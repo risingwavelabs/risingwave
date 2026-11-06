@@ -792,7 +792,7 @@ mod tests {
     use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
-        CompressionAlgorithm, SstableFilterLayout, SstableFilterType,
+        SstableFilterLayout, SstableFilterType,
     };
 
     use crate::controller::SqlMetaStore;

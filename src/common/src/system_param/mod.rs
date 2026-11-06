@@ -83,7 +83,7 @@ macro_rules! for_all_params {
             { sstable_size_mb,                          u32,                            Some(256_u32),                  false,  "Target size of the Sstable.", },
             { parallel_compact_size_mb,                 u32,                            Some(512_u32),                  false,  "The size of parallel task for one compact/flush job.", },
             { block_size_kb,                            u32,                            Some(64_u32),                   false,  "Size of each block in bytes in SST.", },
-            { bloom_false_positive,                     f64,                            Some(0.001_f64),                false,  "False positive probability of bloom filter.", },
+            { bloom_false_positive,                     f64,                            Some(0.001_f64),                false,  "Deprecated and ignored by SST filter builders; kept for backward compatibility.", },
             { state_store,                              String,                         None,                           false,  "URL for the state store", },
             { data_directory,                           String,                         None,                           false,  "Remote directory for storing data and metadata objects.", },
             { backup_storage_url,                       String,                         None,                           true,   "Remote storage url for storing snapshots.", },

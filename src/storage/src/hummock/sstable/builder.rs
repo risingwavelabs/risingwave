@@ -59,7 +59,7 @@ pub struct SstableBuilderOptions {
     pub block_capacity: usize,
     /// Restart point interval.
     pub restart_interval: usize,
-    /// False positive probability of bloom filter.
+    /// Deprecated and ignored by SST filter builders; kept for backward compatibility.
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
@@ -798,7 +798,9 @@ pub(super) mod tests {
         CompactionCatalogAgent, DummyFilterKeyExtractor, MultiFilterKeyExtractor,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
+    use crate::hummock::sstable::xor_filter::{
+        BlockedXor8FilterBuilder, BlockedXor16FilterBuilder,
+    };
     use crate::hummock::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer,
         test_key_of, test_value_of,
@@ -939,6 +941,12 @@ pub(super) mod tests {
             0.01,
             PbSstableFilterType::SstableFilterXor8,
             PbSstableFilterLayout::Plain,
+        )
+        .await;
+        test_with_xor_filter_builder::<BlockedXor8FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterXor8,
+            PbSstableFilterLayout::Blocked,
         )
         .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
