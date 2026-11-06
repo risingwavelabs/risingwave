@@ -22,10 +22,12 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_connector::source::{SplitId, SplitMetaData};
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher};
 use sea_orm::{ConnectionTrait, JoinType, QuerySelect, RelationTrait};
 use thiserror_ext::AsReport;
@@ -69,6 +71,24 @@ use crate::controller::utils::{
 };
 
 pub type ScaleControllerRef = Arc<ScaleController>;
+
+fn worker_placement_changed(
+    recovered_workers: &HashMap<WorkerId, WorkerNode>,
+    current_workers: &HashMap<WorkerId, WorkerNode>,
+) -> bool {
+    let resource_group = |worker: &WorkerNode| {
+        worker
+            .resource_group()
+            .unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned())
+    };
+    recovered_workers.len() != current_workers.len()
+        || current_workers.iter().any(|(id, worker)| {
+            recovered_workers.get(id).is_none_or(|recovered| {
+                recovered.compute_node_parallelism() != worker.compute_node_parallelism()
+                    || resource_group(recovered) != resource_group(worker)
+            })
+        })
+}
 
 // Field order is intentional: derived `Ord` is used to canonicalize actor
 // layout for no-op detection, so new fields must preserve meaningful
@@ -1046,6 +1066,59 @@ mod tests {
 
     use super::*;
 
+    fn worker(id: u32, parallelism: u32, resource_group: Option<&str>) -> WorkerNode {
+        WorkerNode {
+            id: id.into(),
+            r#type: risingwave_pb::common::WorkerType::ComputeNode as i32,
+            property: Some(risingwave_pb::common::worker_node::Property {
+                is_streaming: true,
+                parallelism,
+                resource_group: resource_group.map(str::to_owned),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn worker_placement_detects_membership_and_capacity_changes() {
+        let worker1 = worker(1, 8, Some("rg-a"));
+        let worker2 = worker(2, 8, Some("rg-a"));
+        let recovered = HashMap::from([(worker1.id, worker1.clone())]);
+
+        assert!(worker_placement_changed(
+            &recovered,
+            &HashMap::from([(worker1.id, worker1), (worker2.id, worker2.clone())]),
+        ));
+        assert!(worker_placement_changed(&recovered, &HashMap::new()));
+        assert!(worker_placement_changed(
+            &recovered,
+            &HashMap::from([(worker2.id, worker2)]),
+        ));
+
+        for changed in [worker(1, 16, Some("rg-a")), worker(1, 8, Some("rg-b"))] {
+            assert!(worker_placement_changed(
+                &recovered,
+                &HashMap::from([(changed.id, changed)]),
+            ));
+        }
+    }
+
+    #[test]
+    fn worker_placement_ignores_metadata_and_normalizes_default_group() {
+        let worker = worker(1, 8, None);
+        let recovered = HashMap::from([(worker.id, worker.clone())]);
+        let mut current = recovered.clone();
+        let changed = current.get_mut(&worker.id).unwrap();
+        changed.started_at = Some(42);
+        changed.property.as_mut().unwrap().is_serving = true;
+        changed.property.as_mut().unwrap().resource_group = Some(DEFAULT_RESOURCE_GROUP.to_owned());
+
+        assert!(!worker_placement_changed(&recovered, &recovered));
+        assert!(!worker_placement_changed(&recovered, &current));
+        assert!(!worker_placement_changed(&HashMap::new(), &HashMap::new()));
+    }
+
     fn actor(worker_id: impl Into<WorkerId>, vnode_bitmap: Option<Bitmap>) -> InflightActorInfo {
         InflightActorInfo {
             worker_id: worker_id.into(),
@@ -1402,7 +1475,11 @@ impl GlobalStreamManager {
     }
 
     /// Handles notification of worker node activation and deletion, and triggers parallelism control.
-    async fn run(&self, mut shutdown_rx: Receiver<()>) {
+    async fn run(
+        &self,
+        mut shutdown_rx: Receiver<()>,
+        mut initial_workers_rx: Receiver<HashMap<WorkerId, WorkerNode>>,
+    ) {
         tracing::info!("starting automatic parallelism control monitor");
 
         let check_period =
@@ -1428,15 +1505,28 @@ impl GlobalStreamManager {
                 .await
                 .expect("subscribe active streaming compute nodes");
 
-        // Preserve the startup wait before processing notifications and control rounds.
-        ticker.tick().await;
+        // Keep the monitor's snapshot current while bootstrap recovery is in progress. Worker
+        // changes already included in recovery's placement do not need another control pass.
+        let recovered_workers = loop {
+            tokio::select! {
+                biased;
 
-        // Recovery may have placed actors using an older worker snapshot. Reconcile the initial
-        // snapshot even if no worker changes arrive after the subscription was established.
-        // This requests one pass per monitor startup, plus retries for errors or blocked jobs.
-        // Even an unchanged layout costs catalog reads and rendering under the reschedule lock,
-        // but the barrier worker skips actor-id allocation and reschedule-barrier injection.
-        let mut should_trigger = true;
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Stream manager is stopped during bootstrap recovery");
+                    return;
+                }
+                // Process queued worker updates before comparing the two snapshots.
+                _ = active_workers.changed() => {}
+                workers = &mut initial_workers_rx => {
+                    break workers.expect("bootstrap recovery dropped its worker snapshot sender");
+                }
+            }
+        };
+        let mut should_trigger =
+            worker_placement_changed(&recovered_workers, active_workers.current());
+
+        // Preserve the initial tick that delays the first control round.
+        ticker.tick().await;
 
         loop {
             tokio::select! {
@@ -1597,11 +1687,12 @@ impl GlobalStreamManager {
 
     pub fn start_auto_parallelism_monitor(
         self: Arc<Self>,
+        initial_workers_rx: Receiver<HashMap<WorkerId, WorkerNode>>,
     ) -> (JoinHandle<()>, oneshot::Sender<()>) {
         tracing::info!("Automatic parallelism scale-out is enabled for streaming jobs");
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
-            self.run(shutdown_rx).await;
+            self.run(shutdown_rx, initial_workers_rx).await;
         });
 
         (join_handle, shutdown_tx)
