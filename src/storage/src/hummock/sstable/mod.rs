@@ -241,6 +241,19 @@ impl Sstable {
             + self.meta.estimated_heap_size()
             + self.filter_reader.estimated_heap_size()
     }
+
+    /// Size of the meta disk-cache value, without cloning metadata or encoding its filter.
+    pub(crate) fn serde_encoded_size(&self) -> usize {
+        // Bincode's default format encodes a struct like a tuple and uses a fixed-width
+        // length prefix for byte vectors. Replacing the bloom payload changes only its
+        // byte count. Keep sizing the other fields through serde as the format evolves.
+        let size = bincode::serialized_size(&(self.id, &self.meta)).unwrap() as usize;
+        if self.skip_bloom_filter_in_serde {
+            size
+        } else {
+            size - self.meta.bloom_filter.len() + self.filter_reader.serialized_len()
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -657,6 +670,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sstable_serde() {
+        use foyer::Code;
+
+        use crate::hummock::SstableMetaCacheValue;
+
         let (_, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             (0..100).clone().map(|x| {
@@ -668,33 +685,31 @@ mod tests {
         )
         .await;
 
-        // skip sst serde
-        let sstable = Sstable::new(42.into(), meta.clone(), true);
+        for skip_filter in [false, true] {
+            let sstable = Sstable::new(42.into(), meta.clone(), skip_filter);
+            let legacy_bytes = bincode::serialize(&sstable).unwrap();
+            let value = SstableMetaCacheValue::from(sstable);
+            let mut bytes = Vec::new();
+            value.encode(&mut bytes).unwrap();
 
-        let buffer = bincode::serialize(&sstable).unwrap();
+            assert_eq!(bytes, legacy_bytes);
+            assert_eq!(value.estimated_size(), bytes.len());
 
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert!(!sstable.filter_reader.is_empty());
-        // The table filter reader is empty because the SST filter is skipped in serde.
-        assert!(s.filter_reader.is_empty());
-
-        // enable sst serde
-        let sstable = Sstable::new(42.into(), meta, false);
-
-        let buffer = bincode::serialize(&sstable).unwrap();
-
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert_eq!(
-            s.filter_reader.encode_to_bytes(),
-            sstable.filter_reader.encode_to_bytes()
-        );
+            let decoded = SstableMetaCacheValue::decode(&mut legacy_bytes.as_slice()).unwrap();
+            assert_eq!(decoded.id, value.id);
+            assert_eq!(decoded.meta, value.meta);
+            assert!(value.has_filter());
+            if skip_filter {
+                assert!(!decoded.has_filter());
+            } else {
+                assert_eq!(
+                    decoded.filter_reader.encode_to_bytes(),
+                    value.filter_reader.encode_to_bytes()
+                );
+            }
+        }
     }
+
     #[tokio::test]
     async fn test_sstable_from_meta_bytes() {
         let (_, meta) = gen_test_sstable_data(
