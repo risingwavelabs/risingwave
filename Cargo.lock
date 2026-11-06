@@ -15551,6 +15551,7 @@ dependencies = [
 name = "risingwave_object_store"
 version = "3.2.0-alpha"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "await-tree",
  "aws-config",
@@ -15564,6 +15565,10 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
+ "http 1.5.0",
+ "http-body-util",
+ "hyper 1.12.0",
+ "hyper-util",
  "itertools 0.14.0",
  "madsim",
  "madsim-aws-sdk-s3",

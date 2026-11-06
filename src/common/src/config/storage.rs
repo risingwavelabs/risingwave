@@ -615,6 +615,21 @@ where
     Ok(value)
 }
 
+fn deserialize_http_client_rotation_interval_ms<'de, D>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = none_as_empty_string::deserialize(deserializer)?;
+    if value == Some(0) {
+        return Err(D::Error::custom(
+            "storage.object_store.s3.http_client_rotation_interval_ms must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
 impl ObjectStoreConfig {
     pub fn set_atomic_write_dir(&mut self) {
         self.set_atomic_write_dir = true;
@@ -631,6 +646,18 @@ pub struct S3ObjectStoreConfig {
         alias = "object_store_keepalive_ms"
     )]
     pub keepalive_ms: Option<u64>,
+    /// Periodically replace the `OpenDAL` S3/MinIO HTTP client to allow new connections to
+    /// follow DNS changes. Disabled by default (empty string). Must be greater than zero
+    /// when set. The first refresh occurs after one interval plus up to one interval of
+    /// random jitter; later refreshes use the fixed interval. In-flight responses continue
+    /// normally and may outlive the interval; this is not a strict TCP connection lifetime limit.
+    #[serde_with(skip_apply)]
+    #[serde(
+        default,
+        serialize_with = "none_as_empty_string::serialize",
+        deserialize_with = "deserialize_http_client_rotation_interval_ms"
+    )]
+    pub http_client_rotation_interval_ms: Option<u64>,
     #[serde(
         default = "default::object_store_config::s3::recv_buffer_size",
         alias = "object_store_recv_buffer_size"
