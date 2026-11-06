@@ -26,6 +26,13 @@ use risingwave_object_store::object::{
 use super::PinCache;
 use crate::monitor::ObjectStoreMetrics;
 
+pub(super) fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
+    (1..)
+        .map(HummockSstableObjectId::from)
+        .find(|&id| PinCache::shard_index(id, shard_num) == shard)
+        .unwrap()
+}
+
 /// Downloads and publishes an already registered object to prepare a test fixture.
 /// Admission, scheduling and retry behavior must be exercised through the production caller.
 pub(in crate::hummock) async fn download_and_publish_for_test(
@@ -33,13 +40,13 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     remote_store: ObjectStoreRef,
     remote_path: String,
     object_id: HummockSstableObjectId,
+    object_size: u64,
 ) -> ObjectResult<()> {
     let token = pin_cache
         .prepare_refill(object_id)
         .expect("test object must be registered");
-    let size = pin_cache.shard(object_id).read().objects[&object_id].size();
     let download = pin_cache
-        .download(object_id, size, remote_store, remote_path)
+        .download(object_id, object_size, remote_store, remote_path)
         .await?;
     assert!(pin_cache.publish(token, download));
     Ok(())
