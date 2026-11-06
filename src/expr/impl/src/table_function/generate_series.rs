@@ -195,16 +195,18 @@ fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Re
 
 #[inline]
 fn validate_decimal(decimal: Decimal, name: &'static str) -> Result<()> {
-    match decimal {
-        Decimal::Normalized(_) => Ok(()),
-        Decimal::PositiveInf | Decimal::NegativeInf => Err(ExprError::InvalidParam {
-            name,
-            reason: format!("{} value cannot be infinity", name).into(),
-        }),
-        Decimal::NaN => Err(ExprError::InvalidParam {
+    if decimal.is_finite() {
+        Ok(())
+    } else if decimal.is_nan() {
+        Err(ExprError::InvalidParam {
             name,
             reason: format!("{} value cannot be NaN", name).into(),
-        }),
+        })
+    } else {
+        Err(ExprError::InvalidParam {
+            name,
+            reason: format!("{} value cannot be infinity", name).into(),
+        })
     }
 }
 

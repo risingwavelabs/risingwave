@@ -32,7 +32,7 @@ use crate::array::{
     Array, ArrayBuilder, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
     VariantArray as RwVariantArray, VariantArrayBuilder,
 };
-use crate::types::{Scalar, StructType, VariantVal};
+use crate::types::{DecimalParts, Scalar, StructType, VariantVal};
 
 pub struct IcebergArrowConvert;
 
@@ -177,10 +177,12 @@ impl ToArrow for IcebergArrowConvert {
         let values: Vec<Option<i128>> = array
             .iter()
             .map(|e| {
-                e.and_then(|e| match e {
-                    crate::array::Decimal::Normalized(e) => {
-                        let value = e.mantissa();
-                        let scale = e.scale() as i8;
+                e.and_then(|e| match e.to_parts() {
+                    DecimalParts::Finite {
+                        mantissa: value,
+                        scale,
+                    } => {
+                        let scale = scale as i8;
                         let diff_scale = abs(max_scale - scale);
                         let value = match scale {
                             _ if scale < max_scale => value
@@ -199,13 +201,13 @@ impl ToArrow for IcebergArrowConvert {
                         Some(value)
                     }
                     // For Inf, we replace them with the max/min value within the precision.
-                    crate::array::Decimal::PositiveInf => {
+                    DecimalParts::PositiveInf => {
                         Some(max_value)
                     }
-                    crate::array::Decimal::NegativeInf => {
+                    DecimalParts::NegativeInf => {
                         Some(-max_value)
                     }
-                    crate::array::Decimal::NaN => None,
+                    DecimalParts::NaN => None,
                 })
             })
             .collect();
@@ -548,11 +550,11 @@ mod test {
     fn decimal() {
         let array = DecimalArray::from_iter([
             None,
-            Some(Decimal::NaN),
-            Some(Decimal::PositiveInf),
-            Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("123.4".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::NAN),
+            Some(Decimal::POSITIVE_INF),
+            Some(Decimal::NEGATIVE_INF),
+            Some("123.4".parse::<Decimal>().unwrap()),
+            Some("123.456".parse::<Decimal>().unwrap()),
         ]);
         let ty = ArrowDataType::Decimal128(6, 3);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
@@ -574,11 +576,11 @@ mod test {
     fn decimal_with_large_scale() {
         let array = DecimalArray::from_iter([
             None,
-            Some(Decimal::NaN),
-            Some(Decimal::PositiveInf),
-            Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("123.4".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::NAN),
+            Some(Decimal::POSITIVE_INF),
+            Some(Decimal::NEGATIVE_INF),
+            Some("123.4".parse::<Decimal>().unwrap()),
+            Some("123.456".parse::<Decimal>().unwrap()),
         ]);
         let ty = ArrowDataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
@@ -602,31 +604,21 @@ mod test {
         // Test edge cases between RisingWave decimal precision (28 digits) and Arrow Decimal128(38,10)
         let array = DecimalArray::from_iter([
             // Large 27-digit integer (previously would overflow with precision=28, scale=10)
-            Some(Decimal::Normalized(
-                "999999999999999999999999999".parse().unwrap(),
-            )),
+            Some("999999999999999999999999999".parse::<Decimal>().unwrap()),
             // RisingWave MAX_PRECISION: 28-digit integer
-            Some(Decimal::Normalized(
-                "9999999999999999999999999999".parse().unwrap(),
-            )),
+            Some("9999999999999999999999999999".parse::<Decimal>().unwrap()),
             // Large integer with fractional part
-            Some(Decimal::Normalized(
-                "999999999999999999.9999999999".parse().unwrap(),
-            )),
+            Some("999999999999999999.9999999999".parse::<Decimal>().unwrap()),
             // Small value with maximum fractional digits
-            Some(Decimal::Normalized(
-                "0.9999999999999999999999999999".parse().unwrap(),
-            )),
+            Some("0.9999999999999999999999999999".parse::<Decimal>().unwrap()),
             // Negative large integer
-            Some(Decimal::Normalized(
-                "-999999999999999999999999999".parse().unwrap(),
-            )),
+            Some("-999999999999999999999999999".parse::<Decimal>().unwrap()),
             // Edge case: exactly 10^18 (18 digits) - boundary for old precision=28,scale=10
-            Some(Decimal::Normalized("1000000000000000000".parse().unwrap())),
+            Some("1000000000000000000".parse::<Decimal>().unwrap()),
             // Very small decimal
-            Some(Decimal::Normalized("0.0000000001".parse().unwrap())),
+            Some("0.0000000001".parse::<Decimal>().unwrap()),
             // Zero with fractional representation
-            Some(Decimal::Normalized("0.0000000000".parse().unwrap())),
+            Some("0.0000000000".parse::<Decimal>().unwrap()),
         ]);
 
         let ty = ArrowDataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
@@ -663,10 +655,10 @@ mod test {
         use crate::array::Array;
 
         let original_array = DecimalArray::from_iter([
-            Some(Decimal::PositiveInf),
-            Some(Decimal::NegativeInf),
-            Some(Decimal::NaN),
-            Some(Decimal::Normalized("123.45".parse().unwrap())),
+            Some(Decimal::POSITIVE_INF),
+            Some(Decimal::NEGATIVE_INF),
+            Some(Decimal::NAN),
+            Some("123.45".parse::<Decimal>().unwrap()),
             None,
         ]);
 
@@ -688,19 +680,16 @@ mod test {
         assert_eq!(original_array.len(), roundtrip_array.len());
 
         // PositiveInf -> max value -> PositiveInf
-        assert_eq!(roundtrip_array.value_at(0), Some(Decimal::PositiveInf));
+        assert_eq!(roundtrip_array.value_at(0), Some(Decimal::POSITIVE_INF));
 
         // NegativeInf -> min value -> NegativeInf
-        assert_eq!(roundtrip_array.value_at(1), Some(Decimal::NegativeInf));
+        assert_eq!(roundtrip_array.value_at(1), Some(Decimal::NEGATIVE_INF));
 
         // NaN -> NULL -> None (NaN cannot roundtrip, becomes NULL in Arrow)
         assert_eq!(roundtrip_array.value_at(2), None);
 
         // Normal value roundtrips correctly (scale may be adjusted)
-        assert!(matches!(
-            roundtrip_array.value_at(3),
-            Some(Decimal::Normalized(_))
-        ));
+        assert!(roundtrip_array.value_at(3).unwrap().is_finite());
 
         // NULL -> NULL -> None
         assert_eq!(roundtrip_array.value_at(4), None);
