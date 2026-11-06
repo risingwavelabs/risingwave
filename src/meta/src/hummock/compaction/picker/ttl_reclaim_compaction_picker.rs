@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -79,12 +79,11 @@ impl TtlReclaimCompactionPicker {
     }
 
     fn filter(&self, sst: &SstableInfo, current_epoch_physical_time: u64) -> bool {
-        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<_>>();
         let expire_epoch =
             Epoch::from_physical_time(current_epoch_physical_time - MIN_TTL_EXPIRE_INTERVAL_MS);
 
-        for table_id in table_id_in_sst {
-            match self.table_id_to_ttl.get(&table_id) {
+        for table_id in &sst.table_ids {
+            match self.table_id_to_ttl.get(table_id) {
                 Some(ttl_second_u32) => {
                     assert!(*ttl_second_u32 > 0);
                     // default to zero.

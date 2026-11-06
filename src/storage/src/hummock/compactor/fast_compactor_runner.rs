@@ -847,7 +847,7 @@ mod tests {
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
-    use crate::hummock::compactor::compaction_utils::optimize_by_copy_block;
+    use crate::hummock::compactor::compaction_utils::{input_ssts_size, optimize_by_copy_block};
     use crate::hummock::compactor::task_progress::TaskProgress;
     use crate::hummock::compactor::{CompactorContext, MultiCompactionFilter};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -946,7 +946,11 @@ mod tests {
         };
 
         assert_eq!(task.input_ssts[0].read_sstable_infos().count(), 1);
-        assert!(optimize_by_copy_block(&task, &context));
+        assert!(optimize_by_copy_block(
+            &task,
+            context.storage_opts.as_ref(),
+            input_ssts_size(&task),
+        ));
 
         let runner = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
             context,

@@ -46,7 +46,7 @@ use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCat
 use crate::hummock::compactor::compaction_utils::{
     blocked_xor_filter_key_count_threshold, build_multi_compaction_filter,
     estimate_output_key_count_for_task, estimate_task_output_capacity, generate_splits_for_task,
-    metrics_report_for_task, optimize_by_copy_block,
+    input_ssts_size, metrics_report_for_task, optimize_by_copy_block,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -89,7 +89,7 @@ impl CompactorRunner {
             _ => CompressionAlgorithm::Zstd,
         };
 
-        options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        options.capacity = estimate_task_output_capacity(context.storage_opts.as_ref(), &task);
         let estimated_output_key_count =
             estimate_output_key_count_for_task(&task, options.capacity);
         options.estimated_output_key_count = Some(estimated_output_key_count);
@@ -349,10 +349,15 @@ pub async fn compact_with_agent(
 
     let multi_filter = build_multi_compaction_filter(&compact_task);
     let mut task_status = TaskStatus::Success;
-    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
+    let compaction_size = input_ssts_size(&compact_task);
+    let optimize_by_copy_block = optimize_by_copy_block(
+        &compact_task,
+        context.storage_opts.as_ref(),
+        compaction_size,
+    );
 
-    if let Err(e) =
-        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
+    if !optimize_by_copy_block
+        && let Err(e) = generate_splits_for_task(&mut compact_task, &context, compaction_size).await
     {
         tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
         task_status = TaskStatus::ExecuteFailed;
@@ -372,7 +377,7 @@ pub async fn compact_with_agent(
     let task_progress_guard =
         TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
-    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
+    let capacity = estimate_task_output_capacity(context.storage_opts.as_ref(), &compact_task);
 
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
