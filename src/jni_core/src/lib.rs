@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
@@ -51,15 +52,14 @@ use risingwave_common::catalog::cdc_type_compatibility::cdc_source_column_type_c
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
-use risingwave_common::types::{Decimal, ScalarRefImpl};
+use risingwave_common::types::{DataType, Decimal, ScalarRefImpl};
 use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::connector_service::{
     GetEventStreamResponse, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse,
     SinkWriterStreamRequest, SinkWriterStreamResponse,
 };
-use risingwave_pb::data::Op;
-use risingwave_pb::data::data_type::TypeName as PbTypeName;
+use risingwave_pb::data::{DataType as PbDataType, Op};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
@@ -369,28 +369,36 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_validateCdcSourceCol
     env: EnvParam<'a>,
     cdc_table_type: jint,
     upstream_type_name: JString<'a>,
-    rw_type_name: jint,
+    rw_data_type: JByteArray<'a>,
     char_max_length: jlong,
     is_unsigned: jboolean,
     postgres_udt_name: JString<'a>,
+    postgres_array_element_type_name: JString<'a>,
+    postgres_array_element_udt_name: JString<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
         let cdc_table_type =
             PbCdcTableType::try_from(cdc_table_type).unwrap_or(PbCdcTableType::Unspecified);
-        let rw_type_name =
-            PbTypeName::try_from(rw_type_name).unwrap_or(PbTypeName::TypeUnspecified);
+        let rw_data_type = PbDataType::decode(to_guarded_slice(&rw_data_type, env)?.deref())?;
+        let rw_data_type = DataType::from(&rw_data_type);
         let upstream_type_name = jstring_to_option(env, upstream_type_name)?.unwrap_or_default();
         let postgres_udt_name = jstring_to_option(env, postgres_udt_name)?;
+        let postgres_array_element_type_name =
+            jstring_to_option(env, postgres_array_element_type_name)?;
+        let postgres_array_element_udt_name =
+            jstring_to_option(env, postgres_array_element_udt_name)?;
         let char_max_length = (char_max_length >= 0).then_some(char_max_length);
 
         Ok(
             if cdc_source_column_type_compatible(
                 cdc_table_type,
                 &upstream_type_name,
-                rw_type_name,
+                &rw_data_type,
                 char_max_length,
                 is_unsigned != JNI_FALSE,
                 postgres_udt_name.as_deref(),
+                postgres_array_element_type_name.as_deref(),
+                postgres_array_element_udt_name.as_deref(),
             ) {
                 JNI_TRUE
             } else {
