@@ -21,7 +21,8 @@ use std::fmt::Formatter;
 use bytes::Buf;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::key::FullKey;
-use serde::de::{SeqAccess, Visitor};
+use serde::de::value::MapAccessDeserializer;
+use serde::de::{DeserializeSeed, Error, MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -52,19 +53,107 @@ impl<'de> Deserialize<'de> for CachedBlocks {
                     .min(1024 * 1024 / std::mem::size_of::<CachedBlockMeta>());
                 let mut blocks = CachedBlocksBuilder::new(initial);
                 let mut previous = Vec::new();
-                while let Some(block) = seq.next_element::<BlockMeta>()? {
+                let mut block = BlockMeta::default();
+                while seq.next_element_seed(ReuseBlockMeta(&mut block))?.is_some() {
                     blocks.push(
                         CachedBlockMeta::from(&block),
                         &block.smallest_key,
                         &previous,
                     );
-                    previous = block.smallest_key;
+                    std::mem::swap(&mut previous, &mut block.smallest_key);
                 }
                 Ok(blocks.finish())
             }
         }
 
         deserializer.deserialize_seq(BlocksVisitor)
+    }
+}
+
+// The scratch belongs to one decode. The builder copies only the compressed key into its arena.
+struct ReuseBlockMeta<'a>(&'a mut BlockMeta);
+
+impl<'de> DeserializeSeed<'de> for ReuseBlockMeta<'_> {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        const FIELDS: &[&str] = &[
+            "smallest_key",
+            "offset",
+            "len",
+            "uncompressed_size",
+            "total_key_count",
+            "stale_key_count",
+        ];
+        deserializer.deserialize_struct("BlockMeta", FIELDS, self)
+    }
+}
+
+impl<'de> Visitor<'de> for ReuseBlockMeta<'_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SST block metadata")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<(), A::Error> {
+        *self.0 = BlockMeta::deserialize(MapAccessDeserializer::new(map))?;
+        Ok(())
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        seq.next_element_seed(ReuseKey(&mut self.0.smallest_key))?
+            .ok_or_else(|| Error::invalid_length(0, &self))?;
+        let mut fields = [0; 5];
+        for (i, field) in fields.iter_mut().enumerate() {
+            *field = seq
+                .next_element()?
+                .ok_or_else(|| Error::invalid_length(i + 1, &self))?;
+        }
+        [
+            self.0.offset,
+            self.0.len,
+            self.0.uncompressed_size,
+            self.0.total_key_count,
+            self.0.stale_key_count,
+        ] = fields;
+        Ok(())
+    }
+}
+
+struct ReuseKey<'a>(&'a mut Vec<u8>);
+
+impl<'de> DeserializeSeed<'de> for ReuseKey<'_> {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_bytes(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ReuseKey<'_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an encoded SST block boundary key")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        self.0.clear();
+        while let Some(byte) = seq.next_element()? {
+            self.0.push(byte);
+        }
+        Ok(())
+    }
+
+    fn visit_str<E: Error>(self, key: &str) -> Result<(), E> {
+        self.visit_bytes(key.as_bytes())
+    }
+
+    fn visit_bytes<E: Error>(self, key: &[u8]) -> Result<(), E> {
+        self.0.clear();
+        self.0.extend_from_slice(key);
+        Ok(())
     }
 }
 
