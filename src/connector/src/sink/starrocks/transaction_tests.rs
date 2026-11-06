@@ -75,7 +75,7 @@ async fn handle(
     if operation == "load" && body.is_empty() {
         return Json(serde_json::json!({})).into_response();
     }
-    let (fail, block, rollback_failed) = {
+    let (fail, block, rollback_failed, empty_prepare) = {
         let mut state = state.lock().unwrap();
         state.events.push(Event {
             operation: operation.to_owned(),
@@ -93,6 +93,8 @@ async fn handle(
         let block = state.block == Some(operation);
         let rollback_failed = operation == "rollback"
             && (state.rollback_fails || state.committed_labels.contains(&label));
+        // StarRocks rejects prepare if the transaction has never received a load.
+        let empty_prepare = operation == "prepare" && !state.pending.contains_key(&label);
         if !rollback_failed && (fail.is_none() || fail.is_some_and(|(_, _, committed)| committed)) {
             match operation {
                 "load" => {
@@ -114,7 +116,7 @@ async fn handle(
                 _ => {}
             }
         }
-        (fail, block, rollback_failed)
+        (fail, block, rollback_failed, empty_prepare)
     };
     changed.notify_waiters();
     if block {
@@ -125,8 +127,8 @@ async fn handle(
         return (StatusCode::BAD_GATEWAY, "lost commit reply").into_response();
     }
     Json(serde_json::json!({
-        "Status": if fail.is_some() || rollback_failed { "Fail" } else { "OK" },
-        "Message": if rollback_failed { "rollback rejected" } else if fail.is_some() { "injected failure" } else { "" },
+        "Status": if fail.is_some() || rollback_failed || empty_prepare { "Fail" } else { "OK" },
+        "Message": if rollback_failed { "rollback rejected" } else if fail.is_some() { "injected failure" } else if empty_prepare { "transaction hasn't sent any data yet" } else { "" },
         "Label": label,
     }))
     .into_response()
@@ -303,6 +305,82 @@ async fn transaction_cap_without_batch_cap_and_default_behavior() {
 }
 
 #[tokio::test]
+async fn empty_batches_do_not_begin_transactions_and_can_resume_writing() {
+    for append_only in [false, true] {
+        for cap in [None, Some(32)] {
+            for chunk in batches_without_writes(append_only) {
+                let server = TestServer::start().await;
+                let mut writer = server.writer(None, cap, append_only);
+                writer.write_batch(chunk.clone()).await.unwrap();
+                writer.barrier(false).await.unwrap();
+                writer.barrier(true).await.unwrap();
+                assert!(server.state.lock().unwrap().events.is_empty());
+
+                writer
+                    .write_batch(StreamChunk::from_pretty(" I\n + 7"))
+                    .await
+                    .unwrap();
+                writer.barrier(true).await.unwrap();
+                // Empty input after a completed commit must not reopen a transaction either.
+                writer.write_batch(chunk).await.unwrap();
+                writer.barrier(true).await.unwrap();
+                let state = server.state.lock().unwrap();
+                let operations = state
+                    .events
+                    .iter()
+                    .map(|event| event.operation.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(operations, ["begin", "load", "prepare", "commit"]);
+                assert_eq!(state.committed_rows.len(), 1);
+                assert_eq!(state.committed_rows[0]["id"], 7);
+            }
+        }
+    }
+}
+
+fn batches_without_writes(append_only: bool) -> Vec<StreamChunk> {
+    let mut chunks = vec![
+        StreamChunk::empty(&[DataType::Int64]),
+        StreamChunk::from_pretty(" I\n + 1 D\n - 2 D"),
+    ];
+    if !append_only {
+        // UpdateDelete is visible, but the upsert writer only sends its UpdateInsert.
+        chunks.push(StreamChunk::from_pretty(" I\n U- 3"));
+    }
+    chunks
+}
+
+#[tokio::test]
+async fn empty_batches_preserve_an_existing_transaction() {
+    for append_only in [false, true] {
+        for cap in [None, Some(32)] {
+            let server = TestServer::start().await;
+            let mut writer = server.writer(None, cap, append_only);
+            writer
+                .write_batch(StreamChunk::from_pretty(" I\n + 7"))
+                .await
+                .unwrap();
+            // Finish the request while retaining the transaction, then receive no more rows.
+            writer.barrier(false).await.unwrap();
+            for chunk in batches_without_writes(append_only) {
+                writer.write_batch(chunk).await.unwrap();
+            }
+            writer.barrier(true).await.unwrap();
+            let state = server.state.lock().unwrap();
+            assert_eq!(state.events.len(), 4);
+            assert!(
+                state
+                    .events
+                    .iter()
+                    .all(|event| event.label == state.events[0].label)
+            );
+            assert_eq!(state.committed_rows.len(), 1);
+            assert_eq!(state.committed_rows[0]["id"], 7);
+        }
+    }
+}
+
+#[tokio::test]
 async fn transaction_rollover_resets_batch_accounting() {
     let server = TestServer::start().await;
     let mut writer = server.writer(Some(32), Some(16), true);
@@ -365,18 +443,20 @@ async fn oversized_row_does_not_commit_pending_data_or_begin_transaction() {
         let mut writer = server.writer(batch, transaction, true);
         assert!(
             writer
-                .write_row_json(r#"{"id":100}"#.to_owned())
+                .write_batch(StreamChunk::from_pretty(" I\n + 100"))
                 .await
                 .is_err()
         );
         assert!(server.events("begin").is_empty());
+        drop(writer);
+        let mut writer = server.writer(batch, transaction, true);
         writer
-            .write_row_json(r#"{"id":1}"#.to_owned())
+            .write_batch(StreamChunk::from_pretty(" I\n + 1"))
             .await
             .unwrap();
         assert!(
             writer
-                .write_row_json(r#"{"id":100}"#.to_owned())
+                .write_batch(StreamChunk::from_pretty(" I\n + 100"))
                 .await
                 .is_err()
         );
@@ -471,6 +551,31 @@ async fn consume(writer: StarrocksSinkWriter, log: &mut TestLog, interval: u64) 
     .await
     .unwrap_err()
     .to_report_string()
+}
+
+#[tokio::test]
+async fn empty_batches_allow_checkpoint_truncation() {
+    for append_only in [false, true] {
+        for cap in [None, Some(32)] {
+            for interval in [1, 2] {
+                for chunk in batches_without_writes(append_only) {
+                    let server = TestServer::start().await;
+                    let mut log = TestLog::default();
+                    log.items
+                        .push((1, LogStoreReadItem::StreamChunk { chunk, chunk_id: 0 }));
+                    for epoch in 1..=interval {
+                        log.items.push(TestLog::checkpoint(epoch));
+                    }
+                    assert_eq!(
+                        consume(server.writer(None, cap, append_only), &mut log, interval).await,
+                        "end of test log"
+                    );
+                    assert_eq!(log.truncated, [TruncateOffset::Barrier { epoch: interval }]);
+                    assert!(server.state.lock().unwrap().events.is_empty());
+                }
+            }
+        }
+    }
 }
 
 #[tokio::test]
