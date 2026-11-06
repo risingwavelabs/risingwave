@@ -668,7 +668,7 @@
     select * from t where (a, b) > (1, 5) or a >= 1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((Row(t.a, t.b) > '(1,5)':Struct(Int32, Int32)) OR (t.a >= 1:Int32)) }
+    └─BatchFilter { predicate: (RowGreaterThan(Row(t.a, t.b), '(1,5)':Struct(Int32, Int32)) OR (t.a >= 1:Int32)) }
       └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a >= Int32(1)], distribution: UpstreamHashShard(t.a, t.b) }
 - name: The full range of a small integer type is not split into points.
   sql: |
@@ -683,5 +683,5 @@
     select * from t where a is null or (a, b) > (null::int, 0) or (a is null and c > 0);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((IsNull(t.a) OR (Row(t.a, t.b) > '(,0)':Struct(Int32, Int32))) OR (IsNull(t.a) AND (t.c > 0:Int32))) }
+    └─BatchFilter { predicate: ((IsNull(t.a) OR RowGreaterThan(Row(t.a, t.b), '(,0)':Struct(Int32, Int32))) OR (IsNull(t.a) AND (t.c > 0:Int32))) }
       └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: UpstreamHashShard(t.a) }
