@@ -23,6 +23,7 @@ use std::ops::{Bound, Range};
 
 use bytes::Buf;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, TABLE_PREFIX_LEN, TableKey, UserKey};
 
@@ -213,6 +214,21 @@ impl PrefixKeys {
             entry.restore(table_id, key);
         }
         key
+    }
+
+    /// Reads the fixed vnode prefix, if the block separator retains it.
+    pub(super) fn vnode(&self, index: usize) -> Option<VirtualNode> {
+        let group = index / KEY_RESTART_INTERVAL;
+        let first = group * KEY_RESTART_INTERVAL;
+        let mut prefix = [0; VirtualNode::SIZE];
+        let mut key_len = 0;
+        for entry in self.entries(self.restarts[group]).take(index - first + 1) {
+            key_len = entry.shared + entry.suffix.len();
+            let start = entry.shared.min(prefix.len());
+            let end = key_len.min(prefix.len());
+            prefix[start..end].copy_from_slice(&entry.suffix[..end - start]);
+        }
+        (key_len >= prefix.len()).then(|| VirtualNode::from_be_bytes(prefix))
     }
 
     /// Compares a block boundary without allocating or restoring its full key.

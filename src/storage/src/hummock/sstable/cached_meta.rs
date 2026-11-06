@@ -19,6 +19,7 @@ use std::cmp::Ordering;
 use std::ops::{Bound, Range};
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::{BlockMeta, MonotonicDeleteEvent};
@@ -81,6 +82,10 @@ impl CachedSstableMeta {
     pub fn block_smallest_key<'a>(&self, index: usize, key: &'a mut Vec<u8>) -> &'a [u8] {
         let block = &self.block_metas[index];
         self.keys.restore_key(index, block.table_id, key)
+    }
+
+    pub(in crate::hummock) fn block_smallest_vnode(&self, index: usize) -> Option<VirtualNode> {
+        self.keys.vnode(index)
     }
 
     /// Compares a block boundary without allocating or restoring its full key.
