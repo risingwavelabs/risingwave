@@ -15,15 +15,20 @@
 use std::collections::HashSet;
 use std::ops::{Mul, Sub};
 
+use itertools::Itertools;
+use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor, PlanVisitor};
+use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
     self, LogicalPlanRef as PlanRef, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::plan_visitor::LogicalPlanNode;
 use crate::optimizer::property::Cardinality;
+use crate::utils::Condition;
 
 /// A visitor that computes the cardinality of a plan node.
 pub struct CardinalityVisitor;
@@ -49,6 +54,117 @@ impl CardinalityVisitor {
             input_card.min(0..=1)
         } else {
             input_card.min(0..)
+        }
+    }
+
+    /// Returns the columns that `predicate` fixes to a single value:
+    /// - columns compared by `=`, `IS NOT DISTINCT FROM`, or a single-item `IN` with a pure
+    ///   expression that references no input column, such as a constant, a parameter, or a
+    ///   correlated input ref. A row comparison such as `(a, b) = (1, 2)` fixes its columns field
+    ///   by field.
+    /// - boolean columns used as a conjunction directly or through `NOT`, `IS TRUE`, or
+    ///   `IS FALSE`, such as `WHERE flag`.
+    ///
+    /// Other conjunctions, such as `pk > 1`, `pk = other_col`, or `pk = 1 OR pk = 2`, can keep
+    /// several rows even when they reference every unique key column, so they are ignored.
+    fn fixed_columns(predicate: &Condition) -> HashSet<usize> {
+        let mut fixed = HashSet::new();
+        for conjunction in &predicate.conjunctions {
+            match conjunction {
+                ExprImpl::InputRef(input_ref) => {
+                    fixed.insert(input_ref.index());
+                }
+                ExprImpl::FunctionCall(call) => match (call.func_type(), call.inputs()) {
+                    (
+                        ExprType::Not | ExprType::IsTrue | ExprType::IsFalse,
+                        [ExprImpl::InputRef(input_ref)],
+                    ) => {
+                        fixed.insert(input_ref.index());
+                    }
+                    // `In` with two inputs is `lhs IN (rhs)`.
+                    (ExprType::Equal | ExprType::IsNotDistinctFrom | ExprType::In, [lhs, rhs]) => {
+                        Self::collect_equality_fixed_columns(lhs, rhs, &mut fixed);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        fixed
+    }
+
+    /// Collects the columns that `lhs = rhs` fixes. When both sides are rows, each pair of
+    /// fields is compared on its own.
+    fn collect_equality_fixed_columns(lhs: &ExprImpl, rhs: &ExprImpl, fixed: &mut HashSet<usize>) {
+        if let (Some(lhs_fields), Some(rhs_fields)) = (Self::row_fields(lhs), Self::row_fields(rhs))
+            && lhs_fields.len() == rhs_fields.len()
+        {
+            for (lhs, rhs) in lhs_fields.iter().zip_eq_fast(rhs_fields) {
+                Self::collect_equality_fixed_columns(lhs, rhs, fixed);
+            }
+            return;
+        }
+        let is_fixed_value = |e: &ExprImpl| !e.has_input_ref() && !e.has_subquery() && e.is_pure();
+        if is_fixed_value(rhs) {
+            Self::collect_operand_columns(lhs, fixed);
+        } else if is_fixed_value(lhs) {
+            Self::collect_operand_columns(rhs, fixed);
+        }
+    }
+
+    /// Collects the columns of an operand that is equal to a fixed value: the column itself, a
+    /// lossless cast of it, or each such field of a row, as in `ROW(a, b) = '(1,2)'`.
+    fn collect_operand_columns(expr: &ExprImpl, fixed: &mut HashSet<usize>) {
+        if let Some(fields) = Self::row_fields(expr) {
+            for field in fields {
+                Self::collect_operand_columns(field, fixed);
+            }
+        } else if let Some(index) = Self::as_injective_input_ref(expr) {
+            fixed.insert(index);
+        }
+    }
+
+    fn row_fields(expr: &ExprImpl) -> Option<&[ExprImpl]> {
+        match expr {
+            ExprImpl::FunctionCall(call) if call.func_type() == ExprType::Row => {
+                Some(call.inputs())
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the column referenced by `expr` if `expr` is the column itself or a lossless cast
+    /// of it, so that equal results imply equal column values. Such casts come from comparing
+    /// columns of different numeric types, e.g. `CAST(int_pk AS DECIMAL) = 1.5` or
+    /// `CAST(int_pk AS BIGINT) = bigint_col`.
+    fn as_injective_input_ref(expr: &ExprImpl) -> Option<usize> {
+        match expr {
+            ExprImpl::InputRef(input_ref) => Some(input_ref.index()),
+            ExprImpl::FunctionCall(call) if call.func_type() == ExprType::Cast => {
+                let [input] = call.inputs() else {
+                    return None;
+                };
+                let lossless = matches!(
+                    (input.return_type(), call.return_type()),
+                    (
+                        DataType::Int16,
+                        DataType::Int32
+                            | DataType::Int64
+                            | DataType::Decimal
+                            | DataType::Float32
+                            | DataType::Float64
+                    ) | (
+                        DataType::Int32,
+                        DataType::Int64 | DataType::Decimal | DataType::Float64
+                    ) | (DataType::Int64, DataType::Decimal)
+                );
+                if lossless {
+                    Self::as_injective_input_ref(input)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 }
@@ -130,19 +246,17 @@ impl LogicalPlanVisitor for CardinalityVisitor {
     }
 
     fn visit_logical_filter(&mut self, plan: &plan_node::LogicalFilter) -> Cardinality {
-        let eq_set = plan
-            .predicate()
-            .collect_input_refs(plan.input().schema().len())
-            .ones()
-            .collect();
+        let eq_set = Self::fixed_columns(plan.predicate());
         Self::visit_predicate(&*plan.input(), self.visit(plan.input()), eq_set)
     }
 
     fn visit_logical_scan(&mut self, plan: &plan_node::LogicalScan) -> Cardinality {
+        // The predicate refers to table columns, while the stream key refers to output columns.
+        let fixed_table_columns = Self::fixed_columns(plan.predicate());
         let eq_set = plan
-            .predicate()
-            .collect_input_refs(plan.table().columns.len())
-            .ones()
+            .output_col_idx()
+            .iter()
+            .positions(|table_column| fixed_table_columns.contains(table_column))
             .collect();
         Self::visit_predicate(plan, plan.table_cardinality(), eq_set)
     }

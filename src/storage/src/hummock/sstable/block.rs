@@ -258,6 +258,51 @@ impl Block {
 
     pub fn decode_from_raw(buf: Bytes) -> Self {
         let table_id = (&buf[buf.len() - 4..]).get_u32_le();
+        let n_index = (&buf[buf.len() - 8..buf.len() - 4]).get_u32_le() as usize;
+        let index_start = buf.len() - 8 - n_index * RestartPoint::size_of();
+        let (index_entries, remainder) = buf[index_start..buf.len() - 8].as_chunks::<5>();
+        assert!(remainder.is_empty());
+        let mut index_entries = index_entries.iter();
+        let decode_index = |entry: &[u8; 5]| RestartPoint {
+            offset: u32::from_le_bytes(entry[..4].try_into().unwrap()),
+            key_len_type: LenType::from(entry[4] >> 4),
+            value_len_type: LenType::from(entry[4] & 0x0f),
+        };
+        let mut current = decode_index(index_entries.next().unwrap());
+        let mut next = index_entries.next().map(decode_index);
+        let n_restarts = (&buf[index_start - 4..index_start]).get_u32_le() as usize;
+        let data_len = index_start - 4 - n_restarts * size_of::<u32>();
+        let (offsets, remainder) = buf[data_len..index_start - 4].as_chunks::<4>();
+        assert!(remainder.is_empty());
+        let mut restart_points = Vec::with_capacity(n_restarts);
+        for bytes in offsets {
+            let offset = u32::from_le_bytes(*bytes);
+            if let Some(entry) = next.as_ref()
+                && offset >= entry.offset
+            {
+                current = *entry;
+                next = index_entries.next().map(decode_index);
+            }
+            restart_points.push(RestartPoint {
+                offset,
+                key_len_type: current.key_len_type,
+                value_len_type: current.value_len_type,
+            });
+        }
+        Block {
+            data: buf,
+            data_len,
+            restart_points,
+            table_id: TableId::new(table_id),
+            hitmap: Hitmap::default(),
+        }
+    }
+
+    /// Original decoder retained only as a Criterion comparison control.
+    #[cfg(feature = "test")]
+    #[doc(hidden)]
+    pub fn decode_from_raw_legacy_for_bench(buf: Bytes) -> Self {
+        let table_id = (&buf[buf.len() - 4..]).get_u32_le();
         // decode restart_points_type_index
         let n_index = ((&buf[buf.len() - 8..buf.len() - 4]).get_u32_le()) as usize;
         let index_data_len = size_of::<u32>() + n_index * RestartPoint::size_of();
