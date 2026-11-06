@@ -25,9 +25,11 @@ use super::HummockVersionUpdate;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::monitor::GLOBAL_CACHE_REFILL_METRICS;
 
-/// Waits for this event's independent refill attempts, including fallback on failure/timeout.
-/// Work starts at submission independently of polling; refillers own cancellation semantics.
-pub(super) type VersionUpdateCondition = BoxFuture<'static, ()>;
+/// Waits for this event's refill attempts, including backend fallback, then returns whether
+/// its target may be published. False means a batch subsumed this target, not refill failure;
+/// retire it only with a later true endpoint. Pending attempts must not be bypassed.
+/// Work starts independently of polling this future; refillers own cancellation semantics.
+pub(super) type VersionUpdateCondition = BoxFuture<'static, bool>;
 
 /// One received payload's version transition, possibly containing multiple raw deltas.
 pub(super) struct VersionUpdateEvent {
@@ -46,6 +48,8 @@ pub(super) struct ResolvedVersionUpdate {
 struct PendingVersion {
     condition: VersionUpdateCondition,
     event: VersionUpdateEvent,
+    /// A subsumed target can remain queued after its condition has completed.
+    publishable: Option<bool>,
 }
 
 /// Constructs received versions and orders their publication after refill conditions complete.
@@ -112,31 +116,53 @@ impl VersionUpdateQueue {
     pub fn enqueue(&mut self, event: VersionUpdateEvent, condition: VersionUpdateCondition) {
         assert_eq!(event.prev_version_id, self.latest_received.id());
         self.latest_received = event.new_pinned_version.clone();
-        self.queue.push_back(PendingVersion { condition, event });
+        self.queue.push_back(PendingVersion {
+            condition,
+            event,
+            publishable: None,
+        });
         GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.inc();
     }
 
-    /// Removes up to 16 ready events from the front for the caller to publish in order.
-    /// Cancellation while pending preserves queued events and their condition futures.
-    /// An empty queue has no wake source: the caller must enqueue and repoll on incoming updates.
+    /// Returns the settled FIFO prefix through its latest publishable target.
+    /// Subsumed targets may retire with a later endpoint, but unfinished attempts cannot be skipped.
+    /// Cancellation while pending preserves queued events and completed condition results.
+    /// An empty queue must be repolled after the caller enqueues an incoming update.
     pub async fn next_events(&mut self) -> Vec<VersionUpdateEvent> {
         poll_fn(|cx| {
             const MAX_BATCH_SIZE: usize = 16;
-            let mut events = None;
-            while let Some(pending) = self.queue.front_mut()
-                && pending.condition.poll_unpin(cx).is_ready()
-            {
-                let pending = self.queue.pop_front().unwrap();
-                GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.dec();
-                let events = events.get_or_insert_with(|| Vec::with_capacity(MAX_BATCH_SIZE));
-                events.push(pending.event);
-                if events.len() >= MAX_BATCH_SIZE {
-                    break;
+            let mut count = 0;
+            for (index, pending) in self.queue.iter_mut().enumerate() {
+                let publishable = match pending.publishable {
+                    Some(publishable) => publishable,
+                    None => match pending.condition.poll_unpin(cx) {
+                        Poll::Pending => break,
+                        Poll::Ready(publishable) => {
+                            pending.publishable = Some(publishable);
+                            publishable
+                        }
+                    },
+                };
+                if publishable {
+                    count = index + 1;
+                    // Keep main's publication bound, extending only to a safe batch endpoint.
+                    if count >= MAX_BATCH_SIZE {
+                        break;
+                    }
                 }
             }
-            match events {
-                Some(events) => Poll::Ready(events),
-                None => Poll::Pending,
+            if count == 0 {
+                Poll::Pending
+            } else {
+                let events = self
+                    .queue
+                    .drain(..count)
+                    .map(|pending| pending.event)
+                    .collect();
+                GLOBAL_CACHE_REFILL_METRICS
+                    .refill_queue_total
+                    .sub(count as i64);
+                Poll::Ready(events)
             }
         })
         .await
@@ -158,7 +184,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_ready_prefix_limit_and_delta_observation() {
+    async fn test_latest_ready_target_and_delta_observation() {
         let version = PinnedVersion::new(HummockVersion::default(), unbounded_channel().0);
         let mut queue = VersionUpdateQueue::new(version);
         for id in 1..=17 {
@@ -184,7 +210,7 @@ mod tests {
                 observed,
                 vec![(id * 2 - 2, id * 2 - 1), (id * 2 - 1, id * 2)]
             );
-            queue.enqueue(event, std::future::ready(()).boxed());
+            queue.enqueue(event, std::future::ready(true).boxed());
         }
         let first = queue.next_events().await;
         assert_eq!(first.len(), 16);
@@ -198,6 +224,49 @@ mod tests {
         let last = queue.next_events().await;
         assert_eq!(last.len(), 1);
         assert_eq!(last[0].new_pinned_version.id(), 34);
+        assert!(queue.next_events().now_or_never().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_subsumed_targets_wait_for_endpoint_and_survive_pending_polls() {
+        let version = PinnedVersion::new(HummockVersion::default(), unbounded_channel().0);
+        let mut queue = VersionUpdateQueue::new(version);
+        let (release, receiver) = tokio::sync::oneshot::channel();
+        let mut receiver = Some(receiver);
+        for id in 1..=20 {
+            let mut delta = HummockVersionDelta::default();
+            delta.prev_id = (id - 1).into();
+            delta.id = id.into();
+            let event = queue
+                .resolve_update(HummockVersionUpdate::VersionDeltas(vec![delta]), |_, _| {})
+                .unwrap()
+                .event;
+            // A merged refill subsumes targets 2..19. Even a large batch must wait
+            // for its publishable endpoint, including that event's Foyer attempt.
+            let condition: VersionUpdateCondition = if id == 20 {
+                let receiver = receiver.take().unwrap();
+                async move {
+                    receiver.await.unwrap();
+                    true
+                }
+                .boxed()
+            } else {
+                async move { !(2..=19).contains(&id) }.boxed()
+            };
+            queue.enqueue(event, condition);
+        }
+        let events = queue.next_events().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].new_pinned_version.id(), 1);
+        // Event 2's completed async future must not be polled again after a canceled wait.
+        for _ in 0..2 {
+            assert!(queue.next_events().now_or_never().is_none());
+        }
+        release.send(()).unwrap();
+        let events = queue.next_events().await;
+        assert_eq!(events.len(), 19);
+        assert_eq!(events.first().unwrap().prev_version_id, 1);
+        assert_eq!(events.last().unwrap().new_pinned_version.id(), 20);
         assert!(queue.next_events().now_or_never().is_none());
     }
 }
