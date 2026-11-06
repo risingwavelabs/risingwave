@@ -332,6 +332,7 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
         // Add footer to tell which kind of filter.
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR16);
+        self.data.shrink_to_fit();
         Some(std::mem::take(&mut self.data))
     }
 
@@ -383,6 +384,7 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR8);
+        self.data.shrink_to_fit();
         Some(std::mem::take(&mut self.data))
     }
 
@@ -1057,23 +1059,23 @@ mod tests {
             builder.switch_block(None);
         }
 
-        let built = builder.finish(None).unwrap();
-        assert!(built.capacity() > built.len());
-        let bytes = built.clone();
-        let from_builder = XorFilterReader::from_owned(built, &metas);
-        match &from_builder.filter {
-            XorFilter::BlockXor8(filter) => assert_eq!(filter.chunks()[0].capacity(), bytes.len()),
-            XorFilter::BlockXor16(filter) => assert_eq!(filter.chunks()[0].capacity(), bytes.len()),
-            _ => unreachable!(),
-        }
-        let owned = bytes.clone();
+        let bytes = builder.finish(None).unwrap();
+        assert_eq!(bytes.capacity(), bytes.len());
+
+        // Owned decoding adopts the buffer as-is, even when it has spare capacity.
+        let mut owned = Vec::with_capacity(bytes.len() + 4096);
+        owned.extend_from_slice(&bytes);
+        let capacity = owned.capacity();
         let original = owned.as_ptr();
         let reader = XorFilterReader::from_owned(owned, &metas);
-        match &reader.filter {
-            XorFilter::BlockXor8(filter) => assert_eq!(filter.chunks()[0].as_ptr(), original),
-            XorFilter::BlockXor16(filter) => assert_eq!(filter.chunks()[0].as_ptr(), original),
+        let chunk = match &reader.filter {
+            XorFilter::BlockXor8(filter) => &filter.chunks()[0],
+            XorFilter::BlockXor16(filter) => &filter.chunks()[0],
             _ => unreachable!(),
-        }
+        };
+        assert_eq!(chunk.as_ptr(), original);
+        assert_eq!(chunk.capacity(), capacity);
+
         let borrowed = XorFilterReader::new(&bytes, &metas);
         match &borrowed.filter {
             XorFilter::BlockXor8(filter) => {
@@ -1084,7 +1086,7 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        for reader in [&reader, &borrowed, &from_builder] {
+        for reader in [&reader, &borrowed] {
             assert_eq!(reader.serialized_len(), bytes.len());
             assert_eq!(reader.encode_to_bytes(), bytes);
 

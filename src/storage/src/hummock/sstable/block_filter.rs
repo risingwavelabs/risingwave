@@ -58,12 +58,8 @@ pub(super) struct BlockBasedFilter<F> {
 }
 
 impl<F: BlockFilter> BlockBasedFilter<F> {
-    pub(super) fn decode(mut data: Cow<'_, [u8]>, metas: &[BlockMeta]) -> Self {
+    pub(super) fn decode(data: Cow<'_, [u8]>, metas: &[BlockMeta]) -> Self {
         assert_eq!(data.last(), Some(&F::BLOCKED_TAG));
-        if let Cow::Owned(data) = &mut data {
-            // An early-sealed SST can retain the builder's oversized reservation.
-            data.shrink_to_fit();
-        }
         let footer = data.len() - BLOCKED_FILTER_FOOTER_LEN;
         let count = (&data[footer..]).get_u32_le() as usize;
         assert_eq!(count, metas.len());
