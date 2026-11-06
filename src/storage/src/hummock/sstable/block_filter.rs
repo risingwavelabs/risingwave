@@ -69,10 +69,10 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         let mut filters = Vec::with_capacity(count);
         let mut encoded_len = BLOCKED_FILTER_FOOTER_LEN;
         for _ in 0..count {
-            let offset = footer - reader.len() + BLOCKED_FILTER_ENTRY_LEN_PREFIX;
             let len = reader.get_u32_le() as usize;
-            let child = &reader[..len];
-            reader.advance(len);
+            let offset = footer - reader.len();
+            let (child, remaining) = reader.split_at(len);
+            reader = remaining;
             F::validate(child);
             let (chunk, start) = if owned {
                 (0, offset)
