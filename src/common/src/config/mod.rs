@@ -940,6 +940,22 @@ pub mod tests {
     }
 
     #[test]
+    fn test_storage_sstable_meta_fetch_concurrency() {
+        let default: RwConfig = toml::from_str("").unwrap();
+        assert_eq!(default.storage.sstable_meta_fetch_concurrency, 1);
+        let config: RwConfig =
+            toml::from_str("[storage]\nsstable_meta_fetch_concurrency = 8").unwrap();
+        assert_eq!(config.storage.sstable_meta_fetch_concurrency, 8);
+        let error = toml::from_str::<RwConfig>("[storage]\nsstable_meta_fetch_concurrency = 0")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("storage.sstable_meta_fetch_concurrency must be greater than 0")
+        );
+    }
+
+    #[test]
     fn test_storage_max_prefetch_block_number_must_be_positive() {
         let config = toml::from_str::<RwConfig>(
             r#"
