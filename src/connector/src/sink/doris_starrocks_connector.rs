@@ -372,6 +372,12 @@ impl InserterInner {
         Ok(())
     }
 
+    #[cfg(all(test, feature = "sink-starrocks", not(madsim)))]
+    pub(crate) async fn wait_for_upload_receiver_closed(&self) {
+        // Synchronize tests without consuming the HTTP task's original result.
+        self.sender.as_ref().unwrap().closed().await;
+    }
+
     async fn wait_handle(&mut self) -> Result<Vec<u8>> {
         let res = match tokio::time::timeout(self.stream_load_http_timeout, &mut self.join_handle)
             .await

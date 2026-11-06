@@ -24,6 +24,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use risingwave_common::catalog::Field;
 use risingwave_common::test_prelude::StreamChunkTestExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -48,6 +49,7 @@ struct ServerState {
     fail: Option<(&'static str, usize, bool)>,
     block: Option<&'static str>,
     rollback_fails: bool,
+    load_redirect: Option<String>,
 }
 
 struct TestServer {
@@ -73,6 +75,9 @@ async fn handle(
     let label = headers["label"].to_str().unwrap().to_owned();
     // The client first probes FE with an empty load, then sends its streaming body.
     if operation == "load" && body.is_empty() {
+        if let Some(url) = state.lock().unwrap().load_redirect.clone() {
+            return (StatusCode::TEMPORARY_REDIRECT, [("location", url)]).into_response();
+        }
         return Json(serde_json::json!({})).into_response();
     }
     let (fail, block, rollback_failed, empty_prepare) = {
@@ -541,7 +546,11 @@ impl TestLog {
     }
 }
 
-async fn consume(writer: StarrocksSinkWriter, log: &mut TestLog, interval: u64) -> String {
+async fn consume(
+    writer: impl SinkWriter<CommitMetadata = ()>,
+    log: &mut TestLog,
+    interval: u64,
+) -> String {
     DecoupleCheckpointLogSinkerOf::new(
         writer,
         SinkWriterMetrics::for_test(),
@@ -751,6 +760,171 @@ async fn load_failures_preserve_the_original_error_and_can_replay() {
                 assert!(state.committed_rows.iter().any(|row| row["id"] == id));
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn interrupted_upload_preserves_write_error_and_replays_after_rollback_failure() {
+    for append_only in [false, true] {
+        for rollback_fails in [false, true] {
+            let server = TestServer::start().await;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            {
+                let mut state = server.state.lock().unwrap();
+                state.load_redirect = Some(format!("http://127.0.0.1:{port}/api/transaction/load"));
+                state.rollback_fails = rollback_fails;
+            }
+            let disconnect = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(socket);
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    headers.push_str(&line);
+                }
+                assert!(headers.starts_with("PUT /api/transaction/load "));
+                assert!(
+                    headers
+                        .to_ascii_lowercase()
+                        .contains("transfer-encoding: chunked")
+                );
+                let label = headers
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(name, _)| name.eq_ignore_ascii_case("label"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .to_owned();
+                let mut chunk_size = String::new();
+                reader.read_line(&mut chunk_size).await.unwrap();
+                let chunk_size = usize::from_str_radix(chunk_size.trim(), 16).unwrap();
+                assert!(chunk_size > 1);
+                let mut prefix = [0];
+                reader.read_exact(&mut prefix).await.unwrap();
+                assert_eq!(prefix[0], b'{');
+                // Close mid-chunk, without a response or the terminating HTTP chunk.
+                drop(reader);
+                label
+            });
+
+            let mut log = TestLog::default();
+            for batch in 0..2 {
+                let mut data = " I\n".to_owned();
+                for id in batch * 8192..(batch + 1) * 8192 {
+                    data.push_str(&format!(" + {id}\n"));
+                }
+                log.items.push(TestLog::chunk(1, &data));
+            }
+            log.items.push(TestLog::checkpoint(1));
+            let write_error = Arc::new(Mutex::new(None));
+            let writer = WaitForUploadDisconnect {
+                writer: server.writer(None, Some(1024 * 1024), append_only),
+                wait_for_disconnect: true,
+                write_error: write_error.clone(),
+            };
+            let error = tokio::time::timeout(Duration::from_secs(5), consume(writer, &mut log, 1))
+                .await
+                .unwrap();
+            // The original transport error must survive abort, including a rejected rollback.
+            assert_eq!(Some(&error), write_error.lock().unwrap().as_ref());
+            assert!(!error.contains("rollback rejected"), "{error}");
+            assert_eq!(log.cursor, 2, "failure must precede the checkpoint");
+            assert!(log.truncated.is_empty());
+            assert!(server.events("prepare").is_empty());
+            assert!(server.events("commit").is_empty());
+            let label = disconnect.await.unwrap();
+            assert_eq!(label, server.events("begin")[0].label);
+            let rollbacks = server.events("rollback");
+            assert_eq!(rollbacks.len(), 1);
+            assert_eq!(rollbacks[0].label, label);
+
+            {
+                let mut state = server.state.lock().unwrap();
+                state.load_redirect = None;
+                state.rollback_fails = false;
+            }
+            assert_eq!(
+                consume(
+                    server.writer(None, Some(1024 * 1024), append_only),
+                    &mut log,
+                    1
+                )
+                .await,
+                "end of test log"
+            );
+            assert_eq!(log.truncated, [TruncateOffset::Barrier { epoch: 1 }]);
+            let state = server.state.lock().unwrap();
+            assert_ne!(
+                state
+                    .events
+                    .iter()
+                    .find(|e| e.operation == "commit")
+                    .unwrap()
+                    .label,
+                label
+            );
+            let ids = state
+                .committed_rows
+                .iter()
+                .map(|row| row["id"].as_i64().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(ids, (0..16384).collect::<Vec<_>>());
+        }
+    }
+}
+
+/// Synchronize at the real upload channel closure, without timing-dependent sleeps.
+struct WaitForUploadDisconnect {
+    writer: StarrocksSinkWriter,
+    wait_for_disconnect: bool,
+    write_error: Arc<Mutex<Option<String>>>,
+}
+
+#[async_trait]
+impl SinkWriter for WaitForUploadDisconnect {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.writer.begin_epoch(epoch).await
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        let result = self.writer.write_batch(chunk).await;
+        if let Err(error) = &result {
+            let SinkError::DorisStarrocksConnect(source) = error else {
+                panic!(
+                    "expected an upload transport error: {:?}",
+                    error.as_report()
+                );
+            };
+            assert!(
+                source.downcast_ref::<reqwest::Error>().is_some(),
+                "{:?}",
+                source.as_report()
+            );
+            *self.write_error.lock().unwrap() = Some(error.to_report_string());
+        } else if std::mem::take(&mut self.wait_for_disconnect) {
+            self.writer
+                .client
+                .as_ref()
+                .unwrap()
+                .insert
+                .wait_for_upload_receiver_closed()
+                .await;
+        }
+        result
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        self.writer.barrier(is_checkpoint).await
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.writer.abort().await
     }
 }
 
