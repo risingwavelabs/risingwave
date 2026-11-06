@@ -25,6 +25,7 @@ use risingwave_object_store::benchmark::{self, BenchmarkConfig, Profile};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use serde_json::json;
+use thiserror_ext::AsReport;
 
 #[derive(Args, Debug)]
 pub struct ObjectStoreArgs {
@@ -346,7 +347,7 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
     deadline.abort();
     let report = result?;
     let succeeded = report.succeeded();
-    eprint!("{}", benchmark::terminal_summary(&report));
+    let mut terminal = json!(benchmark::terminal_summary(&report));
     let mut json = json!({
         "build": { "version": risingwave_common::RW_VERSION, "git_sha": risingwave_common::GIT_SHA },
         "target": {
@@ -382,7 +383,26 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         secrets.extend(credentials.split(':').map(str::to_owned));
     }
     redact_errors(&mut json, &secrets);
+    redact_strings(&mut terminal, &secrets);
+    eprint!(
+        "{}",
+        terminal.as_str().expect("terminal summary is a string")
+    );
     let text = serde_json::to_string_pretty(&json)?;
+    emit_report(&text, output, &mut std::io::stdout().lock())?;
+    if !succeeded {
+        bail!(
+            "benchmark did not complete successfully; inspect the JSON phase and cleanup results"
+        );
+    }
+    Ok(())
+}
+
+fn emit_report(
+    text: &str,
+    output: Option<(tempfile::NamedTempFile, &PathBuf)>,
+    stdout: &mut impl Write,
+) -> Result<()> {
     let saved = output
         .map(|(mut file, path)| {
             file.write_all(text.as_bytes())?;
@@ -393,15 +413,84 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
             Ok::<_, anyhow::Error>(())
         })
         .transpose();
-    // Attempt both outputs before propagating either error. In particular, a
-    // late file error must not suppress the complete JSON document on stdout.
-    let printed = writeln!(std::io::stdout().lock(), "{text}").context("write report to stdout");
-    saved.context("save benchmark report; full JSON was also attempted on stdout")?;
-    printed?;
-    if !succeeded {
-        bail!(
-            "benchmark did not complete successfully; inspect the JSON phase and cleanup results"
+    // Attempt both outputs even if a late filesystem failure occurs.
+    let printed = writeln!(stdout, "{text}").context("write report to stdout");
+    match (saved, printed) {
+        (Err(error), Err(print_error)) => Err(error.context(format!(
+            "save benchmark report; stdout also failed: {}",
+            print_error.as_report()
+        ))),
+        (Err(error), _) => {
+            Err(error.context("save benchmark report; full JSON was also attempted on stdout"))
+        }
+        (_, Err(error)) => Err(error),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(all(test, not(madsim)))]
+mod tests {
+    use super::*;
+
+    struct BrokenStdout;
+
+    impl Write for BrokenStdout {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("broken stdout"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn late_save_failure_keeps_complete_stdout_and_redacted_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("result.json");
+        let file = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        // The target becomes a directory after output preparation.
+        std::fs::create_dir(&path).unwrap();
+        let mut value = json!({"benchmark": {"phases": [{"errors": ["read failed: secret"]}], "cleanup_errors": ["cleanup failed: secret"]}});
+        redact_errors(&mut value, &["secret".into()]);
+        let text = serde_json::to_string(&value).unwrap();
+        let mut stdout = Vec::new();
+        assert!(emit_report(&text, Some((file, &path)), &mut stdout).is_err());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&stdout).unwrap(),
+            value
+        );
+        assert!(!String::from_utf8(stdout).unwrap().contains("secret"));
+        assert_eq!(
+            value["benchmark"]["phases"][0]["errors"][0],
+            "read failed: [redacted]"
+        );
+        assert_eq!(
+            value["benchmark"]["cleanup_errors"][0],
+            "cleanup failed: [redacted]"
         );
     }
-    Ok(())
+
+    #[test]
+    fn stdout_failure_still_saves_report() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("result.json");
+        let file = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        assert!(emit_report("{}", Some((file, &path)), &mut BrokenStdout).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "{}");
+    }
+
+    #[test]
+    fn file_and_stdout_failures_are_both_retained() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("result.json");
+        let file = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        std::fs::create_dir(&path).unwrap();
+
+        let error = emit_report("{}", Some((file, &path)), &mut BrokenStdout).unwrap_err();
+        let error = error.as_report().to_string();
+        assert!(error.contains("persist benchmark report"), "{error}");
+        assert!(error.contains("write report to stdout"), "{error}");
+        assert!(error.contains("broken stdout"), "{error}");
+    }
 }

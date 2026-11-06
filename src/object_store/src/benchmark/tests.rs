@@ -791,8 +791,7 @@ fn successful_failed_and_interrupted_latency_have_separate_denominators() {
     assert_eq!(report.operation_unit, "complete_prefix_scan");
 }
 
-#[tokio::test]
-async fn corrupt_range_is_rejected_before_large_data_preparation() {
+async fn preflight_fault_report(cleanup_failure: bool) -> BenchmarkReport {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = listener.local_addr().unwrap();
@@ -847,6 +846,11 @@ async fn corrupt_range_is_rejected_before_large_data_preparation() {
                         data[0] ^= 1;
                     } // Correct length, wrong range content.
                     ("206 Partial Content", data.len(), data)
+                } else if cleanup_failure
+                    && (header.starts_with("POST ") || header.starts_with("DELETE "))
+                {
+                    let data = b"<Error><Code>AccessDenied</Code><Message>injected cleanup failure</Message></Error>".to_vec();
+                    ("403 Forbidden", data.len(), data)
                 } else if header.starts_with("POST ") {
                     let data = b"<DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"/>"
                         .to_vec();
@@ -865,6 +869,9 @@ async fn corrupt_range_is_rejected_before_large_data_preparation() {
     });
     let mut cfg = ObjectStoreConfig::default();
     cfg.retry.read_retry_attempts = 0;
+    cfg.retry.upload_retry_attempts = 0;
+    cfg.retry.delete_retry_attempts = 0;
+    cfg.retry.delete_objects_retry_attempts = 0;
     let cfg = Arc::new(cfg);
     let metrics = Arc::new(ObjectStoreMetrics::unused());
     let store = crate::object::OpendalObjectStore::new_minio_engine(
@@ -883,11 +890,17 @@ async fn corrupt_range_is_rejected_before_large_data_preparation() {
     .await
     .unwrap();
     server.abort();
+    assert_eq!(puts.load(Ordering::SeqCst), 1); // Only the 4 KiB probe was uploaded.
+    report
+}
+
+#[tokio::test]
+async fn corrupt_range_is_rejected_before_large_data_preparation() {
+    let report = preflight_fault_report(false).await;
     let check = &report.phases[0];
     assert_eq!(check.name, "preflight");
     assert_eq!(check.status, "failed");
     assert!(check.errors[0].contains("incorrect content"), "{check:?}");
-    assert_eq!(puts.load(Ordering::SeqCst), 1); // Only the 4 KiB probe was uploaded.
     assert_eq!(
         report
             .phases
@@ -896,5 +909,30 @@ async fn corrupt_range_is_rejected_before_large_data_preparation() {
             .unwrap()
             .status,
         "skipped"
+    );
+}
+
+#[tokio::test]
+async fn preflight_and_final_cleanup_failures_keep_the_primary_error_and_json() {
+    let report = preflight_fault_report(true).await;
+    assert!(!report.succeeded());
+    let error = &report.phases[0].errors[0];
+    assert!(error.contains("incorrect content"), "{error}");
+    assert!(error.contains("preflight probe cleanup"), "{error}");
+    assert_eq!(report.cleanup_status, "failed");
+    assert!(!report.cleanup_errors.is_empty());
+    assert!(
+        report
+            .cleanup_errors
+            .iter()
+            .any(|e| e.contains("injected cleanup failure"))
+    );
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(json["cleanup_status"], "failed");
+    assert!(
+        json["phases"][0]["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("incorrect content")
     );
 }
