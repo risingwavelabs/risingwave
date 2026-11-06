@@ -350,15 +350,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             fragment_id,
         );
 
-        let input_is_upsert = self.input.stream_kind() == StreamKind::Upsert;
-        // When processing upsert stream, we need to tolerate the inconsistency (mismatched `DELETE`
-        // and `INSERT` pairs) when compacting input chunks with derived stream key.
-        let input_compact_ib = if input_is_upsert {
-            InconsistencyBehavior::Tolerate
-        } else {
-            InconsistencyBehavior::Panic
-        };
-
+        let input_kind = self.input.stream_kind();
         let input = self.input.execute();
 
         let input = input.inspect_ok(move |msg| {
@@ -374,8 +366,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             stream_key,
             self.chunk_size,
             self.input_data_types,
-            input_compact_ib,
-            input_is_upsert,
+            input_kind,
             self.sink_param.downstream_pk.clone(),
             self.non_append_only_behavior,
             metrics.sink_chunk_buffer_size,
@@ -597,8 +588,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
-        input_compact_ib: InconsistencyBehavior,
-        input_is_upsert: bool,
+        input_kind: StreamKind,
         downstream_pk: Option<Vec<usize>>,
         non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
@@ -633,16 +623,20 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         let mut delete_chunks = vec![];
                         let mut insert_chunks = vec![];
 
-                        let compactor = StreamChunkCompactor::new(stream_key.clone(), chunks);
-                        let compacted = if downstream_pk.is_some() && !input_is_upsert {
-                            compactor.into_compacted_chunks_inline::<{ output_kind::RETRACT }>(
-                                input_compact_ib,
-                            )
-                        } else {
-                            dispatch_output_kind!(sink_type, KIND, {
-                                compactor.into_compacted_chunks_inline::<KIND>(input_compact_ib)
-                            })
-                        };
+                        let compactor =
+                            StreamChunkCompactor::new(stream_key.clone(), chunks, input_kind);
+                        let compacted =
+                            if downstream_pk.is_some() && input_kind != StreamKind::Upsert {
+                                compactor.into_compacted_chunks_inline::<{ output_kind::RETRACT }>(
+                                    InconsistencyBehavior::Panic,
+                                )
+                            } else {
+                                dispatch_output_kind!(sink_type, KIND, {
+                                    compactor.into_compacted_chunks_inline::<KIND>(
+                                        InconsistencyBehavior::Panic,
+                                    )
+                                })
+                            };
                         for c in compacted {
                             let chunk = force_delete_only(c.clone());
                             if chunk.cardinality() > 0 {
@@ -666,8 +660,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 .into_iter()
                                 .chain(insert_chunks.into_iter())
                                 .collect();
+                            // With a downstream pk, the first stage retains retract updates,
+                            // so this stage has the same input semantics as the original stream.
                             let chunks = dispatch_output_kind!(sink_type, KIND, {
-                                StreamChunkCompactor::new(downstream_pk.clone(), chunks)
+                                StreamChunkCompactor::new(downstream_pk.clone(), chunks, input_kind)
                                     .into_compacted_chunks_reconstructed::<KIND>(
                                         chunk_size,
                                         input_data_types.clone(),
@@ -738,6 +734,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     compact_chunk_inline::<KIND>(
                                         chunk,
                                         downstream_pk,
+                                        input_kind,
                                         // When compacting based on user provided primary key, we should never panic
                                         // on inconsistency in case the user provided primary key is not unique.
                                         InconsistencyBehavior::Warn,
@@ -822,6 +819,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         compact_chunk_inline::<KIND>(
                             chunk,
                             downstream_pk,
+                            // Writer-side compaction has already converted updates for upsert sinks.
+                            if sink_param.sink_type == SinkType::Upsert {
+                                StreamKind::Upsert
+                            } else {
+                                StreamKind::Retract
+                            },
                             // When compacting based on user provided primary key, we should never panic
                             // on inconsistency in case the user provided primary key is not unique.
                             InconsistencyBehavior::Warn,
@@ -1974,6 +1977,66 @@ mod test {
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_upsert_input_retains_delete() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        for force_compaction in [false, true] {
+            for separate_chunks in [false, true] {
+                let mut input = vec![
+                    Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                    Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 10")),
+                    Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                ];
+                if separate_chunks {
+                    input.push(Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 20")));
+                    input.push(Message::Chunk(StreamChunk::from_pretty("I I\n- 1 .")));
+                } else {
+                    input.push(Message::Chunk(StreamChunk::from_pretty(
+                        "I I\n+ 1 20\n- 1 .",
+                    )));
+                }
+                input.push(Message::Barrier(Barrier::new_test_barrier(test_epoch(3))));
+                let ctx = ActorContext::for_test(0);
+                let metrics =
+                    ctx.streaming_metrics
+                        .new_sink_exec_metrics(0.into(), ctx.id, ctx.fragment_id);
+                let output = SinkExecutor::<BoundedInMemLogStoreFactory>::process_msg(
+                    futures::stream::iter(input.into_iter().map(Ok)),
+                    SinkType::Upsert,
+                    vec![0],
+                    1024,
+                    vec![DataType::Int64; 2],
+                    StreamKind::Upsert,
+                    Some(vec![0]),
+                    Some(NonAppendOnlyBehavior {
+                        pk_specified_and_matched: true,
+                        force_compaction,
+                    }),
+                    metrics.sink_chunk_buffer_size,
+                    false,
+                    false,
+                )
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+                let chunks = output
+                    .into_iter()
+                    .filter_map(|msg| match msg {
+                        Message::Chunk(chunk) if chunk.cardinality() != 0 => Some(chunk),
+                        _ => None,
+                    })
+                    .collect_vec();
+                let expected = if separate_chunks && !force_compaction {
+                    StreamChunk::from_pretty("I I\n+ 1 10\n+ 1 20\n- 1 .")
+                } else {
+                    StreamChunk::from_pretty("I I\n+ 1 10\n- 1 .")
+                };
+                assert_eq!(StreamChunk::concat(chunks), expected);
+            }
+        }
     }
 
     /// Runs a sink executor over `Int64` columns and returns the output chunks.
