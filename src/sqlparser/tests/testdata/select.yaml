@@ -215,6 +215,56 @@
 - input: select 'a' not like ANY(array['a', null]);
   formatted_sql: SELECT 'a' NOT LIKE SOME(ARRAY['a', NULL])
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Like { negated: true, expr: Value(SingleQuotedString("a")), pattern: SomeOp(Array(Array { elem: [Value(SingleQuotedString("a")), Value(Null)], named: true })), escape_char: None })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'a' ilike all(array['a']);
+  formatted_sql: SELECT 'a' ILIKE ALL(ARRAY['a'])
+- input: select 1 = any(array[1])::varchar;
+  formatted_sql: SELECT CAST(1 = SOME(ARRAY[1]) AS CHARACTER VARYING)
+- input: select 1 = 5 any(array[1, 2]);
+  error_msg: |-
+    sql parser error: expected end of statement, found: (
+    LINE 1: select 1 = 5 any(array[1, 2]);
+                            ^
+- input: select a from t where a = 99 all(array[1]);
+  error_msg: |-
+    sql parser error: expected end of statement, found: all
+    LINE 1: select a from t where a = 99 all(array[1]);
+                                         ^
+- input: select any(array[1, 2]);
+  error_msg: |-
+    sql parser error: syntax error at or near any at line 1, column 8
+    LINE 1: select any(array[1, 2]);
+                      ^
+- input: select 1 = (some(array[1, 2]));
+  error_msg: |-
+    sql parser error: syntax error at or near some at line 1, column 13
+    LINE 1: select 1 = (some(array[1, 2]));
+                            ^
+- input: select 1 between any(array[1, 2]) and 5;
+  error_msg: |-
+    sql parser error: syntax error at or near any at line 1, column 18
+    LINE 1: select 1 between any(array[1, 2]) and 5;
+                                ^
+- input: select 1 between 0 and all(array[1, 2]);
+  error_msg: |-
+    sql parser error: syntax error at or near all at line 1, column 24
+    LINE 1: select 1 between 0 and all(array[1, 2]);
+                                      ^
+- input: select (1, 2) in (all(array[(1, 2)]));
+  error_msg: |-
+    sql parser error: syntax error at or near all at line 1, column 19
+    LINE 1: select (1, 2) in (all(array[(1, 2)]));
+                                 ^
+- input: select 'a' similar to any(array['a']);
+  error_msg: |-
+    sql parser error: syntax error at or near any at line 1, column 23
+    LINE 1: select 'a' similar to any(array['a']);
+                                     ^
+- input: select 1 any;
+  formatted_sql: SELECT 1 AS any
+- input: select case 1 when any(array[1, 2]) then 'y' else 'n' end;
+  formatted_sql: SELECT CASE 1 WHEN SOME(ARRAY[1, 2]) THEN 'y' ELSE 'n' END
+- input: select case 1 when any(array[1]) and true then 'y' end;
+  error_msg: "sql parser error: \nLINE 1: select case 1 when any(array[1]) and true then 'y' end;\n                                         ^"
 - input: selet 1;
   error_msg: |-
     sql parser error: expected statement, found: selet
