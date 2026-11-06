@@ -68,11 +68,7 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         let count = (&data[footer..]).get_u32_le() as usize;
         assert_eq!(count, metas.len());
         let owned = matches!(&data, Cow::Owned(_));
-        let mut chunks = Vec::with_capacity(if owned {
-            1
-        } else {
-            data.len().div_ceil(BLOCKED_FILTER_CHUNK_SIZE)
-        });
+        let mut chunks = Vec::new();
         let mut reader = &data[..footer];
         let mut filters = Vec::with_capacity(count);
         let mut encoded_len = BLOCKED_FILTER_FOOTER_LEN;
@@ -99,7 +95,7 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         assert!(reader.is_empty(), "trailing blocked filter bytes");
         if let Cow::Owned(data) = data {
             // The owned child ranges all refer to chunk zero.
-            chunks.push(data);
+            chunks = vec![data];
         }
         Self {
             filters,

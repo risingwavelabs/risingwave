@@ -447,12 +447,32 @@ impl BlockFilter for Xor8Block {
     }
 
     fn encode(data: &[u8], out: &mut Vec<u8>) {
-        out.extend_from_slice(data);
+        out.extend_from_slice(&data[..data.len() - 1]);
+        out.push(FOOTER_XOR8);
     }
+}
+
+#[inline]
+fn xor16_body(data: &[u8]) -> &[u8] {
+    // The old decoder reads complete words after the header. For malformed even-length
+    // input, this includes the tag as the high byte of the last word.
+    &data[..data.len() & !1]
 }
 
 #[derive(Clone)]
 struct Xor16Block;
+
+impl Xor16Block {
+    #[inline]
+    fn body(data: &[u8]) -> &[u8] {
+        if data.len() == 1 {
+            // The tag-only form represents an empty filter with a zeroed header.
+            &[0; PLAIN_XOR_FILTER_FIXED_LEN - 1]
+        } else {
+            xor16_body(data)
+        }
+    }
+}
 
 impl BlockFilter for Xor16Block {
     const BLOCKED_TAG: u8 = FOOTER_BLOCKED_XOR16;
@@ -464,35 +484,16 @@ impl BlockFilter for Xor16Block {
 
     #[inline]
     fn reader(data: &[u8]) -> impl Filter<u64> + '_ {
-        if data.len() == 1 {
-            return Xor16BytesRef {
-                seed: 0,
-                block_length: 0,
-                fingerprints: &[],
-            };
-        }
-        // Old blocked readers ignore an incomplete fingerprint before the footer.
-        let body = &data[..(data.len() - 1) & !1];
-        Xor16BytesRef::from_encoded_le(body).expect("invalid xor16 child")
+        Xor16BytesRef::from_encoded_le(Self::body(data)).expect("invalid xor16 child")
     }
 
     fn serialized_len(data: &[u8]) -> usize {
-        data.len().max(PLAIN_XOR_FILTER_FIXED_LEN)
+        Self::body(data).len() + 1
     }
 
     fn encode(data: &[u8], out: &mut Vec<u8>) {
-        if data.len() == 1 {
-            // Legacy empty children encode with the canonical full header.
-            Xor16 {
-                seed: 0,
-                block_length: 0,
-                fingerprints: Box::default(),
-            }
-            .encode_le_into(out);
-            out.push(FOOTER_XOR16);
-        } else {
-            out.extend_from_slice(data);
-        }
+        out.extend_from_slice(Self::body(data));
+        out.push(FOOTER_XOR16);
     }
 }
 
@@ -518,40 +519,30 @@ pub struct XorFilterReader {
 impl XorFilterReader {
     /// Creates an xor filter from a byte slice
     pub fn new(data: &[u8], metas: &[BlockMeta]) -> Self {
+        Self::decode(Cow::Borrowed(data), metas)
+    }
+
+    /// Restores a filter while retaining its owned bytes for blocked lookups.
+    pub(super) fn from_owned(data: Vec<u8>, metas: &[BlockMeta]) -> Self {
+        Self::decode(Cow::Owned(data), metas)
+    }
+
+    fn decode(data: Cow<'_, [u8]>, metas: &[BlockMeta]) -> Self {
         if data.len() <= 1 {
             return Self {
                 filter: XorFilter::Xor16(Xor16 {
                     seed: 0,
                     block_length: 0,
-                    fingerprints: vec![].into_boxed_slice(),
+                    fingerprints: Box::default(),
                 }),
             };
         }
 
-        let kind = *data.last().unwrap();
-        let filter = match kind {
-            FOOTER_BLOCKED_XOR16 => {
-                XorFilter::BlockXor16(BlockBasedFilter::decode(Cow::Borrowed(data), metas))
-            }
-            FOOTER_BLOCKED_XOR8 => {
-                XorFilter::BlockXor8(BlockBasedFilter::decode(Cow::Borrowed(data), metas))
-            }
-            FOOTER_XOR16 => XorFilter::Xor16(Self::to_xor16(data)),
-            _ => XorFilter::Xor8(Self::to_xor8(data)),
-        };
-        Self { filter }
-    }
-
-    /// Restores a filter while retaining its owned bytes for blocked lookups.
-    pub fn from_owned(data: Vec<u8>, metas: &[BlockMeta]) -> Self {
-        let filter = match data.last().copied() {
-            Some(FOOTER_BLOCKED_XOR16) if data.len() > 1 => {
-                XorFilter::BlockXor16(BlockBasedFilter::decode(Cow::Owned(data), metas))
-            }
-            Some(FOOTER_BLOCKED_XOR8) if data.len() > 1 => {
-                XorFilter::BlockXor8(BlockBasedFilter::decode(Cow::Owned(data), metas))
-            }
-            _ => return Self::new(&data, metas),
+        let filter = match *data.last().unwrap() {
+            FOOTER_BLOCKED_XOR16 => XorFilter::BlockXor16(BlockBasedFilter::decode(data, metas)),
+            FOOTER_BLOCKED_XOR8 => XorFilter::BlockXor8(BlockBasedFilter::decode(data, metas)),
+            FOOTER_XOR16 => XorFilter::Xor16(Self::to_xor16(&data)),
+            _ => XorFilter::Xor8(Self::to_xor8(&data)),
         };
         Self { filter }
     }
@@ -563,16 +554,7 @@ impl XorFilterReader {
     }
 
     fn to_xor16(data: &[u8]) -> Xor16 {
-        assert_eq!(data.last(), Some(&FOOTER_XOR16));
-        if data.len() <= 1 {
-            return Xor16 {
-                seed: 0,
-                block_length: 0,
-                fingerprints: vec![].into_boxed_slice(),
-            };
-        }
-        // Preserve the old plain reader's complete-word decoding, including malformed tails.
-        Xor16BytesRef::from_encoded_le(&data[..data.len() & !1])
+        Xor16BytesRef::from_encoded_le(xor16_body(data))
             .expect("invalid xor16 filter")
             .into()
     }
@@ -714,54 +696,48 @@ mod tests {
 
     #[test]
     fn test_blocked_filter_codec_compatibility() {
-        let canonical =
-            Xor16FilterBuilder::build_from_xor16(&XorFilterReader::to_xor16(&[FOOTER_XOR16]));
-        let next = Xor16FilterBuilder::build_from_xor16(&Xor16::from(&vec![42]));
-        let mut mixed = Vec::new();
-        for _ in 0..2 {
-            mixed.put_u32_le(1);
-            mixed.push(FOOTER_XOR16);
-        }
-        mixed.put_u32_le(next.len() as u32);
-        mixed.extend_from_slice(&next);
-        mixed.put_u32_le(3);
-        mixed.put_u8(FOOTER_BLOCKED_XOR16);
-        let metas = vec![BlockMeta::default(); 3];
-        for reader in [
-            XorFilterReader::new(&mixed, &metas),
-            XorFilterReader::from_owned(mixed.clone(), &metas),
-        ] {
-            assert_eq!(reader.get_block_raw_filter(0), canonical);
-            assert_eq!(reader.get_block_raw_filter(1), canonical);
-            assert_eq!(reader.get_block_raw_filter(2), next);
-            let encoded = reader.encode_to_bytes();
-            assert_eq!(reader.serialized_len(), encoded.len());
-            assert_eq!(
-                encoded.len(),
-                mixed.len() + 2 * (PLAIN_XOR_FILTER_FIXED_LEN - 1)
-            );
-        }
+        let empty = [FOOTER_XOR16];
+        let canonical_empty = XorFilterReader::new(&empty, &[]).encode_to_bytes();
+        let xor8 = Xor8FilterBuilder::build_from_xor8(&Xor8::from(&vec![42]));
+        let mut old_xor8 = xor8.clone();
+        *old_xor8.last_mut().unwrap() = 17;
+        let mut xor16_with_tail = Xor16FilterBuilder::build_from_xor16(&Xor16::from(&vec![42]));
+        xor16_with_tail.insert(xor16_with_tail.len() - 1, 17);
+        // The old decoder reads the last two bytes as one fingerprint, then re-adds the tag.
+        let mut canonical_xor16 = xor16_with_tail.clone();
+        canonical_xor16.push(FOOTER_XOR16);
 
-        // Child export must preserve bytes tolerated by the existing readers.
-        let mut xor8 = Xor8FilterBuilder::build_from_xor8(&Xor8::from(&vec![42]));
-        *xor8.last_mut().unwrap() = 17;
-        let mut xor16 = next;
-        xor16.insert(xor16.len() - 1, 17);
-        for (child, tag) in [(xor8, FOOTER_BLOCKED_XOR8), (xor16, FOOTER_BLOCKED_XOR16)] {
-            let mut bytes = Vec::new();
-            bytes.put_u32_le(child.len() as u32);
-            bytes.extend_from_slice(&child);
-            bytes.put_u32_le(1);
-            bytes.push(tag);
+        let check_case = |tag, input: &[&[u8]], expected: &[&[u8]]| {
+            let frame = |children: &[&[u8]]| {
+                let mut bytes = Vec::new();
+                for child in children {
+                    bytes.put_u32_le(child.len() as u32);
+                    bytes.extend_from_slice(child);
+                }
+                bytes.put_u32_le(children.len() as u32);
+                bytes.push(tag);
+                bytes
+            };
+            let bytes = frame(input);
+            let encoded = frame(expected);
+            let metas = vec![BlockMeta::default(); input.len()];
             for reader in [
-                XorFilterReader::new(&bytes, &metas[..1]),
-                XorFilterReader::from_owned(bytes.clone(), &metas[..1]),
+                XorFilterReader::new(&bytes, &metas),
+                XorFilterReader::from_owned(bytes.clone(), &metas),
             ] {
-                assert_eq!(reader.get_block_raw_filter(0), child);
-                assert_eq!(reader.encode_to_bytes(), bytes);
-                assert_eq!(reader.serialized_len(), bytes.len());
+                for (index, child) in expected.iter().enumerate() {
+                    assert_eq!(reader.get_block_raw_filter(index), *child);
+                }
+                assert_eq!(reader.encode_to_bytes(), encoded);
+                assert_eq!(reader.serialized_len(), encoded.len());
             }
-        }
+        };
+        check_case(FOOTER_BLOCKED_XOR8, &[&old_xor8], &[&xor8]);
+        check_case(
+            FOOTER_BLOCKED_XOR16,
+            &[&empty, &empty, &xor16_with_tail],
+            &[&canonical_empty, &canonical_empty, &canonical_xor16],
+        );
     }
 
     #[test]
