@@ -18,15 +18,20 @@ fn parse_error(message: impl std::fmt::Display) -> SinkError {
     SinkError::ClickHouse(format!("Cannot parse Distributed table target: {message}"))
 }
 
-/// Extracts the underlying database and table from `system.tables.engine_full`.
-///
-/// Accepts identifiers and quoted names, plus `currentDatabase()` for the database.
-/// An empty database string also uses `current_database`, which must be the effective
-/// database of the `ClickHouse` session.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct DistributedTable {
+    pub cluster: String,
+    pub database: String,
+    pub table: String,
+}
+
+/// Extracts database and table names from `system.tables.engine_full`.
+/// Supports identifiers, quoted names, and `currentDatabase()` (the session database).
+/// Preserves an empty database string for cluster-config resolution.
 pub(super) fn parse_distributed_table(
     engine: &str,
     current_database: &str,
-) -> Result<(String, String)> {
+) -> Result<DistributedTable> {
     let args = distributed_arguments(engine)?;
     if !(3..=5).contains(&args.len()) {
         return Err(parse_error(format!(
@@ -46,19 +51,39 @@ pub(super) fn parse_distributed_table(
         .and_then(|rest| rest.trim_start().strip_prefix('('))
         .and_then(|rest| rest.strip_suffix(')'))
         .is_some_and(|args| args.trim().is_empty());
-    let mut database = if is_current_database {
+    let database = if is_current_database {
         current_database.to_owned()
     } else {
         parse_name(args[1], "database")?
     };
-    if database.is_empty() {
-        database = current_database.to_owned();
-    }
+    let cluster = parse_name(args[0], "cluster")?;
     let table = parse_name(args[2], "table")?;
-    if database.is_empty() || table.is_empty() {
-        return Err(parse_error("database and table must not be empty"));
+    if cluster.is_empty() || table.is_empty() || (is_current_database && database.is_empty()) {
+        return Err(parse_error(
+            "cluster, table and current database must not be empty",
+        ));
     }
-    Ok((database, table))
+    Ok(DistributedTable {
+        cluster,
+        database,
+        table,
+    })
+}
+
+/// All replicas must specify the same database for local-table metadata.
+/// Unset defaults depend on remote configuration and cannot be safely inferred.
+pub(super) fn resolve_default_database(cluster: &str, databases: &[String]) -> Result<String> {
+    let Some(database) = databases.first() else {
+        return Err(SinkError::ClickHouse(format!(
+            "Cluster {cluster:?} was not found in system.clusters"
+        )));
+    };
+    if database.is_empty() || databases.iter().any(|other| other != database) {
+        return Err(SinkError::ClickHouse(format!(
+            "Distributed engine: Cannot resolve database for cluster {cluster:?}: replica default databases are empty or inconsistent"
+        )));
+    }
+    Ok(database.clone())
 }
 
 fn distributed_arguments(engine: &str) -> Result<Vec<&str>> {
@@ -225,8 +250,10 @@ mod tests {
             ),
             ("Distributed(logs, ' db ', ' table ')", " db ", " table "),
         ] {
+            let target = parse_distributed_table(engine, "default").unwrap();
+            assert_eq!(target.cluster, "logs");
             assert_eq!(
-                parse_distributed_table(engine, "default").unwrap(),
+                (target.database, target.table),
                 (database.to_owned(), table.to_owned()),
                 "{engine}"
             );
@@ -243,20 +270,59 @@ mod tests {
             "Distributed(logs, currentDatabase\t(\n\t), hits)",
             "Distributed('logs(a,b)', currentDatabase(), hits, cityHash64(a, b))",
             " Distributed ( logs , currentDatabase() , hits , cityHash64(a, b) ) ",
-            "Distributed(logs, '', hits, cityHash64(tuple(a, b), [1, 2]))",
+            "Distributed(logs, currentDatabase(), hits, cityHash64(tuple(a, b), [1, 2]))",
             "Distributed(logs, currentDatabase(), hits, cityHash64('a,)(', b))",
             "Distributed(logs, currentDatabase(), hits, cityHash64(\"a,b\", `c)d`))",
             r"Distributed(logs, currentDatabase(), hits, cityHash64('a\'),b', '\xFF'))",
             "Distributed(logs, currentDatabase(), hits, id, 'hot') SETTINGS fsync_after_insert = 1, fsync_directories = 1",
         ] {
+            let target = parse_distributed_table(engine, "session_db").unwrap();
             assert_eq!(
-                parse_distributed_table(engine, "session_db").unwrap(),
+                (target.database, target.table),
                 ("session_db".to_owned(), "hits".to_owned()),
                 "{engine}"
             );
         }
-        assert!(parse_distributed_table("Distributed(logs, '', hits)", "").is_err());
         assert!(parse_distributed_table("Distributed(logs, currentDatabase(), hits)", "").is_err());
+    }
+
+    #[test]
+    fn test_distributed_empty_database_uses_cluster_default() {
+        for engine in [
+            "Distributed(logs, '', hits)",
+            "Distributed('logs', '', hits, cityHash64(tuple(a, b), [1, 2]))",
+            "Distributed(`logs`, '', hits)",
+        ] {
+            for session_database in ["sink_db", ""] {
+                let target = parse_distributed_table(engine, session_database).unwrap();
+                assert_eq!(target.cluster, "logs");
+                assert_eq!(target.database, "");
+                assert_eq!(target.table, "hits");
+                assert_eq!(
+                    resolve_default_database(
+                        &target.cluster,
+                        &["cluster_db".to_owned(), "cluster_db".to_owned()],
+                    )
+                    .unwrap(),
+                    "cluster_db"
+                );
+            }
+        }
+        let target =
+            parse_distributed_table("Distributed('logs(a,b)', '', hits)", "sink_db").unwrap();
+        assert_eq!(target.cluster, "logs(a,b)");
+        assert!(target.database.is_empty());
+
+        // An explicit database or currentDatabase() must not use the cluster default.
+        for (argument, expected) in [
+            ("'explicit_db'", "explicit_db"),
+            ("currentDatabase()", "sink_db"),
+        ] {
+            let target =
+                parse_distributed_table(&format!("Distributed(logs, {argument}, hits)"), "sink_db")
+                    .unwrap();
+            assert_eq!(target.database, expected);
+        }
     }
 
     #[test]
@@ -298,8 +364,9 @@ mod tests {
                 "tname",
             ),
         ] {
+            let target = parse_distributed_table(engine, "default").unwrap();
             assert_eq!(
-                parse_distributed_table(engine, "default").unwrap(),
+                (target.database, target.table),
                 (database.to_owned(), table.to_owned()),
                 "{engine}"
             );
@@ -315,6 +382,7 @@ mod tests {
             "Distributed()",
             "Distributed(logs, db)",
             "Distributed(, db, t)",
+            "Distributed('', db, t)",
             "Distributed(logs, , t)",
             "Distributed(logs, db, )",
             "Distributed(logs, db, t,)",
