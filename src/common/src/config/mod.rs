@@ -714,6 +714,40 @@ pub mod tests {
     }
 
     #[test]
+    fn test_http_client_rotation_config() {
+        for (input, expected) in [
+            ("", None),
+            ("http_client_rotation_interval_ms = \"\"", None),
+            ("http_client_rotation_interval_ms = 60000", Some(60000)),
+        ] {
+            let config: RwConfig =
+                toml::from_str(&format!("[storage.object_store.s3]\n{input}")).unwrap();
+            assert_eq!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .http_client_rotation_interval_ms,
+                expected
+            );
+            let roundtrip: RwConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(
+                roundtrip
+                    .storage
+                    .object_store
+                    .s3
+                    .http_client_rotation_interval_ms,
+                expected
+            );
+        }
+        let error = toml::from_str::<RwConfig>(
+            "[storage.object_store.s3]\nhttp_client_rotation_interval_ms = 0",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must be greater than 0"));
+    }
+
+    #[test]
     fn test_object_store_configs_backward_compatibility() {
         // Define configs with the old name and make sure it still works
         {

@@ -43,6 +43,7 @@ pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::SchemaTableName;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
@@ -75,22 +76,6 @@ pub const ORACLE_CDC_CONNECTOR: &str = Oracle::CDC_CONNECTOR_NAME;
 /// Build a unique CDC table identifier from a source ID and external table name
 pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> String {
     format!("{}.{}", source_id, external_table_name)
-}
-
-pub fn normalize_simple_postgres_quoted_table_name(table_name: &str) -> Option<String> {
-    let (schema_name, table_name) = table_name.split_once('.')?;
-    let table_name = table_name.strip_prefix('"')?.strip_suffix('"')?;
-    if schema_name.is_empty()
-        || table_name.is_empty()
-        || table_name.contains('.')
-        || table_name.contains('"')
-        || table_name.contains('\\')
-        || schema_name.contains('"')
-    {
-        return None;
-    }
-
-    Some(format!("{schema_name}.{table_name}"))
 }
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
@@ -165,6 +150,77 @@ pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
     ) -> ConnectorResult<()> {
         check_common_with_options(props)
     }
+}
+
+/// Handles the identifiers of upstream objects of a CDC source connector, such as tables and
+/// columns: how the connector spells them, quotes them, and how Debezium names them.
+// TODO(#27225): move the remaining per-connector identifier handling in as trait methods.
+pub trait CdcSourceExternalTableIdentifier: CdcSourceTypeTrait {
+    /// Returns the canonical identifier of the external table that the connect properties of a
+    /// CDC table point to: the part of the Debezium topic name of the table's change events that
+    /// the source reader keeps as `_rw_table_name`. A CDC table filters the change events of its
+    /// source by this identifier, and its `cdc_table_id` is built from it.
+    fn canonical_name(connect_properties: &BTreeMap<String, String>) -> String {
+        let SchemaTableName {
+            schema_name,
+            table_name,
+        } = SchemaTableName::from_properties(connect_properties);
+        format!("{schema_name}.{table_name}")
+    }
+
+    /// Splits a `.`-separated name, such as the one in the `TABLE '...'` clause of a CDC table,
+    /// into its identifiers, following the connector's quoting syntax. Returns `None` if the name
+    /// is malformed.
+    fn split_quoted_identifier(name: &str) -> Option<Vec<String>> {
+        split_quoted_identifier_inner(name, '"', '"')
+    }
+}
+
+/// Splits a `.`-separated name into its identifiers. An identifier wrapped in `open` and `close`
+/// may contain `.`, and a doubled `close` inside it stands for one `close`, e.g. `"a.b"` and
+/// `"a""b"` for Postgres, `[a.b]` and `[a]]b]` for SQL Server. Returns `None` if the name is
+/// malformed.
+pub fn split_quoted_identifier_inner(name: &str, open: char, close: char) -> Option<Vec<String>> {
+    let mut parts = vec![];
+    let mut current = String::new();
+    let mut chars = name.chars().peekable();
+    let mut in_quote = false;
+    let mut just_closed_quote = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quote {
+            if ch == close {
+                if chars.peek() == Some(&close) {
+                    current.push(close);
+                    chars.next();
+                } else {
+                    in_quote = false;
+                    just_closed_quote = true;
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            match ch {
+                '.' => {
+                    if current.is_empty() {
+                        return None;
+                    }
+                    parts.push(std::mem::take(&mut current));
+                    just_closed_quote = false;
+                }
+                _ if ch == open && current.is_empty() => in_quote = true,
+                _ if ch == open || ch == close || just_closed_quote => return None,
+                _ => current.push(ch),
+            }
+        }
+    }
+
+    if in_quote || current.is_empty() {
+        return None;
+    }
+    parts.push(current);
+    Some(parts)
 }
 
 /// Checks the `WITH (...)` options that every CDC source accepts, on both `CREATE` and `ALTER`.
@@ -540,31 +596,70 @@ impl CdcScanOptions {
 mod tests {
     use super::*;
 
+    fn connect_properties(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
     #[test]
-    fn test_normalize_simple_postgres_quoted_table_name() {
+    fn test_canonical_name() {
         assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."TableName""#).as_deref(),
-            Some("public.TableName")
+            Mysql::canonical_name(&connect_properties(&[
+                ("connector", MYSQL_CDC_CONNECTOR),
+                ("database.name", "mydb"),
+                ("table.name", "orders"),
+            ])),
+            "mydb.orders"
         );
         assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."pg_my_table""#).as_deref(),
-            Some("public.pg_my_table")
+            Postgres::canonical_name(&connect_properties(&[
+                ("connector", POSTGRES_CDC_CONNECTOR),
+                ("database.name", "postgres"),
+                ("schema.name", "public"),
+                ("table.name", "a.b"),
+            ])),
+            "public.a.b"
         );
         assert_eq!(
-            normalize_simple_postgres_quoted_table_name("public.table"),
-            None
+            SqlServer::canonical_name(&connect_properties(&[
+                ("connector", SQL_SERVER_CDC_CONNECTOR),
+                ("database.name", "my.db"),
+                ("schema.name", "dbo"),
+                ("table.name", "a.b"),
+            ])),
+            "my.db.dbo.a.b"
+        );
+    }
+
+    #[test]
+    fn test_split_quoted_identifier() {
+        let parts = |parts: &[&str]| Some(parts.iter().map(|p| (*p).to_owned()).collect_vec());
+
+        assert_eq!(
+            Postgres::split_quoted_identifier("public.orders"),
+            parts(&["public", "orders"])
         );
         assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#""Mixed.Schema"."TableName""#),
-            None
+            Postgres::split_quoted_identifier(r#""My.Schema"."a""b.c""#),
+            parts(&["My.Schema", r#"a"b.c"#])
         );
         assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."table.name""#),
-            None
+            SqlServer::split_quoted_identifier("[my.db].dbo.[a]]b.c]"),
+            parts(&["my.db", "dbo", "a]b.c"])
         );
         assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."table\name""#),
-            None
+            SqlServer::split_quoted_identifier("dbo.a[b"),
+            None,
+            "`[` opens a quote only at the start of a part"
         );
+
+        for name in ["", "a..b", ".a", "a.", r#"public."a"#, r#"public."a"b"#] {
+            assert_eq!(Postgres::split_quoted_identifier(name), None, "{name}");
+        }
+        for name in ["[a", "dbo.[a]b]", "dbo.a]b", "[a]].b"] {
+            assert_eq!(SqlServer::split_quoted_identifier(name), None, "{name}");
+        }
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_pb::expr::expr_node::{self, RexNode};
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
@@ -24,20 +25,29 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
+use crate::MetaResult;
+
+/// A stored definition can come from an older version, so it may not parse anymore. The error leaves
+/// out the definition and the parser's message, which quotes it, because the connector options in a
+/// definition can have secrets.
+fn parse_definition(definition: &str) -> MetaResult<Statement> {
+    let ast = Parser::parse_sql(definition)
+        .map_err(|_| anyhow!("failed to parse the stored definition"))?;
+    Ok(Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement"))
+}
+
 /// `alter_relation_rename` renames a relation to a new name in its `Create` statement, and returns
 /// the updated definition raw sql. Note that the `definition` must be a `Create` statement and the
 /// `new_name` must be a valid identifier, it should be validated before calling this function. To
 /// update all relations that depend on the renamed one, use `alter_relation_rename_refs`.
-pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
+pub fn alter_relation_rename(definition: &str, new_name: &str) -> MetaResult<String> {
     // This happens when we try to rename a table that's created by `CREATE TABLE AS`. Remove it
     // when we support `SHOW CREATE TABLE` for `CREATE TABLE AS`.
     if definition.is_empty() {
         tracing::warn!("found empty definition when renaming relation, ignored.");
-        return definition.into();
+        return Ok(definition.into());
     }
-    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt =
-        Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement");
+    let mut stmt = parse_definition(definition)?;
 
     match &mut stmt {
         Statement::CreateTable { name, .. }
@@ -63,15 +73,13 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
         _ => unreachable!(),
     };
 
-    stmt.to_string()
+    Ok(stmt.to_string())
 }
 
 /// `alter_relation_rename_refs` updates all references of renamed-relation in the definition of
 /// target relation's `Create` statement.
-pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> String {
-    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt =
-        Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement");
+pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> MetaResult<String> {
+    let mut stmt = parse_definition(definition)?;
 
     match &mut stmt {
         Statement::CreateTable {
@@ -139,7 +147,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
         }
         _ => unreachable!(),
     };
-    stmt.to_string()
+    Ok(stmt.to_string())
 }
 
 /// Replace the last ident in the `table_name` with the given name, the object name is ensured to be
@@ -519,6 +527,8 @@ impl IndexItemRewriter {
 
 #[cfg(test)]
 mod tests {
+    use thiserror_ext::AsReport;
+
     use super::*;
 
     #[test]
@@ -526,8 +536,20 @@ mod tests {
         let definition = "CREATE TABLE foo (a int, b int)";
         let new_name = "bar";
         let expected = "CREATE TABLE bar (a INT, b INT)";
-        let actual = alter_relation_rename(definition, new_name);
+        let actual = alter_relation_rename(definition, new_name).unwrap();
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_rename_with_unparsable_definition() {
+        let definition = "CREATE SINK s FROM t WITH (password = 'secret') AND";
+        for result in [
+            alter_relation_rename(definition, "s2"),
+            alter_relation_rename_refs(definition, "t", "t2"),
+        ] {
+            let error = result.unwrap_err().to_report_string();
+            assert!(!error.contains("secret"), "{error}");
+        }
     }
 
     #[test]
@@ -536,7 +558,7 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected = "CREATE INDEX idx1 ON bar(v1 DESC, v2)";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, from, to).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -548,7 +570,7 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE SINK sink_t FROM bar WITH (connector = 'kafka', format = 'append_only')";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, from, to).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -560,17 +582,17 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, foo.v2 AS m2v FROM bar AS foo";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, from, to).unwrap();
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM bar AS foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, from, to).unwrap();
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM foo AS bar WHERE bar.v1 = 1";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar AS bar WHERE bar.v1 = 1";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, from, to).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -594,7 +616,7 @@ mod tests {
                             (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM bar AS foo) ORDER BY (SELECT foo.v6 FROM bar AS foo)) FROM bar AS foo)\
                           ) \
                         FROM bar AS foo";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, from, to).unwrap();
         assert_eq!(expected, actual);
     }
 }

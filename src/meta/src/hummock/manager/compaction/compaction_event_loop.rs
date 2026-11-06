@@ -344,6 +344,7 @@ impl HummockCompactionEventHandler {
             let compact_ret = self
                 .hummock_manager
                 .get_compact_tasks(
+                    compactor.context_id(),
                     existed_groups.clone(),
                     pull_task_count - generated_task_count,
                     &mut **selector,
@@ -807,13 +808,18 @@ mod scheduling_tests {
     use std::time::Duration;
 
     use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+    use risingwave_meta_model::compaction_task;
     use risingwave_rpc_client::HummockMetaClient;
+    use sea_orm::EntityTrait;
 
     use super::*;
     use crate::hummock::MockHummockMetaClient;
-    use crate::hummock::compaction::selector::default_compaction_selector;
+    use crate::hummock::compaction::selector::{
+        ManualCompactionOption, default_compaction_selector,
+    };
     use crate::hummock::manager::compaction::ScheduleTrigger;
     use crate::hummock::manager::tests::{gen_sstable_info, setup_compute_env_with_meta_opts};
+    use crate::hummock::model::ext::compaction_task_model_to_assignment;
 
     tokio::task_local! {
         static BEFORE_UNSCHEDULE: Arc<tokio::sync::Barrier>;
@@ -878,6 +884,81 @@ mod scheduling_tests {
             )
             .await
             .unwrap();
+    }
+
+    async fn assert_task_assignee(
+        manager: &HummockManager,
+        task_id: u64,
+        context_id: HummockContextId,
+    ) {
+        let assignment = manager
+            .compaction_task_from_assignment_for_test(task_id)
+            .await
+            .unwrap();
+        assert_eq!(assignment.context_id, context_id);
+
+        let model = compaction_task::Entity::find_by_id(task_id as i64)
+            .one(&manager.env.meta_store_ref().conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(model.context_id, context_id);
+        let restored_assignment = compaction_task_model_to_assignment(model.clone());
+        assert_eq!(restored_assignment.context_id, context_id);
+        let protobuf_assignment: risingwave_pb::hummock::CompactTaskAssignment = model.into();
+        assert_eq!(protobuf_assignment.context_id, context_id);
+
+        let (_, assignments) = manager.list_compaction_status().await;
+        let assignment = assignments
+            .iter()
+            .find(|a| a.compact_task.as_ref().unwrap().task_id == task_id)
+            .unwrap();
+        assert_eq!(assignment.context_id, context_id);
+    }
+
+    #[tokio::test]
+    async fn test_assignment_records_compactor_for_pulled_tasks() {
+        let (manager, _) = fixture(false).await;
+        let tasks = dispatch(manager.clone()).await;
+        assert!(!tasks.is_empty());
+        for task in tasks {
+            assert_task_assignee(&manager, task.task_id, 99.into()).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_assignment_records_compactor_for_manual_tasks() {
+        let (manager, _) = fixture(false).await;
+        let context_id = 77.into();
+        let mut receiver = manager.compactor_manager.add_compactor(context_id);
+        let manual_manager = manager.clone();
+        let trigger = tokio::spawn(async move {
+            manual_manager
+                .trigger_manual_compaction(
+                    2.into(),
+                    ManualCompactionOption {
+                        level: 0,
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        let response = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let Some(ResponseEvent::CompactTask(task)) = response.event else {
+            panic!("expected a manual compaction task");
+        };
+        assert_task_assignee(&manager, task.task_id, context_id).await;
+        assert!(
+            manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+        trigger.await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -962,7 +1043,7 @@ mod scheduling_tests {
         let right = *mapping.keys().find(|&&id| id != left).unwrap();
         // Obtain a real no-task result before merge by keeping the existing left SSTs assigned.
         let pending = manager
-            .get_compact_task(left, &mut *default_compaction_selector())
+            .get_compact_task(99.into(), left, &mut *default_compaction_selector())
             .await
             .unwrap()
             .unwrap();
@@ -1003,7 +1084,7 @@ mod scheduling_tests {
                 .unwrap();
             let right = *mapping.keys().find(|&&id| id != left).unwrap();
             let task = manager
-                .get_compact_task(right, &mut *default_compaction_selector())
+                .get_compact_task(99.into(), right, &mut *default_compaction_selector())
                 .await
                 .unwrap()
                 .unwrap();
@@ -1062,7 +1143,12 @@ mod scheduling_tests {
             );
             // A getter or explicit trigger using the deleted group must also leave it absent.
             let (tasks, _) = manager
-                .get_compact_tasks(vec![right], 1, &mut *default_compaction_selector())
+                .get_compact_tasks(
+                    99.into(),
+                    vec![right],
+                    1,
+                    &mut *default_compaction_selector(),
+                )
                 .await
                 .unwrap();
             assert!(tasks.is_empty());
