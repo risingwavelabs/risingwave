@@ -334,7 +334,7 @@ fn test_read_cleanup_on_runtime_shutdown() {
 }
 
 #[cfg(not(madsim))]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
     config.storage.cache.pin_cache_shard_num = 3;
@@ -631,4 +631,58 @@ async fn test_disk_space_query_failure_does_not_start_local_io() {
     );
     assert!(cache.storage.lock().uploads.is_empty());
     assert!(cache.get(1001.into()).is_none());
+}
+
+#[tokio::test]
+async fn test_withdrawn_reader_keeps_its_byte_charge_until_minor_deletes() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let remote = in_memory_object_store();
+    remote
+        .upload("sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    let cache = PinCache::new(in_memory_object_store(), 1, [])
+        .await
+        .unwrap();
+    cache.register_objects([1001.into(), 1002.into(), 1003.into()]);
+    let free = Arc::new(AtomicU64::new(16));
+    cache.set_available_space_for_test({
+        let free = free.clone();
+        move || Ok(Some(free.load(Ordering::SeqCst)))
+    });
+    download_and_publish_for_test(&cache, remote, "sst".into(), 1001.into(), 8)
+        .await
+        .unwrap();
+    free.store(8, Ordering::SeqCst);
+    // Keep a16-byte window open:8 resident bytes plus an8-byte pending reservation.
+    let pending = cache.prepare_download(1002.into(), 8).await.unwrap();
+    assert_eq!(cache.storage.lock().capacity_limit, Some(16));
+    let reader = cache.get(1001.into()).unwrap();
+    cache.unregister_objects([1001.into()]);
+    cache.select_minor().delete().await.unwrap();
+    assert_eq!(
+        cache
+            .storage
+            .lock()
+            .files
+            .values()
+            .map(|f| f.size)
+            .sum::<u64>(),
+        8
+    );
+    assert!(matches!(
+        cache.prepare_download(1003.into(), 1).await,
+        Err(super::PinCacheDownloadError::CapacityRejected)
+    ));
+    assert_eq!(
+        reader.read(..).await.unwrap(),
+        Bytes::from_static(b"complete")
+    );
+    drop(reader);
+    cache.select_minor().delete().await.unwrap();
+    assert!(cache.storage.lock().files.is_empty());
+    drop(pending);
+    free.store(16, Ordering::SeqCst);
+    drop(cache.prepare_download(1003.into(), 16).await.unwrap());
 }

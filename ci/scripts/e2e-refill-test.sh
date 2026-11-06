@@ -55,6 +55,7 @@ echo "--- risedev-env"
 risedev show-risedev-env
 
 risedev slt -p 4566 -d dev './e2e_test/refill/table_refill.slt'
+risedev slt -p 4566 -d dev './e2e_test/refill/pin_cache.slt.serial'
 
 echo "--- Kill cluster"
 risedev ci-kill

@@ -147,7 +147,13 @@ pub(crate) struct PinCache {
     // Leaf lock: never acquire a shard lock or perform I/O while holding it.
     // Upload protection and physical file ownership share this lock.
     storage: Mutex<PinCacheStorageState>,
+    // Serializes capacity probes/admission with confirmed physical deletion.
+    capacity_gate: tokio::sync::Mutex<()>,
     next_path_id: AtomicU64,
+    // Largest physical SST rejected since the worker last took the pressure hint.
+    gc_pressure_bytes: AtomicU64,
+    #[cfg(test)]
+    test_hooks: test_utils::PinCacheTestHooks,
 }
 
 /// Admission captured before queuing a refill. Its identity is private to the issuing cache.
@@ -192,7 +198,11 @@ impl PinCache {
             store,
             storage: Mutex::default(),
             shards: (0..shard_num).map(|_| PinCacheShard::default()).collect(),
+            capacity_gate: tokio::sync::Mutex::new(()),
             next_path_id: AtomicU64::new(rand::random()),
+            gc_pressure_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            test_hooks: test_utils::PinCacheTestHooks::default(),
         };
         let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
         for &id in expected_sizes.keys() {
@@ -215,6 +225,25 @@ impl PinCache {
         metrics.published_bytes.set(metric_bytes(recovered.bytes));
         metrics.recovery_ready.set(1);
         Ok(Arc::new(pin_cache))
+    }
+
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        #[cfg(test)]
+        {
+            let probe = self.test_hooks.space_probe.lock().clone();
+            if let Some(probe) = probe {
+                let result = probe();
+                let observer = self.test_hooks.space_pause.lock().clone();
+                if let Some(observer) = observer {
+                    let (resume, paused) = tokio::sync::oneshot::channel();
+                    if observer.send(resume).is_ok() {
+                        let _ = paused.await;
+                    }
+                }
+                return result;
+            }
+        }
+        self.store.available_space().await
     }
 
     pub(crate) fn get(
