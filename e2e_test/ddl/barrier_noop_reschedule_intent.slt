@@ -10,13 +10,14 @@
 # - repeated no-op intents, issued faster than the barrier interval, do not starve the timer;
 # - a real reschedule still injects a barrier and the timer keeps running afterwards.
 #
-# The test runs in its own database with a 1s barrier interval, so the SQL goes through `psql`
-# instead of the SLT session, which is bound to the `dev` database. A row inserted without
-# `FLUSH` becomes visible only after a checkpoint barrier. While no-op intents are issued every
-# 0.25s, the periodic barrier must still fire and make the row visible.
+# The test runs in its own database with a 1s barrier interval and every barrier a checkpoint,
+# so the SQL goes through `psql` instead of the SLT session, which is bound to the `dev`
+# database. A row inserted without `FLUSH` becomes visible only after a checkpoint barrier.
+# While no-op intents are issued every 0.25s, the periodic barrier must still fire and make the
+# row visible.
 
 statement ok
-create database db_noop_reschedule_intent with barrier_interval_ms = 1000;
+create database db_noop_reschedule_intent with barrier_interval_ms = 1000 checkpoint_frequency = 1;
 
 # The two extra same-value alters warm up the no-op path, so that a slow first alter on a cold
 # cluster cannot leave a gap longer than the barrier interval once the loop below starts.
