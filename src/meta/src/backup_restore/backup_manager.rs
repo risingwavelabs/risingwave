@@ -73,6 +73,13 @@ pub struct BackupManager {
     backup_store: ArcSwap<(ObjectStoreMetaSnapshotStorage, StoreConfig)>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_job_handle: tokio::sync::Mutex<Option<BackupJobHandle>>,
+    #[cfg(test)]
+    pub(crate) snapshot_captured: tokio::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
     metrics: BackupManagerMetrics,
     meta_metrics: Arc<MetaMetrics>,
     /// (job id, status, message)
@@ -157,6 +164,8 @@ impl BackupManager {
             hummock_manager,
             backup_store: ArcSwap::from_pointee(backup_store),
             running_job_handle: tokio::sync::Mutex::new(None),
+            #[cfg(test)]
+            snapshot_captured: Default::default(),
             metrics: BackupManagerMetrics::default(),
             meta_metrics,
             latest_job_info: ArcSwap::from_pointee((0, BackupJobStatus::NotFound, "".into())),
@@ -356,6 +365,14 @@ impl BackupWorker {
                 .build(job_id, hummock_version_builder)
                 .await?;
             let snapshot = snapshot_builder.finish()?;
+            #[cfg(test)]
+            {
+                let gate = backup_manager_clone.snapshot_captured.lock().await.take();
+                if let Some((captured, publish)) = gate {
+                    captured.send(()).unwrap();
+                    publish.await.unwrap();
+                }
+            }
             backup_manager_clone
                 .backup_store
                 .load()
