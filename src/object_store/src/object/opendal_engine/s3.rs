@@ -21,6 +21,7 @@ use opendal::raw::HttpClient;
 use opendal::services::S3;
 use risingwave_common::config::ObjectStoreConfig;
 
+use super::rotating_transport::RotatingTransport;
 use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::ObjectResult;
 use crate::object::object_metrics::ObjectStoreMetrics;
@@ -43,7 +44,7 @@ impl OpendalObjectStore {
             builder = builder.enable_virtual_host_style();
         }
 
-        let http_client = Self::new_http_client(&config)?;
+        let http_client = Self::new_http_transport(config.clone())?;
 
         let op = new_operator(
             &config,
@@ -91,7 +92,7 @@ impl OpendalObjectStore {
             &config,
             Operator::new(builder)?.layer(LoggingLayer::default()),
         );
-        let http_client = Self::new_http_client(&config)?;
+        let http_client = Self::new_http_transport(config.clone())?;
         op.update_http_client(|_| http_client);
 
         Ok(Self {
@@ -102,7 +103,25 @@ impl OpendalObjectStore {
         })
     }
 
-    pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<HttpClient> {
+    fn new_http_transport(config: Arc<ObjectStoreConfig>) -> ObjectResult<HttpClient> {
+        match config.s3.http_client_rotation_interval_ms {
+            None => Ok(HttpClient::with(Self::new_http_client(&config)?)),
+            Some(interval_ms) => Ok(HttpClient::with(RotatingTransport::new(
+                move || {
+                    Self::new_http_client(&config).map_err(|err| {
+                        opendal::Error::new(
+                            opendal::ErrorKind::Unexpected,
+                            "failed to build rotating HTTP client",
+                        )
+                        .set_source(err)
+                    })
+                },
+                Duration::from_millis(interval_ms),
+            )?)),
+        }
+    }
+
+    pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<reqwest::Client> {
         let mut client_builder = reqwest::ClientBuilder::new();
 
         if let Some(keepalive_ms) = config.s3.keepalive_ms.as_ref() {
@@ -112,7 +131,10 @@ impl OpendalObjectStore {
         if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
-        #[allow(deprecated)]
-        Ok(HttpClient::build(client_builder)?)
+        client_builder.build().map_err(|err| {
+            opendal::Error::new(opendal::ErrorKind::Unexpected, "http client build failed")
+                .set_source(err)
+                .into()
+        })
     }
 }
