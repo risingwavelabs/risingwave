@@ -785,7 +785,10 @@ pub async fn start_service_as_election_leader(
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
-        .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(
+            BackupServiceServer::new(backup_srv)
+                .send_compressed(tonic::codec::CompressionEncoding::Zstd),
+        )
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
