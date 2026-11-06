@@ -835,7 +835,6 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.ensure_transaction().await?;
         if self.is_append_only {
             self.append_only(chunk).await
         } else {
