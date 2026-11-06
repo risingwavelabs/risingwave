@@ -116,8 +116,9 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<TableId>,
     last_full_key: Vec<u8>,
-    /// Buffer for encoded key and value to avoid allocation.
-    raw_key: BytesMut,
+    /// Encoded key buffer, swapped with `last_full_key` after each entry.
+    raw_key: Vec<u8>,
+    /// Reusable buffer for the encoded value.
     raw_value: BytesMut,
     last_table_id: Option<TableId>,
     sst_object_id: HummockSstableObjectId,
@@ -193,7 +194,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             last_table_id: None,
-            raw_key: BytesMut::new(),
+            raw_key: Vec::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
             sst_object_id,
@@ -413,8 +414,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
 
-        self.last_full_key.clear();
-        self.last_full_key.extend_from_slice(&self.raw_key);
+        std::mem::swap(&mut self.last_full_key, &mut self.raw_key);
 
         self.raw_key.clear();
         self.raw_value.clear();
