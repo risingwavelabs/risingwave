@@ -363,7 +363,7 @@
     SELECT * FROM orders_count_by_user WHERE (user_id = 1) or (user_id = 2 and date in (1111, 2222)) or (user_id != 3);
   expected_outputs:
     - batch_plan
-- name: When any arm of or clause is not equal type, we can't convert it to scan range yet.
+- name: When any arm of or clause is not equal type, it can still be a scan range.
   before:
     - create_table_and_mv
   sql: |
@@ -504,7 +504,7 @@
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10) or (user_id > 30) or (user_id > 5 and user_id < 15);
   expected_outputs:
     - batch_plan
-- name: When OR clauses contain overlapping conditions, we cannot push down if it results in a full table scan.
+- name: When OR clauses contain overlapping conditions and cover all values, only NULLs are left out.
   before:
     - create_table_and_mv
   sql: |
@@ -542,7 +542,27 @@
     SELECT * FROM orders_count_by_user WHERE (user_id between 0 and 5) or (user_id = 1 and date > 5);
   expected_outputs:
     - batch_plan
-- name: A range with one side bounded skips NULLs, so it does not overlap with IS NULL.
+- name: Several ranges provide key order, so a limit can stop early.
+  before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 AND (date < 5 OR date > 10) ORDER BY date LIMIT 1;
+  expected_outputs:
+    - batch_plan
+- name: A point get and a range keep key order too.
+  sql: |
+    create table t(a int primary key, b int);
+    select * from t where a = 1 or a > 5 order by a limit 1;
+  expected_outputs:
+    - batch_plan
+- name: A list of values of the next column is several ranges.
+  before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 AND date IN (5, 7);
+  expected_outputs:
+    - batch_plan
+- name: A range with one side bounded ends right before the NULLs, so IS NULL extends it.
   before:
     - create_table_and_mv
   sql: |
@@ -567,3 +587,57 @@
     select * from t where a is null or (a, b) > (null::int, 0) or (a is null and c > 0);
   expected_outputs:
     - batch_plan
+- name: A contradiction in an OR arm does not widen the scan.
+  sql: |
+    create table t(a int primary key, b int);
+    select * from t where (a > 5 and a < 3) or a = 1;
+  expected_outputs:
+  - batch_plan
+- name: The union of a row comparison and a part of it is exact, so there is no filter.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) > (1, 5) or a = 1;
+  expected_outputs:
+  - batch_plan
+- name: Both arms cover all non-NULL values, and the NULLs stay out.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) < (7, 1) or (a, b) > (6, 7);
+  expected_outputs:
+  - batch_plan
+- name: A NULL in the first field of a row comparison selects nothing.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) > (null::int, 1) or a = 1;
+  expected_outputs:
+  - batch_plan
+- name: Later columns narrow every value of an IN list.
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a in (1, 2) and b > 5;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a in (1, 2) and b in (3, 4);
+  expected_outputs:
+  - batch_plan
+- name: A row comparison after an equality on the pk prefix.
+  sql: |
+    create table t(a int, b int, c int, d int, primary key(a, b, c));
+    select * from t where a = 1 and (b, c) > (2, 3);
+  expected_outputs:
+  - batch_plan
+- name: A row comparison on a mixed order pk is two exact ranges.
+  sql: |
+    create table t(a int, b int, c int);
+    create materialized view mv as select * from t order by a, b desc;
+    select * from mv where (a, b) > (1, 5);
+  expected_outputs:
+  - batch_plan
+- name: Row comparisons with non-strict operators and BETWEEN get ranges too.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) between (1, 2) and (3, 4);
+  expected_outputs:
+  - batch_plan

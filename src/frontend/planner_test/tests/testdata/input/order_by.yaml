@@ -147,7 +147,7 @@
     select * from mv order by v desc;
   expected_outputs:
   - batch_plan
-- name: BatchSort needed, because our BatchScan can not get a ordered result when scan from ranges
+- name: BatchSort is not needed, because scan ranges are read in key order
   sql: |
     create table t(v int);
     create materialized view mv as select * from t order by v asc;
