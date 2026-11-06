@@ -84,7 +84,11 @@ impl CachedSstableMeta {
     }
 
     /// Compares a block boundary without allocating or restoring its full key.
-    pub(super) fn compare_block_key(&self, index: usize, target: FullKey<&[u8]>) -> Ordering {
+    pub(in crate::hummock) fn compare_block_key(
+        &self,
+        index: usize,
+        target: FullKey<&[u8]>,
+    ) -> Ordering {
         self.keys
             .compare_key(index, self.block_metas[index].table_id, target)
     }

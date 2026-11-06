@@ -24,7 +24,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
@@ -159,18 +159,24 @@ impl BlockStreamIterator {
         &self.next_smallest_key
     }
 
-    /// Upper bound used to decide whether the unread block precedes the other input.
-    /// The next block's lower bound is exclusive; the SST's largest key is inclusive.
-    /// Callers must compare user keys strictly to avoid copying across versions of one key.
-    fn next_block_upper_bound<'a>(&'a self, buffer: &'a mut Vec<u8>) -> &'a [u8] {
+    /// Checks whether the unread block's upper bound is strictly before the target user key.
+    /// Equality may hide more versions of the same user key.
+    fn next_block_before(&self, user_key: UserKey<&[u8]>) -> bool {
         let sstable = &self.block_stream.sstable;
-        let next_block_index = self.block_stream.next_block_index();
-        if next_block_index + 1 < sstable.meta.block_metas.len() {
+        let upper_block_index = self.block_stream.next_block_index() + 1;
+        if upper_block_index < sstable.block_count() {
+            // The maximum epoch sorts first for this user key. All of its versions
+            // therefore compare equal or greater than this target.
+            let target = FullKey {
+                user_key,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
+            };
             sstable
                 .meta
-                .block_smallest_key(next_block_index + 1, buffer)
+                .compare_block_key(upper_block_index, target)
+                .is_lt()
         } else {
-            sstable.meta.largest_key.as_ref()
+            FullKey::decode(&sstable.meta.largest_key).user_key < user_key
         }
     }
 
@@ -468,7 +474,6 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
 
     /// Merge while both inputs have data, retaining partially consumed decoded blocks.
     async fn merge_inputs(&mut self) -> HummockResult<()> {
-        let mut upper_buffer = Vec::new();
         while self.left.is_valid() && self.right.is_valid() {
             let mut ret = self
                 .left
@@ -499,14 +504,10 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             if !first.current_sstable().has_decoded_block() {
                 let right_key = second.current_sstable().key();
                 while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
-                    let full_key = FullKey::decode(
-                        first
-                            .current_sstable()
-                            .next_block_upper_bound(&mut upper_buffer),
-                    );
-                    // Equality may hide more versions of the other input's user key.
-                    // Only a strictly smaller upper bound is safe for raw copy.
-                    if full_key.user_key.ge(&right_key.user_key) {
+                    if !first
+                        .current_sstable()
+                        .next_block_before(right_key.user_key)
+                    {
                         break;
                     }
                     let smallest_key =
