@@ -813,6 +813,14 @@ impl CatalogController {
                 drop_table_connector_ctx.to_remove_source_id,
             ));
         }
+        // Without its connector, the table is no longer refreshable.
+        RefreshJob::delete_by_id(
+            drop_table_connector_ctx
+                .to_change_streaming_job_id
+                .as_mv_table_id(),
+        )
+        .exec(txn)
+        .await?;
         let user_infos = list_user_info_by_ids(to_update_user_ids, txn).await?;
 
         Ok((user_infos, to_drop_objects))
