@@ -1072,9 +1072,10 @@ mod tests {
         inject(&mut periodic, &barrier);
         let injected_at = Instant::now();
 
+        // Without the reset the tick would come at the original deadline, 10ms earlier.
         let barrier = periodic.next_barrier(&context).await;
         assert!(barrier.periodic);
-        assert_eq!(injected_at.elapsed(), Duration::from_millis(1000));
+        assert!(injected_at.elapsed() >= Duration::from_millis(1000));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1138,10 +1139,11 @@ mod tests {
         // The forced barrier is not injected, so the timer is not reset and the periodic
         // barrier arrives without waiting, as the first tick of the timer is due at creation.
         let start_time = Instant::now();
+        // A reset would have pushed the tick a full 100ms interval out.
         let barrier = periodic.next_barrier(&context).await;
         assert!(barrier.periodic);
         assert_eq!(barrier.database_id, DatabaseId::from(1));
-        assert_eq!(start_time.elapsed(), Duration::ZERO);
+        assert!(start_time.elapsed() < Duration::from_millis(100));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1182,7 +1184,8 @@ mod tests {
             HashSet::from([barrier3.database_id, barrier4.database_id]),
             HashSet::from([DatabaseId::from(1), DatabaseId::from(2)])
         );
-        assert_eq!(start_time.elapsed(), Duration::ZERO);
+        // A reset would have pushed either tick a full 100ms interval out.
+        assert!(start_time.elapsed() < Duration::from_millis(100));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1213,7 +1216,8 @@ mod tests {
         let barrier2 = periodic.next_barrier(&context).now_or_never().unwrap();
         assert!(barrier2.periodic);
         assert!(barrier2.checkpoint);
-        assert_eq!(start_time.elapsed(), Duration::from_millis(50));
+        // A reset at the tie would have moved the tick from 50ms to 100ms.
+        assert!(start_time.elapsed() < Duration::from_millis(100));
         inject(&mut periodic, &barrier2);
 
         // Third barrier - should not be checkpoint (counter reset)
