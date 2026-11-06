@@ -68,12 +68,11 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         let count = (&data[footer..]).get_u32_le() as usize;
         assert_eq!(count, metas.len());
         let owned = matches!(&data, Cow::Owned(_));
-        let mut chunks = if owned {
-            // Reserve chunk zero for the input buffer, moved after parsing.
-            vec![Vec::new()]
+        let mut chunks = Vec::with_capacity(if owned {
+            1
         } else {
-            Vec::with_capacity(data.len().div_ceil(BLOCKED_FILTER_CHUNK_SIZE))
-        };
+            data.len().div_ceil(BLOCKED_FILTER_CHUNK_SIZE)
+        });
         let mut reader = &data[..footer];
         let mut filters = Vec::with_capacity(count);
         let mut encoded_len = BLOCKED_FILTER_FOOTER_LEN;
@@ -86,20 +85,7 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
             let (chunk, start) = if owned {
                 (0, offset)
             } else {
-                if chunks
-                    .last()
-                    .is_none_or(|chunk| chunk.capacity() - chunk.len() < child.len())
-                {
-                    let capacity = child
-                        .len()
-                        .max(BLOCKED_FILTER_CHUNK_SIZE.min(child.len() + reader.len()));
-                    chunks.push(Vec::with_capacity(capacity));
-                }
-                let index = u32::try_from(chunks.len() - 1).unwrap();
-                let chunk = chunks.last_mut().unwrap();
-                let start = chunk.len();
-                chunk.extend_from_slice(child);
-                (index, start)
+                append_child(&mut chunks, child, reader.len())
             };
             let end =
                 u32::try_from(start + child.len()).expect("blocked filter data offset exceeds u32");
@@ -112,7 +98,8 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         }
         assert!(reader.is_empty(), "trailing blocked filter bytes");
         if let Cow::Owned(data) = data {
-            chunks[0] = data;
+            // The owned child ranges all refer to chunk zero.
+            chunks.push(data);
         }
         Self {
             filters,
@@ -213,4 +200,28 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         }
         false
     }
+}
+
+/// Copies one complete child and returns its chunk index and starting offset.
+#[inline(always)]
+fn append_child(
+    chunks: &mut Vec<Vec<u8>>,
+    child: &[u8],
+    remaining_input_bytes: usize,
+) -> (u32, usize) {
+    if chunks
+        .last()
+        .is_none_or(|chunk| chunk.capacity() - chunk.len() < child.len())
+    {
+        // Cap the reservation by the input left to copy, while fitting oversized children.
+        let capacity = BLOCKED_FILTER_CHUNK_SIZE
+            .min(child.len() + remaining_input_bytes)
+            .max(child.len());
+        chunks.push(Vec::with_capacity(capacity));
+    }
+    let index = u32::try_from(chunks.len() - 1).unwrap();
+    let chunk = chunks.last_mut().unwrap();
+    let start = chunk.len();
+    chunk.extend_from_slice(child);
+    (index, start)
 }
