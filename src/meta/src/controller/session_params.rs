@@ -181,7 +181,7 @@ impl SessionParamsController {
     }
 
     pub fn notify_workers(&self, name: String, value: String) {
-        self.notification_manager.notify_frontend_without_version(
+        self.notification_manager.notify_frontend_non_catalog(
             Operation::Update,
             Info::SessionParam(SetSessionParamRequest {
                 param: name,

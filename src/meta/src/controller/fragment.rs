@@ -79,7 +79,9 @@ use crate::controller::utils::{
     resolve_no_shuffle_actor_mapping,
 };
 use crate::error::MetaError;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
+use crate::manager::{
+    ActiveStreamingWorkerNodes, LocalNotification, NotificationManager, NotificationVersion,
+};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
@@ -204,7 +206,7 @@ impl NotificationManager {
         }
         // notify all fragment mappings to frontend.
         for fragment_mapping in fragment_mappings {
-            self.notify_frontend_without_version(
+            self.notify_frontend_non_catalog(
                 operation,
                 NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
             );
@@ -1217,12 +1219,20 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+    pub fn get_worker_slot_mappings(
+        &self,
+    ) -> (Vec<PbFragmentWorkerSlotMapping>, NotificationVersion) {
         let guard = self.env.shared_actor_info.read_guard();
-        guard
+        let mappings = guard
             .iter_over_fragments()
             .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
-            .collect_vec()
+            .collect_vec();
+        (
+            mappings,
+            self.env
+                .notification_manager()
+                .current_notification_version(),
+        )
     }
 
     pub async fn list_fragment_descs_with_node(

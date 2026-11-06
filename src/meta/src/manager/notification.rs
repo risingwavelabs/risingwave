@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -33,7 +34,7 @@ use tonic::Status;
 
 use crate::controller::SqlMetaStore;
 use crate::manager::WorkerKey;
-use crate::manager::notification_version::NotificationVersionGenerator;
+use crate::manager::catalog_version::PersistedCatalogVersion;
 use crate::model::FragmentId;
 
 pub type MessageStatus = Status;
@@ -106,18 +107,26 @@ struct Task {
     target: Target,
     operation: Operation,
     info: Info,
-    /// `None` means using the latest version published to the notification queue without
-    /// incrementing it.
-    version: Option<NotificationVersion>,
+    version: NotificationVersion,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
+///
+/// Every notification takes a new version from one sequence, whichever subscribers it goes to. The
+/// sequence is used in two ways:
+/// - Each part of a snapshot records the latest version when it is read. A subscriber drops a
+///   notification about that part if its version is not greater, because the snapshot includes it.
+/// - After a DDL, frontends wait for the version of the latest catalog notification. They do not
+///   receive every notification, so they cannot wait for the latest version of any kind.
 pub struct NotificationManager {
     core: Arc<parking_lot::Mutex<NotificationManagerCore>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
-    /// The current notification version generator.
-    version_generator: Mutex<NotificationVersionGenerator>,
+    /// The version of the latest notification. It is not persisted, because subscribers get a new
+    /// snapshot after meta restarts.
+    notification_version: AtomicU64,
+    /// The version of the latest catalog notification.
+    catalog_version: Mutex<PersistedCatalogVersion>,
 }
 
 impl NotificationManager {
@@ -126,21 +135,16 @@ impl NotificationManager {
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let core = Arc::new(parking_lot::Mutex::new(NotificationManagerCore::new()));
         let core_clone = core.clone();
-        let version_generator = NotificationVersionGenerator::new(meta_store_impl)
-            .await
-            .unwrap();
-        let mut latest_version = version_generator.current_version();
+        let catalog_version = PersistedCatalogVersion::new(meta_store_impl).await.unwrap();
+        let notification_version = AtomicU64::new(catalog_version.get());
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
-                if let Some(version) = task.version {
-                    latest_version = version;
-                }
                 let response = SubscribeResponse {
                     status: None,
                     operation: task.operation as i32,
                     info: Some(task.info),
-                    version: latest_version,
+                    version: task.version,
                 };
                 core.lock().notify(task.target, response);
             }
@@ -149,7 +153,8 @@ impl NotificationManager {
         Self {
             core: core_clone,
             task_tx,
-            version_generator: Mutex::new(version_generator),
+            notification_version,
+            catalog_version: Mutex::new(catalog_version),
         }
     }
 
@@ -159,13 +164,20 @@ impl NotificationManager {
         guard.exiting = true;
     }
 
+    /// Allocate `count` consecutive versions and return the last one.
+    fn allocate_versions(&self, count: NotificationVersion) -> NotificationVersion {
+        self.notification_version
+            .fetch_add(count, Ordering::Relaxed)
+            + count
+    }
+
     #[inline(always)]
-    fn notify(
+    fn enqueue(
         &self,
         target: Target,
         operation: Operation,
         info: Info,
-        version: Option<NotificationVersion>,
+        version: NotificationVersion,
     ) {
         let task = Task {
             target,
@@ -176,22 +188,8 @@ impl NotificationManager {
         self.task_tx.send(task).unwrap();
     }
 
-    /// Add a notification to the waiting queue and increase notification version.
-    async fn notify_with_version(
-        &self,
-        target: Target,
-        operation: Operation,
-        info: Info,
-    ) -> NotificationVersion {
-        let mut version_guard = self.version_generator.lock().await;
-        version_guard.increase_version().await;
-        let version = version_guard.current_version();
-        self.notify(target, operation, info, Some(version));
-        version
-    }
-
-    /// Assign consecutive versions to a frontend notification batch and enqueue the complete batch
-    /// while holding the version generator lock.
+    /// Add catalog notifications to the waiting queue. Assign consecutive versions to the batch and
+    /// enqueue the complete batch while holding the catalog version lock.
     async fn notify_frontend_batch(
         &self,
         notifications: Vec<(Operation, Info)>,
@@ -201,30 +199,26 @@ impl NotificationManager {
             return None;
         }
 
-        let mut version_guard = self.version_generator.lock().await;
-        let first_version = version_guard.current_version() + 1;
-        version_guard.increase_version_by(batch_len).await;
-        let final_version = version_guard.current_version();
+        let mut catalog_version = self.catalog_version.lock().await;
+        let final_version = self.allocate_versions(batch_len);
+        let first_version = final_version - batch_len + 1;
+        catalog_version.set(final_version).await;
 
         for ((operation, info), version) in notifications
             .into_iter()
             .zip_eq_debug(first_version..=final_version)
         {
-            self.notify(
-                SubscribeType::Frontend.into(),
-                operation,
-                info,
-                Some(version),
-            );
+            self.enqueue(SubscribeType::Frontend.into(), operation, info, version);
         }
 
         Some(final_version)
     }
 
-    /// Add a notification using the latest version published to the queue without incrementing it.
+    /// Add a notification that is not a catalog change to the waiting queue.
     #[inline(always)]
-    fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
-        self.notify(target, operation, info, None);
+    fn notify(&self, target: Target, operation: Operation, info: Info) {
+        let version = self.allocate_versions(1);
+        self.enqueue(target, operation, info, version);
     }
 
     pub fn notify_snapshot(
@@ -243,21 +237,23 @@ impl NotificationManager {
         });
     }
 
-    pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
+    pub fn notify_all(&self, operation: Operation, info: Info) {
         for subscribe_type in [
             SubscribeType::Frontend,
             SubscribeType::Hummock,
             SubscribeType::Compactor,
             SubscribeType::Compute,
         ] {
-            self.notify_without_version(subscribe_type.into(), operation, info.clone());
+            self.notify(subscribe_type.into(), operation, info.clone());
         }
     }
 
+    /// Notify frontends of a catalog change. They can wait for the returned version.
     #[must_use]
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
+        self.notify_frontend_batch(vec![(operation, info)])
             .await
+            .expect("the batch contains a notification")
     }
 
     #[must_use]
@@ -266,8 +262,7 @@ impl NotificationManager {
         operation: Operation,
         object_info: PbObjectInfo,
     ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Frontend.into(),
+        self.notify_frontend(
             operation,
             Info::ObjectGroup(PbObjectGroup {
                 objects: vec![PbObject {
@@ -280,7 +275,7 @@ impl NotificationManager {
     }
 
     pub(crate) fn notify_hummock_targeted_update(&self, worker_key: WorkerKey, info: Info) {
-        self.notify_without_version(
+        self.notify(
             Target {
                 subscribe_type: SubscribeType::Hummock,
                 worker_key: Some(worker_key),
@@ -290,20 +285,20 @@ impl NotificationManager {
         );
     }
 
-    pub fn notify_compute_without_version(&self, operation: Operation, info: Info) {
-        self.notify_without_version(SubscribeType::Compute.into(), operation, info)
+    pub fn notify_compute(&self, operation: Operation, info: Info) {
+        self.notify(SubscribeType::Compute.into(), operation, info)
     }
 
-    pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
-        self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
+    pub fn notify_frontend_non_catalog(&self, operation: Operation, info: Info) {
+        self.notify(SubscribeType::Frontend.into(), operation, info)
     }
 
     pub fn notify_hummock(&self, operation: Operation, info: Info) {
-        self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
+        self.notify(SubscribeType::Hummock.into(), operation, info)
     }
 
     pub fn notify_compactor(&self, operation: Operation, info: Info) {
-        self.notify_without_version(SubscribeType::Compactor.into(), operation, info)
+        self.notify(SubscribeType::Compactor.into(), operation, info)
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -311,9 +306,9 @@ impl NotificationManager {
         &self,
         operation: Operation,
         info: Info,
-        version: Option<NotificationVersion>,
+        version: NotificationVersion,
     ) {
-        self.notify(SubscribeType::Hummock.into(), operation, info, version)
+        self.enqueue(SubscribeType::Hummock.into(), operation, info, version)
     }
 
     pub fn notify_local_subscribers(&self, notification: LocalNotification) {
@@ -373,9 +368,15 @@ impl NotificationManager {
         self.core.lock().local_senders.clear();
     }
 
-    pub async fn current_version(&self) -> NotificationVersion {
-        let version_guard = self.version_generator.lock().await;
-        version_guard.current_version()
+    pub async fn current_catalog_version(&self) -> NotificationVersion {
+        self.catalog_version.lock().await.get()
+    }
+
+    /// The version of the latest notification. Read it together with a part of a snapshot under
+    /// the read lock of that part, and send notifications about that part under its write lock, so
+    /// that the version tells exactly which notifications the snapshot includes.
+    pub fn current_notification_version(&self) -> NotificationVersion {
+        self.notification_version.load(Ordering::Relaxed)
     }
 }
 
@@ -498,10 +499,58 @@ mod tests {
         );
 
         mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
+        assert_eq!(rx1.recv().await.unwrap().unwrap().version, version + 1);
+    }
+
+    #[tokio::test]
+    async fn test_every_notification_has_its_own_version() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Frontend, worker_key, tx);
+
+        let catalog_version = mgr
+            .notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        assert_eq!(rx.recv().await.unwrap().unwrap().version, catalog_version);
+
+        mgr.notify_frontend_non_catalog(Operation::Add, Info::Node(Default::default()));
+        mgr.notify_frontend_non_catalog(Operation::Add, Info::Node(Default::default()));
         assert_eq!(
-            rx1.recv().await.unwrap().unwrap().version,
-            frontend_notification.version
+            rx.recv().await.unwrap().unwrap().version,
+            catalog_version + 1
         );
+        assert_eq!(
+            rx.recv().await.unwrap().unwrap().version,
+            catalog_version + 2
+        );
+        assert_eq!(mgr.current_notification_version(), catalog_version + 2);
+        // Frontends never wait for those two, so `WAIT` must not read their versions.
+        assert_eq!(mgr.current_catalog_version().await, catalog_version);
+
+        let next_catalog_version = mgr
+            .notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        assert_eq!(next_catalog_version, catalog_version + 3);
+        assert_eq!(mgr.current_catalog_version().await, next_catalog_version);
+    }
+
+    #[tokio::test]
+    async fn test_versions_after_restart() {
+        let meta_store = SqlMetaStore::for_test().await;
+        let mgr = NotificationManager::new(meta_store.clone()).await;
+        let catalog_version = mgr
+            .notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
+        assert_eq!(mgr.current_notification_version(), catalog_version + 1);
+
+        let restarted = NotificationManager::new(meta_store).await;
+        assert_eq!(restarted.current_catalog_version().await, catalog_version);
+        assert_eq!(restarted.current_notification_version(), catalog_version);
     }
 
     #[tokio::test]
@@ -514,7 +563,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         mgr.insert_sender(SubscribeType::Frontend, worker_key, tx);
 
-        let initial_version = mgr.current_version().await;
+        let initial_version = mgr.current_catalog_version().await;
         let mut batch = FrontendNotificationBatch::new(&mgr);
         batch.add(Operation::Add, Info::Database(Default::default()));
         batch.add(Operation::Add, Info::Schema(Default::default()));
@@ -524,7 +573,7 @@ mod tests {
             .expect("the test notification batch contains two notifications");
 
         assert_eq!(published_version, initial_version + 2);
-        assert_eq!(mgr.current_version().await, published_version);
+        assert_eq!(mgr.current_catalog_version().await, published_version);
         assert_eq!(
             rx.recv().await.unwrap().unwrap().version,
             initial_version + 1
@@ -550,12 +599,12 @@ mod tests {
         mgr.insert_sender(SubscribeType::Hummock, worker_key2.clone(), hummock_tx2);
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), frontend_tx1);
 
-        let version = mgr.current_version().await;
+        let version = mgr.current_catalog_version().await;
         mgr.notify_hummock_targeted_update(worker_key1, Info::Database(Default::default()));
 
         let notification = hummock_rx1.recv().await.unwrap().unwrap();
-        assert_eq!(notification.version, version);
-        assert_eq!(mgr.current_version().await, version);
+        assert_eq!(notification.version, version + 1);
+        assert_eq!(mgr.current_catalog_version().await, version);
         assert!(hummock_rx2.try_recv().is_err());
         assert!(frontend_rx1.try_recv().is_err());
     }
@@ -577,12 +626,12 @@ mod tests {
         assert!(rx1.recv().await.is_some());
         assert!(rx2.try_recv().is_err());
 
-        let version = mgr.current_version().await;
+        let version = mgr.current_catalog_version().await;
         mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
         assert!(rx1.try_recv().is_err());
         let notification = rx2.recv().await.unwrap().unwrap();
-        assert_eq!(notification.version, version);
-        assert_eq!(mgr.current_version().await, version);
+        assert_eq!(notification.version, version + 1);
+        assert_eq!(mgr.current_catalog_version().await, version);
     }
 
     #[tokio::test]

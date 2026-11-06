@@ -752,7 +752,7 @@ impl CatalogController {
         LocalSecretManager::global().update_secret(secret_plain.id, secret_plain_payload);
         self.env
             .notification_manager()
-            .notify_compute_without_version(Operation::Update, Info::Secret(secret_plain.clone()));
+            .notify_compute(Operation::Update, Info::Secret(secret_plain.clone()));
 
         let version = self
             .notify_frontend(

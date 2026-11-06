@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,19 +21,20 @@ use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 use crate::MetaResult;
 use crate::controller::SqlMetaStore;
 
-pub struct NotificationVersionGenerator {
-    current_version: u64,
+/// The version of the latest catalog notification. It is persisted, because frontends wait for it
+/// and it must not go back after meta restarts.
+pub struct PersistedCatalogVersion {
+    version: u64,
     conn: DatabaseConnection,
 }
 
-// TODO: add pre-allocation if necessary
-impl NotificationVersionGenerator {
+impl PersistedCatalogVersion {
     pub async fn new(meta_store_impl: SqlMetaStore) -> MetaResult<Self> {
         let txn = meta_store_impl.conn.begin().await?;
         let model = CatalogVersion::find_by_id(VersionCategory::Notification)
             .one(&txn)
             .await?;
-        let current_version = model.as_ref().map(|m| m.version).unwrap_or(1) as u64;
+        let version = model.as_ref().map(|m| m.version).unwrap_or(1) as u64;
         if model.is_none() {
             CatalogVersion::insert(catalog_version::ActiveModel {
                 name: Set(VersionCategory::Notification),
@@ -45,28 +46,24 @@ impl NotificationVersionGenerator {
         }
 
         Ok(Self {
-            current_version,
+            version,
             conn: meta_store_impl.conn,
         })
     }
 
-    pub fn current_version(&self) -> u64 {
-        self.current_version
+    pub fn get(&self) -> u64 {
+        self.version
     }
 
-    pub async fn increase_version(&mut self) {
-        self.increase_version_by(1).await;
-    }
-
-    pub async fn increase_version_by(&mut self, delta: u64) {
-        assert!(delta > 0, "notification version delta must be positive");
+    pub async fn set(&mut self, version: u64) {
+        assert!(version > self.version, "catalog version must increase");
         CatalogVersion::update(catalog_version::ActiveModel {
             name: Set(VersionCategory::Notification),
-            version: Set((self.current_version + delta) as i64),
+            version: Set(version as i64),
         })
         .exec(&self.conn)
         .await
         .unwrap();
-        self.current_version += delta;
+        self.version = version;
     }
 }

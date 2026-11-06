@@ -750,7 +750,7 @@ impl DdlController {
         let version = self
             .metadata_manager
             .catalog_controller
-            .current_notification_version()
+            .current_catalog_version()
             .await;
         Ok(version)
     }
@@ -2450,7 +2450,7 @@ impl DdlController {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
-                    .current_notification_version()
+                    .current_catalog_version()
                     .await;
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
                 return Ok(WaitVersion {

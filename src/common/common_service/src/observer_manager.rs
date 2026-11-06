@@ -110,7 +110,8 @@ where
             | Info::User(_)
             | Info::Connection(_)
             | Info::Secret(_)
-            | Info::Function(_) => {
+            | Info::Function(_)
+            | Info::TableRefillRuntimeConfig(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
             Info::Node(_) => {
@@ -134,14 +135,6 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
-            Info::TableRefillRuntimeConfig(_) => {
-                notification.version
-                    > info
-                        .table_refill_runtime_config
-                        .as_ref()
-                        .map(|config| config.version)
-                        .unwrap_or_default()
-            }
         });
 
         self.observer_states
@@ -305,6 +298,8 @@ mod tests {
         initialized: bool,
         table_refill_runtime_config_versions: Vec<u64>,
         database_notifications: usize,
+        node_versions: Vec<u64>,
+        mapping_versions: Vec<u64>,
     }
 
     impl ObserverState for TestObserverState {
@@ -318,6 +313,8 @@ mod tests {
                     self.table_refill_runtime_config_versions.push(resp.version)
                 }
                 Info::Database(_) => self.database_notifications += 1,
+                Info::Node(_) => self.node_versions.push(resp.version),
+                Info::StreamingWorkerSlotMapping(_) => self.mapping_versions.push(resp.version),
                 info => panic!("unexpected notification: {info:?}"),
             }
         }
@@ -337,17 +334,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_filter_stale_table_refill_runtime_config_before_snapshot() {
+    async fn test_filter_notifications_before_snapshot() {
         let snapshot = SubscribeResponse {
             info: Some(Info::Snapshot(MetaSnapshot {
                 version: Some(SnapshotVersion {
-                    catalog_version: 1,
-                    worker_node_version: 1,
-                    streaming_worker_slot_mapping_version: 1,
-                }),
-                table_refill_runtime_config: Some(TableRefillRuntimeConfig {
-                    version: 10,
-                    ..Default::default()
+                    catalog_version: 100,
+                    worker_node_version: 107,
+                    streaming_worker_slot_mapping_version: 120,
                 }),
                 ..Default::default()
             })),
@@ -355,21 +348,46 @@ mod tests {
         };
         let rx = TestChannel {
             messages: VecDeque::from([
-                notification(
-                    9,
-                    Info::TableRefillRuntimeConfig(TableRefillRuntimeConfig {
-                        version: 9,
-                        ..Default::default()
-                    }),
-                ),
-                notification(
-                    11,
-                    Info::TableRefillRuntimeConfig(TableRefillRuntimeConfig {
-                        version: 11,
-                        ..Default::default()
-                    }),
-                ),
-                notification(1, Info::Database(Default::default())),
+                notification(100, Info::Database(Default::default())),
+                notification(101, Info::Database(Default::default())),
+                notification(107, Info::Node(Default::default())),
+                notification(108, Info::Node(Default::default())),
+                notification(120, Info::StreamingWorkerSlotMapping(Default::default())),
+                notification(121, Info::StreamingWorkerSlotMapping(Default::default())),
+                snapshot,
+            ]),
+        };
+        let mut observer_manager = ObserverManager {
+            rx,
+            client: TestClient,
+            observer_states: TestObserverState::default(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        assert_eq!(observer_manager.observer_states.database_notifications, 1);
+        assert_eq!(observer_manager.observer_states.node_versions, vec![108]);
+        assert_eq!(observer_manager.observer_states.mapping_versions, vec![121]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_stale_table_refill_runtime_config_before_snapshot() {
+        let snapshot = SubscribeResponse {
+            info: Some(Info::Snapshot(MetaSnapshot {
+                version: Some(SnapshotVersion {
+                    catalog_version: 10,
+                    ..Default::default()
+                }),
+                table_refill_runtime_config: Some(TableRefillRuntimeConfig::default()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let rx = TestChannel {
+            messages: VecDeque::from([
+                notification(9, Info::TableRefillRuntimeConfig(Default::default())),
+                notification(10, Info::TableRefillRuntimeConfig(Default::default())),
+                notification(11, Info::TableRefillRuntimeConfig(Default::default())),
                 snapshot,
             ]),
         };
@@ -388,6 +406,5 @@ mod tests {
                 .table_refill_runtime_config_versions,
             vec![11]
         );
-        assert_eq!(observer_manager.observer_states.database_notifications, 0);
     }
 }

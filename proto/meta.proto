@@ -611,7 +611,11 @@ message SubscribeRequest {
 }
 
 message MetaSnapshot {
+  // Each field is the latest notification version when a part of the snapshot was read. A
+  // notification about that part with a version not greater than the field is already included.
   message SnapshotVersion {
+    // For frontends, this is the version of the latest catalog notification, which they also wait
+    // for after a DDL.
     uint64 catalog_version = 1;
     reserved 2;
     reserved "parallel_unit_mapping_version";
@@ -686,7 +690,7 @@ message SubscribeResponse {
   common.Status status = 1;
   Operation operation = 2;
 
-  // Catalog version
+  // Every notification has a new version. See `MetaSnapshot.SnapshotVersion` for how it is used.
   uint64 version = 3;
 
   oneof info {
@@ -722,7 +726,8 @@ message SubscribeResponse {
 message TableRefillRuntimeConfig {
   TableCacheRefillPolicies table_cache_refill_policies = 1;
   ServingTableVnodeMappings serving_table_vnode_mappings = 2;
-  uint64 version = 3;
+  reserved 3;
+  reserved "version";
 }
 
 message ServingTableVnodeMappings {

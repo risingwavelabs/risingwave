@@ -206,7 +206,7 @@ pub async fn on_meta_start(
             failed
         );
     }
-    notification_manager.notify_frontend_without_version(
+    notification_manager.notify_frontend_non_catalog(
         Operation::Snapshot,
         Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
             mappings: to_fragment_worker_slot_mapping(&mappings),
@@ -299,7 +299,7 @@ pub fn start_serving_vnode_mapping_worker(
                     failed
                 );
             }
-            notification_manager.notify_frontend_without_version(
+            notification_manager.notify_frontend_non_catalog(
                 Operation::Snapshot,
                 Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
                     mappings: to_fragment_worker_slot_mapping(&mappings),
@@ -352,11 +352,11 @@ pub fn start_serving_vnode_mapping_worker(
                                     let (upserted, failed) = serving_vnode_mapping.upsert(&filtered_fragment_serving_infos, &workers, max_serving_parallelism);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
-                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
+                                        notification_manager.notify_frontend_non_catalog(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.iter().cloned())}));
+                                        notification_manager.notify_frontend_non_catalog(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.iter().cloned())}));
                                     }
                                     sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,
@@ -374,7 +374,7 @@ pub fn start_serving_vnode_mapping_worker(
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
 
                                     serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
+                                    notification_manager.notify_frontend_non_catalog(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
                                     let (workers, fragment_serving_infos) = fetch_serving_infos(&metadata_manager)
                                         .await
                                         .expect("fail to fetch serving infos");

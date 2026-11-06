@@ -252,7 +252,7 @@ mod tests {
         Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1, 3])
     }
 
-    fn runtime_config(table_id: u32, version: u64) -> PbTableRefillRuntimeConfig {
+    fn runtime_config(table_id: u32) -> PbTableRefillRuntimeConfig {
         PbTableRefillRuntimeConfig {
             table_cache_refill_policies: Some(TableCacheRefillPolicies {
                 table_policies: vec![PbTableCacheRefillPolicy {
@@ -270,11 +270,10 @@ mod tests {
                     bitmap: Some(serving_vnodes().to_protobuf()),
                 }],
             }),
-            version,
         }
     }
 
-    fn runtime_snapshot(catalog_version: u64, table_id: u32, version: u64) -> SubscribeResponse {
+    fn runtime_snapshot(catalog_version: u64, table_id: u32) -> SubscribeResponse {
         SubscribeResponse {
             info: Some(Info::Snapshot(MetaSnapshot {
                 hummock_version: Some(PbHummockVersion::default()),
@@ -287,7 +286,7 @@ mod tests {
                     write_limits: HashMap::new(),
                 }),
                 cluster_resource: Some(Default::default()),
-                table_refill_runtime_config: Some(runtime_config(table_id, version)),
+                table_refill_runtime_config: Some(runtime_config(table_id)),
                 ..Default::default()
             })),
             ..Default::default()
@@ -316,19 +315,15 @@ mod tests {
             WriteLimiter::unused(),
         );
 
-        for (catalog_version, table_id, config_version) in [(1, 233, 10), (2, 333, 20)] {
-            observer.handle_initialization_notification(runtime_snapshot(
-                catalog_version,
-                table_id,
-                config_version,
-            ));
+        for (catalog_version, table_id) in [(1, 233), (2, 333)] {
+            observer
+                .handle_initialization_notification(runtime_snapshot(catalog_version, table_id));
             assert!(matches!(
                 observer_event_rx.recv().await.unwrap(),
                 HummockObserverEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(_))
             ));
             let (operation, config) = recv_runtime_config(&mut observer_event_rx).await;
             assert_eq!(operation, Operation::Snapshot);
-            assert_eq!(config.version, config_version);
             let policies = config.table_cache_refill_policies.unwrap();
             assert_eq!(policies.table_policies[0].table_id, table_id);
             assert_eq!(policies.internal_table_policies[0].table_id, table_id + 1);
@@ -345,7 +340,7 @@ mod tests {
     async fn test_table_refill_policies_are_scoped_at_notification_boundary() {
         let table_id = 233;
         let internal_table_id = 234;
-        let config = runtime_config(table_id, 42);
+        let config = runtime_config(table_id);
         let expected_serving_mappings = config.serving_table_vnode_mappings.clone();
 
         for (role, expects_internal_policy) in [
@@ -366,7 +361,6 @@ mod tests {
             observer.handle_table_refill_runtime_config(Operation::Update, config.clone());
             let (operation, config) = recv_runtime_config(&mut observer_event_rx).await;
             assert_eq!(operation, Operation::Update);
-            assert_eq!(config.version, 42);
             assert_eq!(
                 config.serving_table_vnode_mappings,
                 expected_serving_mappings

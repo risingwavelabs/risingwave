@@ -227,10 +227,9 @@ impl SharedActorInfos {
     pub(super) fn retain_databases(&self, database_ids: impl IntoIterator<Item = DatabaseId>) {
         let database_ids: HashSet<_> = database_ids.into_iter().collect();
 
+        let mut inner = self.inner.write();
         let mut mapping = Vec::new();
-        for fragment in self
-            .inner
-            .write()
+        for fragment in inner
             .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
@@ -1433,5 +1432,118 @@ impl InflightDatabaseInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::meta::subscribe_response::Info;
+    use risingwave_pb::stream_plan::PbStreamNode;
+    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+
+    use super::*;
+    use crate::controller::catalog::CatalogController;
+    use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
+
+    fn single_actor_fragment(fragment_id: u32) -> InflightFragmentInfo {
+        InflightFragmentInfo {
+            fragment_id: fragment_id.into(),
+            distribution_type: DistributionType::Single,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 1,
+            nodes: PbStreamNode::default(),
+            actors: HashMap::from([(
+                fragment_id.into(),
+                InflightActorInfo {
+                    worker_id: WorkerId::new(1),
+                    vnode_bitmap: None,
+                    splits: vec![],
+                },
+            )]),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    /// Checks that the next `count` mapping notifications are kept by a frontend whose snapshot has
+    /// version `before`, and dropped by one whose snapshot has version `after`.
+    async fn assert_next_mappings(
+        rx: &mut UnboundedReceiver<Notification>,
+        operation: Operation,
+        before: NotificationVersion,
+        after: NotificationVersion,
+        count: usize,
+    ) {
+        for _ in 0..count {
+            let notification = loop {
+                let notification = rx.recv().await.unwrap().unwrap();
+                if matches!(notification.info, Some(Info::StreamingWorkerSlotMapping(_))) {
+                    break notification;
+                }
+            };
+            assert_eq!(notification.operation(), operation);
+            assert!(notification.version > before);
+            assert!(notification.version <= after);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_orders_mapping_notifications() {
+        let env = MetaSrvEnv::for_test().await;
+        let catalog_controller = CatalogController::new(env.clone()).await.unwrap();
+        let notification_manager = env.notification_manager_ref();
+        let (tx, mut rx) = unbounded_channel();
+        notification_manager.insert_sender(
+            SubscribeType::Frontend,
+            WorkerKey(HostAddress::default()),
+            tx,
+        );
+
+        let infos = env.shared_actor_infos();
+        let database_1 = DatabaseId::new(1);
+        let database_2 = DatabaseId::new(2);
+        let job_id = JobId::new(1);
+        let fragment_1 = single_actor_fragment(1);
+        let fragment_2 = single_actor_fragment(2);
+        let fragment_3 = single_actor_fragment(3);
+        let catalog_version = notification_manager.current_catalog_version().await;
+
+        let (mappings, before) = catalog_controller.get_worker_slot_mappings();
+        assert!(mappings.is_empty());
+        infos.upsert(database_1, [(&fragment_1, job_id), (&fragment_2, job_id)]);
+        let (mappings, after) = catalog_controller.get_worker_slot_mappings();
+        assert_eq!(mappings.len(), 2);
+        assert_next_mappings(&mut rx, Operation::Add, before, after, 2).await;
+
+        let before = after;
+        let mut writer = infos.start_writer(database_1);
+        writer.upsert([(&fragment_1, job_id), (&fragment_3, job_id)]);
+        writer.remove(&fragment_2);
+        writer.finish();
+        let (mappings, after) = catalog_controller.get_worker_slot_mappings();
+        assert_eq!(mappings.len(), 2);
+        assert_next_mappings(&mut rx, Operation::Add, before, after, 1).await;
+        assert_next_mappings(&mut rx, Operation::Update, before, after, 1).await;
+        assert_next_mappings(&mut rx, Operation::Delete, before, after, 1).await;
+
+        let before = after;
+        infos.remove_database(database_1);
+        let (mappings, after) = catalog_controller.get_worker_slot_mappings();
+        assert!(mappings.is_empty());
+        assert_next_mappings(&mut rx, Operation::Delete, before, after, 2).await;
+
+        infos.upsert(database_2, [(&fragment_1, job_id)]);
+        let (_, before) = catalog_controller.get_worker_slot_mappings();
+        infos.retain_databases([]);
+        let (mappings, after) = catalog_controller.get_worker_slot_mappings();
+        assert!(mappings.is_empty());
+        assert_next_mappings(&mut rx, Operation::Add, 0, before, 1).await;
+        assert_next_mappings(&mut rx, Operation::Delete, before, after, 1).await;
+
+        assert_eq!(
+            notification_manager.current_catalog_version().await,
+            catalog_version
+        );
     }
 }

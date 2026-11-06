@@ -1542,10 +1542,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         self.env
             .notification_manager()
-            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
+            .notify_frontend_non_catalog(Operation::Update, Info::Recovery(Recovery {}));
         self.env
             .notification_manager()
-            .notify_compute_without_version(Operation::Update, Info::Recovery(Recovery {}));
+            .notify_compute(Operation::Update, Info::Recovery(Recovery {}));
 
         (failed_database_job_ids, running_job_ids)
     }

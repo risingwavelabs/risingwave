@@ -811,7 +811,7 @@ impl MetadataManager {
         tracing::debug!("wait_streaming_job_finished: {id:?}");
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         if mgr.streaming_job_is_finished(id).await? {
-            return Ok(self.catalog_controller.current_notification_version().await);
+            return Ok(self.catalog_controller.current_catalog_version().await);
         }
         let (tx, rx) = oneshot::channel();
 

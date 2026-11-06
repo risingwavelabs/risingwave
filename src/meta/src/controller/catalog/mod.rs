@@ -398,8 +398,11 @@ impl CatalogController {
     }
 
     /// Return the latest version published to frontend catalog observers.
-    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
-        self.env.notification_manager().current_version().await
+    pub(crate) async fn current_catalog_version(&self) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .current_catalog_version()
+            .await
     }
 }
 
