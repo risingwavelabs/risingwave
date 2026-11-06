@@ -134,6 +134,28 @@ pub struct StarrocksConfig {
     #[with_option(allow_alter_on_fly)]
     pub max_batch_size_bytes: Option<u64>,
 
+    /// Skip the `StarRocks` JSON size check. Defaults to false. This may increase
+    /// backend memory usage and does not disable `starrocks.max_batch_size_bytes`.
+    #[serde(rename = "starrocks.ignore_json_size", default)]
+    #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
+    pub ignore_json_size: bool,
+
+    /// The `StarRocks` load job memory limit in bytes. When omitted, use the server default.
+    /// This is not a limit on all HTTP receive buffers or total backend memory usage.
+    #[serde(rename = "starrocks.load_mem_limit")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub load_mem_limit: Option<u64>,
+
+    /// The server-side transaction timeout in seconds, from begin to prepared.
+    /// A positive 32-bit signed integer, subject to the server's configured timeout range.
+    /// When omitted, use the server default. Independent of the client HTTP timeout.
+    #[serde(rename = "starrocks.transaction_timeout_seconds")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub transaction_timeout_seconds: Option<u32>,
+
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(flatten)]
@@ -173,6 +195,24 @@ impl StarrocksConfig {
         if let Some(0) = config.max_batch_size_bytes {
             return Err(SinkError::Config(anyhow!(
                 "`starrocks.max_batch_size_bytes` must be greater than 0"
+            )));
+        }
+        if config
+            .load_mem_limit
+            .is_some_and(|limit| limit > i64::MAX as u64)
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`starrocks.load_mem_limit` must not exceed {} bytes",
+                i64::MAX
+            )));
+        }
+        if config
+            .transaction_timeout_seconds
+            .is_some_and(|timeout| timeout == 0 || timeout > i32::MAX as u32)
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`starrocks.transaction_timeout_seconds` must be between 1 and {} seconds",
+                i32::MAX
             )));
         }
         Ok(config)
@@ -502,7 +542,9 @@ impl StarrocksSinkWriter {
             format!("http://{}:{}", config.common.host, config.common.http_port)
         };
         let txn_request_builder =
-            StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?;
+            StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?
+                .with_load_options(config.ignore_json_size, config.load_mem_limit)
+                .with_transaction_timeout_seconds(config.transaction_timeout_seconds);
 
         Ok(Self {
             schema: schema.clone(),
@@ -1006,6 +1048,106 @@ mod tests {
             ("starrocks.table".to_owned(), "sink_table".to_owned()),
             ("type".to_owned(), SINK_TYPE_APPEND_ONLY.to_owned()),
         ])
+    }
+
+    #[test]
+    fn starrocks_stream_load_options_defaults() {
+        let config = StarrocksConfig::from_btreemap(base_properties()).unwrap();
+        assert!(!config.ignore_json_size);
+        assert_eq!(config.load_mem_limit, None);
+        assert_eq!(config.transaction_timeout_seconds, None);
+    }
+
+    #[test]
+    fn starrocks_stream_load_options_parse() {
+        let mut properties = base_properties();
+        properties.extend([
+            ("starrocks.ignore_json_size".to_owned(), "true".to_owned()),
+            (
+                "starrocks.load_mem_limit".to_owned(),
+                "268435456".to_owned(),
+            ),
+            (
+                "starrocks.transaction_timeout_seconds".to_owned(),
+                "900".to_owned(),
+            ),
+            ("starrocks.max_batch_size_bytes".to_owned(), "5".to_owned()),
+        ]);
+        let config = StarrocksConfig::from_btreemap(properties).unwrap();
+        assert!(config.ignore_json_size);
+        assert_eq!(config.load_mem_limit, Some(268435456));
+        assert_eq!(config.transaction_timeout_seconds, Some(900));
+        assert_eq!(config.max_batch_size_bytes, Some(5));
+    }
+
+    #[tokio::test]
+    async fn starrocks_ignore_json_size_keeps_local_row_limit() {
+        let mut properties = base_properties();
+        properties.insert("starrocks.ignore_json_size".to_owned(), "true".to_owned());
+        properties.insert("starrocks.max_batch_size_bytes".to_owned(), "5".to_owned());
+        let config = StarrocksConfig::from_btreemap(properties).unwrap();
+        let mut writer =
+            StarrocksSinkWriter::new(config, Schema::new(vec![]), vec![], true, chrono_tz::UTC)
+                .unwrap();
+        // Reject before starting a transaction or sending a request to StarRocks.
+        let error = writer
+            .write_row_json("123456".to_owned())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("single row payload size 6 bytes")
+        );
+    }
+
+    #[test]
+    fn starrocks_stream_load_options_reject_invalid_values() {
+        for (name, values) in [
+            ("starrocks.ignore_json_size", vec!["yes", "1", ""]),
+            (
+                "starrocks.load_mem_limit",
+                vec![
+                    "-1",
+                    "9223372036854775808",
+                    "18446744073709551616",
+                    "invalid",
+                ],
+            ),
+            (
+                "starrocks.transaction_timeout_seconds",
+                vec!["0", "-1", "2147483648", "4294967296", "invalid"],
+            ),
+        ] {
+            for value in values {
+                let mut properties = base_properties();
+                properties.insert(name.to_owned(), value.to_owned());
+                assert!(
+                    StarrocksConfig::from_btreemap(properties).is_err(),
+                    "{name}={value} should be rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn starrocks_stream_load_options_accept_boundaries() {
+        // The FE timeout range is configurable; do not hard-code its default 3-day maximum.
+        for timeout in [1, 259201, i32::MAX as u32] {
+            let mut properties = base_properties();
+            properties.insert("starrocks.ignore_json_size".to_owned(), "false".to_owned());
+            properties.insert(
+                "starrocks.transaction_timeout_seconds".to_owned(),
+                timeout.to_string(),
+            );
+            for limit in [0, i64::MAX as u64] {
+                properties.insert("starrocks.load_mem_limit".to_owned(), limit.to_string());
+                let config = StarrocksConfig::from_btreemap(properties.clone()).unwrap();
+                assert!(!config.ignore_json_size);
+                assert_eq!(config.load_mem_limit, Some(limit));
+                assert_eq!(config.transaction_timeout_seconds, Some(timeout));
+            }
+        }
     }
 
     #[test]
