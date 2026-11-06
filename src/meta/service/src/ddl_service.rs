@@ -70,7 +70,6 @@ pub struct DdlServiceImpl {
     env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
@@ -97,15 +96,13 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
-            sink_manager.clone(),
-            iceberg_compaction_manager.clone(),
+            sink_manager,
             iceberg_pk_index_sink_manager.clone(),
         )
         .await;
         Self {
             env,
             metadata_manager,
-            sink_manager,
             ddl_controller,
             meta_metrics,
             iceberg_compaction_manager,
@@ -499,12 +496,6 @@ impl DdlService for DdlServiceImpl {
         };
 
         let version = self.ddl_controller.run_command(command).await?;
-
-        self.sink_manager
-            .stop_sink_coordinators_for_jobs(vec![sink_id.as_job_id()])
-            .await;
-        self.iceberg_compaction_manager
-            .clear_iceberg_maintenance_by_sink_id(sink_id);
 
         Ok(Response::new(DropSinkResponse {
             status: None,

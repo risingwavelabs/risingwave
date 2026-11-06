@@ -220,7 +220,7 @@ public class MariaDBTlsSourceTest {
         while (stream.hasNext()) {
             for (var message : stream.next().getEventsList()) {
                 if (message.getMsgType() == CdcMessage.CdcMessageType.DATA) {
-                    assertThat(message.getSourceType()).isEqualTo(SourceType.MARIADB);
+                    assertThat(message.getPayload()).contains("\"connector\":\"mariadb\"");
                     return message;
                 }
             }

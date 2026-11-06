@@ -726,6 +726,167 @@
     CREATE TABLE t2(j INT);
     select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- name: a range predicate on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk > t1.a) from t1;
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- name: a disjunction on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1 or pk = 2);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchMaxOneRow
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t2, columns: [t2.v], scan_ranges: [t2.pk = Int32(1), t2.pk = Int32(2)], distribution: SomeShard }
+- name: an equality between the primary key and another column does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = v);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchMaxOneRow
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t2.v] }
+          └─BatchFilter { predicate: (t2.pk = t2.v) }
+            └─BatchScan { table: t2, columns: [t2.v, t2.pk], distribution: UpstreamHashShard(t2.pk) }
+- name: a correlated equality on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t2.pk AND IsNotNull(t2.pk), output: [t1.a, t2.v], lookup table: t2 }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
+        └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, v, t1._row_id(hidden), t2.pk(hidden)], stream_key: [t1._row_id, a], pk_columns: [t1._row_id, a], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.a, t1._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t2.pk, output: [t1.a, t2.v, t1._row_id, t2.pk] }
+        ├─StreamExchange { dist: HashShard(t1.a) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.pk) }
+          └─StreamFilter { predicate: IsNotNull(t2.pk) }
+            └─StreamTableScan { table: t2, columns: [t2.pk, t2.v], stream_scan_type: SnapshotBackfill, stream_key: [t2.pk], pk: [pk], dist: UpstreamHashShard(t2.pk) }
+- name: an equality on a primary key cast to decimal bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1.5);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t2.v] }
+        └─BatchFilter { predicate: (t2.pk::Decimal = 1.5:Decimal) }
+          └─BatchScan { table: t2, columns: [t2.v, t2.pk], distribution: UpstreamHashShard(t2.pk) }
+- name: an equality on a primary key widened to bigint bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a BIGINT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where pk::bigint = t1.a) as v from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a, output: [t1.a, t2.v] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.a) }
+      │ └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+      └─BatchHashJoin { type: Inner, predicate: t1.a = $expr1, output: [t1.a, t2.v] }
+        ├─BatchHashAgg { group_key: [t1.a], aggs: [] }
+        │ └─BatchExchange { order: [], dist: HashShard(t1.a) }
+        │   └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard($expr1) }
+          └─BatchProject { exprs: [t2.v, t2.pk::Int64 as $expr1] }
+            └─BatchScan { table: t2, columns: [t2.pk, t2.v], distribution: UpstreamHashShard(t2.pk) }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, v, t1._row_id(hidden), t1.a(hidden), t2.pk(hidden)], stream_key: [t1._row_id, t2.pk, a], pk_columns: [t1._row_id, t2.pk, a], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.a, t1._row_id, t2.pk) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a, output: [t1.a, t2.v, t1._row_id, t1.a, t2.pk] }
+        ├─StreamExchange { dist: HashShard(t1.a) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamHashJoin { type: Inner, predicate: t1.a = $expr1, output: [t1.a, t2.v, t2.pk] }
+          ├─StreamProject { exprs: [t1.a], noop_update_hint: true }
+          │ └─StreamHashAgg { group_key: [t1.a], aggs: [count] }
+          │   └─StreamExchange { dist: HashShard(t1.a) }
+          │     └─StreamTableScan { table: t1, columns: [t1.a, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+          └─StreamExchange { dist: HashShard($expr1) }
+            └─StreamProject { exprs: [t2.v, t2.pk::Int64 as $expr1, t2.pk] }
+              └─StreamTableScan { table: t2, columns: [t2.pk, t2.v], stream_scan_type: SnapshotBackfill, stream_key: [t2.pk], pk: [pk], dist: UpstreamHashShard(t2.pk) }
+- name: a row equality on every primary key column bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT, b INT);
+    CREATE TABLE t2(a INT, b INT, v INT, PRIMARY KEY(a, b));
+    select t1.a, (select v from t2 where (t2.a, t2.b) = (t1.a, t1.b)) as v from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t2.v] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.a, t1.b) }
+      │ └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b) }
+        └─BatchHashJoin { type: Inner, predicate: $expr1 = $expr2, output: [t1.a, t1.b, t2.v] }
+          ├─BatchExchange { order: [], dist: HashShard($expr1) }
+          │ └─BatchProject { exprs: [t1.a, t1.b, Row(t1.a, t1.b) as $expr1] }
+          │   └─BatchHashAgg { group_key: [t1.a, t1.b], aggs: [] }
+          │     └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b) }
+          │       └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard($expr2) }
+            └─BatchProject { exprs: [t2.v, Row(t2.a, t2.b) as $expr2] }
+              └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.v], distribution: UpstreamHashShard(t2.a, t2.b) }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, v, t1._row_id(hidden), t1.b(hidden), t1.a(hidden), t1.b#1(hidden), t2.a(hidden), t2.b(hidden), $expr1(hidden)], stream_key: [t1._row_id, t2.a, t2.b, $expr1, a, t1.b], pk_columns: [t1._row_id, t2.a, t2.b, $expr1, a, t1.b], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.a, t1._row_id, t1.b, t2.a, t2.b, $expr1) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b, output: [t1.a, t2.v, t1._row_id, t1.b, t1.a, t1.b, t2.a, t2.b, $expr1] }
+        ├─StreamExchange { dist: HashShard(t1.a, t1.b) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t1.a, t1.b) }
+          └─StreamHashJoin { type: Inner, predicate: $expr1 = $expr2, output: [t1.a, t1.b, t2.v, $expr1, t2.a, t2.b] }
+            ├─StreamExchange { dist: HashShard($expr1) }
+            │ └─StreamProject { exprs: [t1.a, t1.b, Row(t1.a, t1.b) as $expr1], noop_update_hint: true }
+            │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
+            │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
+            │       └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+            └─StreamExchange { dist: HashShard($expr2) }
+              └─StreamProject { exprs: [t2.v, Row(t2.a, t2.b) as $expr2, t2.a, t2.b] }
+                └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.v], stream_scan_type: SnapshotBackfill, stream_key: [t2.a, t2.b], pk: [a, b], dist: UpstreamHashShard(t2.a, t2.b) }
+- name: a row equality with a constant on every primary key column bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(a INT, b INT, v INT, PRIMARY KEY(a, b));
+    select (select v from t2 where (a, b) = (1, 2));
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t2.v] }
+        └─BatchFilter { predicate: (Row(t2.a, t2.b) = '(1,2)':Struct(Int32, Int32)) }
+          └─BatchScan { table: t2, columns: [t2.v, t2.a, t2.b], distribution: UpstreamHashShard(t2.a, t2.b) }
+- name: a single-item IN list on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk in (2));
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t2, columns: [t2.v], scan_ranges: [t2.pk = Int32(2)], distribution: SomeShard }
+- name: a boolean primary key used as a predicate bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk BOOLEAN PRIMARY KEY, v INT);
+    select (select v from t2 where pk), (select v from t2 where not pk);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchNestedLoopJoin { type: FullOuter, predicate: true, output: all }
+      ├─BatchExchange { order: [], dist: Single }
+      │ └─BatchProject { exprs: [t2.v] }
+      │   └─BatchFilter { predicate: t2.pk }
+      │     └─BatchScan { table: t2, columns: [t2.v, t2.pk], distribution: UpstreamHashShard(t2.pk) }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t2.v] }
+          └─BatchFilter { predicate: Not(t2.pk) }
+            └─BatchScan { table: t2, columns: [t2.v, t2.pk], distribution: UpstreamHashShard(t2.pk) }
 - name: test grouping sets subquery 1
   sql: |
     CREATE TABLE integers(i INTEGER);
@@ -863,9 +1024,9 @@
   sql: |
     select Array(select 1 union select 2);
   batch_plan: |-
-    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-    ├─BatchValues { rows: [[]] }
-    └─BatchProject { exprs: [Coalesce(array_agg(1:Int32), ARRAY[]:List(Int32)) as $expr1] }
+    BatchProject { exprs: [Coalesce(array_agg(1:Int32), ARRAY[]:List(Int32)) as $expr1] }
+    └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+      ├─BatchValues { rows: [[]] }
       └─BatchSimpleAgg { aggs: [array_agg(1:Int32)] }
         └─BatchExchange { order: [], dist: Single }
           └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
@@ -1096,3 +1257,21 @@
                                     └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr5] }
                                       └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
                                         └─BatchSysScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
+- name: correlated column in multi-row VALUES returns an error instead of panicking
+  sql: |
+    create table t(a int, b int, c int);
+    select * from t where t.a in (select * from (values (t.b), (t.c)) v);
+  batch_error: 'internal error: Subquery cannot be unnested: a correlated column reference is not resolved.'
+  stream_error: 'internal error: Subquery cannot be unnested: a correlated column reference is not resolved.'
+- name: subquery left in SQL table function arguments returns an error instead of panicking
+  sql: |
+    create function my_tf(n int) returns table (sq int) language sql as $$ select v * v from generate_series(1, n) as g(v) $$;
+    select * from my_tf(3);
+  batch_error: 'internal error: Subquery is not supported in this context.'
+  stream_error: 'internal error: Subquery is not supported in this context.'
+- name: subquery in a lambda body returns an error instead of panicking
+  sql: |
+    create table t(a int[]);
+    select array_transform(a, |x| (select 1)) from t;
+  batch_error: 'internal error: Subquery is not supported in this context.'
+  stream_error: 'internal error: Subquery is not supported in this context.'

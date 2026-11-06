@@ -38,10 +38,13 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type, match_sink_name_str,
+};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
@@ -108,8 +111,8 @@ pub struct AbortCreatingJobResult {
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
-    /// The aborted sinks; the caller should clear their iceberg maintenance state via
-    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    /// The aborted sinks; the caller should retire their maintenance state and stop their
+    /// coordinators, using only sinks actually removed.
     pub aborted_sink_ids: Vec<SinkId>,
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
@@ -231,6 +234,30 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
             specific_resource_group: model.specific_resource_group,
         }
     }
+}
+
+fn update_source_node_rate_limit(
+    node: &mut PbNodeBody,
+    rate_limit: Option<u32>,
+) -> MetaResult<bool> {
+    let (properties, current_limit) = match node {
+        PbNodeBody::Source(node) => match &mut node.source_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        PbNodeBody::StreamFsFetch(node) => match &mut node.node_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        _ => return Ok(false),
+    };
+    if properties.is_iceberg_update_source() {
+        return Err(MetaError::invalid_parameter(
+            "Iceberg streaming_updates does not support rate limiting",
+        ));
+    }
+    *current_limit = rate_limit;
+    Ok(true)
 }
 
 fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -> MetaResult<bool> {
@@ -2576,6 +2603,15 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
+        if source
+            .with_properties
+            .inner_ref()
+            .is_iceberg_update_source()
+        {
+            return Err(MetaError::invalid_parameter(
+                "Iceberg streaming_updates does not support rate limiting",
+            ));
+        }
         let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id.as_job_id()]
@@ -2971,14 +3007,21 @@ impl CatalogController {
 
         // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
         if !skip_alter_on_fly_check {
-            let prop_keys: Vec<String> = alter_props
-                .keys()
-                .chain(alter_secret_refs.keys())
-                .cloned()
-                .collect();
-            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-                &connector, &prop_keys,
-            )?;
+            dispatch_cdc_source_type!(
+                CdcSourceType::from(connector.as_str()),
+                T,
+                T::check_alter_with_options(&alter_props, &alter_secret_refs)?,
+                {
+                    let prop_keys: Vec<String> = alter_props
+                        .keys()
+                        .chain(alter_secret_refs.keys())
+                        .cloned()
+                        .collect();
+                    risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                        &connector, &prop_keys,
+                    )?
+                }
+            );
         }
 
         let mut options_with_secret = WithOptionsSecResolved::new(
@@ -3184,7 +3227,9 @@ impl CatalogController {
         if let Statement::CreateSink { stmt } = &mut stmt {
             update_stmt_with_props(&mut stmt.with_properties.0, &props)?;
         } else {
-            panic!("definition is not a create sink statement")
+            return Err(MetaError::invalid_parameter(
+                "cannot alter an internal Iceberg sink; use ALTER TABLE ... CONNECTOR WITH (...) instead",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -3266,7 +3311,9 @@ impl CatalogController {
             }
             update_stmt_with_props(with_options, &props)?;
         } else {
-            panic!("definition is not a create iceberg table statement")
+            return Err(MetaError::invalid_parameter(
+                "definition is not a create iceberg table statement",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -3798,20 +3845,15 @@ impl CatalogController {
             let mut found = Ok(false);
             match throttle_type {
                 ThrottleType::Source => {
-                    visit_stream_node_mut(stream_node, |node| match node {
-                        PbNodeBody::Source(node) => {
-                            if let Some(node_inner) = &mut node.source_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                    visit_stream_node_mut(stream_node, |node| {
+                        if found.is_err() {
+                            return;
                         }
-                        PbNodeBody::StreamFsFetch(node) => {
-                            if let Some(node_inner) = &mut node.node_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                        match update_source_node_rate_limit(node, rate_limit) {
+                            Ok(true) => found = Ok(true),
+                            Ok(false) => {}
+                            Err(err) => found = Err(err),
                         }
-                        _ => {}
                     });
                 }
                 ThrottleType::Backfill => {
@@ -4070,46 +4112,59 @@ async fn ensure_source_props_not_set_by_connection(
     Ok(())
 }
 
+fn update_sink_node_props(
+    node: &mut PbNodeBody,
+    sink_id: SinkId,
+    props: &BTreeMap<String, String>,
+) -> bool {
+    let sink_desc = match node {
+        PbNodeBody::Sink(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexWriter(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => &mut node.sink_desc,
+        PbNodeBody::CompactionResolver(node) if node.sink_id == sink_id => {
+            node.properties.extend(props.clone());
+            return true;
+        }
+        _ => return false,
+    };
+    if let Some(sink_desc) = sink_desc
+        && sink_desc.id == sink_id
+    {
+        sink_desc.properties.extend(props.clone());
+        true
+    } else {
+        false
+    }
+}
+
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
     props: BTreeMap<String, String>,
 ) -> MetaResult<()> {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
         .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
         .filter(fragment::Column::JobId.eq(sink_id))
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| {
-            *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
-        })
-        .filter_map(|(id, _, stream_node)| {
+        .filter_map(|(id, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
             visit_stream_node_mut(&mut stream_node, |node| {
-                if let PbNodeBody::Sink(node) = node
-                    && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id
-                {
-                    sink_desc.properties.extend(props.clone());
-                    found = true;
-                }
+                found |= update_sink_node_props(node, sink_id, &props);
             });
             if found { Some((id, stream_node)) } else { None }
         })
         .collect_vec();
-    assert!(
-        !fragments.is_empty(),
-        "sink id should be used by at least one fragment"
-    );
+    if fragments.is_empty() {
+        return Err(MetaError::invalid_parameter(format!(
+            "sink {sink_id} is not used by any fragment"
+        )));
+    }
     for (id, stream_node) in fragments {
         Fragment::update(fragment::ActiveModel {
             fragment_id: Set(id),
@@ -4194,9 +4249,66 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_pb::stream_plan::{
+        CompactionResolverNode, IcebergWithPkIndexPositionDeleteMergerNode,
+        IcebergWithPkIndexWriterNode, SinkDesc, SinkNode,
+    };
     use risingwave_sqlparser::ast::{SqlOption, Statement};
 
-    use super::{Parser, merge_with_options};
+    use super::{Parser, PbNodeBody, SinkId, merge_with_options, update_sink_node_props};
+
+    #[test]
+    fn test_update_sink_props_in_all_sink_nodes() {
+        let sink_id = SinkId::new(42);
+        let props = BTreeMap::from([("enable_compaction".to_owned(), "true".to_owned())]);
+        let sink_desc = SinkDesc {
+            id: sink_id,
+            properties: BTreeMap::from([
+                ("connector".to_owned(), "iceberg".to_owned()),
+                ("enable_compaction".to_owned(), "false".to_owned()),
+            ]),
+            ..Default::default()
+        };
+        let nodes = [
+            PbNodeBody::Sink(Box::new(SinkNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(Box::new(
+                IcebergWithPkIndexPositionDeleteMergerNode {
+                    sink_desc: Some(sink_desc.clone()),
+                },
+            )),
+            PbNodeBody::CompactionResolver(Box::new(CompactionResolverNode {
+                sink_id,
+                properties: sink_desc.properties,
+                ..Default::default()
+            })),
+        ];
+        for mut node in nodes {
+            assert!(!update_sink_node_props(&mut node, SinkId::new(43), &props));
+            assert!(update_sink_node_props(&mut node, sink_id, &props));
+            let properties = match &node {
+                PbNodeBody::Sink(node) => &node.sink_desc.as_ref().unwrap().properties,
+                PbNodeBody::IcebergWithPkIndexWriter(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::CompactionResolver(node) => &node.properties,
+                _ => unreachable!(),
+            };
+            assert_eq!(properties["enable_compaction"], "true");
+            assert_eq!(properties["connector"], "iceberg");
+        }
+    }
 
     #[test]
     fn test_merge_with_options_normalizes_altered_option_name() {

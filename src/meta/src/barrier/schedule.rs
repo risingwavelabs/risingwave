@@ -807,7 +807,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn mark_ready(&self, _options: MarkReadyOptions) -> MetaResult<()> {
+        async fn mark_ready(
+            &self,
+            _options: MarkReadyOptions,
+            _running_job_ids: HashSet<JobId>,
+        ) -> MetaResult<()> {
             unimplemented!()
         }
 

@@ -23,7 +23,6 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::TracerProviderBuilder;
-use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::query_log::*;
@@ -598,12 +597,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         tracing::info!("opentelemetry exporter for fastrace is set at {endpoint}");
     }
 
-    // Metrics layer
-    {
-        let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
-
-        layers.push(Box::new(MetricsLayer::new().with_filter(filter)));
-    }
     tracing_subscriber::registry().with(layers).init();
     // TODO: add file-appender tracing subscriber in the future
 }

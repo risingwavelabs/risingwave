@@ -106,74 +106,6 @@ mod sink_properties {
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use source_properties::*;
     let mut map = HashMap::new();
-    // CDC Properties - added for schema.change.failure.policy
-    map.try_insert(
-        std::any::type_name::<MysqlCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<MariadbCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<PostgresCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "debezium.heartbeat.interval.ms".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<SqlServerCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<OracleCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "debezium.heartbeat.interval.ms".to_owned(),
-            "heartbeat.table.name".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-
-    map.try_insert(
-        std::any::type_name::<MongodbCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
     // KafkaProperties
     map.try_insert(
         std::any::type_name::<KafkaProperties>().to_owned(),
@@ -195,7 +127,6 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.sasl.kerberos.service.name".to_owned(),
             "properties.sasl.kerberos.keytab".to_owned(),
             "properties.sasl.kerberos.principal".to_owned(),
-            "properties.sasl.kerberos.kinit.cmd".to_owned(),
             "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
             "properties.sasl.oauthbearer.config".to_owned(),
             "properties.sasl.oauthbearer.method".to_owned(),
@@ -326,7 +257,6 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.sasl.kerberos.service.name".to_owned(),
             "properties.sasl.kerberos.keytab".to_owned(),
             "properties.sasl.kerberos.principal".to_owned(),
-            "properties.sasl.kerberos.kinit.cmd".to_owned(),
             "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
             "properties.sasl.oauthbearer.config".to_owned(),
             "properties.sasl.oauthbearer.method".to_owned(),
@@ -446,7 +376,6 @@ pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSe
             "properties.sasl.kerberos.service.name".to_owned(),
             "properties.sasl.kerberos.keytab".to_owned(),
             "properties.sasl.kerberos.principal".to_owned(),
-            "properties.sasl.kerberos.kinit.cmd".to_owned(),
             "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
             "properties.sasl.oauthbearer.config".to_owned(),
             "properties.sasl.oauthbearer.method".to_owned(),

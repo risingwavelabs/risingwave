@@ -74,6 +74,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, SecretId, ViewId};
 use crate::error::ErrorCode;
+use crate::expr::ScopeId;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
@@ -110,10 +111,12 @@ pub struct Binder {
 
     /// A stack holding contexts of left-lateral `TableFactor`s.
     ///
-    /// We need a separate stack as `CorrelatedInputRef` depth is
-    /// determined by the upper subquery context depth, not the lateral context stack depth.
+    /// These are the left inputs of the joins enclosing the table factor being bound. They are
+    /// only visible to a `LATERAL` factor, and are saved with the query level that owns them.
     lateral_contexts: Vec<LateralBindContext>,
 
+    /// The scope id for the next [`BindContext`]. Scope 0 is the initial context.
+    next_scope_id: u32,
     next_subquery_id: usize,
     next_values_id: usize,
     /// The `ShareId` is used to identify the share relation which could be a CTE, a source, a view
@@ -256,6 +259,7 @@ impl Binder {
             auth_context: session.auth_context(),
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
+            next_scope_id: 1,
             next_subquery_id: 0,
             next_values_id: 0,
             next_share_id: 0,
@@ -348,6 +352,7 @@ impl Binder {
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
         self.context.disable_security_invoker = new_context.disable_security_invoker;
+        self.context.scope = self.next_scope();
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -369,6 +374,7 @@ impl Binder {
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
         self.context.disable_security_invoker = new_context.disable_security_invoker;
+        self.context.scope = self.next_scope();
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -420,6 +426,13 @@ impl Binder {
             .iter()
             .rev()
             .take_while(|(context, _)| context.sql_udf_arguments.is_none())
+    }
+
+    /// A fresh scope id for a new [`BindContext`].
+    fn next_scope(&mut self) -> ScopeId {
+        let scope = ScopeId(self.next_scope_id);
+        self.next_scope_id += 1;
+        scope
     }
 
     fn next_subquery_id(&mut self) -> usize {

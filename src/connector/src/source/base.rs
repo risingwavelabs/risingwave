@@ -50,7 +50,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{
-    CitusCdc, MariadbCdc, MongodbCdc, MysqlCdc, OracleCdc, PostgresCdc, SqlServerCdc,
+    MariadbCdc, MongodbCdc, MysqlCdc, OracleCdc, PostgresCdc, SqlServerCdc,
 };
 use crate::source::batch::BatchSourceSplitImpl;
 use crate::source::monitor::EnumeratorMetrics;
@@ -825,7 +825,6 @@ impl SplitImpl {
                 | MariadbCdc(_)
                 | PostgresCdc(_)
                 | MongodbCdc(_)
-                | CitusCdc(_)
                 | SqlServerCdc(_)
                 | OracleCdc(_)
         )
@@ -838,7 +837,6 @@ impl SplitImpl {
             MariadbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
             MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
             SqlServerCdc(split) => split.start_offset().clone().unwrap_or_default(),
             OracleCdc(split) => split.start_offset().clone().unwrap_or_default(),
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
@@ -1014,7 +1012,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()));
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;

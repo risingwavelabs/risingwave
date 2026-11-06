@@ -232,7 +232,6 @@ public class MariaDBSourceTest {
     }
 
     private static void assertMariaDbMessage(CdcMessage message) {
-        assertThat(message.getSourceType()).isEqualTo(SourceType.MARIADB);
         if (!message.getPayload().isBlank()
                 && message.getMsgType() == CdcMessage.CdcMessageType.DATA) {
             assertThat(message.getPayload()).contains("\"connector\":\"mariadb\"");

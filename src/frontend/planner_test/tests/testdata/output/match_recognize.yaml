@@ -1000,10 +1000,7 @@
         define a as a.v > t1.x, b as b.v < 0
       )
     );
-  stream_error: |-
-    Not supported: streaming nested-loop join
-    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://docs.risingwave.com/processing/sql/dynamic-filters
+  stream_error: 'internal error: Subquery cannot be unnested: a correlated column reference is not resolved.'
 - name: a pattern variable colliding with the input table name is a naming error, not an internal one
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;

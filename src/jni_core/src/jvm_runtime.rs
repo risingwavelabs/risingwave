@@ -70,18 +70,6 @@ fn build_jvm_with_native_registration() -> anyhow::Result<JavaVM> {
         }
     }
 
-    // move risingwave-source-cdc to the head of classpath, because we have some patched Debezium classes
-    // in this jar which needs to be loaded first.
-    let mut new_class_vec = Vec::with_capacity(class_vec.len());
-    for path in class_vec {
-        if path.contains("risingwave-source-cdc") {
-            new_class_vec.insert(0, path.clone());
-        } else {
-            new_class_vec.push(path.clone());
-        }
-    }
-    class_vec = new_class_vec;
-
     let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
         heap_size
     } else {

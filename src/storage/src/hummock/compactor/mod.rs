@@ -640,10 +640,16 @@ pub fn start_iceberg_compactor(
                                         |_| (),
                                     )
                                     .is_some()
-                                    && let Some(result) = simulated_pk_index_compaction_result()
                                 {
-                                    let mut report = build_iceberg_task_report(task_id, sink_id, None);
-                                    report.pk_index_result = Some(result);
+                                    // Consume each rewrite once. Later bounded probes report
+                                    // no remaining plans instead of reapplying stale inputs.
+                                    let result = simulated_pk_index_compaction_result();
+                                    let mut report = if result.is_none() && is_bounded_round {
+                                        build_drained_iceberg_task_report(task_id, sink_id)
+                                    } else {
+                                        build_iceberg_task_report(task_id, sink_id, None)
+                                    };
+                                    report.pk_index_result = result;
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
                                             &request_sender,
@@ -1420,7 +1426,17 @@ pub fn start_shared_compactor(
                                     shutdown.lock().unwrap().remove(&task_id);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
-                                            compact_task: Some(PbCompactTask::from(&compact_task)),
+                                            // Keep the existing wire format, but only send the task fields consumed by the proxy.
+                                            compact_task: Some(PbCompactTask {
+                                                task_id: compact_task.task_id,
+                                                task_status: compact_task.task_status.into(),
+                                                sorted_output_ssts: compact_task
+                                                    .sorted_output_ssts
+                                                    .iter()
+                                                    .map(|sst| sst.into())
+                                                    .collect(),
+                                                ..Default::default()
+                                            }),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                             object_timestamps,
                                     })),

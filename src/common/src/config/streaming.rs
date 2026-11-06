@@ -263,6 +263,14 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::iceberg_fetch_batch_size")]
     pub iceberg_fetch_batch_size: u64,
 
+    /// `IcebergUpdateListExecutor`: A `streaming_updates` phase with at most this many files
+    /// (capped by `iceberg_fetch_batch_size`) is fetched in order by a single Fetch actor,
+    /// without waiting for the previous phase to commit.
+    /// Larger phases are spread across Fetch actors and wait for their completion. Set to 0 to
+    /// always spread phases.
+    #[serde(default = "default::developer::iceberg_update_ordered_max_tasks")]
+    pub iceberg_update_ordered_max_tasks: u64,
+
     /// `IcebergSink`: The size of the cache for positional delete in the sink.
     #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
     pub iceberg_sink_positional_delete_cache_size: usize,
@@ -270,6 +278,17 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The maximum number of rows in a row group when writing Parquet files.
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
+
+    /// `IcebergWithPkIndexWriter`: The maximum number of concurrent PK index lookups issued for
+    /// deletes and updates in one batch. Values smaller than 1 will be clamped to 1.
+    #[serde(default = "default::developer::iceberg_pk_index_sink_lookup_concurrency")]
+    pub iceberg_pk_index_sink_lookup_concurrency: usize,
+
+    /// `IcebergWithPkIndexWriter`: The maximum number of input rows to process as one batch.
+    /// The writer only merges chunks that are already buffered in its input, so batching never
+    /// waits for new data. Set to 1 to process chunks one by one.
+    #[serde(default = "default::developer::iceberg_pk_index_sink_max_batch_rows")]
+    pub iceberg_pk_index_sink_max_batch_rows: usize,
 
     /// When enabled, materialized views using default `NoCheck` conflict behavior will be forced
     /// to use `Overwrite`. Useful to avoid propagating inconsistent changelog downstream.

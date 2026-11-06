@@ -56,7 +56,9 @@ use tokio::time::Instant;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
-use crate::controller::streaming_job::{CommittedEpochTruncateJob, TableChangeLogTruncateInfo};
+use crate::controller::streaming_job::{
+    CommittedEpochTruncateJob, ProgressTableChangeLogSubscriber, TableChangeLogTruncateInfo,
+};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
@@ -198,6 +200,15 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
 
 #[tokio::test]
 async fn test_truncate_table_change_log_persisted_and_in_memory() {
+    check_truncate_table_change_log_persisted_and_in_memory(false).await;
+}
+
+#[tokio::test]
+async fn test_iceberg_pk_index_table_change_log_retains_replay_anchor() {
+    check_truncate_table_change_log_persisted_and_in_memory(true).await;
+}
+
+async fn check_truncate_table_change_log_persisted_and_in_memory(is_iceberg_pk_index: bool) {
     let (env, hummock_manager, _, _) = setup_compute_env(80).await;
     let table_id = TableId::new(1);
     let state_table_id = TableId::new(2);
@@ -242,7 +253,11 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
         delta.state_table_info_delta.insert(
             state_table_id,
             risingwave_pb::hummock::StateTableInfoDelta {
-                committed_epoch: truncate_epoch,
+                committed_epoch: if is_iceberg_pk_index {
+                    committed_epoch + 1
+                } else {
+                    truncate_epoch
+                },
                 compaction_group_id: 1.into(),
             },
         );
@@ -261,16 +276,63 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
     .await
     .unwrap();
 
-    hummock_manager
-        .truncate_table_change_log(TableChangeLogTruncateInfo {
-            subscription_retention_seconds: HashMap::new(),
-            progress_table_subscribers: vec![],
-            committed_epoch_truncate_jobs: vec![CommittedEpochTruncateJob {
+    let truncate_info = || TableChangeLogTruncateInfo {
+        subscription_retention_seconds: if is_iceberg_pk_index {
+            HashMap::from([(table_id, 0)])
+        } else {
+            HashMap::new()
+        },
+        progress_table_subscribers: if is_iceberg_pk_index {
+            vec![ProgressTableChangeLogSubscriber {
+                subscriber_job_id: JobId::new(3),
+                upstream_table_id: table_id,
+                progress_table_id: state_table_id,
+            }]
+        } else {
+            vec![]
+        },
+        committed_epoch_truncate_jobs: if is_iceberg_pk_index {
+            vec![]
+        } else {
+            vec![CommittedEpochTruncateJob {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(table_id, Some(truncate_epoch))]),
-            }],
-        })
+            }]
+        },
+    };
+    if is_iceberg_pk_index {
+        // After recovery, missing checkpoint progress vetoes even a zero-retention subscription.
+        hummock_manager
+            .truncate_table_change_log(truncate_info())
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager.versioning.read().await.table_change_log[&table_id]
+                .epochs()
+                .collect_vec(),
+            vec![old_epoch, truncate_epoch, committed_epoch]
+        );
+        assert_eq!(
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .all(&env.meta_store_ref().conn)
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+        // Normal-input actors report the real upstream checkpoint at compaction Begin.
+        // Compaction End can commit a synthetic epoch without advancing that frontier.
+        hummock_manager.update_table_change_log_progress([
+            crate::hummock::CommittedTableChangeLogProgress {
+                upstream_table_id: table_id,
+                progress_table_id: state_table_id,
+                truncate_epoch: committed_epoch,
+            },
+        ]);
+    }
+    hummock_manager
+        .truncate_table_change_log(truncate_info())
         .await
         .unwrap();
 
@@ -284,27 +346,103 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
             .all(&env.meta_store_ref().conn)
             .await
             .unwrap();
+    let expected_epochs = if is_iceberg_pk_index {
+        vec![committed_epoch]
+    } else {
+        vec![truncate_epoch, committed_epoch]
+    };
     assert_eq!(
         persisted_epochs,
-        vec![
-            truncate_epoch as risingwave_meta_model::Epoch,
-            committed_epoch as risingwave_meta_model::Epoch,
-        ]
+        expected_epochs
+            .iter()
+            .map(|epoch| *epoch as risingwave_meta_model::Epoch)
+            .collect_vec()
     );
     let in_memory_epochs = hummock_manager.versioning.read().await.table_change_log[&table_id]
         .epochs()
         .collect_vec();
-    assert_eq!(in_memory_epochs, vec![truncate_epoch, committed_epoch]);
+    assert_eq!(in_memory_epochs, expected_epochs);
     assert_eq!(
         hummock_manager
             .gc_manager
             .try_take_may_delete_object_ids(1)
             .unwrap(),
-        HashSet::from([
-            HummockObjectId::Sstable(1.into()),
-            HummockObjectId::Sstable(2.into()),
-        ])
+        if is_iceberg_pk_index {
+            HashSet::from([
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::Sstable(2.into()),
+                HummockObjectId::Sstable(3.into()),
+                HummockObjectId::Sstable(4.into()),
+            ])
+        } else {
+            HashSet::from([
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::Sstable(2.into()),
+            ])
+        }
     );
+    if is_iceberg_pk_index {
+        let next_epoch = test_epoch(40_000);
+        let next_log = EpochNewChangeLog {
+            checkpoint_epoch: next_epoch,
+            non_checkpoint_epochs: vec![],
+            new_value: vec![],
+            old_value: vec![],
+        };
+        risingwave_meta_model::hummock_table_change_log::Entity::insert(
+            to_table_change_log_meta_store_model(table_id, &next_log),
+        )
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+        {
+            let mut versioning = hummock_manager.versioning.write().await;
+            let mut version = versioning.current_version.as_ref().clone();
+            let mut delta = version.version_delta_after();
+            delta.state_table_info_delta.insert(
+                table_id,
+                risingwave_pb::hummock::StateTableInfoDelta {
+                    committed_epoch: next_epoch,
+                    compaction_group_id: 1.into(),
+                },
+            );
+            version.apply_version_delta(&delta);
+            versioning.current_version = Arc::new(version);
+            let log = versioning.table_change_log.get_mut(&table_id).unwrap();
+            assert_eq!(log.next_epoch(committed_epoch), Ok(None));
+            log.add_change_log(next_log);
+            assert_eq!(log.next_epoch(committed_epoch), Ok(Some(next_epoch)));
+        }
+        // Missing reports after cache reset remain conservative until a new checkpoint commits.
+        hummock_manager.table_change_log_progress.write().clear();
+        hummock_manager
+            .truncate_table_change_log(truncate_info())
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager.versioning.read().await.table_change_log[&table_id]
+                .epochs()
+                .collect_vec(),
+            vec![committed_epoch, next_epoch]
+        );
+        hummock_manager.update_table_change_log_progress([
+            crate::hummock::CommittedTableChangeLogProgress {
+                upstream_table_id: table_id,
+                progress_table_id: state_table_id,
+                truncate_epoch: next_epoch,
+            },
+        ]);
+        hummock_manager
+            .truncate_table_change_log(truncate_info())
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager.versioning.read().await.table_change_log[&table_id]
+                .epochs()
+                .collect_vec(),
+            vec![next_epoch]
+        );
+    }
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,
@@ -481,6 +619,7 @@ async fn test_hummock_compaction_task() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault,
                 &mut *default_compaction_selector(),
             )
@@ -518,7 +657,11 @@ async fn test_hummock_compaction_task() {
     let compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), table_id).await;
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -535,7 +678,11 @@ async fn test_hummock_compaction_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1087,7 +1234,11 @@ async fn test_print_compact_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1167,6 +1318,147 @@ async fn test_invalid_sst_id() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
+    let (_, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    register_table_ids_to_compaction_group(&hummock_manager, &[1, 2, 3], compaction_group_id).await;
+    let sst_ids = get_sst_ids(&hummock_manager, 3).await;
+    for (index, &sst_id) in sst_ids.iter().enumerate() {
+        let table_id = TableId::new(index as u32 + 1);
+        let epoch = test_epoch(index as u64 + 1);
+        let sst = SstableInfoInner {
+            object_id: sst_id.into(),
+            sst_id: sst_id.into(),
+            key_range: KeyRange::new(
+                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "a"), epoch)
+                    .encode()
+                    .into(),
+                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "z"), epoch)
+                    .encode()
+                    .into(),
+            ),
+            table_ids: vec![table_id],
+            file_size: 128,
+            sst_size: 128,
+            uncompressed_file_size: 128,
+            total_key_count: 1,
+            min_epoch: epoch,
+            max_epoch: epoch,
+            ..Default::default()
+        }
+        .into();
+        hummock_meta_client
+            .commit_epoch(
+                epoch,
+                SyncResult {
+                    uncommitted_ssts: to_local_sstable_info(&[sst]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let version = hummock_manager.get_current_version().await;
+    let sub_levels = &version
+        .get_compaction_group_levels(compaction_group_id)
+        .l0
+        .sub_levels;
+    assert_eq!(sub_levels.len(), 3);
+    let middle_task = hummock_manager
+        .manual_get_compact_task(
+            worker_id,
+            compaction_group_id,
+            ManualCompactionOption {
+                level: 0,
+                sst_ids: vec![sst_ids[1].into()],
+                exclusive: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(middle_task.target_sub_level_id, sub_levels[1].sub_level_id);
+
+    // Both requests expand their input to include the unhinted, pending middle sublevel.
+    let options = [
+        ManualCompactionOption {
+            level: 0,
+            sst_ids: vec![sst_ids[0].into(), sst_ids[2].into()],
+            exclusive: false,
+            ..Default::default()
+        },
+        ManualCompactionOption {
+            level: 0,
+            internal_table_id: HashSet::from([3.into()]),
+            exclusive: false,
+            ..Default::default()
+        },
+    ];
+    for option in &options {
+        let task = hummock_manager
+            .manual_get_compact_task(worker_id, compaction_group_id, option.clone())
+            .await
+            .unwrap();
+        assert!(
+            task.is_none(),
+            "selected the pending middle sublevel: {task:?}"
+        );
+    }
+    {
+        let compaction = hummock_manager.compaction.read().await;
+        assert_eq!(compaction.compact_task_assignment.len(), 1);
+        let pending = compaction.compaction_statuses[&compaction_group_id].level_handlers[0]
+            .compacting_files();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[&HummockSstableId::from(sst_ids[1])],
+            middle_task.task_id
+        );
+    }
+
+    assert!(
+        hummock_manager
+            .cancel_compact_task(middle_task.task_id, TaskStatus::ManualCanceled)
+            .await
+            .unwrap()
+    );
+    for option in options {
+        let to_l0 = !option.sst_ids.is_empty();
+        let task = hummock_manager
+            .manual_get_compact_task(worker_id, compaction_group_id, option)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.target_level == 0, to_l0);
+        // Once the reservation is released, keep the complete consecutive input interval.
+        assert_eq!(
+            task.read_input_ssts().map(|sst| sst.sst_id).collect_vec(),
+            sst_ids
+                .iter()
+                .rev()
+                .copied()
+                .map(HummockSstableId::from)
+                .collect_vec()
+        );
+        if task.target_level == 0 {
+            assert_eq!(task.target_sub_level_id, sub_levels[0].sub_level_id);
+        }
+        assert!(
+            hummock_manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+    }
 }
 
 #[tokio::test]
@@ -1319,6 +1611,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut *default_compaction_selector(),
             )
@@ -1354,6 +1647,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1392,6 +1686,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1454,6 +1749,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut *default_compaction_selector(),
             )
@@ -1489,6 +1785,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1701,6 +1998,7 @@ async fn test_version_stats() {
 
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault,
             &mut *default_compaction_selector(),
         )
@@ -2003,7 +2301,11 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
     // task picking records compact task metrics for the split group.
     hummock_manager.create_version_checkpoint(0).await.unwrap();
     let compact_task = hummock_manager
-        .get_compact_task(right_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            right_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap();
     assert!(compact_task.is_some());
@@ -2185,7 +2487,11 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault;
     let task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -2223,6 +2529,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
 
     let task2 = hummock_manager
         .get_compact_task(
+            worker_id,
             left_compaction_group_id,
             &mut *default_compaction_selector(),
         )
@@ -2279,7 +2586,7 @@ async fn get_manual_compact_task(
     };
 
     hummock_manager_ref
-        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+        .manual_get_compact_task(1.into(), compaction_group_id, manual_compcation_option)
         .await
         .unwrap()
         .unwrap()
@@ -2341,7 +2648,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     };
     // 2. get compact task
     let compact_task = hummock_manager
-        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+        .manual_get_compact_task(worker_id, compaction_group_id, manual_compcation_option)
         .await
         .unwrap()
         .unwrap();
@@ -2768,7 +3075,7 @@ async fn test_partition_level() {
 
         global_sst_id += 1;
         if let Some(task) = hummock_manager
-            .get_compact_task(new_compaction_group_id, selector.as_mut())
+            .get_compact_task(worker_id, new_compaction_group_id, selector.as_mut())
             .await
             .unwrap()
         {
@@ -3048,7 +3355,11 @@ async fn test_merge_compaction_group_task_expired() {
 
     // for task pending
     let _task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -3091,6 +3402,7 @@ async fn test_merge_compaction_group_task_expired() {
 
     let task2 = hummock_manager
         .get_compact_task(
+            worker_id,
             right_compaction_group_id,
             &mut *default_compaction_selector(),
         )
@@ -3278,7 +3590,11 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
 
     let recovered_manager = build_hummock_manager_for_test_env(env).await;
     let compact_task = recovered_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            1.into(),
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .expect("dirty old-version SST should be picked for compaction");
@@ -3688,7 +4004,7 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
         .unwrap();
 
     let task = hummock_manager
-        .get_compact_task(cg_64, &mut *default_compaction_selector())
+        .get_compact_task(worker_id, cg_64, &mut *default_compaction_selector())
         .await
         .unwrap()
         .expect("should produce a compaction task");

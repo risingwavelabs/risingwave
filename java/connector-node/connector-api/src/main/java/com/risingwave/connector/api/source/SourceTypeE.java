@@ -22,7 +22,6 @@ public enum SourceTypeE {
     MYSQL,
     MARIADB,
     POSTGRES,
-    CITUS,
     MONGODB,
     SQL_SERVER,
     ORACLE,
@@ -36,8 +35,6 @@ public enum SourceTypeE {
                 return SourceTypeE.MARIADB;
             case POSTGRES:
                 return SourceTypeE.POSTGRES;
-            case CITUS:
-                return SourceTypeE.CITUS;
             case MONGODB:
                 return SourceTypeE.MONGODB;
             case SQL_SERVER:

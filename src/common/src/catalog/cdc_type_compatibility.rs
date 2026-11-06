@@ -33,16 +33,16 @@ pub fn cdc_source_column_type_compatible(
             char_max_length,
             is_unsigned,
         ),
-        PbCdcTableType::Sqlserver => {
+        PbCdcTableType::SqlServer => {
             sql_server_source_column_type_compatible(&upstream_type_name, rw_type_name)
         }
-        PbCdcTableType::Postgres | PbCdcTableType::Citus => postgres_source_column_type_compatible(
+        PbCdcTableType::Postgres => postgres_source_column_type_compatible(
             &upstream_type_name,
             rw_type_name,
             char_max_length,
             postgres_udt_name,
         ),
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => false,
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => false,
     }
 }
 
@@ -253,13 +253,11 @@ fn auto_schema_change_source_type_candidates(
         PbCdcTableType::Mysql | PbCdcTableType::Mariadb => {
             mysql_auto_schema_change_source_type_candidates(mapped_type)
         }
-        PbCdcTableType::Sqlserver => {
+        PbCdcTableType::SqlServer => {
             sql_server_auto_schema_change_source_type_candidates(mapped_type)
         }
-        PbCdcTableType::Postgres | PbCdcTableType::Citus => {
-            postgres_auto_schema_change_source_type_candidates(mapped_type)
-        }
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => vec![],
+        PbCdcTableType::Postgres => postgres_auto_schema_change_source_type_candidates(mapped_type),
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => vec![],
     }
 }
 
@@ -414,7 +412,7 @@ mod tests {
     #[test]
     fn test_sql_server_source_column_type_compatibility() {
         assert!(cdc_source_column_type_compatible(
-            PbCdcTableType::Sqlserver,
+            PbCdcTableType::SqlServer,
             "int",
             PbTypeName::Int64,
             None,
@@ -422,7 +420,7 @@ mod tests {
             None,
         ));
         assert!(cdc_source_column_type_compatible(
-            PbCdcTableType::Sqlserver,
+            PbCdcTableType::SqlServer,
             "real",
             PbTypeName::Double,
             None,
@@ -430,7 +428,7 @@ mod tests {
             None,
         ));
         assert!(!cdc_source_column_type_compatible(
-            PbCdcTableType::Sqlserver,
+            PbCdcTableType::SqlServer,
             "bigint",
             PbTypeName::Decimal,
             None,
@@ -477,18 +475,18 @@ mod tests {
     #[test]
     fn test_sql_server_cdc_auto_schema_change_existing_type_compatibility() {
         assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Sqlserver,
+            PbCdcTableType::SqlServer,
             &DataType::Int64,
             &DataType::Int32,
         ));
         assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Sqlserver,
+            PbCdcTableType::SqlServer,
             &DataType::Float32,
             &DataType::Float64,
         ));
 
         assert!(!cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Sqlserver,
+            PbCdcTableType::SqlServer,
             &DataType::Decimal,
             &DataType::Int64,
         ));
@@ -532,10 +530,10 @@ mod tests {
             (PbCdcTableType::Mysql, DataType::Float64),
             (PbCdcTableType::Postgres, DataType::Decimal),
             (PbCdcTableType::Postgres, DataType::Int32.list()),
-            (PbCdcTableType::Sqlserver, DataType::Int16),
-            (PbCdcTableType::Sqlserver, DataType::Int32),
-            (PbCdcTableType::Sqlserver, DataType::Float32),
-            (PbCdcTableType::Sqlserver, DataType::Float64),
+            (PbCdcTableType::SqlServer, DataType::Int16),
+            (PbCdcTableType::SqlServer, DataType::Int32),
+            (PbCdcTableType::SqlServer, DataType::Float32),
+            (PbCdcTableType::SqlServer, DataType::Float64),
         ];
 
         for (cdc_table_type, mapped_type) in cases {

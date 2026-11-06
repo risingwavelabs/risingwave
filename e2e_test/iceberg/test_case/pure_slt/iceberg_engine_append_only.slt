@@ -34,6 +34,47 @@ select * from t_realtime;
 ----
 1 pending
 
+# Unpinned reads must exclude the pending log store: a sink commit between planning and
+# execution could truncate it past the selected Iceberg snapshot.
+statement ok
+SET batch_read_latest_committed = true;
+
+statement ok
+SET query_mode = local;
+
+query IT
+SELECT * FROM t_realtime;
+----
+
+statement ok
+SET query_mode = distributed;
+
+query IT
+SELECT * FROM t_realtime;
+----
+
+statement ok
+SET batch_read_latest_committed TO DEFAULT;
+
+statement ok
+SET visibility_mode = all;
+
+query IT
+SELECT * FROM t_realtime;
+----
+
+statement ok
+SET visibility_mode TO DEFAULT;
+
+statement ok
+SET query_mode TO DEFAULT;
+
+# Frontend-pinned reads still include the pending row.
+query IT
+SELECT * FROM t_realtime;
+----
+1 pending
+
 statement ok
 DROP TABLE t_realtime;
 
@@ -182,7 +223,8 @@ select * from t_without_pk;
 ----
 xxx
 
-query ?
+# The scan above can read pending log-store rows before the first Iceberg snapshot exists.
+query ? retry 6 backoff 1s
 select count(_row_id) from t_without_pk;
 ----
 1

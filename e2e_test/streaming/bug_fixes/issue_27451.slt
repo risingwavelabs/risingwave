@@ -1,0 +1,74 @@
+# https://github.com/risingwavelabs/risingwave/issues/27451
+# TL;DR A grouped agg over an input with at most one row was simplified into a simple agg,
+# which outputs one row instead of zero rows on empty input.
+
+statement ok
+create materialized view m6 as select min(x) as col_0 from (values (1)) as v(x);
+
+statement ok
+create materialized view m16 as select col_0 from m6 where false group by col_0;
+
+query I
+select * from m16;
+----
+
+query I
+select col_0 from m6 where false group by col_0;
+----
+
+# Multiple group keys on a single-row input whose only row may be filtered out.
+statement ok
+create table t (v int);
+
+statement ok
+create materialized view m_single as select min(v) as a, max(v) as b from t;
+
+statement ok
+create materialized view m_grouped as
+select a, b, count(*) as cnt from m_single where a is not null group by a, b;
+
+query III
+select * from m_grouped;
+----
+
+# The same query in batch mode.
+query III
+select a, b, count(*) from m_single where a is not null group by a, b;
+----
+
+statement ok
+insert into t values (1), (3);
+
+statement ok
+flush;
+
+query III
+select * from m_grouped;
+----
+1 3 1
+
+statement ok
+delete from t;
+
+statement ok
+flush;
+
+query III
+select * from m_grouped;
+----
+
+# cleanup
+statement ok
+drop materialized view m_grouped;
+
+statement ok
+drop materialized view m_single;
+
+statement ok
+drop table t;
+
+statement ok
+drop materialized view m16;
+
+statement ok
+drop materialized view m6;

@@ -126,6 +126,22 @@ fn new_committed_epoch_subscriber(
 }
 
 impl SinkCoordinatorManager {
+    /// Let lifecycle tests control when coordinator stop requests complete.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> (Self, UnboundedReceiver<(Vec<JobId>, Notifier)>) {
+        let (request_tx, mut request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
+        let (stop_tx, stop_rx) = unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(request) = request_rx.recv().await {
+                let ManagerRequest::StopCoordinator { notifier, job_ids } = request else {
+                    panic!("expected a coordinator stop request");
+                };
+                stop_tx.send((job_ids, notifier)).unwrap();
+            }
+        });
+        (Self { request_tx }, stop_rx)
+    }
+
     pub fn start_worker(
         db: DatabaseConnection,
         hummock_manager: HummockManagerRef,

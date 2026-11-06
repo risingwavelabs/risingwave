@@ -68,7 +68,6 @@ public final class ValidatorUtils {
             case MARIADB:
                 return String.format("jdbc:mariadb://%s:%s/%s", host, port, database);
             case POSTGRES:
-            case CITUS:
                 return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
             case SQL_SERVER:
                 return String.format(

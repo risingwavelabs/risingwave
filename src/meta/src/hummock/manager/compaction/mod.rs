@@ -84,7 +84,6 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{HummockManager, commit_multi_var};
-use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,8 +344,10 @@ impl HummockManager {
             .await
     }
 
+    /// Selects tasks and records the worker that will receive each nontrivial task.
     pub async fn get_compact_tasks_impl(
         &self,
+        context_id: HummockContextId,
         compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut dyn CompactionSelector,
@@ -562,7 +563,7 @@ impl HummockManager {
                             compact_task.task_id,
                             CompactTaskAssignment {
                                 compact_task: compact_task.clone(),
-                                context_id: META_NODE_ID, // deprecated
+                                context_id,
                             },
                         );
 
@@ -730,6 +731,7 @@ impl HummockManager {
 
     async fn get_compact_tasks(
         &self,
+        context_id: HummockContextId,
         mut compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut dyn CompactionSelector,
@@ -739,7 +741,7 @@ impl HummockManager {
         )));
         compaction_groups.shuffle(&mut thread_rng());
         let (mut tasks, groups) = self
-            .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
+            .get_compact_tasks_impl(context_id, compaction_groups, max_select_count, selector)
             .await?;
         tasks.retain(|task| {
             if task.task_status == TaskStatus::Success {
@@ -754,6 +756,7 @@ impl HummockManager {
 
     pub async fn get_compact_task(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         selector: &mut dyn CompactionSelector,
     ) -> Result<Option<CompactTask>> {
@@ -762,7 +765,7 @@ impl HummockManager {
         )));
 
         let (normal_tasks, _) = self
-            .get_compact_tasks_impl(vec![compaction_group_id], 1, selector)
+            .get_compact_tasks_impl(context_id, vec![compaction_group_id], 1, selector)
             .await?;
         for task in normal_tasks {
             if task.task_status != TaskStatus::Success {
@@ -775,23 +778,29 @@ impl HummockManager {
 
     pub async fn manual_get_compact_task(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
         let (task, _) = self
-            .manual_get_compact_task_with_info(compaction_group_id, manual_compaction_option)
+            .manual_get_compact_task_with_info(
+                context_id,
+                compaction_group_id,
+                manual_compaction_option,
+            )
             .await?;
         Ok(task)
     }
 
     pub async fn manual_get_compact_task_with_info(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<(Option<CompactTask>, bool)> {
         let mut selector = ManualCompactionSelector::new(manual_compaction_option);
         let task = self
-            .get_compact_task(compaction_group_id, &mut selector)
+            .get_compact_task(context_id, compaction_group_id, &mut selector)
             .await?;
         if let Some(err) = selector.validation_error() {
             return Err(Error::InvalidManualCompactionOption(err.to_owned()));
@@ -833,13 +842,9 @@ impl HummockManager {
             .await
     }
 
-    /// Finishes or cancels a compaction task, according to `task_status`.
+    /// Finishes or cancels compaction tasks according to each report's `task_status`.
     ///
-    /// If `context_id` is not None, its validity will be checked when writing meta store.
-    /// Its ownership of the task is checked as well.
-    ///
-    /// Return Ok(false) indicates either the task is not found,
-    /// or the task is not owned by `context_id` when `context_id` is not None.
+    /// Returns one boolean per report, with `false` indicating that the task was not found.
     pub async fn report_compact_tasks_impl(
         &self,
         report_tasks: Vec<ReportTask>,
@@ -1102,7 +1107,11 @@ impl HummockManager {
 
         // 2. Get manual compaction task.
         let compact_task = self
-            .manual_get_compact_task_with_info(compaction_group, manual_compaction_option)
+            .manual_get_compact_task_with_info(
+                compactor.context_id(),
+                compaction_group,
+                manual_compaction_option,
+            )
             .await;
         let (compact_task, blocked_by_pending) = match compact_task {
             Ok((compact_task, blocked_by_pending)) => (compact_task, blocked_by_pending),

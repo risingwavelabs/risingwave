@@ -1,0 +1,64 @@
+# https://github.com/risingwavelabs/risingwave/issues/26654
+# A correlated ARRAY(SELECT ...) subquery must never emit a transient NULL in the change stream.
+# `flush` + `select` only observes the settled state, so capture the changes with a force-append-only sink.
+
+statement ok
+create table t1 (id int primary key);
+
+statement ok
+create table t2 (id int primary key, t1_id int, val varchar);
+
+statement ok
+create materialized view mv as
+select t1.id, array(select t2.val from t2 where t2.t1_id = t1.id) as arr from t1;
+
+statement ok
+create table cap (id int, arr varchar[]) append only;
+
+statement ok
+create sink s into cap from mv with (type = 'append-only', force_append_only = 'true');
+
+statement ok
+insert into t1 values (1);
+
+statement ok
+flush;
+
+statement ok
+insert into t2 values (10, 1, 'alpha');
+
+statement ok
+flush;
+
+statement ok
+delete from t2;
+
+statement ok
+flush;
+
+sleep 3s
+
+query I
+select count(*) from cap where arr is null;
+----
+0
+
+query IT
+select id, arr from mv;
+----
+1 {}
+
+statement ok
+drop sink s;
+
+statement ok
+drop table cap;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t1;
