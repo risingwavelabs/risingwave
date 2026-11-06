@@ -990,9 +990,23 @@ async fn query_column_engine_from_ck(
             .await
             .map_err(SinkError::from)
             .map_err(distributed_context)?;
-        let (database, table) =
-            distributed::parse_distributed_table(&engine.engine_full, &current_database)
+        let distributed::DistributedTable {
+            cluster,
+            mut database,
+            table,
+        } = distributed::parse_distributed_table(&engine.engine_full, &current_database)
+            .map_err(distributed_context)?;
+        if database.is_empty() {
+            let cluster_databases = client
+                .query("SELECT DISTINCT default_database FROM system.clusters WHERE cluster = ?")
+                .bind(&cluster)
+                .fetch_all::<String>()
+                .await
+                .map_err(SinkError::from)
                 .map_err(distributed_context)?;
+            database = distributed::resolve_default_database(&cluster, &cluster_databases)
+                .map_err(distributed_context)?;
+        }
         let inner_context = |err: SinkError| {
             distributed_context(SinkError::ClickHouse(format!(
                 "Underlying local table {database:?}.{table:?}: {}",
