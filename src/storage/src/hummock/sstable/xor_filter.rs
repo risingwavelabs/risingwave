@@ -689,7 +689,6 @@ mod tests {
         CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::sstable::block_filter::BLOCKED_FILTER_CHUNK_SIZE;
     use crate::hummock::sstable::{SstableBuilder, SstableBuilderOptions};
     use crate::hummock::test_utils::{TEST_KEYS_COUNT, test_user_key_of, test_value_of};
     use crate::hummock::value::HummockValue;
@@ -740,56 +739,6 @@ mod tests {
             &[&empty, &empty, &xor16_with_tail],
             &[&canonical_empty, &canonical_empty, &canonical_xor16],
         );
-    }
-
-    #[test]
-    fn test_blocked_filter_chunks() {
-        let small = Xor16FilterBuilder::build_from_xor16(&Xor16::from(&vec![42]));
-        let block_length = BLOCKED_FILTER_CHUNK_SIZE / 6 + 1;
-        let large = Xor16FilterBuilder::build_from_xor16(&Xor16 {
-            seed: 17,
-            block_length,
-            fingerprints: vec![0; block_length * 3].into_boxed_slice(),
-        });
-        assert!(large.len() > BLOCKED_FILTER_CHUNK_SIZE);
-        let block_filters = [&small, &large, &small];
-        let mut bytes = Vec::new();
-        for filter_bytes in block_filters {
-            bytes.put_u32_le(filter_bytes.len() as u32);
-            bytes.extend_from_slice(filter_bytes);
-        }
-        bytes.put_u32_le(block_filters.len() as u32);
-        bytes.push(FOOTER_BLOCKED_XOR16);
-        let metas: Vec<_> = (0..block_filters.len() as u64)
-            .map(|i| BlockMeta {
-                smallest_key: FullKey::for_test(0.into(), i.to_be_bytes(), test_epoch(1)).encode(),
-                ..Default::default()
-            })
-            .collect();
-        let borrowed = XorFilterReader::new(&bytes, &metas);
-        let XorFilter::BlockXor16(filter) = &borrowed.filter else {
-            unreachable!()
-        };
-        assert_eq!(filter.chunks().len(), 3);
-        let owned = XorFilterReader::from_owned(bytes.clone(), &metas);
-        // Compare codecs, clones and per-block queries for both storage routes.
-        for reader in [&borrowed, &owned] {
-            assert_eq!(reader.encode_to_bytes(), bytes);
-            assert_eq!(reader.serialized_len(), bytes.len());
-            assert_eq!(reader.clone().encode_to_bytes(), bytes);
-            for (index, filter_bytes) in block_filters.into_iter().enumerate() {
-                assert_eq!(reader.get_block_raw_filter(index), *filter_bytes);
-                let oracle = XorFilterReader::new(filter_bytes, &[]);
-                let key = FullKey::decode(&metas[index].smallest_key).user_key;
-                let point = (Bound::Included(key), Bound::Included(key));
-                for hash in 0..16 {
-                    assert_eq!(
-                        reader.may_match(&metas, &point, hash),
-                        oracle.may_match(&[], &(Bound::Unbounded, Bound::Unbounded), hash)
-                    );
-                }
-            }
-        }
     }
 
     #[test]
@@ -1068,24 +1017,15 @@ mod tests {
         let capacity = owned.capacity();
         let original = owned.as_ptr();
         let reader = XorFilterReader::from_owned(owned, &metas);
-        let chunk = match &reader.filter {
-            XorFilter::BlockXor8(filter) => &filter.chunks()[0],
-            XorFilter::BlockXor16(filter) => &filter.chunks()[0],
+        let buffer = match &reader.filter {
+            XorFilter::BlockXor8(filter) => filter.backing_buffer(),
+            XorFilter::BlockXor16(filter) => filter.backing_buffer(),
             _ => unreachable!(),
         };
-        assert_eq!(chunk.as_ptr(), original);
-        assert_eq!(chunk.capacity(), capacity);
+        assert_eq!(buffer.as_ptr(), original);
+        assert_eq!(buffer.capacity(), capacity);
 
         let borrowed = XorFilterReader::new(&bytes, &metas);
-        match &borrowed.filter {
-            XorFilter::BlockXor8(filter) => {
-                assert!(filter.chunks().iter().map(Vec::capacity).sum::<usize>() <= bytes.len());
-            }
-            XorFilter::BlockXor16(filter) => {
-                assert!(filter.chunks().iter().map(Vec::capacity).sum::<usize>() <= bytes.len());
-            }
-            _ => unreachable!(),
-        }
         for reader in [&reader, &borrowed] {
             assert_eq!(reader.serialized_len(), bytes.len());
             assert_eq!(reader.encode_to_bytes(), bytes);

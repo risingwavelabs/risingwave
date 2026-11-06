@@ -13,19 +13,17 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::{Bound, Range};
 
 use bytes::{Buf, BufMut};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use xorf::Filter;
 
 use super::BlockMeta;
 
-// Keep each block's filter contiguous while copying the SST filter in chunks.
-pub(super) const BLOCKED_FILTER_CHUNK_SIZE: usize = 1024 * 1024;
 pub(super) const BLOCKED_FILTER_ENTRY_LEN_PREFIX: usize = size_of::<u32>();
 pub(super) const BLOCKED_FILTER_FOOTER_LEN: usize = size_of::<u32>() + 1;
 
@@ -44,15 +42,9 @@ pub(super) trait BlockFilter: Clone {
 }
 
 #[derive(Clone)]
-struct BlockFilterLocation {
-    chunk: u32,
-    data: Range<u32>,
-}
-
-#[derive(Clone)]
 pub(super) struct BlockBasedFilter<F> {
-    filters: Vec<BlockFilterLocation>,
-    chunks: Vec<Vec<u8>>,
+    block_ranges: Vec<Range<u32>>,
+    bytes: Vec<u8>,
     encoded_len: usize,
     _filter: PhantomData<F>,
 }
@@ -63,59 +55,46 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
     /// The layout repeats `[filter length: u32 LE][filter bytes]`, followed by
     /// `[block count: u32 LE][blocked filter tag: u8]`.
     ///
-    /// Owned input is retained in chunk zero. Borrowed input is copied into
-    /// chunks that keep each block's filter in a single contiguous slice.
+    /// Owns only the filter bytes: the object-store path copies the borrowed
+    /// filter slice, while Foyer and the builder transfer their existing buffer.
     pub(super) fn decode(data: Cow<'_, [u8]>, metas: &[BlockMeta]) -> Self {
         assert_eq!(data.last(), Some(&F::BLOCKED_TAG));
-        let footer = data.len() - BLOCKED_FILTER_FOOTER_LEN;
-        let count = (&data[footer..]).get_u32_le() as usize;
-        assert_eq!(count, metas.len());
-        let owned = matches!(&data, Cow::Owned(_));
-        let mut chunks = Vec::new();
-        let mut reader = &data[..footer];
-        let mut filters = Vec::with_capacity(count);
+        let footer_start = data.len() - BLOCKED_FILTER_FOOTER_LEN;
+        let block_count = (&data[footer_start..]).get_u32_le() as usize;
+        assert_eq!(block_count, metas.len());
+
+        let bytes = data.into_owned();
+        let mut entries = &bytes[..footer_start];
+        let mut block_ranges = Vec::with_capacity(block_count);
         let mut encoded_len = BLOCKED_FILTER_FOOTER_LEN;
-        for _ in 0..count {
-            let len = reader.get_u32_le() as usize;
-            let offset = footer - reader.len();
-            let (filter_bytes, remaining) = reader.split_at(len);
-            reader = remaining;
+        for _ in 0..block_count {
+            let len = entries.get_u32_le();
+            let (filter_bytes, remaining) = entries.split_at(len as usize);
             F::validate(filter_bytes);
-            let (chunk, start) = if owned {
-                (0, offset)
-            } else {
-                append_filter_bytes(&mut chunks, filter_bytes, reader.len())
-            };
-            let end = u32::try_from(start + filter_bytes.len())
+
+            let end = u32::try_from(footer_start - remaining.len())
                 .expect("blocked filter data offset exceeds u32");
-            let start = u32::try_from(start).expect("blocked filter data offset exceeds u32");
+            block_ranges.push(end - len..end);
             encoded_len += BLOCKED_FILTER_ENTRY_LEN_PREFIX + F::serialized_len(filter_bytes);
-            filters.push(BlockFilterLocation {
-                chunk,
-                data: start..end,
-            });
+            entries = remaining;
         }
-        assert!(reader.is_empty(), "trailing blocked filter bytes");
-        if let Cow::Owned(data) = data {
-            chunks = vec![data];
-        }
+        assert!(entries.is_empty(), "trailing blocked filter bytes");
         Self {
-            filters,
-            chunks,
+            block_ranges,
+            bytes,
             encoded_len,
             _filter: PhantomData,
         }
     }
 
     #[inline]
-    fn filter_bytes(&self, location: &BlockFilterLocation) -> &[u8] {
-        let chunk = &self.chunks[location.chunk as usize];
-        &chunk[location.data.start as usize..location.data.end as usize]
+    fn filter_bytes(&self, range: &Range<u32>) -> &[u8] {
+        &self.bytes[range.start as usize..range.end as usize]
     }
 
     /// Encodes the filter for one data block, as used by fast compaction.
     pub(super) fn encode_block(&self, index: usize) -> Vec<u8> {
-        let data = self.filter_bytes(&self.filters[index]);
+        let data = self.filter_bytes(&self.block_ranges[index]);
         let mut out = Vec::with_capacity(F::serialized_len(data));
         F::encode(data, &mut out);
         out
@@ -127,12 +106,12 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
     /// normalize legacy filters before writing them.
     pub(super) fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.serialized_len());
-        for location in &self.filters {
-            let data = self.filter_bytes(location);
+        for range in &self.block_ranges {
+            let data = self.filter_bytes(range);
             out.put_u32_le(F::serialized_len(data) as u32);
             F::encode(data, &mut out);
         }
-        out.put_u32_le(self.filters.len() as u32);
+        out.put_u32_le(self.block_ranges.len() as u32);
         out.put_u8(F::BLOCKED_TAG);
         out
     }
@@ -142,18 +121,16 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
     }
 
     pub(super) fn estimated_heap_size(&self) -> usize {
-        self.filters.capacity() * size_of::<BlockFilterLocation>()
-            + self.chunks.capacity() * size_of::<Vec<u8>>()
-            + self.chunks.iter().map(Vec::capacity).sum::<usize>()
+        self.block_ranges.capacity() * size_of::<Range<u32>>() + self.bytes.capacity()
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.filters.is_empty()
+        self.block_ranges.is_empty()
     }
 
     #[cfg(test)]
-    pub(super) fn chunks(&self) -> &[Vec<u8>] {
-        &self.chunks
+    pub(super) fn backing_buffer(&self) -> &Vec<u8> {
+        &self.bytes
     }
 
     /// Checks the supplied hash against filters for the data blocks that may
@@ -165,69 +142,31 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         user_key_range: &UserKeyRangeRef<'_>,
         hash: u64,
     ) -> bool {
-        debug_assert_eq!(self.filters.len(), block_metas.len());
         // The lower bound can fall inside the block whose start key precedes it.
-        let mut block_idx = match user_key_range.0 {
+        let first_block = match user_key_range.0 {
             Bound::Unbounded => 0,
             Bound::Included(left) | Bound::Excluded(left) => block_metas
-                .partition_point(|block_meta| {
-                    let ord = FullKey::decode(&block_meta.smallest_key)
-                        .user_key
-                        .cmp(&left);
-                    ord == Ordering::Less || ord == Ordering::Equal
-                })
+                .partition_point(|meta| FullKey::decode(&meta.smallest_key).user_key <= left)
                 .saturating_sub(1),
         };
 
-        while block_idx < self.filters.len() {
-            let read_bound = match user_key_range.1 {
+        for (meta, range) in block_metas
+            .iter()
+            .zip_eq_fast(&self.block_ranges)
+            .skip(first_block)
+        {
+            let past_end = match user_key_range.1 {
                 Bound::Unbounded => false,
-                Bound::Included(right) => {
-                    let ord = FullKey::decode(&block_metas[block_idx].smallest_key)
-                        .user_key
-                        .cmp(&right);
-                    ord == Ordering::Greater
-                }
-                Bound::Excluded(right) => {
-                    let ord = FullKey::decode(&block_metas[block_idx].smallest_key)
-                        .user_key
-                        .cmp(&right);
-                    ord != Ordering::Less
-                }
+                Bound::Included(right) => FullKey::decode(&meta.smallest_key).user_key > right,
+                Bound::Excluded(right) => FullKey::decode(&meta.smallest_key).user_key >= right,
             };
-            if read_bound {
+            if past_end {
                 break;
             }
-            let location = &self.filters[block_idx];
-            if F::reader(self.filter_bytes(location)).contains(&hash) {
+            if F::reader(self.filter_bytes(range)).contains(&hash) {
                 return true;
             }
-            block_idx += 1;
         }
         false
     }
-}
-
-/// Copies one block's filter and returns its chunk index and starting offset.
-#[inline(always)]
-fn append_filter_bytes(
-    chunks: &mut Vec<Vec<u8>>,
-    filter_bytes: &[u8],
-    remaining_input_bytes: usize,
-) -> (u32, usize) {
-    if chunks
-        .last()
-        .is_none_or(|chunk| chunk.capacity() - chunk.len() < filter_bytes.len())
-    {
-        // Cap the reservation by the input left to copy and keep large filters contiguous.
-        let capacity = BLOCKED_FILTER_CHUNK_SIZE
-            .min(filter_bytes.len() + remaining_input_bytes)
-            .max(filter_bytes.len());
-        chunks.push(Vec::with_capacity(capacity));
-    }
-    let index = u32::try_from(chunks.len() - 1).unwrap();
-    let chunk = chunks.last_mut().unwrap();
-    let start = chunk.len();
-    chunk.extend_from_slice(filter_bytes);
-    (index, start)
 }
