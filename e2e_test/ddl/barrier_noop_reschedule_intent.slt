@@ -1,0 +1,64 @@
+# Regression test for https://github.com/risingwavelabs/risingwave/issues/27838.
+#
+# A no-op `RescheduleIntent`, e.g. `ALTER TABLE ... SET PARALLELISM` to the current value, is
+# discarded without injecting a barrier. It must not reset the database's periodic barrier timer.
+# Otherwise a steady stream of such intents arriving faster than the barrier interval postpones
+# the periodic barrier forever, and nothing is ever checkpointed.
+#
+# Covers:
+# - a due periodic tick survives a no-op intent;
+# - repeated no-op intents, issued faster than the barrier interval, do not starve the timer;
+# - a real reschedule still injects a barrier and the timer keeps running afterwards.
+#
+# The test runs in its own database with a 1s barrier interval, so the SQL goes through `psql`
+# instead of the SLT session, which is bound to the `dev` database. A row inserted without
+# `FLUSH` becomes visible only after a checkpoint barrier. While no-op intents are issued every
+# 0.25s, the periodic barrier must still fire and make the row visible.
+
+statement ok
+create database db_noop_reschedule_intent with barrier_interval_ms = 1000;
+
+# The two extra same-value alters warm up the no-op path, so that a slow first alter on a cold
+# cluster cannot leave a gap longer than the barrier interval once the loop below starts.
+skipif madsim
+system ok
+psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d db_noop_reschedule_intent -v ON_ERROR_STOP=1 -c "create table t (v int);" -c "alter table t set parallelism = 1;" -c "alter table t set parallelism = 1;" -c "alter table t set parallelism = 1;"
+
+skipif madsim
+system ok
+psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d db_noop_reschedule_intent -v ON_ERROR_STOP=1 -c "insert into t values (1);"
+
+# Each check runs right after a no-op intent; the background sleep only paces the iterations.
+# Nothing here injects a barrier, so the row can only become visible through the periodic timer
+# firing in between the intents.
+skipif madsim
+system ok
+bash -c 'set -euo pipefail
+rw="psql -h $SLT_HOST -p $SLT_PORT -U root -d db_noop_reschedule_intent -v ON_ERROR_STOP=1 -Atq"
+for _ in $(seq 1 8); do
+  sleep 0.25 &
+  $rw -c "alter table t set parallelism = 1;" >/dev/null
+  if [ "$($rw -c "select count(*) from t;")" = "1" ]; then exit 0; fi
+  wait
+done
+exit 1'
+
+# A real reschedule still injects a barrier, and the periodic timer keeps running after it.
+skipif madsim
+system ok
+psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d db_noop_reschedule_intent -v ON_ERROR_STOP=1 -c "alter table t set parallelism = 2;" -c "insert into t values (2);"
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail
+rw="psql -h $SLT_HOST -p $SLT_PORT -U root -d db_noop_reschedule_intent -v ON_ERROR_STOP=1 -Atq"
+[ "$($rw -c "select parallelism from rw_table_fragments f join rw_tables t on f.table_id = t.id where t.name = '"'"'t'"'"';")" = "2" ]
+for _ in $(seq 1 8); do
+  sleep 0.25 &
+  if [ "$($rw -c "select count(*) from t;")" = "2" ]; then exit 0; fi
+  wait
+done
+exit 1'
+
+statement ok
+drop database db_noop_reschedule_intent;
