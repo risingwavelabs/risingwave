@@ -318,7 +318,8 @@ impl SstableStore {
             .with_shards(1)
             .with_weighter(
                 |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
-                    u64::BITS as usize / 8 + value.estimate_size()
+                    std::mem::size_of::<HummockSstableObjectId>()
+                        + value.estimated_meta_cache_memory_weight()
                 },
             )
             .storage()

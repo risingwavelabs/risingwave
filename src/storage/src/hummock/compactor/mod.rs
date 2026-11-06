@@ -87,8 +87,8 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockError, HummockErrorInner, HummockResult, ObjectIdManager,
-    SstableBuilderOptions, Xor8FilterBuilder, Xor16FilterBuilder,
+    GetObjectId, HummockError, HummockResult, ObjectIdManager, SstableBuilderOptions,
+    Xor8FilterBuilder, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,

@@ -856,5 +856,12 @@ mod tests {
         );
 
         assert!(optimize_by_copy_block(&compact_task, &context));
+
+        // Mixed legacy XOR16 and newly written XOR8 inputs must rebuild their filters.
+        let mut compact_task = compact_task;
+        let mut legacy_input = compact_task.input_ssts[0].table_infos[0].get_inner();
+        legacy_input.filter_type = PbSstableFilterType::SstableFilterXor16;
+        compact_task.input_ssts[0].table_infos[0] = legacy_input.into();
+        assert!(!optimize_by_copy_block(&compact_task, &context));
     }
 }

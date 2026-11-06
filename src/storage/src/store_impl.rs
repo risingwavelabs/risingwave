@@ -804,7 +804,8 @@ impl StateStoreImpl {
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
                 .with_weighter(
                     |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
-                        u64::BITS as usize / 8 + value.estimate_size()
+                        std::mem::size_of::<HummockSstableObjectId>()
+                            + value.estimated_meta_cache_memory_weight()
                     },
                 )
                 .storage();

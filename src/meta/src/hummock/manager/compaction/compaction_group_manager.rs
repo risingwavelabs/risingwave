@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::meta::default::compaction_config as default_compaction_config;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;

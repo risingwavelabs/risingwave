@@ -233,13 +233,13 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        #[clap(long)]
+        vnode_aligned_level_size_threshold: Option<u64>,
         /// KV-count threshold for using blocked xor filters when output layout is "auto".
         ///
         /// Note: shared-buffer flush does not read compaction group config, so this setting only
         /// applies to compaction tasks.
-        #[clap(long)]
-        vnode_aligned_level_size_threshold: Option<u64>,
-        #[clap(long)]
+        #[clap(long, alias = "max-kv-count-for-xor16")]
         blocked_xor_filter_kv_count_threshold: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.

@@ -18,7 +18,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
-use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor16};
@@ -127,12 +126,10 @@ fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_siz
     PLAIN_XOR_FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
 }
 
-#[cfg(test)]
 fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len()
 }
 
-#[cfg(test)]
 fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
 }
@@ -607,35 +604,6 @@ impl XorFilterReader {
         BlockBasedXor16Filter { filters }
     }
 
-    /// Returns the exact encoded length, including filter headers and footers.
-    pub(super) fn serialized_len(&self) -> usize {
-        const PLAIN_FILTER_FIXED_LEN: usize = 8 + 4 + 1;
-        match &self.filter {
-            XorFilter::Xor8(filter) => PLAIN_FILTER_FIXED_LEN + filter.fingerprints.len(),
-            XorFilter::Xor16(filter) => {
-                PLAIN_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
-            }
-            XorFilter::BlockXor8(reader) => {
-                5 + reader
-                    .filters
-                    .iter()
-                    .map(|filter| 4 + PLAIN_FILTER_FIXED_LEN + filter.fingerprints.len())
-                    .sum::<usize>()
-            }
-            XorFilter::BlockXor16(reader) => {
-                4 + 1
-                    + reader
-                        .filters
-                        .iter()
-                        .map(|filter| {
-                            4 + PLAIN_FILTER_FIXED_LEN
-                                + filter.fingerprints.len() * std::mem::size_of::<u16>()
-                        })
-                        .sum::<usize>()
-            }
-        }
-    }
-
     fn to_block_xor8(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor8Filter {
         let l = data.len();
         let reader = &mut &data[(l - 5)..];
@@ -656,8 +624,7 @@ impl XorFilterReader {
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
     /// footprint of the decoded reader.
-    #[cfg(test)]
-    fn serialized_len(&self) -> usize {
+    pub(super) fn serialized_len(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),

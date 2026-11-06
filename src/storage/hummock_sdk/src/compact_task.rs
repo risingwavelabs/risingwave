@@ -232,7 +232,7 @@ impl CompactTask {
     /// Resolves the physical filter layout for one output SST.
     ///
     /// The caller should pass an output-SST-level key-count estimate. This differs from the legacy
-    /// task-level check below: a large compaction task can produce many small output SSTs, and those
+    /// task-level check: a large compaction task can produce many small output SSTs, and those
     /// outputs should be allowed to use plain filters when each output is below the threshold.
     pub fn sstable_filter_layout_for_output(
         &self,

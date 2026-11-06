@@ -1165,7 +1165,6 @@ message CompactionConfig {
   // Keep the historical protobuf field name for wire and JSON compatibility.
   optional uint64 max_kv_count_for_xor16 = 32;
 
-
   // The SST filter type to use for each output level (for compaction tasks).
   //
   // Supported values: "none", "xor16", "xor8".
