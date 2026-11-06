@@ -55,7 +55,6 @@ pub struct BenchmarkConfig {
     /// Per-basic-phase cap, including failed attempts. Data preparation is separate.
     pub basic_max_operations: usize,
     pub block_size: usize,
-    pub consume_size: usize,
     pub pause_ms: u64,
     pub jitter_ms: u64,
     pub long_pause_every: usize,
@@ -85,8 +84,7 @@ impl Default for BenchmarkConfig {
             basic_duration_ms: 30_000,
             basic_max_operations: 10_000,
             block_size: 64 << 10,
-            consume_size: 256 << 10,
-            pause_ms: 10,
+            pause_ms: 10_000,
             jitter_ms: 0,
             long_pause_every: 0,
             long_pause_ms: 1000,
@@ -160,10 +158,6 @@ impl BenchmarkConfig {
         ensure!(
             self.block_size > 0 && self.block_size <= self.object_size,
             "block_size must fit in object_size"
-        );
-        ensure!(
-            self.consume_size > 0 && self.consume_size <= self.object_size,
-            "consume_size must fit in object_size"
         );
         ensure!(
             self.short_get_size > 0 && self.short_get_size <= self.object_size,
@@ -285,8 +279,8 @@ pub(super) struct Sample {
     items: u64,
     pause: Duration,
     first_data: Timings,
-    consume: Timings,
-    resume: Timings,
+    first_poll: Timings,
+    resume_poll: Timings,
     max_stream_chunk: usize,
 }
 
@@ -328,8 +322,8 @@ pub(super) struct Accumulator {
     latency: Timings,
     failed_latency: Timings,
     first_data: Timings,
-    consume: Timings,
-    resume: Timings,
+    first_poll: Timings,
+    resume_poll: Timings,
     max_stream_chunk: usize,
     errors: Vec<String>,
 }
@@ -349,8 +343,8 @@ impl Accumulator {
         self.items += outcome.sample.items;
         self.pause += outcome.sample.pause;
         self.first_data.merge(&outcome.sample.first_data);
-        self.consume.merge(&outcome.sample.consume);
-        self.resume.merge(&outcome.sample.resume);
+        self.first_poll.merge(&outcome.sample.first_poll);
+        self.resume_poll.merge(&outcome.sample.resume_poll);
         self.max_stream_chunk = self.max_stream_chunk.max(outcome.sample.max_stream_chunk);
         if outcome.interrupted {
             self.interrupted += 1;
@@ -375,8 +369,8 @@ impl Accumulator {
         self.latency.merge(&other.latency);
         self.failed_latency.merge(&other.failed_latency);
         self.first_data.merge(&other.first_data);
-        self.consume.merge(&other.consume);
-        self.resume.merge(&other.resume);
+        self.first_poll.merge(&other.first_poll);
+        self.resume_poll.merge(&other.resume_poll);
         self.max_stream_chunk = self.max_stream_chunk.max(other.max_stream_chunk);
         self.errors
             .extend(other.errors.into_iter().take(8 - self.errors.len()));
@@ -447,8 +441,8 @@ impl Accumulator {
             latency: self.latency.summary(),
             failed_latency: self.failed_latency.summary(),
             first_data: self.first_data.summary(),
-            consume: self.consume.summary(),
-            resume_first_data: self.resume.summary(),
+            first_poll: self.first_poll.summary(),
+            resume_poll: self.resume_poll.summary(),
             max_stream_chunk_bytes: self.max_stream_chunk,
             interference: None,
             errors: self.errors,
@@ -530,9 +524,13 @@ pub struct PhaseReport {
     /// Successful logical operations only; includes intentional pauses.
     pub latency: Option<Distribution>,
     pub failed_latency: Option<Distribution>,
+    /// Stream initialization through receipt of the first complete nonempty chunk.
     pub first_data: Option<Distribution>,
-    pub consume: Option<Distribution>,
-    pub resume_first_data: Option<Distribution>,
+    /// First next-chunk await, excluding explicit stream opening; may include lazy initialization.
+    pub first_poll: Option<Distribution>,
+    /// Subsequent next-chunk awaits, excluding the first item, pauses and EOF.
+    /// In continuous mode these are subsequent reads without a pause.
+    pub resume_poll: Option<Distribution>,
     pub max_stream_chunk_bytes: usize,
     pub interference: Option<InterferenceCohort>,
     pub errors: Vec<String>,
@@ -618,7 +616,11 @@ pub fn terminal_summary(report: &BenchmarkReport) -> String {
             )
             .unwrap();
         }
-        if phase.first_data.is_some() || phase.consume.is_some() || phase.active_pause_ms > 0.0 {
+        if phase.first_data.is_some()
+            || phase.first_poll.is_some()
+            || phase.resume_poll.is_some()
+            || phase.active_pause_ms > 0.0
+        {
             writeln!(
                 text,
                 "  active pause across readers={:.1} ms",
@@ -627,8 +629,8 @@ pub fn terminal_summary(report: &BenchmarkReport) -> String {
             .unwrap();
             for (name, timing) in [
                 ("first_data", &phase.first_data),
-                ("consume", &phase.consume),
-                ("resume_first_data", &phase.resume_first_data),
+                ("first_poll", &phase.first_poll),
+                ("resume_poll", &phase.resume_poll),
             ] {
                 if let Some(d) = timing {
                     writeln!(
@@ -1055,8 +1057,8 @@ pub async fn run(
         }
     }
     Ok(BenchmarkReport {
-        schema_version: 3,
-        profile_version: 3,
+        schema_version: 5,
+        profile_version: 5,
         prefix,
         planned_dataset_bytes: (config.objects * config.object_size) as u64 + metadata_keys.len() as u64 * 4096,
         config: (*config).clone(),
@@ -1074,6 +1076,7 @@ pub async fn run(
             "Cleanup deletes known keys; failed/cancelled multipart uploads may require server lifecycle cleanup.".into(),
             "Cache state is uncontrolled. Read order is recorded; intentional pauses are included in end-to-end latency.".into(),
             "Interference cohorts rotate disjoint object pools and reset deterministic request sequences for each comparison. Pool bytes are eligible capacity, not unique bytes read; requested object counts include readiness. Worker-seconds measure lifetimes within the observation window, not time spent in I/O. A worker failure invalidates both sides of a comparison.".into(),
+            "Compactor reads consume whole stream chunks and pause between them; chunk sizes are transport-dependent (short_get_size in chunked mode). first_poll measures the first next-chunk await (possibly lazy initialization); resume_poll measures subsequent next-chunk awaits, excluding pauses and EOF (continuous mode has no pause). Both may complete from HTTP/TCP buffers; it is not network-only latency. Readiness consumes and excludes one whole chunk before the interference window.".into(),
             "No automatic performance pass/fail or server-side backpressure claim is made.".into(),
         ],
     })

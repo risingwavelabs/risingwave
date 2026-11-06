@@ -65,16 +65,13 @@ pub struct ObjectStoreArgs {
     /// Basic random block GET size (default: 64KiB).
     #[arg(long, value_parser = parse_size)]
     pub block_size: Option<usize>,
-    /// Application consumption unit, independent of GET size (default: 256KiB).
-    #[arg(long, value_parser = parse_size)]
-    pub consume_size: Option<usize>,
-    /// Pause after each nonfinal consumption unit (default: 10 ms).
+    /// Pause after each nonfinal stream chunk (default: 10000 ms / 10 s).
     #[arg(long)]
     pub pause_ms: Option<u64>,
     /// Add deterministic jitter in 0..=N milliseconds (default: 0).
     #[arg(long)]
     pub jitter_ms: Option<u64>,
-    /// Add a long pause every N consumption units; 0 disables it (default: 0).
+    /// Add a long pause every N stream chunks; 0 disables it (default: 0).
     #[arg(long)]
     pub long_pause_every: Option<usize>,
     /// Additional long-pause duration (default: 1000 ms).
@@ -221,7 +218,6 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         basic_duration_ms,
         basic_max_operations,
         block_size,
-        consume_size,
         pause_ms,
         jitter_ms,
         long_pause_every,

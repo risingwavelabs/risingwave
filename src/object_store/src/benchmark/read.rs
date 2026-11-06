@@ -15,17 +15,15 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::ops::Range;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::ensure;
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use thiserror_ext::AsReport;
-use tokio::io::AsyncReadExt;
 use tokio::sync::Barrier;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
@@ -33,7 +31,7 @@ use tokio::time::Instant;
 use super::{
     Accumulator, BenchmarkConfig, InterferenceCohort, Outcome, PhaseReport, ReadMode, Sample,
 };
-use crate::object::{ObjectDataStream, ObjectDataStreamReader, ObjectError, ObjectStoreImpl};
+use crate::object::{ObjectDataStream, ObjectError, ObjectStoreImpl};
 
 // Stable deterministic mixing for offsets/jitter; not a cryptographic generator.
 pub(super) fn offset(seed: u64, index: usize, maximum: usize) -> usize {
@@ -78,7 +76,7 @@ async fn short_gets(
     }
 }
 
-/// B is independent of SDK stream chunks. No background body-draining task is created.
+/// Consume whole SDK stream chunks without an AsyncRead adapter or background draining task.
 pub(super) async fn read_object(
     store: Arc<ObjectStoreImpl>,
     key: String,
@@ -129,6 +127,41 @@ async fn read_request(
     read_response(response, &request, &config, &token).await
 }
 
+// Consume the complete item returned by the stream. In particular, do not retain
+// a partially consumed Bytes in an AsyncRead adapter across a pause. An await can
+// still complete immediately when the HTTP transport or kernel has buffered data.
+async fn next_chunk(
+    stream: &mut ObjectDataStream,
+    sample: &mut Sample,
+    first_poll: bool,
+    token: &CancellationToken,
+) -> anyhow::Result<Option<usize>> {
+    let started = Instant::now();
+    loop {
+        let next = tokio::select! {
+            biased;
+            _ = token.cancelled() => return Err(Interrupted.into()),
+            next = stream.next() => next.transpose()?,
+        };
+        let Some(bytes) = next else {
+            return Ok(None);
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        let size = bytes.len();
+        sample.bytes += size as u64;
+        sample.max_stream_chunk = sample.max_stream_chunk.max(size);
+        if first_poll {
+            sample.first_poll.record(started.elapsed());
+        } else {
+            sample.resume_poll.record(started.elapsed());
+        }
+        // Drop the entire item before pausing or polling the stream again.
+        return Ok(Some(size));
+    }
+}
+
 async fn read_response(
     response: impl Future<Output = Result<ObjectDataStream, ObjectError>>,
     request: &Request,
@@ -136,36 +169,27 @@ async fn read_response(
     token: &CancellationToken,
 ) -> Outcome {
     let mut sample = Sample::default();
-    let chunk_size = Arc::new(AtomicUsize::new(0));
-    let max_chunk = chunk_size.clone();
     let first_started = Instant::now();
     let mut measured_started = None;
-    // Initialization may be lazy. First-data timing includes stream creation and the
-    // first nonempty read, not just the return of streaming_read().
+    // Initialization may be lazy. First-data timing includes opening the stream
+    // and receiving its first whole chunk, with no separate one-byte probe.
     let initialized = async {
-        let stream = tokio::select! {
+        let mut stream = tokio::select! {
             biased;
             _ = token.cancelled() => return Err(Interrupted.into()),
             result = response => result?,
         };
-        let stream = stream.inspect_ok(move |bytes| {
-            max_chunk.fetch_max(bytes.len(), Ordering::Relaxed);
-        });
-        let mut reader = ObjectDataStreamReader::new(stream);
-        let mut first = [0];
-        tokio::select! {
-            biased;
-            _ = token.cancelled() => return Err(Interrupted.into()),
-            result = reader.read_exact(&mut first) => { result?; }
-        }
-        Ok::<_, anyhow::Error>(reader)
+        let size = next_chunk(&mut stream, &mut sample, true, token).await?;
+        let size = size.ok_or_else(|| anyhow::anyhow!("unexpected EOF before first chunk"))?;
+        ensure!(
+            size <= request.length,
+            "GET returned more bytes than the requested range"
+        );
+        sample.first_data.record(first_started.elapsed());
+        Ok::<_, anyhow::Error>((stream, request.length - size))
     }
     .await;
 
-    if initialized.is_ok() {
-        sample.bytes = 1;
-        sample.first_data.record(first_started.elapsed());
-    }
     if let Some((barrier, start)) = &request.ready {
         // Even an initialization error joins readiness, so peers cannot deadlock.
         tokio::select! {
@@ -176,65 +200,24 @@ async fn read_response(
             tokio::task::yield_now().await;
         }
         measured_started = start.get().copied();
-        // The byte used for readiness was received before the observation window.
+        // The entire readiness chunk was consumed before the observation window.
         sample.bytes = 0;
         sample.first_data = Default::default();
+        sample.first_poll = Default::default();
+        sample.resume_poll = Default::default();
     }
 
     let result = async {
-        let mut reader = initialized?;
-        let mut remaining = request.length - 1;
-        let mut buffer = vec![0; config.consume_size];
-        let mut unit = 0;
-        let mut first_unit = true;
-        let mut resumed = false;
+        let (mut stream, mut remaining) = initialized?;
+        let mut chunks = 1;
         while remaining > 0 {
-            let size = if first_unit {
-                (config.consume_size - 1).min(remaining)
-            } else {
-                config.consume_size.min(remaining)
-            };
-            first_unit = false;
-            if size > 0 {
-                let started = Instant::now();
-                // Read a byte separately to distinguish resumption from time to
-                // accumulate the complete consumption unit.
-                tokio::select! {
-                    biased;
-                    _ = token.cancelled() => return Err(Interrupted.into()),
-                    result = reader.read_exact(&mut buffer[..1]) => { result?; }
-                }
-                sample.bytes += 1;
-                remaining -= 1;
-                if resumed {
-                    sample.resume.record(started.elapsed());
-                }
-                let mut filled = 1;
-                // Preserve partial progress if a later read fails or is cancelled.
-                while filled < size {
-                    let n = tokio::select! {
-                        biased;
-                        _ = token.cancelled() => return Err(Interrupted.into()),
-                        result = reader.read(&mut buffer[filled..size]) => result?,
-                    };
-                    ensure!(n > 0, "unexpected EOF with {remaining} bytes remaining");
-                    sample.bytes += n as u64;
-                    remaining -= n;
-                    filled += n;
-                }
-                sample.consume.record(started.elapsed());
-            }
-            unit += 1;
-            if remaining == 0 {
-                break;
-            }
             if request.mode != ReadMode::Continuous {
                 let jitter = offset(
                     config.seed ^ request.reader_id as u64,
-                    unit,
+                    chunks,
                     config.jitter_ms as usize,
                 ) as u64;
-                let long = if config.long_pause_every > 0 && unit % config.long_pause_every == 0 {
+                let long = if config.long_pause_every > 0 && chunks % config.long_pause_every == 0 {
                     config.long_pause_ms
                 } else {
                     0
@@ -251,25 +234,30 @@ async fn read_response(
                         _ = tokio::time::sleep(pause) => {},
                     }
                     sample.pause += started.elapsed();
-                    resumed = true;
-                } else {
-                    resumed = false;
                 }
             }
+            let size = next_chunk(&mut stream, &mut sample, false, token).await?;
+            let size = size.ok_or_else(|| {
+                anyhow::anyhow!("unexpected EOF with {remaining} bytes remaining")
+            })?;
+            ensure!(
+                size <= remaining,
+                "GET returned more bytes than the requested range"
+            );
+            remaining -= size;
+            chunks += 1;
         }
-        // Known-length reads still check EOF: extra bytes invalidate the range.
-        let mut byte = [0];
-        let n = tokio::select! {
-            biased;
-            _ = token.cancelled() => return Err(Interrupted.into()),
-            result = reader.read(&mut byte) => result?,
-        };
-        ensure!(n == 0, "GET returned more bytes than the requested range");
+        // Check EOF without a byte probe or an additional pause.
+        ensure!(
+            next_chunk(&mut stream, &mut sample, false, token)
+                .await?
+                .is_none(),
+            "GET returned more bytes than the requested range"
+        );
         sample.items = 1;
         Ok::<_, anyhow::Error>(())
     }
     .await;
-    sample.max_stream_chunk = chunk_size.load(Ordering::Relaxed);
     let interrupted = result.as_ref().is_err_and(|e| e.is::<Interrupted>());
     Outcome {
         sample,
@@ -632,6 +620,78 @@ mod tests {
         assert_eq!(stats.failed_latency.summary().unwrap().samples, 1);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn readiness_excludes_the_whole_first_chunk() {
+        let barrier = Arc::new(Barrier::new(2));
+        let clock = Arc::new(OnceLock::new());
+        let ready = barrier.clone();
+        let start = clock.clone();
+        let coordinator = tokio::spawn(async move {
+            ready.wait().await;
+            start.set(Instant::now()).unwrap();
+        });
+        let stream = futures::stream::iter([
+            Ok(Bytes::from_static(b"0123")),
+            Ok(Bytes::from_static(b"456789")),
+        ])
+        .boxed();
+        let outcome = read_response(
+            async { Ok(stream) },
+            &Request {
+                key: "object".into(),
+                start: 0,
+                length: 10,
+                mode: ReadMode::Intermittent,
+                reader_id: 0,
+                ready: Some((barrier, clock)),
+            },
+            &BenchmarkConfig {
+                pause_ms: 10,
+                ..Default::default()
+            },
+            &CancellationToken::new(),
+        )
+        .await;
+        coordinator.await.unwrap();
+        assert!(outcome.error.is_none());
+        assert_eq!(outcome.sample.bytes, 6);
+        assert_eq!(outcome.sample.items, 1);
+        assert!(outcome.sample.first_data.summary().is_none());
+        assert!(outcome.sample.first_poll.summary().is_none());
+        assert_eq!(outcome.sample.resume_poll.summary().unwrap().samples, 1);
+        assert_eq!(outcome.sample.pause, Duration::from_millis(10));
+    }
+
+    #[tokio::test]
+    async fn whole_chunk_reads_reject_truncated_and_oversized_bodies() {
+        // Exercise early EOF, an oversized first/last chunk and extra data after
+        // the requested length. No byte adapter may hide an oversized tail.
+        for sizes in [vec![4], vec![11], vec![4, 7], vec![10, 1]] {
+            let total: usize = sizes.iter().sum();
+            let stream =
+                futures::stream::iter(sizes.into_iter().map(|size| Ok(Bytes::from(vec![0; size]))))
+                    .boxed();
+            let outcome = read_response(
+                async { Ok(stream) },
+                &Request {
+                    key: "object".into(),
+                    start: 0,
+                    length: 10,
+                    mode: ReadMode::Continuous,
+                    reader_id: 0,
+                    ready: None,
+                },
+                &BenchmarkConfig::default(),
+                &CancellationToken::new(),
+            )
+            .await;
+            assert!(outcome.error.is_some());
+            assert!(!outcome.interrupted);
+            assert_eq!(outcome.sample.items, 0);
+            assert_eq!(outcome.sample.bytes, total as u64);
+        }
+    }
+
     #[test]
     fn rotating_sequences_cover_disjoint_pools_and_reset_reproducibly() {
         let mut config = BenchmarkConfig {
@@ -685,24 +745,29 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn buffered_resume_byte_does_not_hide_a_delayed_consumption_unit() {
+    #[tokio::test(start_paused = true)]
+    async fn whole_chunks_are_consumed_before_pausing_and_polling_again() {
         let config = BenchmarkConfig {
             object_size: 10,
-            consume_size: 3,
             pause_ms: 10,
             ..Default::default()
         };
-        // The first chunk covers the first unit AND the next unit's first byte.
-        // Only polling for the rest of the second unit starts the body delay.
-        let stream = futures::stream::once(async { Ok(Bytes::from_static(b"0123")) })
-            .chain(futures::stream::once(async {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                Ok(Bytes::from_static(b"456789"))
-            }))
-            .boxed();
+        // The first four bytes must be consumed together. The next measured
+        // await polls the delayed stream item, with no buffered tail to return.
+        let stream = futures::stream::once(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Ok(Bytes::from_static(b"0123"))
+        })
+        .chain(futures::stream::once(async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(Bytes::from_static(b"456789"))
+        }))
+        .boxed();
         let outcome = read_response(
-            async { Ok(stream) },
+            async {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                Ok(stream)
+            },
             &Request {
                 key: "object".into(),
                 start: 0,
@@ -718,20 +783,23 @@ mod tests {
         assert!(outcome.error.is_none());
         assert_eq!(outcome.sample.bytes, 10);
         let first = outcome.sample.first_data.summary().unwrap();
-        let resume = outcome.sample.resume.summary().unwrap();
-        let consume = outcome.sample.consume.summary().unwrap();
-        assert!(consume.max_ms >= 100.0);
-        assert!(first.max_ms < consume.max_ms);
-        assert!(resume.max_ms < consume.max_ms);
-        assert_eq!(consume.samples, 4);
+        let resume_poll = outcome.sample.resume_poll.summary().unwrap();
+        assert!((resume_poll.max_ms - 100.0).abs() < 0.1);
+        let first_poll = outcome.sample.first_poll.summary().unwrap();
+        assert_eq!(first_poll.samples, 1);
+        assert!((first_poll.max_ms - 20.0).abs() < 0.1);
+        assert!((first.max_ms - 50.0).abs() < 0.1);
+        assert!(first.max_ms < resume_poll.max_ms);
+        assert_eq!(resume_poll.samples, 1);
+        assert_eq!(outcome.sample.max_stream_chunk, 6);
         let pause_ms = outcome.sample.pause.as_secs_f64() * 1000.0;
-        assert!(pause_ms >= 30.0);
+        assert_eq!(pause_ms, 10.0);
 
         let mut stats = Accumulator::default();
         stats.add(outcome, Duration::from_millis(130));
         let report = super::super::BenchmarkReport {
-            schema_version: 3,
-            profile_version: 3,
+            schema_version: 5,
+            profile_version: 5,
             prefix: "test/".into(),
             config,
             planned_dataset_bytes: 10,
@@ -749,9 +817,9 @@ mod tests {
         };
         let summary = super::super::terminal_summary(&report);
         assert!(summary.contains("first_data: n=1; p95="));
-        assert!(summary.contains("resume_first_data: n=3; p95="));
-        assert!(summary.contains("consume: n=4; p95="));
-        assert!(summary.contains(&format!("max={:.2} ms", consume.max_ms)));
+        assert!(summary.contains("first_poll: n=1; p95="));
+        assert!(summary.contains("resume_poll: n=1; p95="));
+        assert!(summary.contains(&format!("max={:.2} ms", resume_poll.max_ms)));
         assert!(summary.contains(&format!("active pause across readers={pause_ms:.1} ms")));
     }
 }

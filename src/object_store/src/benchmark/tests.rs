@@ -22,7 +22,6 @@ fn config() -> BenchmarkConfig {
         concurrency: 1,
         range_size: 5,
         block_size: 3,
-        consume_size: 3,
         pause_ms: 1,
         short_get_size: 4,
         basic_duration_ms: 0,
@@ -44,7 +43,7 @@ fn memory() -> Arc<ObjectStoreImpl> {
 }
 
 #[tokio::test]
-async fn consumption_units_and_short_get_tail() {
+async fn whole_stream_chunks_and_short_get_tail() {
     let store = memory();
     store
         .upload("object", Bytes::from_static(b"0123456789"))
@@ -67,28 +66,30 @@ async fn consumption_units_and_short_get_tail() {
         assert!(outcome.error.is_none());
         assert_eq!(outcome.sample.bytes, 10);
         assert_eq!(outcome.sample.items, 1);
-        assert_eq!(outcome.sample.consume.0.len(), 4);
         assert_eq!(outcome.sample.first_data.0.len(), 1);
-        if mode == ReadMode::Continuous {
-            assert_eq!(outcome.sample.pause, Duration::ZERO);
-            assert_eq!(outcome.sample.resume.0.len(), 0);
+        assert_eq!(outcome.sample.first_poll.0.len(), 1);
+        if mode == ReadMode::Chunked {
+            // Three complete short GETs (4, 4, 2 bytes), with only two pauses.
+            assert_eq!(outcome.sample.resume_poll.0.len(), 2);
+            assert_eq!(outcome.sample.max_stream_chunk, 4);
+            assert!(outcome.sample.pause >= Duration::from_millis(2));
         } else {
-            // Three pauses, and no fourth sleep after the final partial unit.
-            assert!(outcome.sample.pause >= Duration::from_millis(3));
-            assert_eq!(outcome.sample.resume.0.len(), 3);
+            // In-memory streaming returns one whole item; never split it to pause.
+            assert_eq!(outcome.sample.resume_poll.0.len(), 0);
+            assert_eq!(outcome.sample.max_stream_chunk, 10);
+            assert_eq!(outcome.sample.pause, Duration::ZERO);
         }
     }
 }
 
 #[tokio::test]
-async fn one_byte_units_and_cancellation_preserve_progress() {
+async fn cancellation_preserves_the_complete_chunk_before_a_pause() {
     let store = memory();
     store
         .upload("object", Bytes::from_static(b"0123456789"))
         .await
         .unwrap();
     let mut cfg = config();
-    cfg.consume_size = 1;
     cfg.pause_ms = 60_000;
     let token = CancellationToken::new();
     let cancel = token.clone();
@@ -96,7 +97,7 @@ async fn one_byte_units_and_cancellation_preserve_progress() {
         store,
         "object".into(),
         Arc::new(cfg),
-        ReadMode::Intermittent,
+        ReadMode::Chunked,
         0,
         token,
     ));
@@ -108,7 +109,7 @@ async fn one_byte_units_and_cancellation_preserve_progress() {
         .unwrap();
     assert!(outcome.interrupted);
     assert!(outcome.error.is_none());
-    assert_eq!(outcome.sample.bytes, 1);
+    assert_eq!(outcome.sample.bytes, 4);
     let mut stats = Accumulator::default();
     stats.add(outcome, Duration::from_millis(10));
     assert_eq!(stats.failed, 0);
@@ -246,8 +247,8 @@ async fn competitor_failures_invalidate_the_paired_fast_comparison() {
         assert!(competitor_context.active_worker_seconds < fast_context.active_worker_seconds);
     }
     let report = BenchmarkReport {
-        schema_version: 3,
-        profile_version: 3,
+        schema_version: 5,
+        profile_version: 5,
         prefix: "test/".into(),
         config: config(),
         planned_dataset_bytes: 30,
@@ -343,7 +344,7 @@ fn rejects_invalid_experiments_and_merges_percentiles() {
     cfg.objects = 1;
     assert!(cfg.validate().is_err());
     cfg = config();
-    cfg.consume_size = 0;
+    cfg.short_get_size = 0;
     assert!(cfg.validate().is_err());
     let mut a = Timings::default();
     let mut b = Timings::default();
@@ -633,7 +634,6 @@ async fn real_s3_profiles() {
         object_size: 12 << 20,
         concurrency: 2,
         fast_readers: 1,
-        consume_size: 1 << 20,
         short_get_size: 4 << 20,
         pause_ms: 1,
         basic_duration_ms: 25,

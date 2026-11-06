@@ -32,7 +32,7 @@ fn parses_sizes_profiles_and_root_command() {
         "s3://bucket",
         "--object-size",
         "256MiB",
-        "--consume-size",
+        "--short-get-size",
         "64KiB",
         "--basic-duration-ms",
         "0",
@@ -46,7 +46,7 @@ fn parses_sizes_profiles_and_root_command() {
     .unwrap()
     .args;
     assert_eq!(args.object_size, Some(256 << 20));
-    assert_eq!(args.consume_size, Some(64 << 10));
+    assert_eq!(args.short_get_size, Some(64 << 10));
     assert_eq!(args.basic_duration_ms, Some(0));
     assert_eq!(args.basic_max_operations, Some(500));
     assert!(
