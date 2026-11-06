@@ -428,7 +428,7 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 }
 
-// RW owns child framing and legacy compatibility; xorf owns the algorithm encoding.
+// RW handles blocked filter framing and legacy compatibility. xorf handles algorithm encoding.
 #[derive(Clone)]
 struct Xor8Block;
 
@@ -441,7 +441,7 @@ impl BlockFilter for Xor8Block {
 
     #[inline]
     fn reader(data: &[u8]) -> impl Filter<u64> + '_ {
-        Xor8Ref::from_encoded_le(&data[..data.len() - 1]).expect("invalid xor8 child")
+        Xor8Ref::from_encoded_le(&data[..data.len() - 1]).expect("invalid xor8 block filter")
     }
 
     fn serialized_len(data: &[u8]) -> usize {
@@ -486,7 +486,7 @@ impl BlockFilter for Xor16Block {
 
     #[inline]
     fn reader(data: &[u8]) -> impl Filter<u64> + '_ {
-        Xor16BytesRef::from_encoded_le(Self::body(data)).expect("invalid xor16 child")
+        Xor16BytesRef::from_encoded_le(Self::body(data)).expect("invalid xor16 block filter")
     }
 
     fn serialized_len(data: &[u8]) -> usize {
@@ -710,13 +710,13 @@ mod tests {
         canonical_xor16.push(FOOTER_XOR16);
 
         let check_case = |tag, input: &[&[u8]], expected: &[&[u8]]| {
-            let frame = |children: &[&[u8]]| {
+            let frame = |block_filters: &[&[u8]]| {
                 let mut bytes = Vec::new();
-                for child in children {
-                    bytes.put_u32_le(child.len() as u32);
-                    bytes.extend_from_slice(child);
+                for filter_bytes in block_filters {
+                    bytes.put_u32_le(filter_bytes.len() as u32);
+                    bytes.extend_from_slice(filter_bytes);
                 }
-                bytes.put_u32_le(children.len() as u32);
+                bytes.put_u32_le(block_filters.len() as u32);
                 bytes.push(tag);
                 bytes
             };
@@ -727,8 +727,8 @@ mod tests {
                 XorFilterReader::new(&bytes, &metas),
                 XorFilterReader::from_owned(bytes.clone(), &metas),
             ] {
-                for (index, child) in expected.iter().enumerate() {
-                    assert_eq!(reader.get_block_raw_filter(index), *child);
+                for (index, filter_bytes) in expected.iter().enumerate() {
+                    assert_eq!(reader.get_block_raw_filter(index), *filter_bytes);
                 }
                 assert_eq!(reader.encode_to_bytes(), encoded);
                 assert_eq!(reader.serialized_len(), encoded.len());
@@ -752,15 +752,15 @@ mod tests {
             fingerprints: vec![0; block_length * 3].into_boxed_slice(),
         });
         assert!(large.len() > BLOCKED_FILTER_CHUNK_SIZE);
-        let children = [&small, &large, &small];
+        let block_filters = [&small, &large, &small];
         let mut bytes = Vec::new();
-        for child in children {
-            bytes.put_u32_le(child.len() as u32);
-            bytes.extend_from_slice(child);
+        for filter_bytes in block_filters {
+            bytes.put_u32_le(filter_bytes.len() as u32);
+            bytes.extend_from_slice(filter_bytes);
         }
-        bytes.put_u32_le(children.len() as u32);
+        bytes.put_u32_le(block_filters.len() as u32);
         bytes.push(FOOTER_BLOCKED_XOR16);
-        let metas: Vec<_> = (0..children.len() as u64)
+        let metas: Vec<_> = (0..block_filters.len() as u64)
             .map(|i| BlockMeta {
                 smallest_key: FullKey::for_test(0.into(), i.to_be_bytes(), test_epoch(1)).encode(),
                 ..Default::default()
@@ -772,14 +772,14 @@ mod tests {
         };
         assert_eq!(filter.chunks().len(), 3);
         let owned = XorFilterReader::from_owned(bytes.clone(), &metas);
-        // Compare codecs, clones and selected-child queries for both storage routes.
+        // Compare codecs, clones and per-block queries for both storage routes.
         for reader in [&borrowed, &owned] {
             assert_eq!(reader.encode_to_bytes(), bytes);
             assert_eq!(reader.serialized_len(), bytes.len());
             assert_eq!(reader.clone().encode_to_bytes(), bytes);
-            for (index, child) in children.into_iter().enumerate() {
-                assert_eq!(reader.get_block_raw_filter(index), *child);
-                let oracle = XorFilterReader::new(child, &[]);
+            for (index, filter_bytes) in block_filters.into_iter().enumerate() {
+                assert_eq!(reader.get_block_raw_filter(index), *filter_bytes);
+                let oracle = XorFilterReader::new(filter_bytes, &[]);
                 let key = FullKey::decode(&metas[index].smallest_key).user_key;
                 let point = (Bound::Included(key), Bound::Included(key));
                 for hash in 0..16 {
@@ -794,20 +794,20 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "index out of bounds")]
-    fn test_blocked_filter_keeps_child_bounds() {
+    fn test_blocked_filter_respects_filter_boundaries() {
         // Three probes at block_length=1 need three fingerprints. A truncated
-        // first child must not borrow the first fingerprint of the next child.
-        let mut child = Vec::new();
-        child.put_u64_le(0);
-        child.put_u32_le(1);
-        child.put_u16_le(11);
-        child.put_u16_le(22);
-        child.put_u8(FOOTER_XOR16);
+        // filter must stay within its own byte range, even when another filter follows it.
+        let mut filter_bytes = Vec::new();
+        filter_bytes.put_u64_le(0);
+        filter_bytes.put_u32_le(1);
+        filter_bytes.put_u16_le(11);
+        filter_bytes.put_u16_le(22);
+        filter_bytes.put_u8(FOOTER_XOR16);
         let mut data = Vec::new();
-        data.put_u32_le(child.len() as u32);
-        data.extend_from_slice(&child);
-        data.put_u32_le(child.len() as u32);
-        data.extend_from_slice(&child);
+        data.put_u32_le(filter_bytes.len() as u32);
+        data.extend_from_slice(&filter_bytes);
+        data.put_u32_le(filter_bytes.len() as u32);
+        data.extend_from_slice(&filter_bytes);
         data.put_u32_le(2);
         data.put_u8(FOOTER_BLOCKED_XOR16);
         let metas: Vec<_> = (0..2_u64)
@@ -1090,15 +1090,15 @@ mod tests {
             assert_eq!(reader.serialized_len(), bytes.len());
             assert_eq!(reader.encode_to_bytes(), bytes);
 
-            // Compare each blocked child with the corresponding independent plain reader.
-            let mut children = bytes.as_slice();
+            // Compare each block's filter with the corresponding independent plain reader.
+            let mut entries = bytes.as_slice();
             for (index, keys) in key_ranges.iter().cloned().enumerate() {
-                let len = children.get_u32_le() as usize;
-                let child = &children[..len];
-                children.advance(len);
-                assert_eq!(reader.get_block_raw_filter(index), child);
+                let len = entries.get_u32_le() as usize;
+                let filter_bytes = &entries[..len];
+                entries.advance(len);
+                assert_eq!(reader.get_block_raw_filter(index), filter_bytes);
 
-                let oracle = XorFilterReader::new(child, &[]);
+                let oracle = XorFilterReader::new(filter_bytes, &[]);
                 let left = FullKey::decode(&metas[index].smallest_key).user_key;
                 let point = (Bound::Included(left), Bound::Included(left));
                 let unbounded = (Bound::Unbounded, Bound::Unbounded);
