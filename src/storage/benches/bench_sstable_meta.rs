@@ -34,12 +34,13 @@ async fn encoded_sstable(key_count: usize, key_len: usize) -> Vec<u8> {
     let options = SstableBuilderOptions {
         capacity: 128 << 20,
         block_capacity: 64 << 10,
+        estimated_output_key_count: Some(key_count),
         ..Default::default()
     };
     let mut builder = SstableBuilder::new(
         1_u64,
         InMemWriter::from(&options),
-        BlockedXor16FilterBuilder::create(options.bloom_false_positive, key_count),
+        BlockedXor16FilterBuilder::create(options.filter_builder_options()),
         options,
         CompactionCatalogAgent::for_test(vec![TableId::default()]),
         None,
