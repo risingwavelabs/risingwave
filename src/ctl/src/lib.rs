@@ -248,6 +248,9 @@ enum HummockCommands {
         blocked_xor_filter_kv_count_threshold: Option<u64>,
         #[clap(long)]
         max_vnode_key_range_bytes: Option<u64>,
+        /// Soft limit on the encoded SST footer in bytes. Zero disables the limit.
+        #[clap(long)]
+        sst_footer_size_limit_bytes: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -775,6 +778,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             enable_optimize_l0_interval_selection,
             blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes,
+            sst_footer_size_limit_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -830,6 +834,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     enable_optimize_l0_interval_selection,
                     blocked_xor_filter_kv_count_threshold,
                     max_vnode_key_range_bytes,
+                    sst_footer_size_limit_bytes,
                 ),
             )
             .await?

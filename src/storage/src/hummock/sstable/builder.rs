@@ -56,8 +56,11 @@ pub const MIN_BLOCK_SIZE: usize = 8 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
-    /// Approximate sstable capacity.
+    /// Size target in bytes for the data blocks and filter.
     pub capacity: usize,
+    /// Separate soft limit in bytes for the full encoded footer, including
+    /// block metadata, the filter, SST boundary keys, and fixed overhead.
+    pub footer_size_limit: Option<usize>,
     /// Approximate block capacity.
     pub block_capacity: usize,
     /// Restart point interval.
@@ -82,6 +85,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
         let capacity: usize = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
+            footer_size_limit: None,
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
@@ -99,6 +103,7 @@ impl Default for SstableBuilderOptions {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_SSTABLE_SIZE,
+            footer_size_limit: None,
             block_capacity: DEFAULT_BLOCK_SIZE,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
@@ -144,6 +149,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
+    block_meta_size: usize,
 
     /// `table_id` of added keys.
     table_ids: BTreeSet<TableId>,
@@ -228,6 +234,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }),
             filter_builder,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
+            block_meta_size: 0,
             table_ids: BTreeSet::new(),
             last_table_id: None,
             raw_key: Vec::new(),
@@ -327,7 +334,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
         meta.offset = self.writer.data_len() as u32;
         let block_len = buf.len();
-        self.block_metas.push(meta);
+        self.add_block_meta(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer
@@ -435,7 +442,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 full_key.encode()
             };
 
-            self.block_metas.push(BlockMeta {
+            self.add_block_meta(BlockMeta {
                 offset: utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
                     panic!(
                         "WARN overflow can't convert writer_data_len {} into u32 sst_id {} block_idx {} tables {:?}",
@@ -723,9 +730,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.writer.data_len()
-            + self.block_builder.approximate_len()
-            + self.filter_builder.approximate_len()
+        self.approximate_data_len() + self.filter_builder.approximate_len()
+    }
+
+    fn approximate_data_len(&self) -> usize {
+        self.writer.data_len() + self.block_builder.approximate_len()
     }
 
     pub async fn build_block(&mut self) -> HummockResult<()> {
@@ -783,9 +792,27 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.writer.data_len() > 0
     }
 
-    /// Returns true if we roughly reached capacity
+    fn add_block_meta(&mut self, meta: BlockMeta) {
+        if self.options.footer_size_limit.is_some() {
+            self.block_meta_size += meta.encoded_size();
+        }
+        self.block_metas.push(meta);
+    }
+
+    /// Checks whether the estimated size reaches either configured threshold.
     pub fn reach_capacity(&self) -> bool {
-        self.approximate_len() >= self.options.capacity
+        let filter_size = self.filter_builder.approximate_len();
+        self.approximate_data_len() + filter_size >= self.options.capacity
+            || self.options.footer_size_limit.is_some_and(|limit| {
+                let smallest_key_size =
+                    self.block_metas.first().map_or(0, |m| m.smallest_key.len());
+                SstableMeta::encoded_size_from_parts(
+                    self.block_meta_size,
+                    filter_size,
+                    smallest_key_size,
+                    self.last_full_key.len(),
+                ) >= limit
+            })
     }
 
     fn finalize_last_table_stats(&mut self) {

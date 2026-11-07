@@ -36,6 +36,8 @@ use tonic::Request;
 pub mod compactor_runner;
 mod context;
 pub mod fast_compactor_runner;
+#[cfg(test)]
+mod footer_budget_tests;
 mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;

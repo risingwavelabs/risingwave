@@ -779,6 +779,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::MaxVnodeKeyRangeBytes(c) => {
                 target.max_vnode_key_range_bytes = optional_positive_u64_config(*c);
             }
+            MutableConfig::SstFooterSizeLimitBytes(c) => {
+                target.sst_footer_size_limit_bytes = optional_positive_u64_config(*c);
+            }
             MutableConfig::SstableFilterType(c) => {
                 parse_sstable_filter_type(&c.filter_type).map_err(Error::CompactionGroup)?;
                 if target.sstable_filter_type.is_empty() {

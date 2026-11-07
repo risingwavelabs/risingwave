@@ -143,6 +143,23 @@ SELECT (compaction_config::jsonb)->>'maxVnodeKeyRangeBytes' FROM rw_hummock_comp
 NULL
 
 statement ok
+ALTER COMPACTION GROUP 2 SET sst_footer_size_limit_bytes = 16777216;
+
+query IT
+SELECT id, (compaction_config::jsonb)->>'sstFooterSizeLimitBytes' FROM rw_hummock_compaction_group_configs WHERE id IN (2, 3) ORDER BY id;
+----
+2 16777216
+3 NULL
+
+statement ok
+ALTER COMPACTION GROUP 2 SET sst_footer_size_limit_bytes = DEFAULT;
+
+query T
+SELECT (compaction_config::jsonb)->>'sstFooterSizeLimitBytes' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+NULL
+
+statement ok
 ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 1024;
 
 query T
