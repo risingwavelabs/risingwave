@@ -25,12 +25,9 @@ select * from v;
 statement ok
 insert into t2 values(1, 2),(1, 2);
 
-
 query II
 select * from v;
 ----
-
-
 
 statement ok
 delete from t1 where v1 = 1;
@@ -47,3 +44,67 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+statement ok
+CREATE TABLE inventory (
+    sku INT PRIMARY KEY,
+    stock INT
+);
+
+statement ok
+INSERT INTO inventory VALUES (42, 314), (99, 2718);
+
+statement ok
+CREATE MATERIALIZED VIEW regional_stock AS
+SELECT sku, stock FROM inventory
+EXCEPT
+SELECT sku, stock FROM inventory WHERE sku = 99;
+
+query II rowsort
+SELECT * FROM regional_stock;
+----
+42 314
+
+statement ok
+INSERT INTO inventory VALUES (42, NULL);
+
+query II rowsort
+SELECT * FROM regional_stock;
+----
+42 NULL
+
+query II rowsort
+SELECT sku, stock FROM inventory
+EXCEPT
+SELECT sku, stock FROM inventory WHERE sku = 99;
+----
+42 NULL
+
+statement ok
+INSERT INTO inventory VALUES (42, 500);
+
+query II rowsort
+SELECT * FROM regional_stock;
+----
+42 500
+
+statement ok
+INSERT INTO inventory VALUES (42, NULL);
+
+query II rowsort
+SELECT * FROM regional_stock;
+----
+42 NULL
+
+statement ok
+DELETE FROM inventory WHERE sku = 42;
+
+query II rowsort
+SELECT * FROM regional_stock;
+----
+
+statement ok
+DROP MATERIALIZED VIEW regional_stock;
+
+statement ok
+DROP TABLE inventory;
