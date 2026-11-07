@@ -255,6 +255,16 @@ impl ObjectStore for OpendalObjectStore {
     ) -> ObjectResult<ObjectMetadataIter> {
         let mut object_lister = self.op.lister_with(prefix).recursive(true);
         if let Some(start_after) = start_after {
+            // Some backends silently ignore this option. Never return an unresumed
+            // listing to a caller that relies on it to make progress.
+            if !self.op.info().capability().list_with_start_after {
+                return Err(opendal::Error::new(
+                    opendal::ErrorKind::Unsupported,
+                    "object store does not support listing with start_after",
+                )
+                .with_context("service", self.store_media_type())
+                .into());
+            }
             object_lister = object_lister.start_after(&start_after);
         }
         let object_lister = object_lister.await?;
@@ -529,6 +539,79 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_list_rejects_unsupported_start_after() {
+        let memory = OpendalObjectStore::test_new_memory_engine().unwrap();
+        memory
+            .upload("prefix/1.data", Bytes::from_static(b"data"))
+            .await
+            .unwrap();
+        assert_eq!(list_all("prefix/", &memory).await.len(), 1);
+
+        // Building the Azure operator does not require credentials or network access.
+        let azblob = OpendalObjectStore {
+            op: Operator::new(
+                opendal::services::Azblob::default()
+                    .container("test")
+                    .endpoint("https://test.blob.core.windows.net"),
+            )
+            .unwrap(),
+            media_type: MediaType::Azblob,
+            config: memory.config.clone(),
+            metrics: memory.metrics.clone(),
+        };
+        for store in [memory, azblob] {
+            assert!(!store.op.info().capability().list_with_start_after);
+            let error = match store
+                .list("prefix/", Some("prefix/1.data".to_owned()), Some(2))
+                .await
+            {
+                Ok(_) => panic!("unsupported start_after must not be silently ignored"),
+                Err(error) => error,
+            };
+            assert!(matches!(
+                error.inner(),
+                crate::object::ObjectErrorInner::Opendal(error)
+                    if error.kind() == opendal::ErrorKind::Unsupported
+            ));
+            assert!(!error.should_retry(false));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_list_allows_stat_and_delete_with_concurrency_limit() {
+        let mut store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        let config = ObjectStoreConfig {
+            req_concurrency_limit: 1,
+            ..Default::default()
+        };
+        store.op = super::super::new_operator(&config, store.op);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for id in 0..4 {
+                store
+                    .upload(&format!("prefix/{id}.data"), Bytes::from_static(b"data"))
+                    .await
+                    .unwrap();
+            }
+            let mut objects = store.list("prefix/", None, None).await.unwrap();
+            let mut seen = std::collections::HashSet::new();
+            while let Some(object) = objects.next().await {
+                // Memory listing needs the adapter's stat fallback to get metadata.
+                let object = object.unwrap();
+                assert_eq!(object.total_size, 4);
+                assert!(seen.insert(object.key.clone()));
+                store.metadata(&object.key).await.unwrap();
+                store.delete_objects(&[object.key]).await.unwrap();
+            }
+            assert_eq!(seen.len(), 4);
+            // Even an exhausted but still-live lister must not hold the permit.
+            assert!(list_all("prefix/", &store).await.is_empty());
+            drop(objects);
+        })
+        .await
+        .expect("listing, stat, and deletion must share a single permit without deadlock");
     }
 
     #[tokio::test]
