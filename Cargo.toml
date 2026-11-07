@@ -460,7 +460,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-# Borrowed XOR16 reader on xorf 0.13.0.
+# Borrowed XOR8/XOR16 byte readers and little-endian codecs on xorf 0.13.0.
 xorf = { git = "https://github.com/Li0k/xorf.git", rev = "9bd4a6f31b98cff6e2fec7e6c1c9d7de4e9077c6" }
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
 foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
