@@ -35,7 +35,7 @@ use risingwave_hummock_sdk::{
     full_key_can_concat,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{LevelType, PbSstableFilterType};
+use risingwave_pb::hummock::{LevelType, PbSstableFilterLayout, PbSstableFilterType};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -44,9 +44,8 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
-    blocked_xor_filter_key_count_threshold, build_multi_compaction_filter,
-    estimate_output_key_count_for_task, estimate_task_output_capacity, generate_splits_for_task,
-    metrics_report_for_task, optimize_by_copy_block,
+    CompactionPlan, VersionGcAction, build_multi_compaction_filter, generate_splits_for_task,
+    metrics_report_for_task, normal_output_options,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -63,8 +62,8 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm,
-    GetObjectId, HummockError, HummockResult, SstableBuilderOptions, SstableStoreRef,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, CachePolicy, GetObjectId, HummockError,
+    HummockResult, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 pub struct CompactorRunner {
@@ -82,23 +81,25 @@ impl CompactorRunner {
         task: CompactTask,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
-        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
-        options.compression_algorithm = match task.compression_algorithm {
-            0 => CompressionAlgorithm::None,
-            1 => CompressionAlgorithm::Lz4,
-            _ => CompressionAlgorithm::Zstd,
-        };
+        let (options, layout) = normal_output_options(&task, &context);
+        Self::with_output(
+            split_index,
+            context,
+            task,
+            object_id_getter,
+            options,
+            layout,
+        )
+    }
 
-        options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        let estimated_output_key_count =
-            estimate_output_key_count_for_task(&task, options.capacity);
-        options.estimated_output_key_count = Some(estimated_output_key_count);
-        options.filter_hash_prealloc_key_count_cap =
-            blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
-        options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
-        let sstable_filter_layout =
-            task.sstable_filter_layout_for_output(estimated_output_key_count as u64);
-
+    fn with_output(
+        split_index: usize,
+        context: CompactorContext,
+        task: CompactTask,
+        object_id_getter: Arc<dyn GetObjectId>,
+        options: SstableBuilderOptions,
+        sstable_filter_layout: PbSstableFilterLayout,
+    ) -> Self {
         let key_range = KeyRange {
             left: task.splits[split_index].left.clone(),
             right: task.splits[split_index].right.clone(),
@@ -322,18 +323,40 @@ pub fn partition_overlapping_sstable_infos(
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact_with_agent(
     compactor_context: CompactorContext,
-    mut compact_task: CompactTask,
-    mut shutdown_rx: Receiver<()>,
+    compact_task: CompactTask,
+    shutdown_rx: Receiver<()>,
     object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-) -> (
+) -> CompactionResult {
+    let plan = CompactionPlan::new(&compact_task, &compactor_context);
+    compact_with_plan(
+        compactor_context,
+        compact_task,
+        shutdown_rx,
+        object_id_getter,
+        compaction_catalog_agent_ref,
+        plan,
+    )
+    .await
+}
+
+type CompactionResult = (
     (
         CompactTask,
         HashMap<TableId, TableStats>,
         HashMap<HummockSstableObjectId, u64>,
     ),
     Option<MemoryTracker>,
-) {
+);
+
+async fn compact_with_plan(
+    compactor_context: CompactorContext,
+    mut compact_task: CompactTask,
+    mut shutdown_rx: Receiver<()>,
+    object_id_getter: Arc<dyn GetObjectId>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    plan: CompactionPlan,
+) -> CompactionResult {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
     metrics_report_for_task(&compact_task, &context);
@@ -349,11 +372,7 @@ pub async fn compact_with_agent(
 
     let multi_filter = build_multi_compaction_filter(&compact_task);
     let mut task_status = TaskStatus::Success;
-    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
-
-    if let Err(e) =
-        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
-    {
+    if let Err(e) = generate_splits_for_task(&mut compact_task, &context, &plan).await {
         tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
         task_status = TaskStatus::ExecuteFailed;
         return (
@@ -372,8 +391,6 @@ pub async fn compact_with_agent(
     let task_progress_guard =
         TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
-    let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
-
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
         (context.storage_opts.block_size_kb as u64) * (1 << 10),
@@ -383,7 +400,7 @@ pub async fn compact_with_agent(
             .s3
             .recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
-        capacity as u64,
+        plan.memory_sst_capacity as u64,
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
@@ -393,7 +410,7 @@ pub async fn compact_with_agent(
         compact_task.compression_algorithm,
         parallelism,
         task_memory_capacity_with_parallelism,
-        optimize_by_copy_block,
+        plan.copy_blocks,
         compact_task_to_string(&compact_task),
     );
 
@@ -431,7 +448,7 @@ pub async fn compact_with_agent(
                 .sub(parallelism as _);
         });
 
-    if optimize_by_copy_block {
+    if plan.copy_blocks {
         let fast_compaction = {
             let context = context.clone();
             let task = compact_task.clone();
@@ -442,25 +459,27 @@ pub async fn compact_with_agent(
             async move {
                 match task.sstable_filter_type {
                     PbSstableFilterType::SstableFilterXor8 => {
-                        fast_compactor_runner::CompactorRunner::<BlockedXor8FilterBuilder, _>::new(
+                        fast_compactor_runner::CompactorRunner::<BlockedXor8FilterBuilder, _>::with_output(
                             context,
                             task,
                             compaction_catalog_agent_ref,
                             object_id_getter,
                             task_progress,
                             multi_filter,
+                            plan.output_options,
                         )
                         .run()
                         .await
                     }
                     PbSstableFilterType::SstableFilterXor16 => {
-                        fast_compactor_runner::CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+                        fast_compactor_runner::CompactorRunner::<BlockedXor16FilterBuilder, _>::with_output(
                             context,
                             task,
                             compaction_catalog_agent_ref,
                             object_id_getter,
                             task_progress,
                             multi_filter,
+                            plan.output_options,
                         )
                         .run()
                         .await
@@ -513,11 +532,13 @@ pub async fn compact_with_agent(
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
-        let compactor_runner = CompactorRunner::new(
+        let compactor_runner = CompactorRunner::with_output(
             split_index,
             compactor_context.clone(),
             compact_task.clone(),
             object_id_getter.clone(),
+            plan.output_options.clone(),
+            plan.output_filter_layout,
         );
         let task_progress = task_progress_guard.progress.clone();
         let runner = async move {
@@ -637,20 +658,14 @@ pub(crate) async fn acquire_complete_catalog_agent(
 
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
-pub async fn compact(
+pub(super) async fn compact(
     compactor_context: CompactorContext,
     compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
     object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-) -> (
-    (
-        CompactTask,
-        HashMap<TableId, TableStats>,
-        HashMap<HummockSstableObjectId, u64>,
-    ),
-    Option<MemoryTracker>,
-) {
+    plan: CompactionPlan,
+) -> CompactionResult {
     let read_table_ids = compact_task.get_table_ids_from_input_ssts().collect_vec();
     let compaction_catalog_agent_ref =
         match acquire_complete_catalog_agent(&compaction_catalog_manager_ref, read_table_ids).await
@@ -673,12 +688,13 @@ pub async fn compact(
             }
         };
 
-    compact_with_agent(
+    compact_with_plan(
         compactor_context,
         compact_task,
         shutdown_rx,
         object_id_getter,
         compaction_catalog_agent_ref,
+        plan,
     )
     .await
 }
@@ -801,9 +817,6 @@ where
         compaction_statistics.iter_total_key_counts += 1;
 
         let is_new_user_key = full_key_tracker.observe(iter.key());
-        let mut drop = false;
-
-        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
         let value = iter.value();
         let ValueMeta {
             object_id,
@@ -827,23 +840,9 @@ where
             last_table_id = Some(iter_key.user_key.table_id);
         }
 
-        // Among keys with same user key, only keep the latest key unless retain_multiple_version is true.
-        // In our design, frontend avoid to access keys which had be deleted, so we don't
-        // need to consider the epoch when the compaction_filter match (it
-        // means that mv had drop)
-        // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
-        // Do not assume that "the epoch of keys behind must be smaller than the current key."
-        if (!task_config.retain_multiple_version && task_config.gc_delete_keys && value.is_delete())
-            || (!task_config.retain_multiple_version && !is_new_user_key)
+        if task_config.version_gc_action(value, is_new_user_key) != VersionGcAction::Keep
+            || compaction_filter.should_delete(iter_key)
         {
-            drop = true;
-        }
-
-        if !drop && compaction_filter.should_delete(iter_key) {
-            drop = true;
-        }
-
-        if drop {
             compaction_statistics.iter_drop_key_counts += 1;
 
             last_table_stats.total_key_count -= 1;
