@@ -76,6 +76,25 @@ Caused by:
   Bind error: Refreshable tables must have a PRIMARY KEY. Please define a primary key for the table.
 
 
+# ----
+# refreshable table with a TTL watermark is not supported yet
+statement error Watermark `WITH TTL` is not supported on refreshable tables
+CREATE TABLE ttl_refresh_t (id int PRIMARY KEY, ts timestamp, WATERMARK FOR ts AS ts - INTERVAL '1 minute' WITH TTL) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    refresh_mode = 'FULL_RELOAD',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+statement error Watermark `WITH TTL` is not supported on refreshable tables
+CREATE TABLE ttl_refresh_t (id int, ts timestamp, WATERMARK FOR ts AS ts - INTERVAL '1 minute' WITH TTL, PRIMARY KEY (id, ts)) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    refresh_mode = 'FULL_RELOAD',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+
 statement error
 CREATE SOURCE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
     connector = '__for_testing_only_batch_posix_fs',
