@@ -825,23 +825,22 @@ impl BigQuerySinkWriter {
         if serialized_rows.is_empty() {
             return Ok(0);
         }
-        let mut result = Vec::new();
-        let mut result_inner = Vec::new();
-        let mut size_count = 0;
-        for i in serialized_rows {
-            size_count += i.len();
-            if !result_inner.is_empty() && size_count > MAX_ROW_SIZE {
-                result.push(result_inner);
-                result_inner = Vec::new();
-                size_count = i.len();
+        let mut batches = Vec::new();
+        let mut batch = Vec::new();
+        let mut batch_size = 0;
+        for row in serialized_rows {
+            if !batch.is_empty() && batch_size + row.len() > MAX_ROW_SIZE {
+                batches.push(std::mem::take(&mut batch));
+                batch_size = 0;
             }
-            result_inner.push(i);
+            batch_size += row.len();
+            batch.push(row);
         }
-        if !result_inner.is_empty() {
-            result.push(result_inner);
+        if !batch.is_empty() {
+            batches.push(batch);
         }
-        let len = result.len();
-        for serialized_rows in result {
+        let len = batches.len();
+        for serialized_rows in batches {
             let rows = AppendRowsRequestRows::ProtoRows(ProtoData {
                 writer_schema: Some(self.writer_pb_schema.clone()),
                 rows: Some(ProtoRows { serialized_rows }),
