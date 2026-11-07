@@ -21081,8 +21081,7 @@ checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
 [[package]]
 name = "xorf"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f13846c9009c0e550697ddde851e934b5dfafbce757a5ef5edfdb27ea20803e"
+source = "git+https://github.com/Li0k/xorf.git?rev=9bd4a6f31b98cff6e2fec7e6c1c9d7de4e9077c6#9bd4a6f31b98cff6e2fec7e6c1c9d7de4e9077c6"
 dependencies = [
  "libm",
  "rand 0.8.5",
