@@ -405,6 +405,7 @@ fn test_parse_iceberg_config() {
             write_parquet_max_row_group_rows: None,
             write_parquet_max_row_group_bytes: None,
             enable_pk_index: false,
+            legacy_pk_index_file_path: true,
             unknown_fields: Default::default(),
             default_table_location_from_namespace: false,
         };

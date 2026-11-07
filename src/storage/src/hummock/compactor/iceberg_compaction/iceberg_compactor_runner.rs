@@ -27,8 +27,8 @@ use iceberg_compaction_core::compaction::{
 };
 use iceberg_compaction_core::config::{
     AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder, CompactionPlanningConfig,
-    DeleteSelection, FileGroupScope, FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder,
-    GroupFilters, SmallFilesConfigBuilder,
+    DataFileNaming, DeleteSelection, FileGroupScope, FilesWithDeletesConfigBuilder,
+    FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use iceberg_compaction_core::file_selection::{FileGroup, PlanStrategy};
@@ -423,6 +423,13 @@ impl IcebergCompactionPlanRunner {
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
             .enable_prefetch(config.enable_prefetch)
+            // The PK index of such sinks rebuilds data file paths from uuids, so compaction
+            // outputs must follow the same layout as the sink writer.
+            .data_file_naming(if iceberg_config.pk_index_stores_file_uuid() {
+                DataFileNaming::FlatUuid
+            } else {
+                DataFileNaming::Default
+            })
             .build()
             .map_err(|e| {
                 HummockError::compaction_executor(
