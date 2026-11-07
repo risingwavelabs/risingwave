@@ -324,6 +324,12 @@ impl HummockManager {
                 change_log.truncate(truncate_epoch);
             }
         }
+        // Publish transient retention before releasing the version lock. Backup/GC pin
+        // registration and final GC filtering use the same lock.
+        versioning
+            .safe_points
+            .get_mut()
+            .retain_change_log_objects(may_delete_object_ids.iter().copied());
         drop(versioning);
         let may_delete_object_count = may_delete_object_ids.len();
         self.gc_manager

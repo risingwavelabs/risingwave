@@ -435,7 +435,8 @@ impl HummockManager {
                     .context_info
                     .read_with_process_name("version_checkpoint_build")
                     .await;
-                let min_pinned_version_id = context_info.min_pinned_version_id();
+                let min_pinned_version_id =
+                    context_info.min_pinned_version_id(&versioning.safe_points.lock());
                 let stale_object_stats = gc_stale_object_stats(
                     &versioning.checkpoint.stale_objects,
                     min_pinned_version_id,
@@ -544,11 +545,7 @@ impl HummockManager {
                     .collect(),
             });
         }
-        let min_pinned_version_id = self
-            .context_info
-            .read_with_process_name("version_checkpoint_build")
-            .await
-            .min_pinned_version_id();
+        let min_pinned_version_id = self.get_min_pinned_version_id().await;
         let may_delete_object = stale_objects
             .iter()
             .filter_map(|(version_id, object_ids)| {
@@ -575,11 +572,7 @@ impl HummockManager {
                 archive.version.as_ref().unwrap().id
             );
         }
-        let min_pinned_version_id = self
-            .context_info
-            .read_with_process_name("version_checkpoint_build")
-            .await
-            .min_pinned_version_id();
+        let min_pinned_version_id = self.get_min_pinned_version_id().await;
         let stale_object_stats =
             gc_stale_object_stats(&new_checkpoint.stale_objects, min_pinned_version_id);
         // 3. hold write lock briefly and update in memory state

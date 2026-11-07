@@ -20,8 +20,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockSstableObjectId, HummockVersionId, INVALID_VERSION_ID,
-    LocalSstableInfo,
+    HummockContextId, HummockObjectId, HummockSstableObjectId, HummockVersionId,
+    INVALID_VERSION_ID, LocalSstableInfo,
 };
 use risingwave_meta_model::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
@@ -40,7 +40,8 @@ use crate::rpc::metrics::MetaMetrics;
 const GC_HISTORY_QUERY_BATCH_SIZE: usize = 1000;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
-/// It's used by meta node itself to temporarily pin versions.
+/// It's used by meta node itself to temporarily pin versions and retain changelog-only
+/// objects whose live references are removed while the safe point is registered.
 pub struct HummockVersionSafePoint {
     pub id: HummockVersionId,
     event_sender: HummockManagerEventSender,
@@ -61,8 +62,6 @@ impl Drop for HummockVersionSafePoint {
 #[derive(Default)]
 pub(super) struct ContextInfo {
     pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
-    /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
-    pub version_safe_points: Vec<HummockVersionId>,
 }
 
 impl ContextInfo {
@@ -138,12 +137,15 @@ impl HummockManager {
         Ok(())
     }
 
-    #[cfg(any(test, feature = "test"))]
     pub async fn get_min_pinned_version_id(&self) -> HummockVersionId {
+        let versioning = self
+            .versioning
+            .read_with_process_name("get_min_pinned_version_id")
+            .await;
         self.context_info
             .read_with_process_name("get_min_pinned_version_id")
             .await
-            .min_pinned_version_id()
+            .min_pinned_version_id(&versioning.safe_points.lock())
     }
 }
 
@@ -454,36 +456,101 @@ impl HummockManager {
     }
 }
 
-// safe point
+/// Transient retention for version references and changelog-only objects.
+///
+/// Registration takes a versioning read lock; changelog removal takes its write lock.
+/// A short inner mutex lets registration proceed alongside GC's final version read and
+/// history write. Never hold the inner mutex across an await or object-store I/O.
+#[derive(Default)]
+pub(super) struct VersionSafePoints {
+    pub version_ids: Vec<HummockVersionId>,
+    // A batch is tagged with the largest pinned version when its references were removed.
+    // Every older safe point may also need it, including a GC pin inheriting an older pin.
+    // These are ownership boundaries, not changelog truncation version numbers: truncation
+    // can happen repeatedly without advancing the Hummock version.
+    retired_change_log_objects: BTreeMap<HummockVersionId, Arc<HashSet<HummockObjectId>>>,
+}
+
+impl VersionSafePoints {
+    pub fn retain_change_log_objects(&mut self, objects: impl Iterator<Item = HummockObjectId>) {
+        if let Some(id) = self.version_ids.iter().max().copied() {
+            Arc::make_mut(self.retired_change_log_objects.entry(id).or_default()).extend(objects);
+        }
+    }
+
+    /// Snapshot only the batch handles under the mutex; scan object IDs after unlocking.
+    pub fn retained_change_log_objects(&self) -> Vec<Arc<HashSet<HummockObjectId>>> {
+        self.retired_change_log_objects.values().cloned().collect()
+    }
+
+    fn unregister(&mut self, id: HummockVersionId) -> Vec<Arc<HashSet<HummockObjectId>>> {
+        if let Some(pos) = self.version_ids.iter().position(|sp| *sp == id) {
+            self.version_ids.remove(pos);
+        }
+        let min_id = self.version_ids.iter().min().copied();
+        let mut released = Vec::new();
+        while let Some(entry) = self.retired_change_log_objects.first_entry() {
+            if min_id.is_some_and(|min_id| min_id <= *entry.key()) {
+                break;
+            }
+            released.push(entry.remove());
+        }
+        released
+    }
+}
+
 impl HummockManager {
     pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
         let versioning = self
             .versioning
             .read_with_process_name("register_safe_point")
             .await;
-        let mut wl = self
-            .context_info
-            .write_with_process_name("register_safe_point")
-            .await;
         let safe_point = HummockVersionSafePoint {
             id: versioning.current_version.id,
             event_sender: self.event_sender.clone(),
         };
-        wl.version_safe_points.push(safe_point.id);
-        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
+        let mut safe_points = versioning.safe_points.lock();
+        safe_points.version_ids.push(safe_point.id);
+        trigger_safepoint_stat(&self.metrics, &safe_points.version_ids);
+        safe_point
+    }
+
+    /// Preserve references that may move to a backup or time-travel snapshot during GC's
+    /// reference scans. Inherit older pins before their original owners can release them.
+    pub(super) async fn register_gc_safe_point(&self) -> HummockVersionSafePoint {
+        let versioning = self
+            .versioning
+            .read_with_process_name("register_gc_safe_point")
+            .await;
+        let context = self
+            .context_info
+            .read_with_process_name("register_gc_safe_point")
+            .await;
+        let mut safe_points = versioning.safe_points.lock();
+        let safe_point = HummockVersionSafePoint {
+            // Objects already removed in the current version must remain reclaimable in
+            // an idle cluster. Future removals are protected, including changelog-only SSTs.
+            id: context
+                .min_pinned_version_id(&safe_points)
+                .min(versioning.current_version.id + 1),
+            event_sender: self.event_sender.clone(),
+        };
+        safe_points.version_ids.push(safe_point.id);
+        trigger_safepoint_stat(&self.metrics, &safe_points.version_ids);
         safe_point
     }
 
     pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
-        let mut wl = self
-            .context_info
-            .write_with_process_name("unregister_safe_point")
+        let versioning = self
+            .versioning
+            .read_with_process_name("unregister_safe_point")
             .await;
-        let version_safe_points = &mut wl.version_safe_points;
-        if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
-            version_safe_points.remove(pos);
-        }
-        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
+        let released = versioning.safe_points.lock().unregister(safe_point);
+        trigger_safepoint_stat(&self.metrics, &versioning.safe_points.lock().version_ids);
+        // Minor GC may already have consumed these candidates while they were pinned.
+        // Its normal reference checks still protect published backups and time travel.
+        self.gc_manager
+            .add_may_delete_object_ids(released.iter().flat_map(|objects| objects.iter().copied()));
     }
 }
 
@@ -502,6 +569,78 @@ mod tests {
 
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
+
+    #[test]
+    fn test_changelog_retention_with_overlapping_and_duplicate_safe_points() {
+        let mut pins = VersionSafePoints::default();
+        let first = HummockObjectId::Sstable(1.into());
+        let second = HummockObjectId::Sstable(2.into());
+        pins.retain_change_log_objects([first].into_iter());
+        assert_eq!(pins.retained_change_log_objects().len(), 0);
+        pins.version_ids.extend([HummockVersionId::new(10); 2]);
+        pins.retain_change_log_objects([first].into_iter());
+        // A newer pin does not need an object retired before its registration.
+        pins.version_ids.push(20.into());
+        pins.retain_change_log_objects([second].into_iter());
+        assert!(pins.unregister(10.into()).is_empty());
+        assert_eq!(
+            pins.unregister(10.into()),
+            vec![Arc::new(HashSet::from([first]))]
+        );
+        assert_eq!(
+            pins.retained_change_log_objects(),
+            vec![Arc::new(HashSet::from([second]))]
+        );
+        assert_eq!(
+            pins.unregister(20.into()),
+            vec![Arc::new(HashSet::from([second]))]
+        );
+        assert_eq!(pins.retained_change_log_objects().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_gc_safe_point_inherits_older_pin() {
+        let (_, manager, ..) = setup_compute_env(80).await;
+        let backup_pin = manager.register_safe_point().await;
+        let old_version = backup_pin.id;
+        crate::hummock::test_utils::register_table_ids_to_compaction_group(
+            &manager,
+            &[1],
+            risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId::StateDefault,
+        )
+        .await;
+        assert!(manager.get_current_version().await.id > old_version);
+        let gc_pin = manager.register_gc_safe_point().await;
+        assert_eq!(gc_pin.id, old_version);
+        drop(backup_pin);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while manager
+                .versioning
+                .read()
+                .await
+                .safe_points
+                .lock()
+                .version_ids
+                .len()
+                != 1
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(manager.get_min_pinned_version_id().await, old_version);
+        drop(gc_pin);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while manager.get_min_pinned_version_id().await
+                != risingwave_hummock_sdk::version::MAX_HUMMOCK_VERSION_ID
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn test_check_gc_history_in_batches() {

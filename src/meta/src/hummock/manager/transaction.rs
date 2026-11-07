@@ -66,6 +66,7 @@ pub(super) struct HummockVersionTransaction<'a> {
     orig_version: &'a mut Arc<HummockVersion>,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
     orig_table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
+    safe_points: &'a mut parking_lot::Mutex<super::context::VersionSafePoints>,
     notification_manager: &'a NotificationManager,
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     meta_metrics: &'a MetaMetrics,
@@ -85,6 +86,7 @@ impl<'a> HummockVersionTransaction<'a> {
         version: &'a mut Arc<HummockVersion>,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
         table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
+        safe_points: &'a mut parking_lot::Mutex<super::context::VersionSafePoints>,
         notification_manager: &'a NotificationManager,
         table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
         meta_metrics: &'a MetaMetrics,
@@ -95,6 +97,7 @@ impl<'a> HummockVersionTransaction<'a> {
             orig_version: version,
             orig_deltas: deltas,
             orig_table_change_log: table_change_log,
+            safe_points,
             pre_applied_version: None,
             disable_apply_to_txn: false,
             notification_manager,
@@ -275,8 +278,16 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                     &change_log_delta,
                 );
             }
-            self.orig_table_change_log
-                .retain(|table_id, _| !table_change_log_delta.delete_all.contains(table_id));
+            self.orig_table_change_log.retain(|table_id, change_log| {
+                if table_change_log_delta.delete_all.contains(table_id) {
+                    self.safe_points
+                        .get_mut()
+                        .retain_change_log_objects(change_log.get_object_ids());
+                    false
+                } else {
+                    true
+                }
+            });
 
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();

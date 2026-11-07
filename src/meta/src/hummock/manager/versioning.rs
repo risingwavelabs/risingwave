@@ -44,7 +44,7 @@ use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
-use crate::hummock::manager::context::ContextInfo;
+use crate::hummock::manager::context::{ContextInfo, VersionSafePoints};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
@@ -63,6 +63,8 @@ pub struct Versioning {
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
 
+    pub(super) safe_points: parking_lot::Mutex<VersionSafePoints>,
+
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     /// Stats for latest hummock version.
@@ -72,13 +74,13 @@ pub struct Versioning {
 }
 
 impl ContextInfo {
-    pub fn min_pinned_version_id(&self) -> HummockVersionId {
+    pub fn min_pinned_version_id(&self, safe_points: &VersionSafePoints) -> HummockVersionId {
         let mut min_pinned_version_id = MAX_HUMMOCK_VERSION_ID;
         for id in self
             .pinned_versions
             .values()
             .map(|v| v.min_pinned_id)
-            .chain(self.version_safe_points.iter().cloned())
+            .chain(safe_points.version_ids.iter().copied())
         {
             min_pinned_version_id = cmp::min(id, min_pinned_version_id);
         }
@@ -120,6 +122,12 @@ impl Versioning {
                 .iter()
                 .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
                 .flat_map(|(_, objects)| get_stale_object_ids(objects)),
+        );
+        let retained_change_log_objects = self.safe_points.lock().retained_change_log_objects();
+        tracked_object_ids.extend(
+            retained_change_log_objects
+                .iter()
+                .flat_map(|objects| objects.iter().copied()),
         );
         tracked_object_ids
     }
@@ -318,6 +326,7 @@ impl HummockManager {
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
                 &mut versioning.table_change_log,
+                &mut versioning.safe_points,
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
@@ -501,7 +510,7 @@ mod tests {
     use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::manager::context::ContextInfo;
+    use crate::hummock::manager::context::{ContextInfo, VersionSafePoints};
     use crate::hummock::manager::versioning::{
         calc_new_write_limits, estimate_table_stats, rebuild_table_stats,
     };
@@ -510,7 +519,11 @@ mod tests {
     #[test]
     fn test_min_pinned_version_id() {
         let mut context_info = ContextInfo::default();
-        assert_eq!(context_info.min_pinned_version_id(), MAX_HUMMOCK_VERSION_ID);
+        let mut safe_points = VersionSafePoints::default();
+        assert_eq!(
+            context_info.min_pinned_version_id(&safe_points),
+            MAX_HUMMOCK_VERSION_ID
+        );
         context_info.pinned_versions.insert(
             1.into(),
             HummockPinnedVersion {
@@ -518,15 +531,16 @@ mod tests {
                 min_pinned_id: 10.into(),
             },
         );
-        assert_eq!(context_info.min_pinned_version_id(), 10);
-        context_info
-            .version_safe_points
-            .push(HummockVersionId::new(5));
-        assert_eq!(context_info.min_pinned_version_id(), 5);
-        context_info.version_safe_points.clear();
-        assert_eq!(context_info.min_pinned_version_id(), 10);
+        assert_eq!(context_info.min_pinned_version_id(&safe_points), 10);
+        safe_points.version_ids.push(HummockVersionId::new(5));
+        assert_eq!(context_info.min_pinned_version_id(&safe_points), 5);
+        safe_points.version_ids.clear();
+        assert_eq!(context_info.min_pinned_version_id(&safe_points), 10);
         context_info.pinned_versions.clear();
-        assert_eq!(context_info.min_pinned_version_id(), MAX_HUMMOCK_VERSION_ID);
+        assert_eq!(
+            context_info.min_pinned_version_id(&safe_points),
+            MAX_HUMMOCK_VERSION_ID
+        );
     }
 
     #[test]
