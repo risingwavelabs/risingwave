@@ -1,0 +1,196 @@
+# Nested USING / NATURAL joins. Expected results match PostgreSQL.
+#
+# A join whose left and right sides both contain a column group (from an earlier
+# USING / NATURAL join) must compare the right side's group, not the left one.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table ung_t1 (x int, y int);
+
+statement ok
+create table ung_t2 (x int, y int);
+
+statement ok
+create table ung_t3 (x int);
+
+statement ok
+create table ung_t4 (x int);
+
+statement ok
+create table ung_t5 (y int);
+
+statement ok
+insert into ung_t1 values (1, 10), (2, 20);
+
+statement ok
+insert into ung_t2 values (2, 20), (3, 30);
+
+statement ok
+insert into ung_t3 values (3), (4);
+
+statement ok
+insert into ung_t4 values (4), (5);
+
+statement ok
+insert into ung_t5 values (10), (20);
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) full join (ung_t3 full join ung_t4 using (x)) using (x) order by x;
+----
+1
+2
+3
+4
+5
+
+query I
+select x from (ung_t1 join ung_t2 using (x)) join (ung_t3 full join ung_t4 using (x)) using (x);
+----
+
+# The left column group is on another column.
+query II
+select x, y from (ung_t1 join ung_t5 using (y)) join (ung_t3 full join ung_t4 using (x)) using (x);
+----
+
+query I
+select x from (ung_t3 natural full join ung_t4) natural full join (ung_t3 as g3 natural full join ung_t4 as g4) order by x;
+----
+3
+4
+5
+
+# The merged column of an outer join must not keep a column that is only
+# non-null on one side of an inner join below it.
+query I
+select x from (ung_t1 join ung_t2 using (x)) full join (ung_t3 full join ung_t4 using (x)) using (x) order by x;
+----
+2
+3
+4
+5
+
+query I
+select x from ung_t1 join ung_t2 using (x) full join ung_t3 using (x) order by x;
+----
+2
+3
+4
+
+query I
+select x from ung_t3 full join (ung_t1 left join ung_t2 using (x)) using (x) order by x;
+----
+1
+2
+3
+4
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) left join ung_t3 using (x) order by x;
+----
+1
+2
+3
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) join ung_t3 using (x);
+----
+3
+
+query I
+select x from ung_t2 right join (ung_t3 right join ung_t4 using (x)) using (x) order by x;
+----
+4
+5
+
+# The merged column takes the value and type of the side its join type picks,
+# which may differ from the other columns of the group in scale or type.
+statement ok
+create table ung_n1 (x numeric);
+
+statement ok
+create table ung_n2 (x numeric);
+
+statement ok
+create table ung_n3 (x numeric);
+
+statement ok
+insert into ung_n1 values (1.0);
+
+statement ok
+insert into ung_n2 values (1.00);
+
+statement ok
+insert into ung_n3 values (1.000);
+
+query T
+select x::varchar from ung_n1 right join (ung_n2 full join ung_n3 using (x)) using (x);
+----
+1.00
+
+query T
+select x::varchar from ung_n1 join (ung_n2 join ung_n3 using (x)) using (x);
+----
+1.0
+
+statement ok
+create table ung_m1 (x bigint);
+
+statement ok
+create table ung_m2 (x int);
+
+statement ok
+create table ung_m3 (x int);
+
+statement ok
+insert into ung_m1 values (2147483647);
+
+statement ok
+insert into ung_m2 values (2147483647);
+
+statement ok
+insert into ung_m3 values (2147483647);
+
+query I
+select x + 1 from (ung_m1 full join ung_m2 using (x)) join ung_m3 using (x);
+----
+2147483648
+
+query I
+select x + 1 from ung_m1 join (ung_m2 join ung_m3 using (x)) using (x);
+----
+2147483648
+
+statement ok
+drop table ung_t1;
+
+statement ok
+drop table ung_t2;
+
+statement ok
+drop table ung_t3;
+
+statement ok
+drop table ung_t4;
+
+statement ok
+drop table ung_t5;
+
+statement ok
+drop table ung_n1;
+
+statement ok
+drop table ung_n2;
+
+statement ok
+drop table ung_n3;
+
+statement ok
+drop table ung_m1;
+
+statement ok
+drop table ung_m2;
+
+statement ok
+drop table ung_m3;
