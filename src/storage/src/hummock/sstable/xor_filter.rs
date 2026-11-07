@@ -59,13 +59,14 @@ impl Xor8FilterBuilder {
     }
 
     fn build_from_xor8(xor_filter: &Xor8) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        buf.put_slice(xor_filter.fingerprints.as_ref());
-        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
-        buf.put_u8(FOOTER_XOR8);
+        let mut buf = Vec::with_capacity(xor8_filter_serialized_len(xor_filter));
+        Self::encode_into(xor_filter, &mut buf);
         buf
+    }
+
+    fn encode_into(xor_filter: &Xor8, buf: &mut Vec<u8>) {
+        xor_filter.encode_le_into(buf);
+        buf.push(FOOTER_XOR8);
     }
 }
 
@@ -81,16 +82,24 @@ impl Xor16FilterBuilder {
     }
 
     fn build_from_xor16(xor_filter: &Xor16) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        xor_filter
-            .fingerprints
-            .iter()
-            .for_each(|x| buf.put_u16_le(*x));
-        // Add an extra byte so readers can distinguish tagged xor filter formats.
-        buf.put_u8(FOOTER_XOR16);
+        let mut buf = Vec::with_capacity(xor16_filter_serialized_len(xor_filter));
+        Self::encode_into(xor_filter, &mut buf);
         buf
+    }
+
+    fn encode_into(xor_filter: &Xor16, buf: &mut Vec<u8>) {
+        let block_length =
+            u32::try_from(xor_filter.block_length).expect("block length exceeds u32");
+        buf.put_u64_le(xor_filter.seed);
+        buf.put_u32_le(block_length);
+        let fingerprints = &xor_filter.fingerprints;
+        let start = buf.len();
+        buf.resize(start + std::mem::size_of_val(fingerprints.as_ref()), 0);
+        let (bytes, _) = buf[start..].as_chunks_mut::<2>();
+        for (bytes, fingerprint) in bytes.iter_mut().zip(fingerprints.iter()) {
+            *bytes = fingerprint.to_le_bytes();
+        }
+        buf.push(FOOTER_XOR16);
     }
 }
 
@@ -894,24 +903,21 @@ impl XorFilterReader {
             XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),
             XorFilter::Xor16(filter) => Xor16FilterBuilder::build_from_xor16(filter),
             XorFilter::BlockXor8(reader) => {
-                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
+                let mut data = Vec::with_capacity(self.serialized_len());
                 for filter in &reader.filters {
-                    let block = Xor8FilterBuilder::build_from_xor8(filter);
-                    data.put_u32_le(block.len() as u32);
-                    data.extend(block);
+                    data.put_u32_le(xor8_filter_serialized_len(filter) as u32);
+                    Xor8FilterBuilder::encode_into(filter, &mut data);
                 }
                 data.put_u32_le(reader.filters.len() as u32);
                 data.put_u8(FOOTER_BLOCKED_XOR8);
                 data
             }
             XorFilter::BlockXor16(reader) => {
-                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
+                let mut data = Vec::with_capacity(self.serialized_len());
                 for filter in &reader.filters {
-                    let block = Xor16FilterBuilder::build_from_xor16(filter);
-                    data.put_u32_le(block.len() as u32);
-                    data.extend(block);
+                    data.put_u32_le(xor16_filter_serialized_len(filter) as u32);
+                    Xor16FilterBuilder::encode_into(filter, &mut data);
                 }
-                // Add footer to tell which kind of filter. 253 indicates a blocked xor16 filter.
                 data.put_u32_le(reader.filters.len() as u32);
                 data.put_u8(FOOTER_BLOCKED_XOR16);
                 data
