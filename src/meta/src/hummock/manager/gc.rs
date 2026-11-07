@@ -335,10 +335,9 @@ impl HummockManager {
         if object_ids.is_empty() {
             return Ok(0);
         }
-        let pinned_by_metadata_backup = match backup_manager.as_ref() {
-            Some(b) => b.list_pinned_object_ids().await,
-            None => HashSet::default(),
-        };
+        // A time-travel snapshot published during this batch can be missed by the scan.
+        // Keep its version references until the batch completes.
+        let _safe_point = self.register_gc_safe_point().await;
         // It's crucial to collect_min_uncommitted_object_id (i.e. `min_object_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_object_id`, new compute nodes may join and generate new uncommitted objects that are not covered by `min_sst_id`.
         // By getting `min_object_id` after `object_ids`, it's ensured `object_ids` won't include any objects from those new compute nodes.
@@ -352,25 +351,35 @@ impl HummockManager {
         metrics
             .full_gc_candidate_object_count
             .observe(candidate_object_number as _);
-        // filter by metadata backup
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|s| !pinned_by_metadata_backup.contains(&s.as_raw()))
-            .collect_vec();
-        let after_metadata_backup = object_ids.len();
         // filter by time travel archive
         let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self
             .filter_out_objects_by_time_travel(object_ids.into_iter())
             .await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in full GC");
+        #[cfg(test)]
+        retention_tests::pause_gc_retention_handoff(self).await;
         let after_time_travel = object_ids.len();
         // filter by object id watermark, i.e. minimum id of uncommitted objects reported by compute nodes.
-        let object_ids = object_ids
+        let mut object_ids = object_ids
             .into_iter()
             .filter(|id| id.as_raw() < min_object_id)
             .collect_vec();
         let after_min_object_id = object_ids.len();
+        // The version safe point does not cover changelog-only SSTs. Check the backup
+        // manifest with backup startup excluded, and keep the guard through deletion.
+        let _backup_guard = if let Some(backup_manager) = &backup_manager {
+            let Some(guard) = backup_manager.try_lock_for_gc() else {
+                tracing::debug!("Skip full GC batch while the backup job is active or locked");
+                return Ok(0);
+            };
+            let backup_pinned = backup_manager.list_pinned_object_ids().await;
+            object_ids.retain(|id| !backup_pinned.contains(&id.as_raw()));
+            Some(guard)
+        } else {
+            None
+        };
+        let after_metadata_backup = object_ids.len();
         // filter by version
         let after_version = self
             .finalize_objects_to_delete(object_ids.into_iter())
@@ -381,9 +390,9 @@ impl HummockManager {
             .observe(after_version_count as _);
         tracing::info!(
             candidate_object_number,
-            after_metadata_backup,
             after_time_travel,
             after_min_object_id,
+            after_metadata_backup,
             after_version_count,
             "complete gc batch"
         );
@@ -518,7 +527,7 @@ impl HummockManager {
         Ok(total)
     }
 
-    /// Minor GC attempts to delete objects that were part of Hummock version but are no longer in use.
+    /// Minor GC checks queued stale objects for references before deleting them.
     pub async fn try_start_minor_gc(&self, backup_manager: BackupManagerRef) -> Result<()> {
         const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
         let Some(object_ids) = self
@@ -527,8 +536,8 @@ impl HummockManager {
         else {
             return Ok(());
         };
-        // Objects pinned by either meta backup or time travel should be filtered out.
-        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
+        #[cfg(test)]
+        retention_tests::pause_gc_retention_handoff(self).await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
             let versioning = self
@@ -544,13 +553,25 @@ impl HummockManager {
         };
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(&s.as_raw()));
+            .filter(|s| !version_pinned.contains(s));
         let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in minor GC");
-        // Retry is not necessary. Full GC will handle these objects eventually.
-        self.delete_objects(object_ids.into_iter().collect())
-            .await?;
+        // Requeue the remaining candidates if we cannot check the manifest safely.
+        let Some(_backup_guard) = backup_manager.try_lock_for_gc() else {
+            self.gc_manager
+                .add_may_delete_object_ids(object_ids.into_iter());
+            return Ok(());
+        };
+        let backup_pinned = backup_manager.list_pinned_object_ids().await;
+        // Full GC can reclaim backup-pinned objects after the backup is deleted.
+        self.delete_objects(
+            object_ids
+                .into_iter()
+                .filter(|id| !backup_pinned.contains(&id.as_raw()))
+                .collect(),
+        )
+        .await?;
         Ok(())
     }
 }
@@ -600,6 +621,9 @@ impl FullGcState {
         self.is_started.store(false, Ordering::SeqCst);
     }
 }
+
+#[cfg(test)]
+mod retention_tests;
 
 #[cfg(test)]
 mod tests {

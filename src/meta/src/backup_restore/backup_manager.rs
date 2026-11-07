@@ -77,6 +77,13 @@ pub struct BackupManager {
     meta_metrics: Arc<MetaMetrics>,
     /// (job id, status, message)
     latest_job_info: ArcSwap<(MetaBackupJobId, BackupJobStatus, String)>,
+    #[cfg(test)]
+    pub(crate) snapshot_captured: tokio::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
 }
 
 impl BackupManager {
@@ -160,6 +167,8 @@ impl BackupManager {
             metrics: BackupManagerMetrics::default(),
             meta_metrics,
             latest_job_info: ArcSwap::from_pointee((0, BackupJobStatus::NotFound, "".into())),
+            #[cfg(test)]
+            snapshot_captured: Default::default(),
         }
     }
 
@@ -324,6 +333,18 @@ impl BackupManager {
             .collect()
     }
 
+    /// Exclude new backup jobs until GC releases the guard.
+    ///
+    /// Returns `None` if the lock is busy or a running job may hold unpublished references.
+    /// Hold the guard from reading the published manifest through object deletion.
+    pub(crate) fn try_lock_for_gc(&self) -> Option<impl Send + '_> {
+        let guard = self.running_job_handle.try_lock().ok()?;
+        if guard.is_some() {
+            return None;
+        }
+        Some(guard)
+    }
+
     pub async fn manifest(&self) -> Arc<MetaSnapshotManifest> {
         self.backup_store.load().0.manifest().await
     }
@@ -356,6 +377,14 @@ impl BackupWorker {
                 .build(job_id, hummock_version_builder)
                 .await?;
             let snapshot = snapshot_builder.finish()?;
+            #[cfg(test)]
+            {
+                let gate = backup_manager_clone.snapshot_captured.lock().await.take();
+                if let Some((captured, publish)) = gate {
+                    captured.send(()).unwrap();
+                    publish.await.unwrap();
+                }
+            }
             backup_manager_clone
                 .backup_store
                 .load()
