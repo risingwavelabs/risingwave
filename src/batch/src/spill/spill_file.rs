@@ -430,17 +430,17 @@ fn io<T>(result: std::io::Result<T>) -> Result<T> {
 }
 
 /// Memory charged to a context, released on drop.
-struct Charge {
+pub(super) struct Charge {
     ctx: MemoryContext,
     bytes: usize,
 }
 
 impl Charge {
-    fn new(ctx: MemoryContext) -> Self {
+    pub(super) fn new(ctx: MemoryContext) -> Self {
         Self { ctx, bytes: 0 }
     }
 
-    fn set(&mut self, bytes: usize) {
+    pub(super) fn set(&mut self, bytes: usize) {
         self.ctx.add_unchecked(bytes as i64 - self.bytes as i64);
         self.bytes = bytes;
     }

@@ -16,7 +16,6 @@ await-tree = { workspace = true }
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-futures-util = "0.3"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 linkme = { workspace = true }
