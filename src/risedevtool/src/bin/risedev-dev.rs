@@ -28,12 +28,12 @@ use fs_err::OpenOptions;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
-    ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
-    DorisService, DummyService, ElasticSearchService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, KafkaService, LakekeeperService, MariaDbService,
-    MetaNodeService, MinioService, MoatService, MongoDbService, MongoDbSetupTask, MotoService,
-    MqttService, MySqlService, NatsService, OpenSearchService, OracleService, PostgresService,
-    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    CassandraService, ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander,
+    ConfigureTmuxTask, DorisService, DummyService, ElasticSearchService, EnsureStopService,
+    ExecuteContext, FrontendService, GrafanaService, KafkaService, LakekeeperService,
+    MariaDbService, MetaNodeService, MinioService, MoatService, MongoDbService, MongoDbSetupTask,
+    MotoService, MqttService, MySqlService, NatsService, OpenSearchService, OracleService,
+    PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
     SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, StarrocksService, Task,
     TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
@@ -310,6 +310,14 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("redis {}:{}", c.address, c.port));
+                }
+                ServiceConfig::Cassandra(c) => {
+                    let mut service = CassandraService::new(c.clone());
+                    service.execute(&mut ctx)?;
+                    let mut task = risedev::CassandraReadyCheckTask::new(c.clone());
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("cassandra {}:{}", c.address, c.port));
                 }
                 ServiceConfig::ClickHouse(c) => {
                     let mut service = ClickHouseService::new(c.clone());
