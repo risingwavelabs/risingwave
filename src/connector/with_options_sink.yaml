@@ -369,6 +369,59 @@ ElasticSearchConfig:
     field_type: String
     required: false
     default: '"upsert" . to_owned ()'
+FirestoreConfig:
+  fields:
+  - name: firestore.project_id
+    field_type: String
+    comments: Google Cloud project ID
+    required: true
+  - name: firestore.collection
+    field_type: String
+    comments: Collection path. A parent document segment may reference a column, e.g. `users/{user_id}/orders`.
+    required: true
+  - name: firestore.database_id
+    field_type: String
+    comments: 'Optional: Firestore database ID (for multi-database projects)'
+    required: false
+  - name: firestore.credentials
+    field_type: String
+    comments: |-
+      A JSON string containing the service account credentials for authorization
+      see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
+    required: false
+  - name: firestore.document_id_column
+    field_type: String
+    comments: |-
+      Column whose value is used as the Firestore document ID. Values must be unique and valid
+      Firestore document IDs. Duplicate values in the same resolved collection intentionally
+      map multiple rows to the same Firestore document.
+    required: false
+  - name: firestore.skip_invalid_rows
+    field_type: bool
+    comments: |-
+      Skip invalid rows and document-level `INVALID_ARGUMENT/OUT_OF_RANGE` rejections (default: false).
+      Skipped mutations are not delivered; authentication and transient failures still fail the chunk.
+    required: false
+    default: Default::default
+  - name: firestore.decimal_mode
+    field_type: FirestoreDecimalMode
+    comments: |-
+      DECIMAL encoding: `decimal128` (default, Enterprise only) or `double` (may lose precision).
+      Database metadata is checked for Decimal128; unavailable metadata never selects double.
+    required: false
+    default: Default::default
+  - name: firestore.max_batch_size
+    field_type: usize
+    comments: 'Maximum batch size for batch writes (default: 500)'
+    required: false
+    default: '500'
+  - name: firestore.max_future_send_nums
+    field_type: usize
+    comments: |-
+      Maximum concurrent batch write requests within one chunk (default: 256).
+      Chunks are written sequentially to preserve per-document mutation order.
+    required: false
+    default: '256'
 FsConfig:
   fields:
   - name: fs.path
