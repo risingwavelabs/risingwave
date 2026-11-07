@@ -14213,6 +14213,7 @@ dependencies = [
  "prometheus",
  "rand 0.9.5",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_connector",
  "risingwave_dml",
  "risingwave_expr",

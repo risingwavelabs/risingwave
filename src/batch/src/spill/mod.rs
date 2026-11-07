@@ -12,4 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod spill_file;
 pub mod spill_op;
+
+/// A spilling executor holds at least this much data in memory before it spills, so that spilling
+/// makes progress even when other queries hold the whole memory budget.
+pub const MIN_WORKING_SET_BYTES: u64 = 1 << 20;
