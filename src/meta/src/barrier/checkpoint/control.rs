@@ -246,6 +246,7 @@ impl CheckpointControl {
             command,
             span,
             checkpoint,
+            periodic,
         } = new_barrier;
 
         if let Some((mut command, notifier)) = command {
@@ -383,6 +384,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 Some((command, notifier)),
                 checkpoint,
+                periodic,
                 span,
                 partial_graph_manager,
                 periodic_barriers,
@@ -411,6 +413,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 None,
                 checkpoint,
+                periodic,
                 span,
                 partial_graph_manager,
                 periodic_barriers,
@@ -1264,6 +1267,7 @@ impl DatabaseCheckpointControl {
         &mut self,
         command: Option<(Command, Notifier)>,
         checkpoint: bool,
+        periodic: bool,
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
         periodic_barriers: &mut PeriodicBarriers,
@@ -1433,6 +1437,8 @@ impl DatabaseCheckpointControl {
             }
         };
 
+        periodic_barriers.on_barrier_injected(self.database_id, periodic, checkpoint);
+
         // Record the in-flight barrier.
         self.enqueue_command(epoch, jobs_to_wait);
 
@@ -1561,6 +1567,7 @@ mod tests {
                         command: Some((compaction_command(sink_id), notifier)),
                         span: tracing::Span::none(),
                         checkpoint: true,
+                        periodic: false,
                     },
                     &mut graphs,
                     &mut periodic,
@@ -1596,6 +1603,7 @@ mod tests {
                 command: Some((compaction_command(SinkId::new(42)), notifier)),
                 span: tracing::Span::none(),
                 checkpoint: true,
+                periodic: false,
             },
             &mut graphs,
             &mut periodic,
