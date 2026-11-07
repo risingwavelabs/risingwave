@@ -351,11 +351,11 @@ impl CompactorManagerInner {
         self.task_heartbeats.remove(&task_id).unwrap();
     }
 
-    /// Returns expired tasks and untracked task IDs that should be stopped on the compactor.
+    /// Returns expired tracked task IDs and untracked task IDs to stop on the compactor.
     pub fn update_task_heartbeats(
         &mut self,
         progress_list: &Vec<CompactTaskProgress>,
-    ) -> (Vec<CompactTask>, Vec<HummockCompactionTaskId>) {
+    ) -> (Vec<HummockCompactionTaskId>, Vec<HummockCompactionTaskId>) {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
@@ -382,7 +382,7 @@ impl CompactorManagerInner {
                 // timeout check
                 if task_ref.expire_at < now {
                     // cancel
-                    cancel_tasks.push(task_ref.task.clone())
+                    cancel_tasks.push(progress.task_id)
                 }
             } else {
                 // Meta may have already canceled the task, for example through risectl.
@@ -480,7 +480,7 @@ impl CompactorManager {
     pub fn update_task_heartbeats(
         &self,
         progress_list: &Vec<CompactTaskProgress>,
-    ) -> (Vec<CompactTask>, Vec<HummockCompactionTaskId>) {
+    ) -> (Vec<HummockCompactionTaskId>, Vec<HummockCompactionTaskId>) {
         self.inner.write().update_task_heartbeats(progress_list)
     }
 
@@ -596,16 +596,44 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
     use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
     use risingwave_rpc_client::HummockMetaClient;
 
+    use super::CompactorManagerInner;
     use crate::hummock::compaction::selector::default_compaction_selector;
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
     use crate::hummock::{CompactorManager, IcebergCompactorManager, MockHummockMetaClient};
+
+    #[test]
+    fn test_update_task_heartbeats_returns_cancellation_ids() {
+        let mut manager = CompactorManagerInner::for_test();
+        for task_id in [1, 2] {
+            manager.initiate_task_heartbeat(CompactTask {
+                task_id,
+                ..Default::default()
+            });
+        }
+        manager.task_heartbeats.get_mut(&1).unwrap().expire_at = 0;
+        manager.task_heartbeats.get_mut(&2).unwrap().expire_at = u64::MAX;
+
+        let progress = [1, 2, 3]
+            .into_iter()
+            .map(|task_id| CompactTaskProgress {
+                task_id,
+                ..Default::default()
+            })
+            .collect();
+        let (expired, untracked) = manager.update_task_heartbeats(&progress);
+
+        assert_eq!(expired, vec![1]);
+        assert_eq!(untracked, vec![3]);
+        assert_eq!(manager.get_progress().len(), 2);
+    }
 
     #[tokio::test]
     async fn test_compactor_manager() {
