@@ -94,7 +94,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     async fn abort_and_mark_blocked(
         &self,
         recovery: RecoveryStart,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) -> MetaResult<()>;
     async fn mark_ready(
         &self,
