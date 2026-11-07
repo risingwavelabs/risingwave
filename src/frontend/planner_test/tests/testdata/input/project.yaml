@@ -126,3 +126,39 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: async projection with literals does not need a separate synchronous layer
+  before:
+    - create_append_only_table
+  sql: |
+    select id, pg_sleep(id::double precision) as waited, 'tag' as tag, null::int as empty
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: separate synchronous computation from nested async projection
+  before:
+    - create_append_only_table
+  sql: |
+    select id, id + 1 as next_id,
+           coalesce(pg_sleep(id::double precision), 1) as waited,
+           length(value) as len
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: async CASE remains conditional when splitting projection
+  before:
+    - create_append_only_table
+  sql: |
+    select id, upper(value) as upper_value,
+           case when id > 0 then pg_sleep(id::double precision) else id end as guarded
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: async lambda is classified together with its enclosing expression
+  before:
+    - create_append_only_table
+  sql: |
+    select id + 1 as next_id,
+           array_transform(array[id], |v| coalesce(pg_sleep(v::double precision), v)) as waited
+    from t;
+  expected_outputs:
+    - stream_plan

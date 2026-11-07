@@ -156,6 +156,31 @@ mod tests {
     }
 
     #[test]
+    fn test_projection_job_overrides_are_independent() {
+        let mut base = StreamingConfig::default();
+        base.developer.project_expr_concurrency = 3;
+        base.developer.project_expr_inflight_request_concurrency = 20;
+        let job_a = merge_streaming_config_section(
+            &base,
+            "[streaming.developer]\nproject_expr_concurrency = 7\nproject_expr_inflight_request_concurrency = 0",
+        )
+        .unwrap()
+        .unwrap();
+        let job_b = merge_streaming_config_section(
+            &base,
+            "[streaming.developer]\nproject_expr_inflight_request_concurrency = 5",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(job_a.developer.project_expr_concurrency, 7);
+        assert_eq!(job_a.developer.project_expr_inflight_request_concurrency, 0);
+        assert_eq!(job_b.developer.project_expr_concurrency, 3);
+        assert_eq!(job_b.developer.project_expr_inflight_request_concurrency, 5);
+        assert_eq!(base.developer.project_expr_concurrency, 3);
+        assert_eq!(base.developer.project_expr_inflight_request_concurrency, 20);
+    }
+
+    #[test]
     fn test_not_relevant() {
         let base = StreamingConfig::default();
         let partial = r#"

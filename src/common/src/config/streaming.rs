@@ -124,20 +124,27 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
-    /// The maximum number of chunks that `ProjectExecutor` evaluates concurrently.
+    /// The maximum number of chunks awaiting ordered output in an asynchronous `ProjectExecutor`.
+    /// Synchronous projections ignore this setting. Finished chunks waiting for earlier results
+    /// still occupy the window. This limit is per executor, not shared across a job's actors.
     ///
     /// - `1` means no chunk-level concurrency.
     /// - `0` means unlimited concurrency.
     #[serde(default = "default::developer::stream_project_expr_concurrency")]
     pub project_expr_concurrency: usize,
 
-    /// The maximum number of in-flight projection evaluation requests in `ProjectExecutor`.
+    /// The visible-row budget for in-flight evaluation in an asynchronous `ProjectExecutor`.
     ///
-    /// An in-flight request has started projection evaluation but has not finished yet. A finished
-    /// request no longer counts against this limit even if its result is still waiting to be emitted
-    /// in order.
+    /// A chunk charges its cardinality when evaluation starts and releases it when evaluation
+    /// finishes, even if its result is still waiting for ordered output. A whole chunk may enter
+    /// while usage is below the budget, exceeding it once; no further nonempty chunk enters until
+    /// usage falls below the budget. This lets chunks larger than the budget make progress.
+    /// Synchronous projections ignore this setting. This is a per-executor row budget, not an
+    /// exact HTTP-request limit: expressions may batch rows or issue multiple requests per row.
     ///
-    /// - `0` means unlimited in-flight requests.
+    /// - `0` means unlimited in-flight rows.
+    /// Both projection limits support job overrides with `ALTER ... SET CONFIG`; overrides take
+    /// precedence over the compute-node config and require job recovery to take effect.
     #[serde(default = "default::developer::stream_project_expr_inflight_request_concurrency")]
     pub project_expr_inflight_request_concurrency: usize,
 

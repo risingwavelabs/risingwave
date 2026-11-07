@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod inflight_rows;
 mod materialized_exprs;
 mod project_scalar;
 mod project_set;
