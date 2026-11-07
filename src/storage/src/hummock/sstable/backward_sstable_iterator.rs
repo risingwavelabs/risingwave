@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use foyer::Hint;
@@ -208,14 +207,7 @@ impl HummockIterator for BackwardSstableIterator {
         let block_idx = self
             .sst
             .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // Compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
-            })
+            .partition_point(0..self.sst.block_count(), std::ops::Bound::Included(key))
             .saturating_sub(1); // considering the boundary of 0
         let block_idx = block_idx as isize;
 

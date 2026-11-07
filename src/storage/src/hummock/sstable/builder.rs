@@ -1279,7 +1279,7 @@ pub(super) mod tests {
         let (data, meta) = source.finish().await.unwrap().writer_output;
         let source = Sstable::new(1.into(), meta, false);
         assert_eq!(source.meta.block_metas.len(), 1);
-        let source_meta = &source.meta.block_metas[0];
+        let source_meta = source.meta.block_meta(0);
         let raw = data.slice(..source_meta.len as usize);
 
         for compression in [CompressionAlgorithm::Lz4, CompressionAlgorithm::Zstd] {

@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
-use super::BlockMeta;
+use super::CachedBlockMeta;
 use crate::hummock::{BlockHolder, HummockResult};
 
 pub struct MemoryUsageTracker {
@@ -71,7 +71,7 @@ impl BlockDataStream {
         // The stream that provides raw data.
         byte_stream: MonitoredStreamingReader,
         // Meta data of the SST that is streamed.
-        block_metas: &[BlockMeta],
+        block_metas: &[CachedBlockMeta],
     ) -> Self {
         Self {
             buf_reader: byte_stream,

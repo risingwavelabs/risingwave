@@ -24,7 +24,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
@@ -61,6 +61,8 @@ pub(crate) struct BlockStreamIterator {
     /// When present, this is the decoded block immediately before the stream cursor.
     /// Otherwise the next block is still eligible for raw copy, or the SST is exhausted.
     iter: Option<BlockIterator>,
+    // Supports borrowed key() while the unread block remains eligible for raw copy.
+    next_smallest_key: Vec<u8>,
     task_progress: Arc<TaskProgress>,
     stats_ptr: Arc<AtomicU64>,
 }
@@ -77,6 +79,10 @@ impl BlockStreamIterator {
         // Fast compaction streams the physical SST. The executor decides whether each block
         // can be copied or needs decoding, including table-id pruning.
         let block_count = sstable.meta.block_metas.len();
+        let mut next_smallest_key = Vec::new();
+        if block_count != 0 {
+            sstable.meta.block_smallest_key(0, &mut next_smallest_key);
+        }
         task_progress.inc_num_pending_read_io();
         Self {
             block_stream: SstableBlockStream::new(
@@ -87,6 +93,7 @@ impl BlockStreamIterator {
                 max_io_retry_times,
             ),
             iter: None,
+            next_smallest_key,
             task_progress,
             stats_ptr,
         }
@@ -99,6 +106,14 @@ impl BlockStreamIterator {
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
         });
         let block = self.block_stream.next_block().await?;
+        if self.block_stream.has_next_block() {
+            self.block_stream.sstable.meta.block_smallest_key(
+                self.block_stream.next_block_index(),
+                &mut self.next_smallest_key,
+            );
+        } else {
+            self.next_smallest_key.clear();
+        }
         if block.is_none() {
             self.iter = None;
         }
@@ -112,7 +127,7 @@ impl BlockStreamIterator {
         let sstable = &self.block_stream.sstable;
         (
             sstable.filter_reader.get_block_raw_filter(block_index),
-            sstable.meta.block_metas[block_index].clone(),
+            sstable.meta.block_meta(block_index),
         )
     }
 
@@ -141,36 +156,35 @@ impl BlockStreamIterator {
     }
 
     fn next_block_smallest(&self) -> &[u8] {
-        self.block_stream.sstable.meta.block_metas[self.block_stream.next_block_index()]
-            .smallest_key
-            .as_ref()
+        &self.next_smallest_key
     }
 
-    /// Upper bound used to decide whether the unread block precedes the other input.
-    /// The next block's lower bound is exclusive; the SST's largest key is inclusive.
-    /// Callers must compare user keys strictly to avoid copying across versions of one key.
-    fn next_block_upper_bound(&self) -> &[u8] {
+    /// Checks whether the unread block's upper bound is strictly before the target user key.
+    /// Equality may hide more versions of the same user key.
+    fn next_block_before(&self, user_key: UserKey<&[u8]>) -> bool {
         let sstable = &self.block_stream.sstable;
-        let next_block_index = self.block_stream.next_block_index();
-        if next_block_index + 1 < sstable.meta.block_metas.len() {
-            sstable.meta.block_metas[next_block_index + 1]
-                .smallest_key
-                .as_ref()
+        let upper_block_index = self.block_stream.next_block_index() + 1;
+        if upper_block_index < sstable.block_count() {
+            // The maximum epoch sorts first for this user key. All of its versions
+            // therefore compare equal or greater than this target.
+            let target = FullKey {
+                user_key,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
+            };
+            sstable
+                .meta
+                .compare_block_key(upper_block_index, target)
+                .is_lt()
         } else {
-            sstable.meta.largest_key.as_ref()
+            FullKey::decode(&sstable.meta.largest_key).user_key < user_key
         }
     }
 
     /// Builder boundary for the just-downloaded block, not necessarily its last stored key.
     fn current_block_largest(&self) -> Vec<u8> {
         let sstable = &self.block_stream.sstable;
-        let next_block_index = self.block_stream.next_block_index();
         if self.block_stream.has_next_block() {
-            let mut largest_key = FullKey::decode(
-                sstable.meta.block_metas[next_block_index]
-                    .smallest_key
-                    .as_ref(),
-            );
+            let mut largest_key = FullKey::decode(&self.next_smallest_key);
             // do not include this key because it is the smallest key of next block.
             largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
             largest_key.encode()
@@ -490,11 +504,10 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             if !first.current_sstable().has_decoded_block() {
                 let right_key = second.current_sstable().key();
                 while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
-                    let full_key =
-                        FullKey::decode(first.current_sstable().next_block_upper_bound());
-                    // Equality may hide more versions of the other input's user key.
-                    // Only a strictly smaller upper bound is safe for raw copy.
-                    if full_key.user_key.ge(&right_key.user_key) {
+                    if !first
+                        .current_sstable()
+                        .next_block_before(right_key.user_key)
+                    {
                         break;
                     }
                     let smallest_key =

@@ -14,14 +14,13 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::ops::Range;
+use std::ops::{Bound, Range};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -31,7 +30,9 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{Block, BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
+use crate::hummock::{
+    Block, BlockHolder, BlockIterator, CachedSstableMeta, HummockResult, TableHolder,
+};
 use crate::monitor::StoreLocalStatistic;
 
 const PROGRESS_KEY_INTERVAL: usize = 100;
@@ -68,14 +69,12 @@ impl SstableStreamIterator {
         let read_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().copied());
         // Further filter the block_metas_range with sstable_info.key_range
         // This is necessary when the SST is split into multiple SstableInfo with different key ranges
-        let block_metas_range = {
-            let block_metas = &sstable.meta.block_metas[block_metas_range.clone()];
-            let inner_range =
-                filter_block_metas(block_metas, &read_table_ids, sstable_info.key_range.clone());
-            // Adjust the range to be relative to the original block_metas
-            (block_metas_range.start + inner_range.start)
-                ..(block_metas_range.start + inner_range.end)
-        };
+        let block_metas_range = filter_block_metas(
+            &sstable.meta,
+            block_metas_range,
+            &read_table_ids,
+            sstable_info.key_range.clone(),
+        );
 
         let key_range_left = FullKey::decode(&sstable_info.key_range.left).to_vec();
         let key_range_right = FullKey::decode(&sstable_info.key_range.right).to_vec();
@@ -373,8 +372,12 @@ impl ConcatSstableIterator {
                 None => self.key_range.clone(),
             };
 
-            let block_metas_range =
-                filter_block_metas(&sstable.meta.block_metas, &read_table_ids, filter_key_range);
+            let block_metas_range = filter_block_metas(
+                &sstable.meta,
+                0..sstable.block_count(),
+                &read_table_ids,
+                filter_key_range,
+            );
 
             if !block_metas_range.is_empty() {
                 let mut sstable_iter = SstableStreamIterator::new(
@@ -539,42 +542,33 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 }
 
 pub(crate) fn filter_block_metas(
-    block_metas: &[BlockMeta],
+    meta: &CachedSstableMeta,
+    range: Range<usize>,
     read_table_ids: &HashSet<TableId>,
     key_range: KeyRange,
 ) -> Range<usize> {
-    if block_metas.is_empty() {
+    if range.is_empty() {
         return 0..0;
     }
-
+    let block_metas = &meta.block_metas;
     let mut start_index = if key_range.left.is_empty() {
-        0
+        range.start
     } else {
-        // start_index points to the greatest block whose smallest_key <= seek_key.
-        block_metas
-            .partition_point(|block| {
-                KeyComparator::compare_encoded_full_key(&key_range.left, &block.smallest_key)
-                    != Ordering::Less
-            })
+        let left = FullKey::decode(&key_range.left);
+        meta.partition_point(range.clone(), Bound::Included(left))
             .saturating_sub(1)
+            .max(range.start)
     };
-
-    let mut end_index = if key_range.right.is_empty() {
-        block_metas.len()
+    let end_exclusive = if key_range.right.is_empty() {
+        range.end
     } else {
-        let ret = block_metas.partition_point(|block| {
-            KeyComparator::compare_encoded_full_key(&block.smallest_key, &key_range.right)
-                != Ordering::Greater
-        });
-
-        if ret == 0 {
-            // not found
-            return 0..0;
-        }
-
-        ret
+        let right = FullKey::decode(&key_range.right);
+        meta.partition_point(range.clone(), Bound::Included(right))
+    };
+    if end_exclusive <= range.start {
+        return 0..0;
     }
-    .saturating_sub(1);
+    let mut end_index = end_exclusive - 1;
 
     // Skip blocks that are not in the SST read table ids.
     while start_index <= end_index {
@@ -773,9 +767,8 @@ mod tests {
             .sstable(&iter.sstables[0], &mut iter.stats)
             .await
             .unwrap();
-        let block_metas = &sst.meta.block_metas;
-        let block_1_smallest_key = block_metas[1].smallest_key.clone();
-        let block_2_smallest_key = block_metas[2].smallest_key.clone();
+        let block_1_smallest_key = sst.meta.block_meta(1).smallest_key;
+        let block_2_smallest_key = sst.meta.block_meta(2).smallest_key;
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.
         let seek_key = block_1_smallest_key.clone();
         iter.seek_idx(0, Some(FullKey::decode(&seek_key)))
@@ -826,7 +819,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_block_metas() {
-        use crate::hummock::compactor::iterator::filter_block_metas;
+        fn filter_block_metas(
+            blocks: &[BlockMeta],
+            table_ids: &HashSet<TableId>,
+            range: KeyRange,
+        ) -> std::ops::Range<usize> {
+            let meta = crate::hummock::CachedSstableMeta::from(crate::hummock::SstableMeta {
+                block_metas: blocks.to_vec(),
+                ..Default::default()
+            });
+            super::filter_block_metas(&meta, 0..blocks.len(), table_ids, range)
+        }
 
         {
             let block_metas = Vec::default();

@@ -44,7 +44,7 @@ use thiserror_ext::AsReport;
 use tokio::time::Instant;
 
 use super::{
-    BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
+    BatchUploadWriter, Block, BlockResponse, CachedBlockMeta, RecentFilter, Sstable, SstableMeta,
     SstableWriterOptions,
 };
 use crate::hummock::block_stream::{BlockDataStream, MemoryUsageTracker, PrefetchBlockStream};
@@ -832,7 +832,7 @@ impl SstableStore {
     pub async fn get_stream_for_blocks(
         &self,
         object_id: HummockSstableObjectId,
-        metas: &[BlockMeta],
+        metas: &[CachedBlockMeta],
     ) -> HummockResult<BlockDataStream> {
         fail_point!("get_stream_err");
         let data_path = self.get_sst_data_path(object_id);
@@ -913,6 +913,7 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         std::mem::take(&mut meta.bloom_filter);
+        let meta = crate::hummock::CachedSstableMeta::from(meta);
         assert_eq!(holder.meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         assert_eq!(holder.meta, meta);
@@ -1068,9 +1069,9 @@ mod tests {
             assert_eq!(stats.cache_data_prefetch_count, 1);
             assert_eq!(stats.cache_data_block_total, 1);
             // If the single-block read also fails, the error must still reach the caller.
-            let second_key = risingwave_hummock_sdk::key::FullKey::decode(
-                &sstable.meta.block_metas[1].smallest_key,
-            );
+            let second_meta = sstable.meta.block_meta(1);
+            let second_key =
+                risingwave_hummock_sdk::key::FullKey::decode(&second_meta.smallest_key);
             assert!(iter.seek(second_key).await.is_err());
             assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
         }
@@ -1101,9 +1102,8 @@ mod tests {
             &info,
         );
         for idx in [0, next_batch] {
-            let key = risingwave_hummock_sdk::key::FullKey::decode(
-                &sstable.meta.block_metas[idx].smallest_key,
-            );
+            let block_meta = sstable.meta.block_meta(idx);
+            let key = risingwave_hummock_sdk::key::FullKey::decode(&block_meta.smallest_key);
             iter.seek(key).await.unwrap();
             assert_eq!(iter.key(), key);
             assert!(sstable_store.get_prefetch_memory_usage() > 0);

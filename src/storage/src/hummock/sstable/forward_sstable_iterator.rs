@@ -16,6 +16,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use sync_point::sync_point;
@@ -154,18 +155,24 @@ impl SstableIterator {
         );
 
         if let Some(end_bound) = options.scan_end_user_key.as_ref() {
-            let block_metas =
-                &sstable.meta.block_metas[block_start_idx_inclusive..block_end_idx_exclusive];
-            let range_end_idx_exclusive = match end_bound {
-                Unbounded => block_metas.len(),
-                Included(end_key) => block_metas.partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key <= end_key.as_ref()
-                }),
-                Excluded(end_key) => block_metas.partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key < end_key.as_ref()
-                }),
+            let range = block_start_idx_inclusive..block_end_idx_exclusive;
+            block_end_idx_exclusive = match end_bound {
+                Unbounded => range.end,
+                Included(end_key) => sstable.meta.partition_point(
+                    range,
+                    Included(FullKey {
+                        user_key: end_key.as_ref(),
+                        epoch_with_gap: EpochWithGap::new_min_epoch(),
+                    }),
+                ),
+                Excluded(end_key) => sstable.meta.partition_point(
+                    range,
+                    Excluded(FullKey {
+                        user_key: end_key.as_ref(),
+                        epoch_with_gap: EpochWithGap::new_max_epoch(),
+                    }),
+                ),
             };
-            block_end_idx_exclusive = block_start_idx_inclusive + range_end_idx_exclusive;
         }
 
         Self {
@@ -287,16 +294,14 @@ impl SstableIterator {
     }
 
     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
-        self.block_start_idx_inclusive
-            + self.sst.meta.block_metas
-                [self.block_start_idx_inclusive..self.block_end_idx_exclusive]
-                .partition_point(|block_meta| {
-                    // compare by version comparator
-                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                    // partition point should be `prev(<=)` instead of `<`.
-                    FullKey::decode(&block_meta.smallest_key).le(&key)
-                })
-                .saturating_sub(1) // considering the boundary of 0
+        self.sst
+            .meta
+            .partition_point(
+                self.block_start_idx_inclusive..self.block_end_idx_exclusive,
+                Included(key),
+            )
+            .saturating_sub(1)
+            .max(self.block_start_idx_inclusive)
     }
 }
 
@@ -672,7 +677,8 @@ mod tests {
             (0, 2, 2),
             (0, 2, 3),
         ] {
-            let key = FullKey::decode(&sstable.meta.block_metas[idx].smallest_key);
+            let block_meta = sstable.meta.block_meta(idx);
+            let key = FullKey::decode(&block_meta.smallest_key);
             iter.seek(key).await.unwrap();
             reference.seek(key).await.unwrap();
             assert_eq!(iter.key(), reference.key(), "block {idx}");
@@ -842,7 +848,7 @@ mod tests {
         table_2_sstable_info.table_ids = vec![TableId::new(2)];
         let table_2_sstable_info = SstableInfo::from(table_2_sstable_info);
         let table_2_start: UserKey<Bytes> =
-            FullKey::decode(&sstable.meta.block_metas[table_2_block_start].smallest_key)
+            FullKey::decode(&sstable.meta.block_meta(table_2_block_start).smallest_key)
                 .user_key
                 .copy_into();
         let options = Arc::new(SstableIteratorReadOptions {

@@ -174,7 +174,7 @@ mod tests {
     }
 
     async fn assert_next_block(stream: &mut SstableBlockStream, original: &Bytes, index: usize) {
-        let meta = stream.sstable.meta.block_metas[index].clone();
+        let meta = stream.sstable.meta.block_metas[index];
         let (data, uncompressed_size) = stream.next_block().await.unwrap().unwrap();
         assert_eq!(
             data,
