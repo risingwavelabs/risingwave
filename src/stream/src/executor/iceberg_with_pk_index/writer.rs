@@ -25,6 +25,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
 
@@ -184,9 +185,13 @@ where
     // chunk in the same checkpoint observes earlier writes/deletes via the state table.
     #[try_stream(ok = DataChunk, error = StreamExecutorError)]
     async fn process_chunk(&mut self, chunk: StreamChunk) {
+        // `StreamSink::sink_type_in_prop` maps Iceberg's `type='upsert'` to a retract sink,
+        // and `derive_sink_type` rejects upsert input. Only retract or append-only input can
+        // reach this writer, so inserts cannot replace existing Iceberg rows.
         let chunk = compact_chunk_inline::<{ output_kind::RETRACT }>(
             chunk,
             &self.pk_indices,
+            StreamKind::Retract,
             InconsistencyBehavior::Panic,
         );
 

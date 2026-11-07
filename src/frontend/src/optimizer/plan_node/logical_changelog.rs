@@ -16,6 +16,7 @@ use itertools::Itertools;
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
+use super::stream::StreamPlanNodeMetadata;
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
@@ -151,11 +152,9 @@ impl ColPrunable for LogicalChangeLog {
             }
         }
 
-        // Retain the input stream key so unkeyed CDC changelogs can co-locate row changes.
+        // Retain the input stream key so keyed and unkeyed changelogs preserve distinct row changes.
         // The output projection below hides key columns not requested by the parent.
-        if self.core.key_indices.is_none()
-            && let Some(stream_key) = self.input().stream_key()
-        {
+        if let Some(stream_key) = self.input().stream_key() {
             for &index in stream_key {
                 if !input_required_cols.contains(&index) {
                     input_required_cols.push(index);
@@ -214,6 +213,22 @@ impl ToBatch for LogicalChangeLog {
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let input = self.input().to_stream(ctx)?;
+
+        if let Some(key) = &self.core.key_indices {
+            // Upsert deletes only guarantee stream-key columns. Validate before shuffling:
+            // otherwise a tombstone can be routed differently from its preceding insert.
+            if input.stream_kind().is_upsert()
+                && !key.iter().all(|i| input.expect_stream_key().contains(i))
+            {
+                return Err(BindError(
+                    "When producing a changelog from an upsert stream, KEY must be the same as \
+                     or a subset of the stream key. Materialize the input first to use other key columns."
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
+
         let input = if let Some(key) = &self.core.key_indices {
             RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
         } else if matches!(input.distribution(), Distribution::SomeShard) {
@@ -326,8 +341,8 @@ mod tests {
         assert!(input.as_stream_exchange().is_some());
         assert_eq!(input.distribution(), &Distribution::HashShard(vec![1]));
 
-        // An explicit changelog key takes precedence over the CDC primary key and survives pruning.
-        let changelog = LogicalChangeLog::create(scan.into(), Some(vec![1]));
+        // An explicit changelog key matching the CDC primary key also survives pruning.
+        let changelog = LogicalChangeLog::create(scan.into(), Some(vec![0]));
         let stream = changelog
             .to_stream(&mut ToStreamContext::new_with_backfill_type(
                 false,
@@ -335,10 +350,10 @@ mod tests {
             ))
             .unwrap();
         let input = stream.as_stream_change_log().unwrap().input();
-        assert_eq!(input.distribution(), &Distribution::HashShard(vec![1]));
+        assert_eq!(input.distribution(), &Distribution::HashShard(vec![0]));
 
         let pruned = changelog.prune_col(
-            &[0, 2, 3],
+            &[1, 2, 3],
             &mut ColumnPruningContext::new(changelog.clone()),
         );
         let stream = pruned
