@@ -2332,6 +2332,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_paused_sink_schema_change_does_not_deadlock() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table(pk_info);
+
+        test_env.register_table(table.clone()).await;
+
+        let bitmap = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            bitmap,
+            1024,
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test-paused-schema-change",
+            None,
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(table.id)
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
+        // Paused on bootstrap, simulating an actor running while cluster is paused.
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), true)
+            .await
+            .unwrap();
+
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
+
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as PbSchemaChangeOp;
+        let schema_change = PbSinkSchemaChange {
+            original_schema: table
+                .columns
+                .iter()
+                .map(|col| PbField {
+                    data_type: Some(
+                        col.column_desc
+                            .as_ref()
+                            .unwrap()
+                            .column_type
+                            .as_ref()
+                            .unwrap()
+                            .clone(),
+                    ),
+                    name: col.column_desc.as_ref().unwrap().name.clone(),
+                })
+                .collect(),
+            op: Some(PbSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                fields: vec![PbField {
+                    data_type: Some(DataType::Int32.to_protobuf()),
+                    name: "new_col".to_owned(),
+                }],
+            })),
+        };
+
+        // When paused, flush_current_epoch with schema change must complete immediately
+        // without waiting for reader barrier truncation, avoiding deadlock.
+        let post_flush = tokio::time::timeout(
+            Duration::from_secs(3),
+            writer.flush_current_epoch(
+                epoch2,
+                FlushCurrentEpochOptions {
+                    is_checkpoint: true,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                    schema_change: Some(schema_change.clone()),
+                    wait_log_store_flush: false,
+                },
+            ),
+        )
+        .await
+        .expect("flush must not hang when paused")
+        .unwrap();
+
+        post_flush.post_yield_barrier().await.unwrap();
+
+        // When cluster resumes, the reader should unblock and read the queued barrier.
+        writer.resume().unwrap();
+
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    schema_change: read_schema_change,
+                    ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint);
+                assert_eq!(read_schema_change, Some(schema_change));
+                reader
+                    .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+                    .unwrap();
+            }
+            item => unreachable!("{:?}", item),
+        }
+    }
+
+    #[tokio::test]
     async fn test_wait_log_store_flush_without_schema_change() {
         let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;

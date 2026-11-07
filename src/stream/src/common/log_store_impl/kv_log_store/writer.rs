@@ -162,8 +162,10 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         }
         flush_info.report(&self.metrics);
 
-        let should_wait_log_store_flush =
-            options.schema_change.is_some() || options.wait_log_store_flush;
+        // When the stream is paused, the reader is parked at the pause gate and cannot truncate
+        // barriers. Do not wait for barrier truncation to avoid deadlocking the actor loop.
+        let should_wait_log_store_flush = !self.is_paused
+            && (options.schema_change.is_some() || options.wait_log_store_flush);
         // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
         // always rebuild sink when update vnode bitmap.
         self.tx.barrier(
