@@ -31,6 +31,7 @@ pub async fn handle_create_sql_function(
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
@@ -38,6 +39,16 @@ pub async fn handle_create_sql_function(
 
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
+    }
+
+    // TODO: `UdfKind` has no variant for SQL functions, so the shared `should_reject_function_behavior`
+    // and `should_reject_unsafe_skip_materializing_exprs` predicates cannot be used here yet. Once SQL
+    // functions are representable there, replace this check with calls to both of them.
+    if with_options.unsafe_skip_materializing_exprs.is_some() {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`unsafe_skip_materializing_exprs` is not supported for SQL functions".to_owned(),
+        )
+        .into());
     }
 
     let language = "sql".to_owned();
@@ -173,6 +184,10 @@ pub async fn handle_create_sql_function(
         link: None,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        // SQL UDF calls are inlined at bind time, so their purity is derived from the bound body
+        // and neither of these fields is ever read.
+        unsafe_skip_materializing_exprs: false,
+        is_immutable: false,
         is_async: None,
         is_batched: None,
         created_at_epoch: None,
