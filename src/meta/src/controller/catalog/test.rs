@@ -2101,6 +2101,9 @@ mod tests {
             arg_types,
             return_type: Some(test_data_type.clone()),
             language: "python".to_owned(),
+            always_retry_on_network_error: true,
+            unsafe_skip_materializing_exprs: true,
+            is_immutable: true,
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
             )),
@@ -2123,6 +2126,9 @@ mod tests {
         assert_eq!(function.return_type.to_protobuf(), test_data_type);
         assert_eq!(function.arg_types.to_protobuf().len(), 1);
         assert_eq!(function.language, "python");
+        assert!(function.always_retry_on_network_error);
+        assert!(function.unsafe_skip_materializing_exprs);
+        assert!(function.is_immutable);
 
         mgr.create_schema(PbSchema {
             database_id: TEST_DATABASE_ID,
