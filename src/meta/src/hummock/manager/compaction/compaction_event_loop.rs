@@ -206,11 +206,8 @@ impl HummockCompactionEventHandler {
     ) -> bool {
         let mut compactor_alive = true;
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
-        let cancel_tasks = compactor_manager
-            .update_task_heartbeats(&progress)
-            .into_iter()
-            .map(|task| task.task_id)
-            .collect::<Vec<_>>();
+        let (mut cancel_tasks, mut untracked_tasks) =
+            compactor_manager.update_task_heartbeats(&progress);
         if !cancel_tasks.is_empty() {
             tracing::info!(
                 ?cancel_tasks,
@@ -230,6 +227,10 @@ impl HummockCompactionEventHandler {
                 );
             }
         }
+
+        // Untracked tasks have already been removed from meta. They only need a cancellation
+        // event on the reporting compactor, without another attempt to remove their meta state.
+        cancel_tasks.append(&mut untracked_tasks);
 
         match compactor_manager.get_compactor(context_id) {
             Some(compactor) => {
@@ -901,5 +902,196 @@ mod scheduling_tests {
                 .unwrap()
         );
         trigger.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_manual_cancellation_notifies_owner_and_retries_on_heartbeat() {
+        let (manager, _) = fixture(false).await;
+        let context_id = 99.into();
+        let mut receiver = manager.compactor_manager.add_compactor(context_id);
+        let mut other_receiver = manager.compactor_manager.add_compactor(100.into());
+        let task = manager
+            .get_compact_task(context_id, 2.into(), &mut default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+        let handler = HummockCompactionEventHandler::new(manager.clone());
+        let progress = CompactTaskProgress {
+            task_id: task.task_id,
+            num_progress_key: 1,
+            ..Default::default()
+        };
+
+        assert!(handler.handle_heartbeat(context_id, vec![progress]).await);
+        assert!(receiver.try_recv().is_err());
+
+        // This is the same cancellation path used by risectl. Meta no longer lists the task.
+        assert!(
+            manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+        // The request itself notifies the recorded owner without waiting for another heartbeat.
+        let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+        let ResponseEvent::CancelCompactTask(cancel) = event else {
+            panic!("expected compactor cancellation, got {event:?}");
+        };
+        assert_eq!(cancel.task_id, task.task_id);
+        assert_eq!(cancel.context_id, context_id);
+        assert!(receiver.try_recv().is_err());
+        assert!(other_receiver.try_recv().is_err());
+        assert!(manager.compactor_manager.get_progress().is_empty());
+        assert!(
+            manager
+                .compaction_task_from_assignment_for_test(task.task_id)
+                .await
+                .is_none()
+        );
+        let next_task = manager
+            .get_compact_task(context_id, 2.into(), &mut default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Retry cancellation while the old task still runs, including after reconnecting.
+        // A newly assigned task in the same heartbeat must remain active.
+        for num_progress_key in 1..=3 {
+            if num_progress_key == 3 {
+                receiver = manager.compactor_manager.add_compactor(context_id);
+            }
+            assert!(
+                handler
+                    .handle_heartbeat(
+                        context_id,
+                        vec![
+                            progress,
+                            CompactTaskProgress {
+                                task_id: next_task.task_id,
+                                num_progress_key,
+                                ..Default::default()
+                            },
+                        ],
+                    )
+                    .await
+            );
+            let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+            let ResponseEvent::CancelCompactTask(cancel) = event else {
+                panic!("expected compactor cancellation, got {event:?}");
+            };
+            assert_eq!(cancel.task_id, task.task_id);
+            assert_eq!(cancel.context_id, context_id);
+            assert!(receiver.try_recv().is_err());
+            let tracked = manager.compactor_manager.get_progress();
+            assert_eq!(tracked.len(), 1);
+            assert_eq!(tracked[0].task_id, next_task.task_id);
+        }
+
+        // A late result cannot revive the canceled task or apply its output.
+        assert!(
+            !manager
+                .report_compact_task(
+                    task.task_id,
+                    TaskStatus::Success,
+                    vec![],
+                    None,
+                    HashMap::default(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_batch_cancellation_notifies_each_owner_once() {
+        let (manager, _) = fixture(false).await;
+        let (left, mapping) = manager
+            .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+            .await
+            .unwrap();
+        let right = *mapping.keys().find(|&&id| id != left).unwrap();
+        let left_context_id: HummockContextId = 77.into();
+        let right_context_id: HummockContextId = 88.into();
+        let mut left_receiver = manager.compactor_manager.add_compactor(left_context_id);
+        let mut right_receiver = manager.compactor_manager.add_compactor(right_context_id);
+        let left_task = manager
+            .get_compact_task(left_context_id, left, &mut default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+        let right_task = manager
+            .get_compact_task(right_context_id, right, &mut default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let results = manager
+            .cancel_compact_tasks(
+                vec![
+                    left_task.task_id,
+                    u64::MAX,
+                    right_task.task_id,
+                    left_task.task_id,
+                ],
+                TaskStatus::ManualCanceled,
+            )
+            .await
+            .unwrap();
+        assert_eq!(results, vec![true, false, true, false]);
+        for (receiver, task_id, context_id) in [
+            (&mut left_receiver, left_task.task_id, left_context_id),
+            (&mut right_receiver, right_task.task_id, right_context_id),
+        ] {
+            let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+            let ResponseEvent::CancelCompactTask(cancel) = event else {
+                panic!("expected compactor cancellation, got {event:?}");
+            };
+            assert_eq!(cancel.task_id, task_id);
+            assert_eq!(cancel.context_id, context_id);
+            assert!(receiver.try_recv().is_err());
+        }
+        assert!(manager.compactor_manager.get_progress().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_failed_cancellation_notification_retries_after_reconnect() {
+        let (manager, _) = fixture(false).await;
+        let context_id = 99.into();
+        let receiver = manager.compactor_manager.add_compactor(context_id);
+        let task = manager
+            .get_compact_task(context_id, 2.into(), &mut default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+        drop(receiver);
+
+        // Losing the session must not prevent meta from committing the cancellation.
+        assert!(
+            manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+        assert!(manager.compactor_manager.get_progress().is_empty());
+
+        let mut receiver = manager.compactor_manager.add_compactor(context_id);
+        assert!(
+            HummockCompactionEventHandler::new(manager)
+                .handle_heartbeat(
+                    context_id,
+                    vec![CompactTaskProgress {
+                        task_id: task.task_id,
+                        ..Default::default()
+                    }],
+                )
+                .await
+        );
+        let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+        let ResponseEvent::CancelCompactTask(cancel) = event else {
+            panic!("expected compactor cancellation, got {event:?}");
+        };
+        assert_eq!(cancel.task_id, task.task_id);
+        assert_eq!(cancel.context_id, context_id);
+        assert!(receiver.try_recv().is_err());
     }
 }
