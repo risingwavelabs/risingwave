@@ -124,19 +124,19 @@ mod tests {
             InflightDatabaseInfo::empty(database_id, env.shared_actor_infos().clone());
         let (notifier, started_rx) = Notifier::new();
 
-        let new_barrier = schedule::NewBarrier {
+        let mut periodic_barriers = PeriodicBarriers::default();
+        let new_barrier = schedule::NewBarrier::for_test(
             database_id,
-            command: Some((
+            Some((
                 Command::RescheduleIntent {
                     context: RescheduleContext::empty(),
                     reschedule_plan: None,
                 },
                 notifier,
             )),
-            span: tracing::Span::none(),
-            checkpoint: false,
-            periodic: false,
-        };
+            false,
+            &mut periodic_barriers,
+        );
 
         let result =
             resolve_reschedule_intent(env, HashMap::new(), Some(&database_info), new_barrier);
@@ -180,12 +180,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 }
 
-fn resolve_reschedule_intent(
+fn resolve_reschedule_intent<'a>(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     database_info: Option<&InflightDatabaseInfo>,
-    mut new_barrier: schedule::NewBarrier,
-) -> MetaResult<Option<schedule::NewBarrier>> {
+    mut new_barrier: schedule::NewBarrier<'a>,
+) -> MetaResult<Option<schedule::NewBarrier<'a>>> {
     let Some((command, notifier)) = new_barrier.command.take() else {
         return Ok(Some(new_barrier));
     };
@@ -443,8 +443,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 
     async fn resolve_since_timestamp_snapshot_backfill(
-        &mut self,
-        new_barrier: &mut schedule::NewBarrier,
+        context: &C,
+        completing_task: &mut CompletingTask,
+        checkpoint_control: &mut CheckpointControl,
+        partial_graph_manager: &mut PartialGraphManager,
+        new_barrier: &mut schedule::NewBarrier<'_>,
     ) -> MetaResult<bool> {
         let Some((
             Command::CreateStreamingJob {
@@ -467,10 +470,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // Complete any inflight command first so the committed upstream epoch and
         // table changelog view used for since_timestamp resolution cannot be stale.
-        match self.completing_task.wait_completing_task().await {
-            Ok(Some(output)) => self
-                .checkpoint_control
-                .ack_completed(&mut self.partial_graph_manager, output)?,
+        match completing_task.wait_completing_task().await {
+            Ok(Some(output)) => checkpoint_control.ack_completed(partial_graph_manager, output)?,
             Ok(None) => {}
             Err(err) => {
                 error!(
@@ -481,8 +482,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
         }
 
-        match self
-            .context
+        match context
             .resolve_log_store_epoch(
                 snapshot_backfill_info
                     .upstream_mv_table_id_to_backfill_epoch
@@ -844,9 +844,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
-                    match self
-                        .resolve_since_timestamp_snapshot_backfill(&mut new_barrier)
-                        .await
+                    match Self::resolve_since_timestamp_snapshot_backfill(
+                        &*self.context,
+                        &mut self.completing_task,
+                        &mut self.checkpoint_control,
+                        &mut self.partial_graph_manager,
+                        &mut new_barrier,
+                    )
+                    .await
                     {
                         Ok(true) => {}
                         Ok(false) => continue,
@@ -858,7 +863,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(
                         new_barrier,
                         &mut self.partial_graph_manager,
-                        &mut self.periodic_barriers,
                         self.active_streaming_nodes.current(),
                     ) {
                         if !self.enable_recovery {

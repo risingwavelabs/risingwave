@@ -41,12 +41,45 @@ use crate::notification::{Notifier, wait_collection};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
-pub(super) struct NewBarrier {
+pub(super) struct NewBarrier<'a> {
     pub database_id: DatabaseId,
     pub command: Option<(Command, Notifier)>,
     pub span: tracing::Span,
     pub checkpoint: bool,
-    pub periodic: bool,
+    pub periodic_barriers: &'a mut PeriodicBarriers,
+    periodic: bool,
+}
+
+impl NewBarrier<'_> {
+    /// Reset the periodic timer of the database, unless the barrier is the periodic one, and
+    /// update its checkpoint counter. Call this only after the barrier is injected; a barrier
+    /// discarded before injection, e.g. a no-op or rejected reschedule intent, is dropped
+    /// instead and leaves both untouched.
+    pub(super) fn injected(self) {
+        if !self.periodic {
+            self.periodic_barriers
+                .reset_database_timer(self.database_id);
+        }
+        self.periodic_barriers
+            .update_num_uncheckpointed_barrier(self.database_id, self.checkpoint);
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_test(
+        database_id: DatabaseId,
+        command: Option<(Command, Notifier)>,
+        checkpoint: bool,
+        periodic_barriers: &mut PeriodicBarriers,
+    ) -> NewBarrier<'_> {
+        NewBarrier {
+            database_id,
+            command,
+            span: tracing::Span::none(),
+            checkpoint,
+            periodic_barriers,
+            periodic: false,
+        }
+    }
 }
 
 /// A queue for scheduling barriers.
@@ -460,7 +493,7 @@ impl PeriodicBarriers {
     pub(super) async fn next_barrier(
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
-    ) -> NewBarrier {
+    ) -> NewBarrier<'_> {
         let force_checkpoint_database = self.force_checkpoint_databases.extract_if(|_| true).next();
         if let Some(database_id) = force_checkpoint_database {
             NewBarrier {
@@ -468,6 +501,7 @@ impl PeriodicBarriers {
                 command: None,
                 span: tracing_span(),
                 checkpoint: true,
+                periodic_barriers: self,
                 periodic: false,
             }
         } else {
@@ -481,6 +515,7 @@ impl PeriodicBarriers {
                         command: Some((scheduled.command, scheduled.notifier)),
                         span: scheduled.span,
                         checkpoint,
+                        periodic_barriers: self,
                         periodic: false,
                     }
                 },
@@ -493,27 +528,12 @@ impl PeriodicBarriers {
                         command: None,
                         span: tracing_span(),
                         checkpoint,
+                        periodic_barriers: self,
                         periodic: true,
                     }
                 }
             }
         }
-    }
-
-    /// Reset the periodic timer of the database, unless the barrier was the periodic one, and
-    /// update its checkpoint counter. Call this only after a barrier returned by
-    /// [`Self::next_barrier`] is injected; a barrier discarded before injection, e.g. a no-op or
-    /// rejected reschedule intent, must leave both untouched.
-    pub(super) fn on_barrier_injected(
-        &mut self,
-        database_id: DatabaseId,
-        periodic: bool,
-        checkpoint: bool,
-    ) {
-        if !periodic {
-            self.reset_database_timer(database_id);
-        }
-        self.update_num_uncheckpointed_barrier(database_id, checkpoint);
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
@@ -786,14 +806,6 @@ mod tests {
         }
     }
 
-    fn inject(periodic_barriers: &mut PeriodicBarriers, barrier: &NewBarrier) {
-        periodic_barriers.on_barrier_injected(
-            barrier.database_id,
-            barrier.periodic,
-            barrier.checkpoint,
-        );
-    }
-
     fn noop_reschedule_intent(database_id: DatabaseId) -> Scheduled {
         let (notifier, _) = Notifier::new();
         Scheduled {
@@ -983,20 +995,20 @@ mod tests {
             let barrier = periodic.next_barrier(&context).await;
             assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
             assert!(!barrier.checkpoint); // First barrier shouldn't be a checkpoint
-            inject(&mut periodic, &barrier);
+            barrier.injected();
         }
 
         // Since we have 3 databases with intervals 50ms, 100ms, and 200ms,
         // the first barrier should come from database 1 (50ms interval)
         let start_time = Instant::now();
         let barrier = periodic.next_barrier(&context).await;
-        inject(&mut periodic, &barrier);
         let mut elapsed = start_time.elapsed();
 
         // Verify the barrier properties
         assert_eq!(barrier.database_id, DatabaseId::from(1));
         assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
         assert!(barrier.checkpoint); // Second barrier should be checkpoint for database 1
+        barrier.injected();
         // Use tokio's time pause mechanism, so it will be exactly 50ms here.
         assert_eq!(
             elapsed,
@@ -1015,7 +1027,7 @@ mod tests {
             let barrier = periodic.next_barrier(&context).await;
             assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
             assert!(!barrier.checkpoint); // Next two barriers shouldn't be checkpoints
-            inject(&mut periodic, &barrier);
+            barrier.injected();
         }
 
         elapsed = start_time.elapsed();
@@ -1039,8 +1051,7 @@ mod tests {
         let (context, tx) = MockGlobalBarrierWorkerContext::new();
 
         // Skip the first barrier to let the timers start
-        let barrier = periodic.next_barrier(&context).await;
-        inject(&mut periodic, &barrier);
+        periodic.next_barrier(&context).await.injected();
 
         // Schedule a command
         let (notifier, _started_rx) = Notifier::new();
@@ -1069,7 +1080,7 @@ mod tests {
             assert!(matches!(command, Command::Flush));
         }
 
-        inject(&mut periodic, &barrier);
+        barrier.injected();
         let injected_at = Instant::now();
 
         // Without the reset the tick would come at the original deadline, 10ms earlier.
@@ -1100,12 +1111,12 @@ mod tests {
         let mut barriers = Vec::new();
         for _ in 0..5 {
             let barrier = periodic.next_barrier(&context).await;
-            barriers.push(barrier);
+            barriers.push(barrier.database_id);
         }
 
         // Count barriers per database
-        for barrier in barriers {
-            *barrier_counts.entry(barrier.database_id).or_insert(0) += 1;
+        for database_id in barriers {
+            *barrier_counts.entry(database_id).or_insert(0) += 1;
         }
 
         // Database 1 (30ms interval) should have more barriers than database 2 (100ms interval)
@@ -1161,14 +1172,15 @@ mod tests {
         periodic.force_checkpoint_in_next_barrier(DatabaseId::from(2));
 
         let barrier1 = periodic.next_barrier(&context).now_or_never().unwrap();
-        let barrier2 = periodic.next_barrier(&context).now_or_never().unwrap();
-
         assert!(barrier1.checkpoint);
         assert!(barrier1.command.is_none());
+        let database_id1 = barrier1.database_id;
+
+        let barrier2 = periodic.next_barrier(&context).now_or_never().unwrap();
         assert!(barrier2.checkpoint);
         assert!(barrier2.command.is_none());
         assert_eq!(
-            HashSet::from([barrier1.database_id, barrier2.database_id]),
+            HashSet::from([database_id1, barrier2.database_id]),
             HashSet::from([DatabaseId::from(1), DatabaseId::from(2)])
         );
         assert!(periodic.force_checkpoint_databases.is_empty());
@@ -1177,11 +1189,13 @@ mod tests {
         // barriers arrive without waiting, as the first tick of a timer is due at creation.
         let start_time = Instant::now();
         let barrier3 = periodic.next_barrier(&context).await;
-        let barrier4 = periodic.next_barrier(&context).await;
         assert!(barrier3.periodic);
+        let database_id3 = barrier3.database_id;
+
+        let barrier4 = periodic.next_barrier(&context).await;
         assert!(barrier4.periodic);
         assert_eq!(
-            HashSet::from([barrier3.database_id, barrier4.database_id]),
+            HashSet::from([database_id3, barrier4.database_id]),
             HashSet::from([DatabaseId::from(1), DatabaseId::from(2)])
         );
         // A reset would have pushed either tick a full 100ms interval out.
@@ -1199,7 +1213,7 @@ mod tests {
         // First barrier - should not be checkpoint
         let barrier1 = periodic.next_barrier(&context).await;
         assert!(!barrier1.checkpoint);
-        inject(&mut periodic, &barrier1);
+        barrier1.injected();
 
         // A no-op reschedule intent arrives exactly when the next tick is due. The biased
         // select takes the intent, which is then discarded without injection, so neither the
@@ -1218,12 +1232,12 @@ mod tests {
         assert!(barrier2.checkpoint);
         // A reset at the tie would have moved the tick from 50ms to 100ms.
         assert!(start_time.elapsed() < Duration::from_millis(100));
-        inject(&mut periodic, &barrier2);
+        barrier2.injected();
 
         // Third barrier - should not be checkpoint (counter reset)
         let barrier3 = periodic.next_barrier(&context).await;
         assert!(!barrier3.checkpoint);
-        inject(&mut periodic, &barrier3);
+        barrier3.injected();
     }
 
     #[tokio::test]

@@ -236,20 +236,12 @@ impl CheckpointControl {
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
-        new_barrier: NewBarrier,
+        mut new_barrier: NewBarrier<'_>,
         partial_graph_manager: &mut PartialGraphManager,
-        periodic_barriers: &mut PeriodicBarriers,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
-        let NewBarrier {
-            database_id,
-            command,
-            span,
-            checkpoint,
-            periodic,
-        } = new_barrier;
-
-        if let Some((mut command, notifier)) = command {
+        let database_id = new_barrier.database_id;
+        if let Some((mut command, notifier)) = new_barrier.command.take() {
             if let &mut Command::CreateStreamingJob {
                 ref mut cross_db_snapshot_backfill_info,
                 ref info,
@@ -381,13 +373,10 @@ impl CheckpointControl {
                 },
             };
 
+            new_barrier.command = Some((command, notifier));
             database.handle_new_barrier(
-                Some((command, notifier)),
-                checkpoint,
-                periodic,
-                span,
+                new_barrier,
                 partial_graph_manager,
-                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -411,12 +400,8 @@ impl CheckpointControl {
                 return Ok(());
             }
             database.handle_new_barrier(
-                None,
-                checkpoint,
-                periodic,
-                span,
+                new_barrier,
                 partial_graph_manager,
-                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -1265,19 +1250,16 @@ impl DatabaseCheckpointControl {
     /// Handle the new barrier from the scheduled queue and inject it.
     fn handle_new_barrier(
         &mut self,
-        command: Option<(Command, Notifier)>,
-        checkpoint: bool,
-        periodic: bool,
-        span: tracing::Span,
+        mut new_barrier: NewBarrier<'_>,
         partial_graph_manager: &mut PartialGraphManager,
-        periodic_barriers: &mut PeriodicBarriers,
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let prev_epoch = self.state.in_flight_prev_epoch();
         let curr_epoch = prev_epoch.next();
 
-        let (mut command, notifier) = if let Some((command, notifier)) = command {
+        let (mut command, notifier) = if let Some((command, notifier)) = new_barrier.command.take()
+        {
             (Some(command), Some(notifier))
         } else {
             (None, None)
@@ -1407,12 +1389,14 @@ impl DatabaseCheckpointControl {
             return Ok(());
         }
 
-        let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
+        let barrier_info = self
+            .state
+            .next_barrier_info(new_barrier.checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch(), "new barrier enqueued");
         });
-        span.record("epoch", barrier_info.curr_epoch());
+        new_barrier.span.record("epoch", barrier_info.curr_epoch());
 
         let epoch = barrier_info.epoch();
         let ApplyCommandInfo { jobs_to_wait } = match self.apply_command(
@@ -1420,7 +1404,7 @@ impl DatabaseCheckpointControl {
             &mut notifier_start,
             barrier_info,
             partial_graph_manager,
-            periodic_barriers,
+            new_barrier.periodic_barriers,
             hummock_version_stats,
             worker_nodes,
         ) {
@@ -1437,7 +1421,7 @@ impl DatabaseCheckpointControl {
             }
         };
 
-        periodic_barriers.on_barrier_injected(self.database_id, periodic, checkpoint);
+        new_barrier.injected();
 
         // Record the in-flight barrier.
         self.enqueue_command(epoch, jobs_to_wait);
@@ -1562,15 +1546,13 @@ mod tests {
                 let (notifier, started) = Notifier::new();
 
                 let result = control.handle_new_barrier(
-                    NewBarrier {
+                    NewBarrier::for_test(
                         database_id,
-                        command: Some((compaction_command(sink_id), notifier)),
-                        span: tracing::Span::none(),
-                        checkpoint: true,
-                        periodic: false,
-                    },
+                        Some((compaction_command(sink_id), notifier)),
+                        true,
+                        &mut periodic,
+                    ),
                     &mut graphs,
-                    &mut periodic,
                     &HashMap::new(),
                 );
                 assert!(result.is_ok(), "stale compaction must not trigger recovery");
@@ -1598,15 +1580,13 @@ mod tests {
         let mut periodic = PeriodicBarriers::new(Duration::from_secs(1), 10, vec![]);
         let (notifier, started) = Notifier::new();
         let result = control.handle_new_barrier(
-            NewBarrier {
-                database_id: DatabaseId::new(1),
-                command: Some((compaction_command(SinkId::new(42)), notifier)),
-                span: tracing::Span::none(),
-                checkpoint: true,
-                periodic: false,
-            },
+            NewBarrier::for_test(
+                DatabaseId::new(1),
+                Some((compaction_command(SinkId::new(42)), notifier)),
+                true,
+                &mut periodic,
+            ),
             &mut graphs,
-            &mut periodic,
             &HashMap::new(),
         );
         assert!(result.is_ok());
