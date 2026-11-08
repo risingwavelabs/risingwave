@@ -474,6 +474,7 @@ list_retry_attempts = 3
 
 [storage.object_store.s3]
 keepalive_ms = 600000
+http_client_rotation_interval_ms = ""
 recv_buffer_size = 2097152
 send_buffer_size = ""
 nodelay = true

@@ -15,6 +15,7 @@
 pub mod enumerator;
 pub mod external;
 pub mod jni_source;
+pub mod mariadb;
 pub mod mongodb;
 pub mod mysql;
 pub mod oracle;
@@ -68,6 +69,7 @@ pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
+pub const MARIADB_CDC_CONNECTOR: &str = Mariadb::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
@@ -320,6 +322,7 @@ impl<'a> From<&'a str> for CdcSourceType {
     fn from(name: &'a str) -> Self {
         match name {
             MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
+            MARIADB_CDC_CONNECTOR => CdcSourceType::Mariadb,
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
             SQL_SERVER_CDC_CONNECTOR => CdcSourceType::SqlServer,
@@ -333,6 +336,7 @@ impl CdcSourceType {
     pub fn as_str_name(&self) -> &str {
         match self {
             CdcSourceType::Mysql => "MySQL",
+            CdcSourceType::Mariadb => "MariaDB",
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Mongodb => "MongoDB",
             CdcSourceType::SqlServer => "SQL Server",

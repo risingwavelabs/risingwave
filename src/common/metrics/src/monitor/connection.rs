@@ -431,11 +431,12 @@ pub struct TcpConfig {
     pub keepalive_duration: Option<Duration>,
 }
 
-#[expect(clippy::derivable_impls)]
 impl Default for TcpConfig {
     fn default() -> Self {
         Self {
-            tcp_nodelay: false,
+            // Without it, Nagle's algorithm holds the DATA frame of a small gRPC request until the
+            // peer's delayed ACK, adding about 40ms to the request.
+            tcp_nodelay: true,
             keepalive_duration: None,
         }
     }
