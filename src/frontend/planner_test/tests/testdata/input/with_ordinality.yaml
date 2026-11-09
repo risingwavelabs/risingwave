@@ -82,7 +82,6 @@
     - batch_plan
     - stream_plan
 # lateral join (scalar function)
-# FIXME: currently this panics due to CorrelatedInputRef in Values https://github.com/risingwavelabs/risingwave/issues/12231
 - sql: |
     create table t(x int , arr int[]);
     select * from t, abs(x) WITH ORDINALITY;
