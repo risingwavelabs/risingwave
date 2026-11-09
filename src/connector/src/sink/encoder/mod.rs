@@ -94,6 +94,24 @@ pub enum DateHandlingMode {
     String,
 }
 
+impl DateHandlingMode {
+    pub const OPTION_KEY: &'static str = "date.handling.mode";
+
+    pub fn from_options(options: &BTreeMap<String, String>) -> Result<Self> {
+        match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
+            // Preserve the legacy encoding when the option is absent.
+            Some("from_ce") | None => Ok(Self::FromCe),
+            Some("from_epoch") => Ok(Self::FromEpoch),
+            Some("string") => Ok(Self::String),
+            Some(v) => Err(super::SinkError::Config(anyhow::anyhow!(
+                "unrecognized {} value {}",
+                Self::OPTION_KEY,
+                v
+            ))),
+        }
+    }
+}
+
 /// Useful for both json and protobuf
 #[derive(Clone, Copy)]
 pub enum TimestampHandlingMode {

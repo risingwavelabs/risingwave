@@ -188,6 +188,7 @@ impl RowEncoder for JsonEncoder {
                 Value::Object(mappings),
                 param.schema_name.clone(),
                 col_indices.into_iter().map(|i| &self.schema[i]),
+                &self.config,
             )
         } else {
             mappings
@@ -412,6 +413,7 @@ fn json_converter_with_schema<'a>(
     object: Value,
     name: String,
     fields: impl Iterator<Item = &'a Field>,
+    config: &JsonEncoderConfig,
 ) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(2);
     mapping.insert(
@@ -419,7 +421,7 @@ fn json_converter_with_schema<'a>(
         json!({
             "type": "struct",
             "fields": fields.map(|field| {
-                let mut mapping = type_as_json_schema(&field.data_type);
+                let mut mapping = type_as_json_schema(&field.data_type, config);
                 mapping.insert("field".to_owned(), json!(field.name));
                 mapping
             }).collect_vec(),
@@ -432,7 +434,7 @@ fn json_converter_with_schema<'a>(
 }
 
 // reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
-pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
+pub(crate) fn schema_type_mapping(rw_type: &DataType, config: &JsonEncoderConfig) -> &'static str {
     match rw_type {
         DataType::Boolean => "boolean",
         DataType::Int16 => "int16",
@@ -441,11 +443,19 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Float32 => "float",
         DataType::Float64 => "double",
         DataType::Decimal => "string",
-        DataType::Date => "int32",
+        DataType::Date => match config.date_handling_mode {
+            DateHandlingMode::FromCe | DateHandlingMode::FromEpoch => "int32",
+            DateHandlingMode::String => "string",
+        },
         DataType::Varchar => "string",
         DataType::Time => "int64",
         DataType::Timestamp => "int64",
-        DataType::Timestamptz => "string",
+        DataType::Timestamptz => match config.timestamptz_handling_mode {
+            TimestamptzHandlingMode::Micro | TimestamptzHandlingMode::Milli => "int64",
+            TimestamptzHandlingMode::UtcString | TimestamptzHandlingMode::UtcWithoutSuffix => {
+                "string"
+            }
+        },
         DataType::Interval => "string",
         DataType::Struct(_) => "struct",
         DataType::List(_) => "array",
@@ -458,16 +468,19 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
     }
 }
 
-fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
+fn type_as_json_schema(rw_type: &DataType, config: &JsonEncoderConfig) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(4); // type + optional + fields/items + field
-    mapping.insert("type".to_owned(), json!(schema_type_mapping(rw_type)));
+    mapping.insert(
+        "type".to_owned(),
+        json!(schema_type_mapping(rw_type, config)),
+    );
     mapping.insert("optional".to_owned(), json!(true));
     match rw_type {
         DataType::Struct(struct_type) => {
             let sub_fields = struct_type
                 .iter()
                 .map(|(sub_name, sub_type)| {
-                    let mut sub_mapping = type_as_json_schema(sub_type);
+                    let mut sub_mapping = type_as_json_schema(sub_type, config);
                     sub_mapping.insert("field".to_owned(), json!(sub_name));
                     sub_mapping
                 })
@@ -477,7 +490,7 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
         DataType::List(list_type) => {
             mapping.insert(
                 "items".to_owned(),
-                json!(type_as_json_schema(list_type.elem())),
+                json!(type_as_json_schema(list_type.elem(), config)),
             );
         }
         _ => {}
@@ -488,12 +501,146 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
-        Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
-        Timestamp,
+        Date, Decimal, Interval, ListValue, Scalar, ScalarImpl, StructRef, StructType, StructValue,
+        Time, Timestamp,
     };
 
     use super::*;
+
+    fn assert_temporal_schema_and_payload(
+        data_type: DataType,
+        value: ScalarImpl,
+        date_mode: DateHandlingMode,
+        timestamptz_mode: TimestamptzHandlingMode,
+        expected_type: &str,
+        expected_value: Value,
+    ) {
+        let schema = Schema::new(vec![
+            Field::with_name(data_type.clone(), "value"),
+            Field::with_name(DataType::list(data_type.clone()), "items"),
+            Field::with_name(
+                StructType::new(vec![
+                    ("value", data_type.clone()),
+                    ("items", DataType::list(data_type.clone())),
+                ])
+                .into(),
+                "nested",
+            ),
+        ]);
+        let items = ScalarImpl::List(ListValue::from_datum_iter(
+            &data_type,
+            [Some(value.clone()), None],
+        ));
+        let row = OwnedRow::new(vec![
+            Some(value.clone()),
+            Some(items.clone()),
+            Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(value),
+                Some(items),
+            ]))),
+        ]);
+        let value_schema = json!({
+            "field": "value", "type": expected_type, "optional": true,
+        });
+        let items_schema = json!({
+            "field": "items", "type": "array", "optional": true,
+            "items": {"type": expected_type, "optional": true},
+        });
+        let nested_schema = json!({
+            "field": "nested", "type": "struct", "optional": true,
+            "fields": [value_schema, items_schema],
+        });
+
+        for col_indices in [None, Some(vec![0])] {
+            let is_key = col_indices.is_some();
+            let encoder = JsonEncoder::new(
+                schema.clone(),
+                col_indices,
+                date_mode,
+                TimestampHandlingMode::Milli,
+                timestamptz_mode,
+                TimeHandlingMode::Milli,
+                JsonbHandlingMode::String,
+            )
+            .with_kafka_connect(KafkaConnectParams {
+                schema_name: "test.temporal".to_owned(),
+            });
+            let fields = if is_key {
+                json!([value_schema])
+            } else {
+                json!([value_schema, items_schema, nested_schema])
+            };
+            let payload = if is_key {
+                json!({"value": expected_value})
+            } else {
+                json!({
+                    "value": expected_value,
+                    "items": [expected_value, null],
+                    "nested": {
+                        "value": expected_value,
+                        "items": [expected_value, null],
+                    },
+                })
+            };
+            assert_eq!(
+                Value::Object(encoder.encode(&row).unwrap()),
+                json!({
+                    "schema": {
+                        "type": "struct", "name": "test.temporal", "optional": false,
+                        "fields": fields,
+                    },
+                    "payload": payload,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn test_json_schema_date_modes() {
+        for (mode, expected_type, expected_value) in [
+            (DateHandlingMode::FromCe, "int32", json!(719163)),
+            (DateHandlingMode::FromEpoch, "int32", json!(0)),
+            (DateHandlingMode::String, "string", json!("1970-01-01")),
+        ] {
+            assert_temporal_schema_and_payload(
+                DataType::Date,
+                ScalarImpl::Date(Date::from_ymd_uncheck(1970, 1, 1)),
+                mode,
+                TimestamptzHandlingMode::UtcString,
+                expected_type,
+                expected_value,
+            );
+        }
+    }
+
+    #[test]
+    fn test_json_schema_timestamptz_modes() {
+        for (mode, expected_type, expected_value) in [
+            (
+                TimestamptzHandlingMode::UtcString,
+                "string",
+                json!("1970-01-01T00:00:01.123456Z"),
+            ),
+            (
+                TimestamptzHandlingMode::UtcWithoutSuffix,
+                "string",
+                json!("1970-01-01 00:00:01.123456"),
+            ),
+            (TimestamptzHandlingMode::Micro, "int64", json!(1123456)),
+            (TimestamptzHandlingMode::Milli, "int64", json!(1123)),
+        ] {
+            assert_temporal_schema_and_payload(
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("1970-01-01T00:00:01.123456Z".parse().unwrap()),
+                DateHandlingMode::FromCe,
+                mode,
+                expected_type,
+                expected_value,
+            );
+        }
+    }
 
     #[test]
     fn test_to_json_basic_type() {
@@ -886,9 +1033,21 @@ mod tests {
                 name: "14".into(),
             },
         ];
-        let schema =
-            json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())["schema"]
-                .to_string();
+        let config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::FromCe,
+            timestamp_handling_mode: TimestampHandlingMode::Milli,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::None,
+            jsonb_handling_mode: JsonbHandlingMode::String,
+        };
+        let schema = json_converter_with_schema(
+            json!({}),
+            "test".to_owned(),
+            fields.iter(),
+            &config,
+        )["schema"]
+            .to_string();
         let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
     }
