@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::prelude::*;
+use super::stream_project_split_rule::{has_mixed_computations, is_trivial_expr};
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject};
 use crate::optimizer::rule::ProjectMergeRule;
@@ -31,7 +32,7 @@ impl Rule<Stream> for StreamProjectMergeRule {
             && outer_project
                 .exprs()
                 .iter()
-                .any(|expr| !matches!(expr, ExprImpl::InputRef(_)))
+                .any(|expr| !is_trivial_expr(expr))
         {
             return None;
         }
@@ -42,7 +43,7 @@ impl Rule<Stream> for StreamProjectMergeRule {
             inner_project.exprs(),
             true,
         )?;
-        if super::stream_project_split_rule::has_mixed_computations(&core.exprs) {
+        if has_mixed_computations(&core.exprs) {
             return None;
         }
         core.input = inner_project.input();

@@ -16,12 +16,19 @@ use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::{
     Expr, ExprImpl, ExprVisitor, FunctionCall, FunctionCallWithLambda, UserDefinedFunction,
+    default_visit_expr,
 };
 
 #[derive(Default)]
 struct AsyncAnalyzer(bool);
 
 impl ExprVisitor for AsyncAnalyzer {
+    fn visit_expr(&mut self, expr: &ExprImpl) {
+        if !self.0 {
+            default_visit_expr(self, expr);
+        }
+    }
+
     fn visit_function_call(&mut self, call: &FunctionCall) {
         let args = call
             .inputs()
@@ -32,8 +39,14 @@ impl ExprVisitor for AsyncAnalyzer {
         self.0 |= FUNCTION_REGISTRY
             .get(call.func_type(), &args, &call.return_type())
             .is_ok_and(|sig| sig.is_async);
+        if self.0 {
+            return;
+        }
         for input in call.inputs() {
             self.visit_expr(input);
+            if self.0 {
+                break;
+            }
         }
     }
 

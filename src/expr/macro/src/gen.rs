@@ -157,7 +157,21 @@ impl FunctionAttr {
         let ctor_name = format_ident!("{}", self.ident_name());
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
-            quote! { #name }
+            if self.async_ {
+                quote! {
+                    |return_type, children| {
+                        let expr = #name(return_type, children)?;
+                        risingwave_expr::ensure!(
+                            matches!(&expr, risingwave_expr::expr::BoxedExpression::Async(_)),
+                            "async expression builder `{}` returned a synchronous expression",
+                            stringify!(#name)
+                        );
+                        Ok(expr)
+                    }
+                }
+            } else {
+                quote! { #name }
+            }
         } else if self.rewritten {
             quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {

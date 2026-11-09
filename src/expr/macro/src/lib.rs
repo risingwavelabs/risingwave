@@ -443,6 +443,8 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Different from `#[function]`, which implements the `Expression` trait for a rust scalar function,
 /// `#[build_function]` is used when you already implemented `Expression` manually.
 /// Set `async` when the expression is asynchronous even with synchronous children.
+/// A marked builder must return an asynchronous expression on success; the generated wrapper
+/// returns an error if this contract is violated. Unmarked builders may inherit async children.
 ///
 /// The expected input is a "build" function:
 /// ```ignore

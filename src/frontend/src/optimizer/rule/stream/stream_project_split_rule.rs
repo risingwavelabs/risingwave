@@ -66,11 +66,15 @@ impl Rule<Stream> for StreamProjectSplitRule {
     }
 }
 
+pub(super) fn is_trivial_expr(expr: &ExprImpl) -> bool {
+    matches!(expr, ExprImpl::InputRef(_) | ExprImpl::Literal(_))
+}
+
 pub(super) fn has_mixed_computations(exprs: &[ExprImpl]) -> bool {
     exprs.iter().any(ExprImpl::is_async)
-        && exprs.iter().any(|expr| {
-            !matches!(expr, ExprImpl::InputRef(_) | ExprImpl::Literal(_)) && !expr.is_async()
-        })
+        && exprs
+            .iter()
+            .any(|expr| !is_trivial_expr(expr) && !expr.is_async())
 }
 
 impl StreamProjectSplitRule {
@@ -91,6 +95,62 @@ mod tests {
     use crate::optimizer::plan_node::StreamValues;
     use crate::optimizer::plan_node::generic::PhysicalPlanRef;
     use crate::optimizer::rule::StreamProjectMergeRule;
+
+    #[tokio::test]
+    async fn merge_async_result_with_literals() {
+        let input: PlanRef = StreamValues::new(generic::Values::new_with_stream_key(
+            vec![],
+            Schema::new(vec![Field::with_name(DataType::Float64, "seconds")]),
+            OptimizerContext::mock(),
+            vec![0],
+        ))
+        .into();
+        let sleep: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::PgSleep,
+            vec![InputRef::new(0, DataType::Float64).into()],
+            DataType::Int32,
+        )
+        .into();
+        let inner: PlanRef = StreamProject::new(generic::Project::new(
+            vec![InputRef::new(0, DataType::Float64).into(), sleep.clone()],
+            input.clone(),
+        ))
+        .into();
+        let tag = ExprImpl::literal_varchar("tag".into());
+        let null = ExprImpl::literal_null(DataType::Int32);
+        let outer: PlanRef = StreamProject::new(generic::Project::new(
+            vec![
+                InputRef::new(0, DataType::Float64).into(),
+                InputRef::new(1, DataType::Int32).into(),
+                tag.clone(),
+                null.clone(),
+            ],
+            inner.clone(),
+        ))
+        .into();
+        let merged = StreamProjectMergeRule {}.apply(outer.clone()).unwrap();
+        let project = merged.as_stream_project().unwrap();
+        assert_eq!(project.input(), input);
+        assert_eq!(merged.schema(), outer.schema());
+        assert_eq!(merged.stream_key(), outer.stream_key());
+        assert_eq!(merged.distribution(), outer.distribution());
+        assert_eq!(
+            project.exprs(),
+            &vec![InputRef::new(0, DataType::Float64).into(), sleep, tag, null]
+        );
+
+        // Adding literals must not allow a shared async result to be evaluated twice.
+        let duplicate: PlanRef = StreamProject::new(generic::Project::new(
+            vec![
+                InputRef::new(1, DataType::Int32).into(),
+                InputRef::new(1, DataType::Int32).into(),
+                ExprImpl::literal_int(1),
+            ],
+            inner,
+        ))
+        .into();
+        assert!(StreamProjectMergeRule {}.apply(duplicate).is_none());
+    }
 
     #[tokio::test]
     async fn split_preserves_nested_evaluation_and_shared_results() {

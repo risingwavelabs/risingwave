@@ -24,6 +24,7 @@ mod statement_timeout;
 mod transaction_isolation_level;
 mod visibility_mode;
 
+use anyhow::Context;
 use chrono_tz::Tz;
 pub use iceberg_query_storage_mode::IcebergQueryStorageMode;
 use itertools::Itertools;
@@ -37,7 +38,7 @@ pub use statement_timeout::StatementTimeout;
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
-use crate::config::mutate::{ConfigMutateError, TomlTableMutateExt};
+use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::{CacheRefillPolicy, JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
@@ -690,8 +691,7 @@ impl ConfigReporter for () {
 
 def_anyhow_newtype! {
     pub SessionConfigToOverrideError,
-    toml::ser::Error => "failed to serialize session config",
-    ConfigMutateError => "failed to serialize session config",
+    toml::ser::Error => "failed to serialize initial streaming configuration override",
     ConfigMergeError => transparent,
 }
 
@@ -729,17 +729,24 @@ impl SessionConfig {
                 .upsert("streaming.developer.cache_refill_policy", v)
                 .unwrap();
         }
-        if let Some(v) = self.streaming_project_expr_concurrency.as_ref() {
-            table.upsert("streaming.developer.project_expr_concurrency", v)?;
-        }
-        if let Some(v) = self
-            .streaming_project_expr_inflight_request_concurrency
-            .as_ref()
-        {
-            table.upsert(
+        for (key, value) in [
+            (
+                "streaming.developer.project_expr_concurrency",
+                self.streaming_project_expr_concurrency.as_ref(),
+            ),
+            (
                 "streaming.developer.project_expr_inflight_request_concurrency",
-                v,
-            )?;
+                self.streaming_project_expr_inflight_request_concurrency
+                    .as_ref(),
+            ),
+        ] {
+            if let Some(value) = value {
+                table.upsert(key, value).with_context(|| {
+                    format!(
+                        "failed to build initial streaming configuration override: {key}={value}"
+                    )
+                })?;
+            }
         }
 
         let res = toml::to_string(&table)?;
@@ -906,15 +913,31 @@ mod test {
     #[test]
     fn test_projection_config_override_serialization_error() {
         // Deserialization can bypass SET validation, e.g. for persisted session defaults.
-        for name in [
-            "streaming_project_expr_concurrency",
-            "streaming_project_expr_inflight_request_concurrency",
+        for (name, key) in [
+            (
+                "streaming_project_expr_concurrency",
+                "streaming.developer.project_expr_concurrency",
+            ),
+            (
+                "streaming_project_expr_inflight_request_concurrency",
+                "streaming.developer.project_expr_inflight_request_concurrency",
+            ),
         ] {
             let mut value = serde_json::to_value(SessionConfig::default()).unwrap();
             value[name] = "9223372036854775808".into();
             let config: SessionConfig = serde_json::from_value(value).unwrap();
             let err = config.to_initial_streaming_config_override().unwrap_err();
-            assert_eq!(err.to_string(), "failed to serialize session config");
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "failed to build initial streaming configuration override: {key}=9223372036854775808"
+                )
+            );
+            assert!(
+                err.0
+                    .downcast_ref::<crate::config::mutate::ConfigMutateError>()
+                    .is_some()
+            );
         }
     }
 
