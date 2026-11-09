@@ -241,12 +241,12 @@ impl CheckpointControl {
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let database_id = new_barrier.database_id;
-        if let Some((mut command, notifier)) = new_barrier.command.take() {
+        if let Some((command, _)) = &mut new_barrier.command {
             if let &mut Command::CreateStreamingJob {
                 ref mut cross_db_snapshot_backfill_info,
                 ref info,
                 ..
-            } = &mut command
+            } = command
             {
                 for (table_id, snapshot_epoch) in
                     &mut cross_db_snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
@@ -272,6 +272,9 @@ impl CheckpointControl {
                         let err: MetaError =
                             anyhow!("database of cross db upstream table {} not found", table_id)
                                 .into();
+                        let (_, notifier) = new_barrier
+                            .command
+                            .expect("matched command should still exist");
                         notifier.notify_start_failed(err);
 
                         return Ok(());
@@ -279,7 +282,7 @@ impl CheckpointControl {
                 }
             }
 
-            if let Command::ApplyIcebergPkIndexCompaction { sink_id, .. } = &command
+            if let Command::ApplyIcebergPkIndexCompaction { sink_id, .. } = &*command
                 && self
                     .databases
                     .get(&database_id)
@@ -294,14 +297,16 @@ impl CheckpointControl {
             {
                 // DROP can overtake an asynchronous compaction result. Reject it before
                 // advancing epochs or injecting barriers, without recovering other jobs.
-                notifier.notify_start_failed(
-                    anyhow!(
-                        "Iceberg V3 independent job for sink {} is not running in database {}",
-                        sink_id,
-                        database_id
-                    )
-                    .into(),
-                );
+                let err = anyhow!(
+                    "Iceberg V3 independent job for sink {} is not running in database {}",
+                    sink_id,
+                    database_id
+                )
+                .into();
+                let (_, notifier) = new_barrier
+                    .command
+                    .expect("matched command should still exist");
+                notifier.notify_start_failed(err);
                 return Ok(());
             }
 
@@ -309,7 +314,7 @@ impl CheckpointControl {
                 Entry::Occupied(entry) => entry
                     .into_mut()
                     .expect_running("should not have command when not running"),
-                Entry::Vacant(entry) => match &command {
+                Entry::Vacant(entry) => match &*command {
                     Command::CreateStreamingJob { info, job_type, .. } => {
                         let CreateStreamingJobType::Normal = job_type else {
                             if cfg!(debug_assertions) {
@@ -317,7 +322,11 @@ impl CheckpointControl {
                                     "unexpected first job of type {job_type:?} with info {info:?}"
                                 );
                             } else {
-                                notifier.notify_start_failed(anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into());
+                                let err = anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into();
+                                let (_, notifier) = new_barrier
+                                    .command
+                                    .expect("matched command should still exist");
+                                notifier.notify_start_failed(err);
                                 return Ok(());
                             }
                         };
@@ -340,8 +349,11 @@ impl CheckpointControl {
                     | Command::Resume
                     | Command::DropStreamingJobs { .. }
                     | Command::DropSubscription { .. } => {
-                        notifier.start().started();
                         warn!(?command, "skip command for empty database");
+                        let (_, notifier) = new_barrier
+                            .command
+                            .expect("matched command should still exist");
+                        notifier.start().started();
                         return Ok(());
                     }
                     Command::RescheduleIntent { .. }
@@ -366,14 +378,17 @@ impl CheckpointControl {
                             )
                         } else {
                             warn!(%database_id, ?command, "database does not exist while handling the command");
-                            notifier.notify_start_failed(anyhow!("database {database_id} does not exist while handling command {command:?}").into());
+                            let err = anyhow!("database {database_id} does not exist while handling command {command:?}").into();
+                            let (_, notifier) = new_barrier
+                                .command
+                                .expect("matched command should still exist");
+                            notifier.notify_start_failed(err);
                             return Ok(());
                         }
                     }
                 },
             };
 
-            new_barrier.command = Some((command, notifier));
             database.handle_new_barrier(
                 new_barrier,
                 partial_graph_manager,
