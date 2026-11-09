@@ -43,7 +43,12 @@ use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::manager::MetadataManager;
 
+pub(super) mod change_log_retention;
+
+use change_log_retention::ChangeLogObjectRetention;
+
 pub(crate) struct GcManager {
+    pub(super) change_log_retention: ChangeLogObjectRetention,
     store: ObjectStoreRef,
     path_prefix: String,
     use_new_object_prefix_strategy: bool,
@@ -62,6 +67,7 @@ impl GcManager {
             path_prefix: path_prefix.to_owned(),
             use_new_object_prefix_strategy,
             may_delete_object_ids: Default::default(),
+            change_log_retention: Default::default(),
         }
     }
 
@@ -234,8 +240,9 @@ impl HummockManager {
             .read_with_process_name("finalize_objects_to_delete")
             .await
             .min_pinned_version_id();
-        let tracked_object_ids: HashSet<HummockObjectId> =
+        let mut tracked_object_ids: HashSet<HummockObjectId> =
             versioning.get_tracked_object_ids(min_pinned_version_id);
+        tracked_object_ids.extend(self.gc_manager.change_log_retention.objects());
         let to_delete = object_ids
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
@@ -357,8 +364,6 @@ impl HummockManager {
             .filter_out_objects_by_time_travel(object_ids.into_iter())
             .await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in full GC");
-        #[cfg(test)]
-        retention_tests::pause_gc_retention_handoff(self).await;
         let after_time_travel = object_ids.len();
         // filter by object id watermark, i.e. minimum id of uncommitted objects reported by compute nodes.
         let mut object_ids = object_ids
@@ -366,20 +371,15 @@ impl HummockManager {
             .filter(|id| id.as_raw() < min_object_id)
             .collect_vec();
         let after_min_object_id = object_ids.len();
-        // The version safe point does not cover changelog-only SSTs. Check the backup
-        // manifest with backup startup excluded, and keep the guard through deletion.
-        let _backup_guard = if let Some(backup_manager) = &backup_manager {
-            let Some(guard) = backup_manager.try_lock_for_gc() else {
-                tracing::debug!("Skip full GC batch while the backup job is active or locked");
-                return Ok(0);
-            };
+        // The batch pin retains changelog references even if a backup publishes after
+        // this manifest scan and releases its own pin. No backup job lock is needed.
+        if let Some(backup_manager) = &backup_manager {
             let backup_pinned = backup_manager.list_pinned_object_ids().await;
             object_ids.retain(|id| !backup_pinned.contains(&id.as_raw()));
-            Some(guard)
-        } else {
-            None
-        };
+        }
         let after_metadata_backup = object_ids.len();
+        #[cfg(test)]
+        retention_tests::pause_gc_retention_handoff(self).await;
         // filter by version
         let after_version = self
             .finalize_objects_to_delete(object_ids.into_iter())
@@ -511,6 +511,8 @@ impl HummockManager {
     /// Deduplicates within each batch of at most 1,000 input IDs. On success, returns the input
     /// count, including duplicates; deletion errors stop subsequent batches.
     pub async fn delete_objects(&self, objects_to_delete: Vec<HummockObjectId>) -> Result<usize> {
+        #[cfg(test)]
+        retention_tests::pause_gc_deletion(self).await;
         let total = objects_to_delete.len();
         for objects in objects_to_delete.chunks(1000) {
             if self.env.opts.vacuum_spin_interval_ms != 0 {
@@ -536,6 +538,7 @@ impl HummockManager {
         else {
             return Ok(());
         };
+        let _change_log_guard = self.gc_manager.change_log_retention.pin(true);
         #[cfg(test)]
         retention_tests::pause_gc_retention_handoff(self).await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
@@ -549,7 +552,9 @@ impl HummockManager {
                 .read_with_process_name("try_start_minor_gc")
                 .await
                 .min_pinned_version_id();
-            versioning.get_tracked_object_ids(min_pinned_version_id)
+            let mut pinned = versioning.get_tracked_object_ids(min_pinned_version_id);
+            pinned.extend(self.gc_manager.change_log_retention.objects());
+            pinned
         };
         let object_ids = object_ids
             .into_iter()
@@ -557,12 +562,6 @@ impl HummockManager {
         let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in minor GC");
-        // Requeue the remaining candidates if we cannot check the manifest safely.
-        let Some(_backup_guard) = backup_manager.try_lock_for_gc() else {
-            self.gc_manager
-                .add_may_delete_object_ids(object_ids.into_iter());
-            return Ok(());
-        };
         let backup_pinned = backup_manager.list_pinned_object_ids().await;
         // Full GC can reclaim backup-pinned objects after the backup is deleted.
         self.delete_objects(

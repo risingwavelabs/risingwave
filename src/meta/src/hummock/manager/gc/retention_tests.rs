@@ -48,6 +48,19 @@ use crate::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
 type GcHandoffGate = (oneshot::Sender<()>, oneshot::Receiver<()>);
 static GC_HANDOFF_GATES: LazyLock<Mutex<HashMap<usize, GcHandoffGate>>> =
     LazyLock::new(Default::default);
+static GC_DELETION_GATES: LazyLock<Mutex<HashMap<usize, GcHandoffGate>>> =
+    LazyLock::new(Default::default);
+
+pub(super) async fn pause_gc_deletion(manager: &HummockManager) {
+    let gate = GC_DELETION_GATES
+        .lock()
+        .unwrap()
+        .remove(&(std::ptr::from_ref(manager) as usize));
+    if let Some((entered, resume)) = gate {
+        entered.send(()).unwrap();
+        resume.await.unwrap();
+    }
+}
 
 pub(super) async fn pause_gc_retention_handoff(manager: &HummockManager) {
     let gate = GC_HANDOFF_GATES
@@ -82,17 +95,17 @@ impl GcKind {
 
 #[tokio::test]
 async fn test_full_gc_preserves_new_backup() {
-    publish_while_gc_is_running(GcKind::Full, RetainedBy::Backup).await;
+    publish_while_gc_is_running(GcKind::Full, RetainedBy::Backup, false).await;
 }
 
 #[tokio::test]
 async fn test_full_gc_preserves_new_time_travel_snapshot() {
-    publish_while_gc_is_running(GcKind::Full, RetainedBy::TimeTravel).await;
+    publish_while_gc_is_running(GcKind::Full, RetainedBy::TimeTravel, false).await;
 }
 
 #[tokio::test]
 async fn test_minor_gc_preserves_new_backup() {
-    publish_while_gc_is_running(GcKind::Minor, RetainedBy::Backup).await;
+    publish_while_gc_is_running(GcKind::Minor, RetainedBy::Backup, false).await;
 }
 
 enum RetainedBy {
@@ -100,8 +113,12 @@ enum RetainedBy {
     TimeTravel,
 }
 
-async fn publish_while_gc_is_running(kind: GcKind, retained_by: RetainedBy) {
-    let fixture = RetentionFixture::new(kind, false).await;
+async fn publish_while_gc_is_running(
+    kind: GcKind,
+    retained_by: RetainedBy,
+    capture_old_value: bool,
+) {
+    let fixture = RetentionFixture::new(kind, capture_old_value).await;
     let RetentionFixture {
         manager,
         client,
@@ -111,7 +128,20 @@ async fn publish_while_gc_is_running(kind: GcKind, retained_by: RetainedBy) {
         old_value_id,
     } = &fixture;
     if matches!(kind, GcKind::Minor) {
-        fixture.truncate_changelog().await;
+        if capture_old_value {
+            let ids = manager
+                .on_current_version_and_table_change_log(|_, logs| {
+                    logs.values()
+                        .flat_map(|log| log.get_object_ids())
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            manager
+                .gc_manager
+                .add_may_delete_object_ids(ids.into_iter());
+        } else {
+            fixture.truncate_changelog().await;
+        }
     }
 
     let (entered_tx, entered_rx) = oneshot::channel();
@@ -203,9 +233,10 @@ async fn publish_while_gc_is_running(kind: GcKind, retained_by: RetainedBy) {
     );
     if let Some(old_value_id) = old_value_id {
         let old_path = object_path(gc, *old_value_id);
-        assert!(
-            gc.store.metadata(&old_path).await.is_err(),
-            "minor GC did not reclaim an unretained old-value SST"
+        assert_eq!(
+            gc.store.metadata(&old_path).await.is_ok(),
+            capture_old_value,
+            "old-value SST must remain exactly when captured by the backup"
         );
     }
     // The full-GC batch must release its safe point so a later GC can reclaim the object.
@@ -248,6 +279,7 @@ enum Publication {
 
 async fn gc_after_old_value_capture(kind: GcKind, publication: Publication) {
     let fixture = RetentionFixture::new(kind, true).await;
+    let garbage = fixture.add_garbage().await;
     let manager = &fixture.manager;
     let backup = &fixture.backup;
     let gc = &manager.gc_manager;
@@ -281,6 +313,12 @@ async fn gc_after_old_value_capture(kind: GcKind, publication: Publication) {
 
     if matches!(publication, Publication::AfterGc) {
         kind.run(manager, backup.clone()).await;
+    }
+    if matches!(publication, Publication::AfterGc) {
+        assert!(
+            gc.store.metadata(&garbage).await.is_err(),
+            "GC skipped garbage while backup was running"
+        );
     }
     publish_tx.send(()).unwrap();
     wait_for_backup(backup, job).await;
@@ -328,6 +366,7 @@ impl RetentionFixture {
     async fn new(kind: GcKind, capture_old_value: bool) -> Self {
         let mut opts = MetaOpts::test(false);
         opts.min_sst_retention_time_sec = 0;
+        opts.vacuum_spin_interval_ms = 0;
         let (env, manager, _, worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
         let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
         let txn = env.meta_store_ref().conn.begin().await.unwrap();
@@ -462,6 +501,19 @@ impl RetentionFixture {
         }
     }
 
+    async fn add_garbage(&self) -> String {
+        let id = HummockObjectId::Sstable(get_sst_ids(&self.manager, 1).await[0].into());
+        let gc = &self.manager.gc_manager;
+        let path = object_path(gc, id);
+        gc.store
+            .upload(&path, bytes::Bytes::from_static(&[0; 128]))
+            .await
+            .unwrap();
+        gc.add_may_delete_object_ids([id].into_iter());
+        sleep(Duration::from_secs(2)).await;
+        path
+    }
+
     async fn truncate_changelog(&self) {
         self.manager
             .truncate_table_change_log(TableChangeLogTruncateInfo {
@@ -480,4 +532,146 @@ fn object_path(gc: &GcManager, object_id: HummockObjectId) -> String {
         gc.use_new_object_prefix_strategy,
     );
     get_object_data_path(&prefix, &gc.path_prefix, object_id)
+}
+
+#[tokio::test]
+async fn test_backup_completes_while_full_gc_deletion_is_paused() {
+    backup_during_gc_deletion(GcKind::Full).await;
+}
+
+#[tokio::test]
+async fn test_backup_completes_while_minor_gc_deletion_is_paused() {
+    backup_during_gc_deletion(GcKind::Minor).await;
+}
+
+async fn pause_deletion(
+    fixture: &RetentionFixture,
+    kind: GcKind,
+) -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let (resume_tx, resume_rx) = oneshot::channel();
+    GC_DELETION_GATES.lock().unwrap().insert(
+        Arc::as_ptr(&fixture.manager) as usize,
+        (entered_tx, resume_rx),
+    );
+    let manager = fixture.manager.clone();
+    let backup = fixture.backup.clone();
+    let task = tokio::spawn(async move { kind.run(&manager, backup).await });
+    timeout(Duration::from_secs(10), entered_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    (task, resume_tx)
+}
+
+async fn backup_during_gc_deletion(kind: GcKind) {
+    let fixture = RetentionFixture::new(kind, true).await;
+    fixture.truncate_changelog().await;
+    let (gc_task, resume) = pause_deletion(&fixture, kind).await;
+    let job = timeout(
+        Duration::from_secs(10),
+        fixture.backup.start_backup_job(None),
+    )
+    .await
+    .expect("backup startup waited for GC deletion")
+    .unwrap();
+    wait_for_backup(&fixture.backup, job).await;
+    assert!(!gc_task.is_finished());
+    let pinned = fixture.backup.list_pinned_object_ids().await;
+    assert!(pinned.contains(&fixture.object_id.as_raw()));
+    assert!(!pinned.contains(&fixture.old_value_id.unwrap().as_raw()));
+    resume.send(()).unwrap();
+    gc_task.await.unwrap();
+    let gc = &fixture.manager.gc_manager;
+    assert!(
+        gc.store
+            .metadata(&object_path(gc, fixture.old_value_id.unwrap()))
+            .await
+            .is_err()
+    );
+    assert!(
+        gc.store
+            .metadata(&object_path(gc, fixture.object_id))
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn test_full_gc_deletes_garbage_while_minor_gc_is_paused() {
+    let fixture = RetentionFixture::new(GcKind::Minor, true).await;
+    fixture.truncate_changelog().await;
+    let (minor_task, resume) = pause_deletion(&fixture, GcKind::Minor).await;
+    let garbage = fixture.add_garbage().await;
+    timeout(
+        Duration::from_secs(10),
+        GcKind::Full.run(&fixture.manager, fixture.backup.clone()),
+    )
+    .await
+    .expect("full GC waited for minor GC");
+    assert!(!minor_task.is_finished());
+    assert!(
+        fixture
+            .manager
+            .gc_manager
+            .store
+            .metadata(&garbage)
+            .await
+            .is_err(),
+        "full GC skipped its batch"
+    );
+    resume.send(()).unwrap();
+    minor_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_changelog_pin_release_does_not_acquire_versioning() {
+    let fixture = RetentionFixture::new(GcKind::Full, true).await;
+    let pin = fixture.manager.register_safe_point().await;
+    fixture.truncate_changelog().await;
+    let old_id = fixture.old_value_id.unwrap();
+    assert!(
+        fixture
+            .manager
+            .gc_manager
+            .change_log_retention
+            .objects()
+            .contains(&old_id)
+    );
+    // Both the new changelog pin and the existing version pin must release even while
+    // another task owns the versioning write lock.
+    let _versioning = fixture.manager.versioning.write().await;
+    drop(pin);
+    assert!(
+        fixture
+            .manager
+            .gc_manager
+            .change_log_retention
+            .objects()
+            .is_empty()
+    );
+    timeout(Duration::from_secs(10), async {
+        while !fixture
+            .manager
+            .context_info
+            .read()
+            .await
+            .version_safe_points
+            .is_empty()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("safe-point release acquired versioning");
+}
+
+#[tokio::test]
+async fn test_full_gc_preserves_changelog_after_backup_manifest_scan() {
+    publish_while_gc_is_running(GcKind::Full, RetainedBy::Backup, true).await;
+}
+
+#[tokio::test]
+async fn test_minor_gc_preserves_changelog_after_table_removal() {
+    publish_while_gc_is_running(GcKind::Minor, RetainedBy::Backup, true).await;
 }

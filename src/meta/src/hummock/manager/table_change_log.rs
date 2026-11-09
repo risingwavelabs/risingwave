@@ -324,6 +324,10 @@ impl HummockManager {
                 change_log.truncate(truncate_epoch);
             }
         }
+        // Record removed references before releasing the existing versioning lock.
+        self.gc_manager
+            .change_log_retention
+            .retain(may_delete_object_ids.iter().copied());
         drop(versioning);
         let may_delete_object_count = may_delete_object_ids.len();
         self.gc_manager
