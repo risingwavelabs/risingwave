@@ -532,6 +532,7 @@ pub async fn start_service_as_election_leader(
     .await?;
     sub_tasks.push((refresh_handle, refresh_shutdown));
 
+    let (initial_workers_tx, initial_workers_rx) = tokio::sync::oneshot::channel();
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
@@ -543,6 +544,7 @@ pub async fn start_service_as_election_leader(
         iceberg_pk_index_sink_manager.clone(),
         scale_controller.clone(),
         refresh_manager.clone(),
+        initial_workers_tx,
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
@@ -763,7 +765,7 @@ pub async fn start_service_as_election_leader(
         ));
 
         if !env.opts.disable_automatic_parallelism_control {
-            sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
+            sub_tasks.push(stream_manager.start_auto_parallelism_monitor(initial_workers_rx));
         }
     }
 
@@ -828,14 +830,24 @@ pub async fn start_service_as_election_leader(
         .add_service(
             HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
         )
-        .add_service(NotificationServiceServer::new(notification_srv))
+        // Compress notifications with zstd for clients that accept it (older clients still
+        // get uncompressed responses). The initial `MetaSnapshot` carries the full hummock
+        // version; uncompressed messages larger than `i32::MAX` bytes are silently reset by
+        // hyper/h2, so compression keeps large snapshots deliverable.
+        .add_service(
+            NotificationServiceServer::new(notification_srv)
+                .send_compressed(tonic::codec::CompressionEncoding::Zstd),
+        )
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
-        .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(
+            BackupServiceServer::new(backup_srv)
+                .send_compressed(tonic::codec::CompressionEncoding::Zstd),
+        )
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))

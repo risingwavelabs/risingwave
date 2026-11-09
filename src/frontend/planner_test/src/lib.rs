@@ -63,6 +63,7 @@ static PLANNER_TEST_JAVASCRIPT_UDF: UdfImplDescriptor = UdfImplDescriptor {
         })
     },
     build_fn: |_| bail!("UDFs are not executed in planner tests"),
+    supports_always_retry_on_network_error: |_| false,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash, Eq)]
@@ -644,6 +645,7 @@ impl TestCase {
                             args,
                             returns,
                             params,
+                            with_options,
                         )
                         .await?;
                     } else {

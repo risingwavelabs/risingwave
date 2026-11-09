@@ -39,10 +39,10 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
-use risingwave_connector::source::cdc::{
-    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
+use risingwave_connector::source::cdc::{CdcSourceExternalTableIdentifier, build_cdc_table_id};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
@@ -76,8 +76,9 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table, exclude_cdc_table_columns, not_null_check_for_cdc_table,
-    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
+    derive_connect_properties_for_cdc_table, exclude_cdc_table_columns,
+    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
+    sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -914,6 +915,12 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
     let cdc_table_type = ExternalCdcTableType::from_properties(&options);
+    let canonical_name = dispatch_cdc_source_type!(
+        options.cdc_source_type(),
+        T,
+        T::canonical_name(&options),
+        unreachable!("CDC table without a CDC connector")
+    );
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id, // id of cdc source streaming job
@@ -927,10 +934,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-    let options = build_cdc_scan_options_with_options(context.with_options(), &cdc_table_type)?;
+    let options = build_cdc_scan_options_with_options(
+        context.with_options(),
+        cdc_table_desc.connect_properties.cdc_source_type(),
+    )?;
 
     let logical_scan = LogicalCdcScan::create(
-        external_table_name.clone(),
+        external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
@@ -946,15 +956,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let cdc_table_id_external_table_name = if let ExternalCdcTableType::Postgres = cdc_table_type
-        && let Some(normalized_table_name) =
-            normalize_simple_postgres_quoted_table_name(&external_table_name)
-    {
-        normalized_table_name
-    } else {
-        external_table_name
-    };
-    let cdc_table_id = build_cdc_table_id(source.id, &cdc_table_id_external_table_name);
+    let cdc_table_id = build_cdc_table_id(source.id, &canonical_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -1109,11 +1111,10 @@ pub(super) async fn handle_create_table_plan(
                 source.clone()
             };
             check_cdc_source_select_privilege(session, &source)?;
-            let (cdc_with_options, normalized_external_table_name) =
-                derive_with_options_for_cdc_table(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
+            let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
 
             let excluded_columns = handler_args
                 .with_options
@@ -1173,7 +1174,7 @@ pub(super) async fn handle_create_table_plan(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                normalized_external_table_name,
+                external_table_name,
                 column_defs,
                 source_watermarks,
                 columns,
@@ -1978,11 +1979,10 @@ pub async fn generate_stream_graph_for_replace_table(
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-            let (cdc_with_options, normalized_external_table_name) =
-                derive_with_options_for_cdc_table(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
+            let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
             let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
@@ -2000,7 +2000,7 @@ pub async fn generate_stream_graph_for_replace_table(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                normalized_external_table_name,
+                external_table_name,
                 columns,
                 source_watermarks,
                 column_catalogs,

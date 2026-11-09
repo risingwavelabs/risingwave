@@ -195,10 +195,21 @@ public class SourceTestClient {
             ConnectorServiceProto.SourceType sourceType,
             long sourceId,
             Map<String, String> properties) {
+        return getEventStream(sourceType, sourceId, properties, "", false);
+    }
+
+    public Iterator<ConnectorServiceProto.GetEventStreamResponse> getEventStream(
+            ConnectorServiceProto.SourceType sourceType,
+            long sourceId,
+            Map<String, String> properties,
+            String startOffset,
+            boolean snapshotDone) {
         ConnectorServiceProto.GetEventStreamRequest req =
                 ConnectorServiceProto.GetEventStreamRequest.newBuilder()
                         .setSourceId(sourceId)
                         .setSourceType(sourceType)
+                        .setStartOffset(startOffset)
+                        .setSnapshotDone(snapshotDone)
                         .putAllProperties(properties)
                         .build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;

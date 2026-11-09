@@ -36,6 +36,55 @@ use tracing::{debug, warn};
 use crate::HummockEpoch;
 use crate::key::{TableKey, TableKeyRange, prefix_slice_with_vnode, vnode};
 
+/// Narrow `key_range`, which lies in a single vnode, to the keys not cleaned by the pk-prefix
+/// `watermark` in `direction`.
+pub fn rewrite_range_with_watermark(
+    direction: WatermarkDirection,
+    watermark: &[u8],
+    key_range: &mut TableKeyRange,
+) {
+    let vnode = vnode(key_range);
+    match direction {
+        WatermarkDirection::Ascending => {
+            let overwrite_start_key = match &key_range.0 {
+                Included(start_key) | Excluded(start_key) => start_key.key_part() < watermark,
+                Unbounded => true,
+            };
+            if overwrite_start_key {
+                let watermark_key = TableKey(prefix_slice_with_vnode(vnode, watermark));
+                let fully_filtered = match &key_range.1 {
+                    Included(end_key) => end_key < &watermark_key,
+                    Excluded(end_key) => end_key <= &watermark_key,
+                    Unbounded => false,
+                };
+                if fully_filtered {
+                    key_range.1 = Excluded(watermark_key.clone());
+                }
+                key_range.0 = Included(watermark_key);
+            }
+        }
+        WatermarkDirection::Descending => {
+            let overwrite_end_key = match &key_range.1 {
+                Included(end_key) | Excluded(end_key) => end_key.key_part() > watermark,
+                Unbounded => true,
+            };
+            if overwrite_end_key {
+                let watermark_key = TableKey(prefix_slice_with_vnode(vnode, watermark));
+                let fully_filtered = match &key_range.0 {
+                    Included(start_key) => start_key > &watermark_key,
+                    Excluded(start_key) => start_key >= &watermark_key,
+                    Unbounded => false,
+                };
+                if fully_filtered {
+                    *key_range = (Included(watermark_key.clone()), Excluded(watermark_key));
+                } else {
+                    key_range.1 = Included(watermark_key);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ReadTableWatermark {
     pub direction: WatermarkDirection,
@@ -124,49 +173,8 @@ impl TableWatermarksIndex {
             // TODO: Storage read respecting watermark will be implemented in a later PR in StateTable.
             return;
         }
-        let vnode = vnode(key_range);
-        if let Some(watermark) = self.read_watermark(vnode, epoch) {
-            match self.watermark_direction {
-                WatermarkDirection::Ascending => {
-                    let overwrite_start_key = match &key_range.0 {
-                        Included(start_key) | Excluded(start_key) => {
-                            start_key.key_part() < watermark
-                        }
-                        Unbounded => true,
-                    };
-                    if overwrite_start_key {
-                        let watermark_key = TableKey(prefix_slice_with_vnode(vnode, &watermark));
-                        let fully_filtered = match &key_range.1 {
-                            Included(end_key) => end_key < &watermark_key,
-                            Excluded(end_key) => end_key <= &watermark_key,
-                            Unbounded => false,
-                        };
-                        if fully_filtered {
-                            key_range.1 = Excluded(watermark_key.clone());
-                        }
-                        key_range.0 = Included(watermark_key);
-                    }
-                }
-                WatermarkDirection::Descending => {
-                    let overwrite_end_key = match &key_range.1 {
-                        Included(end_key) | Excluded(end_key) => end_key.key_part() > watermark,
-                        Unbounded => true,
-                    };
-                    if overwrite_end_key {
-                        let watermark_key = TableKey(prefix_slice_with_vnode(vnode, &watermark));
-                        let fully_filtered = match &key_range.0 {
-                            Included(start_key) => start_key > &watermark_key,
-                            Excluded(start_key) => start_key >= &watermark_key,
-                            Unbounded => false,
-                        };
-                        if fully_filtered {
-                            *key_range = (Included(watermark_key.clone()), Excluded(watermark_key));
-                        } else {
-                            key_range.1 = Included(watermark_key);
-                        }
-                    }
-                }
-            }
+        if let Some(watermark) = self.read_watermark(vnode(key_range), epoch) {
+            rewrite_range_with_watermark(self.watermark_direction, &watermark, key_range);
         }
     }
 

@@ -614,6 +614,12 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: correlated CTE referenced from a nested subquery
+  sql: |
+    create table t1(x int);
+    select x, (with cte as (select x as v) select (select v from cte)) from t1;
+  expected_outputs:
+    - batch_plan
 - name: subqueries in case when exprs
   sql: |
     WITH input AS (
@@ -711,3 +717,25 @@
   expected_outputs:
     - logical_plan
     - batch_plan
+
+- name: array subquery uses inner join
+  sql: |
+    create table t1(id int primary key);
+    create table t2(id int primary key, t1_id int, val varchar);
+    select t1.id, array(select t2.val from t2 where t2.t1_id = t1.id) as arr from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+
+- name: mixing array and scalar subqueries keeps left outer join
+  sql: |
+    create table t1(id int primary key);
+    create table t2(id int primary key, t1_id int, val varchar);
+    select
+      t1.id,
+      array(select t2.val from t2 where t2.t1_id = t1.id) as arr,
+      (select max(t2.val) from t2 where t2.t1_id = t1.id) as mx
+    from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

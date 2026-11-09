@@ -24,9 +24,8 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::id::TableId;
 use risingwave_common::metrics::{
-    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
-    LabelGuardedLocalHistogram, LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec,
-    RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
+    LabelGuardedIntGauge, LabelGuardedLocalHistogram, LabelGuardedLocalIntCounter,
+    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -55,10 +54,10 @@ pub struct MonitoredStorageMetrics {
     pub iter_in_progress_counts: RelabeledGuardedIntGaugeVec,
 
     // [table_id, op_type]
-    pub iter_log_op_type_counts: LabelGuardedIntCounterVec,
+    pub iter_log_op_type_counts: RelabeledGuardedIntCounterVec,
 
     // [table_id, top_n, ef_search]
-    pub vector_nearest_duration: LabelGuardedHistogramVec,
+    pub vector_nearest_duration: RelabeledGuardedHistogramVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
@@ -243,6 +242,12 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
+        let iter_log_op_type_counts = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+            MetricLevel::Info,
+            iter_log_op_type_counts,
+            metric_level,
+            1,
+        );
 
         let opts = histogram_opts!(
             "state_store_sync_duration",
@@ -269,6 +274,12 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
+        let vector_nearest_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Info,
+            vector_nearest_duration,
+            metric_level,
+            1,
+        );
 
         Self {
             get_duration,

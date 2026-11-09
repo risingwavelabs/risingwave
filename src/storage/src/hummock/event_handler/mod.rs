@@ -31,6 +31,7 @@ use crate::store::SealCurrentEpochOptions;
 pub mod hummock_event_handler;
 pub mod refiller;
 pub mod uploader;
+mod version_update;
 
 pub(crate) use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
