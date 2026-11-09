@@ -60,10 +60,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) {
         if database_id.is_none() {
-            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason.into()));
         }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.

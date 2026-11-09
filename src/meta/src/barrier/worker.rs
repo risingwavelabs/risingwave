@@ -25,6 +25,8 @@ use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
+use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
@@ -168,11 +170,14 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         Self::new_inner(env, request_rx, context).await
     }
 
-    pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start(
+        self,
+        initial_workers_tx: Sender<HashMap<WorkerId, WorkerNode>>,
+    ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let fut = (self.env.await_tree_reg())
             .register_derived_root("Global Barrier Worker")
-            .instrument(self.run(shutdown_rx));
+            .instrument(self.run(shutdown_rx, initial_workers_tx));
         let join_handle = tokio::spawn(fut);
 
         (join_handle, shutdown_tx)
@@ -203,7 +208,11 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
-    async fn run(mut self, shutdown_rx: Receiver<()>) {
+    async fn run(
+        mut self,
+        shutdown_rx: Receiver<()>,
+        initial_workers_tx: Sender<HashMap<WorkerId, WorkerNode>>,
+    ) {
         tracing::info!(
             "Starting barrier manager with: enable_recovery={}, in_flight_barrier_nums={}",
             self.enable_recovery,
@@ -243,9 +252,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            // Keep the bootstrap recovery future boxed so the outer barrier worker future
+            // stays below clippy's large-futures threshold.
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap(initial_workers_tx))
+                    .instrument(span),
+            )
+            .await;
         }
 
         self.run_inner(shutdown_rx).await
@@ -483,7 +496,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     for database_id in failed_databases {
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                             warn!(%worker_id, %database_id, "database entering recovery on node failure");
-                                            self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
+                                            self.context.abort_and_mark_blocked(Some(database_id), &RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                             self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
                                             // TODO: add log on blocking time
                                             let output = self.completing_task.wait_completing_task().await?;
@@ -511,7 +524,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     }
                                 if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(%database_id, "database entering recovery");
-                                    self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
+                                    self.context.abort_and_mark_blocked(Some(database_id), &RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                     // TODO: add log on blocking time
                                     let output = self.completing_task.wait_completing_task().await?;
                                     entering_recovery.enter(output, &mut self.control_stream_manager);
@@ -546,7 +559,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 Err(err)?;
                             } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                 warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
-                                self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
+                                self.context.abort_and_mark_blocked(Some(database_id), &RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
                                 // TODO: add log on blocking time
                                 let output = self.completing_task.wait_completing_task().await?;
                                 entering_recovery.enter(output, &mut self.control_stream_manager);
@@ -768,18 +781,24 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         self.control_stream_manager.clear();
 
         let reason_str = match &recovery_reason {
-            RecoveryReason::Bootstrap => "bootstrap".to_owned(),
+            RecoveryReason::Bootstrap(_) => "bootstrap".to_owned(),
             RecoveryReason::Failover(err) => {
                 format!("failed over: {}", err.as_report())
             }
             RecoveryReason::Adhoc => "adhoc recovery".to_owned(),
         };
-        self.context.abort_and_mark_blocked(None, recovery_reason);
+        self.context.abort_and_mark_blocked(None, &recovery_reason);
 
         self.recovery_inner(is_paused, reason_str).await;
         self.context.mark_ready(MarkReadyOptions::Global {
             blocked_databases: self.checkpoint_control.recovering_databases().collect(),
         });
+
+        if let RecoveryReason::Bootstrap(tx) = recovery_reason {
+            // recovery_inner installs the successful attempt's placement snapshot. Send it
+            // only after recovery is ready, before the normal loop consumes worker updates.
+            let _ = tx.send(self.active_streaming_nodes.current().clone());
+        }
     }
 
     #[await_tree::instrument("recovery({recovery_reason})")]

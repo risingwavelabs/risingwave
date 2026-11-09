@@ -860,7 +860,7 @@ mod tests {
         fn abort_and_mark_blocked(
             &self,
             _database_id: Option<DatabaseId>,
-            _recovery_reason: crate::barrier::RecoveryReason,
+            _recovery_reason: &crate::barrier::RecoveryReason,
         ) {
             unimplemented!()
         }

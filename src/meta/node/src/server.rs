@@ -499,6 +499,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
+    let (initial_workers_tx, initial_workers_rx) = tokio::sync::oneshot::channel();
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
@@ -509,6 +510,7 @@ pub async fn start_service_as_election_leader(
         scale_controller.clone(),
         barrier_scheduler.clone(),
         refresh_manager.clone(),
+        initial_workers_tx,
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
@@ -709,7 +711,7 @@ pub async fn start_service_as_election_leader(
         ));
 
         if !env.opts.disable_automatic_parallelism_control {
-            sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
+            sub_tasks.push(stream_manager.start_auto_parallelism_monitor(initial_workers_rx));
         }
     }
 

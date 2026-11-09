@@ -70,7 +70,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     );
     fn mark_ready(&self, options: MarkReadyOptions);
 

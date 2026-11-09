@@ -20,7 +20,8 @@ use arc_swap::ArcSwap;
 use risingwave_common::bail;
 use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_meta_model::DatabaseId;
+use risingwave_meta_model::{DatabaseId, WorkerId};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::{DdlProgress, PbBackfillType};
 use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -35,7 +36,7 @@ use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
     BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, FragmentBackfillProgress,
-    RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
+    RecoveryStatus, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -162,13 +163,13 @@ impl GlobalBarrierManager {
         let status = self.status.load();
         match &**status {
             BarrierManagerStatus::Starting
-            | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
+            | BarrierManagerStatus::Recovering(RecoveryStatus::Bootstrap) => {
                 bail!("The cluster is bootstrapping")
             }
-            BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
+            BarrierManagerStatus::Recovering(RecoveryStatus::Failover(e)) => {
                 Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
             }
-            BarrierManagerStatus::Recovering(RecoveryReason::Adhoc) => {
+            BarrierManagerStatus::Recovering(RecoveryStatus::Adhoc) => {
                 bail!("The cluster is recovering-adhoc")
             }
             BarrierManagerStatus::Running => Ok(()),
@@ -191,6 +192,7 @@ impl GlobalBarrierManager {
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
+        initial_workers_tx: oneshot::Sender<HashMap<WorkerId, WorkerNode>>,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -214,7 +216,7 @@ impl GlobalBarrierManager {
             request_tx,
             metadata_manager: metadata_manager_clone,
         };
-        let (join_handle, shutdown_tx) = barrier_worker.start();
+        let (join_handle, shutdown_tx) = barrier_worker.start(initial_workers_tx);
         (Arc::new(manager), join_handle, shutdown_tx)
     }
 }
