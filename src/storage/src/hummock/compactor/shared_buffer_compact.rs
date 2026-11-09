@@ -198,7 +198,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         };
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new(
+        let compactor = SharedBufferCompactRunner::new::<IS_NEW_VALUE>(
             split_index,
             key_range,
             context.clone(),
@@ -416,7 +416,7 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(
+    pub fn new<const IS_NEW_VALUE: bool>(
         split_index: usize,
         key_range: KeyRange,
         context: CompactorContext,
@@ -440,8 +440,13 @@ impl SharedBufferCompactRunner {
                 retain_multiple_version: true,
                 table_vnode_partition,
                 sstable_filter_layout,
-                // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
-                sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
+                sstable_filter_type: if IS_NEW_VALUE {
+                    // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
+                    PbSstableFilterType::SstableFilterXor16
+                } else {
+                    // Changelog readers scan old-value SSTs without probing the filter.
+                    PbSstableFilterType::SstableFilterNone
+                },
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },
