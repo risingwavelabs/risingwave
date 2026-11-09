@@ -31,6 +31,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
+use risingwave_meta::barrier::snapshot_backfill_max_pending_barrier_num;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
 use risingwave_sqlparser::ast::SqlOptionRedaction;
@@ -654,14 +655,13 @@ fn validate_config(config: &RwConfig) {
     // A snapshot backfill partial graph drains its queued catch-up barriers only when a new
     // upstream barrier arrives, and that barrier is queued first, so the queue shrinks by at
     // most `limit - 1` per upstream barrier. A limit of 1 could never empty the queue.
-    let snapshot_backfill_max_pending_barrier_num =
-        config.streaming.in_flight_barrier_nums.saturating_mul(
-            config
-                .streaming
-                .snapshot_backfill_barrier_amplification_factor
-                .max(1),
-        );
-    if snapshot_backfill_max_pending_barrier_num < 2 {
+    if snapshot_backfill_max_pending_barrier_num(
+        config.streaming.in_flight_barrier_nums,
+        config
+            .streaming
+            .snapshot_backfill_barrier_amplification_factor,
+    ) < 2
+    {
         let error_msg = "`in_flight_barrier_nums` times `snapshot_backfill_barrier_amplification_factor` must be at least 2";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
