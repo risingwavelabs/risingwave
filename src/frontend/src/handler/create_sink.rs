@@ -219,9 +219,9 @@ pub async fn gen_sink_plan(
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
 
     let context = if let Some(explain_options) = explain_options {
-        OptimizerContext::new(handler_args.clone(), explain_options)
+        OptimizerContext::new(handler_args.clone(), explain_options)?
     } else {
-        OptimizerContext::from_handler_args(handler_args.clone())
+        OptimizerContext::from_handler_args(handler_args.clone())?
     };
     let is_auto_schema_change = resolved_with_options
         .get(AUTO_SCHEMA_CHANGE_KEY)
