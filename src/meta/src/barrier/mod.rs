@@ -51,6 +51,7 @@ pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 use risingwave_common::id::JobId;
 use risingwave_pb::ddl_service::PbBackfillType;
 
+pub use self::checkpoint::snapshot_backfill_max_pending_barrier_num;
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     IcebergPkIndexCompactionOverwrite, IndependentStreamingJobType, ReplaceStreamJobPlan,
