@@ -293,9 +293,7 @@ async fn validate_integrity(
         )
         .await,
     );
-    let mut iter = object_store
-        .list(hummock_storage_directory, None, None)
-        .await?;
+    let mut iter = object_store.list(hummock_storage_directory, None).await?;
     while let Some(obj) = iter.try_next().await? {
         let Some(obj_id) = try_get_object_id_from_path(&obj.key) else {
             continue;

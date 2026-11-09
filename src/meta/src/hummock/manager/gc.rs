@@ -91,7 +91,7 @@ impl GcManager {
         prefix: Option<String>,
     ) -> Result<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path_prefix, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path, None, None).await?;
+        let raw_iter = self.store.list(&list_path, None).await?;
         let valid_suffixes = VALID_OBJECT_ID_SUFFIXES.map(|suffix| format!(".{}", suffix));
         let iter = raw_iter.filter(move |r| match r {
             Ok(i) => future::ready(valid_suffixes.iter().any(|suffix| i.key.ends_with(suffix))),
@@ -671,7 +671,7 @@ mod tests {
 
     #[cfg(not(madsim))] // OpenDAL FS uses real filesystem I/O.
     #[tokio::test]
-    async fn test_full_gc_without_start_after() {
+    async fn test_full_gc_preserves_listing_across_batches() {
         use bytes::Bytes;
         use risingwave_object_store::object::ObjectStoreImpl;
 
@@ -718,14 +718,6 @@ mod tests {
                 .await
                 .unwrap();
         }
-        // FS, like Azure Blob, cannot resume a fresh listing with start_after.
-        assert!(
-            manager
-                .object_store
-                .list(&prefix, Some(format!("{prefix}/1.data")), None)
-                .await
-                .is_err()
-        );
         // The watermark is zero, so every object survives both full batches. Repeat the
         // run to also check that completion releases the in-progress guard.
         for _ in 0..2 {

@@ -181,23 +181,13 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn list(
-        &self,
-        prefix: &str,
-        start_after: Option<String>,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
+    async fn list(&self, prefix: &str, limit: Option<usize>) -> ObjectResult<ObjectMetadataIter> {
         let list_result = self
             .objects
             .lock()
             .await
             .iter()
             .filter_map(|(path, (metadata, _))| {
-                if let Some(ref start_after) = start_after
-                    && metadata.key.le(start_after)
-                {
-                    return None;
-                }
                 if path.starts_with(prefix) {
                     return Some(metadata.clone());
                 }
@@ -391,7 +381,7 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &InMemObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list(prefix, None, None)
+            .list(prefix, None)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()

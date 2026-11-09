@@ -244,7 +244,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
             let object_store = get_object_store().await;
             let mut prefix_stripped_paths = Vec::new();
             let mut stream = object_store
-                .list(&dir, None, None)
+                .list(&dir, None)
                 .await
                 .map_err(|e| anyhow!(e))?;
             use futures::StreamExt;
@@ -293,7 +293,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
             let object_store = get_object_store().await;
             let mut keys = Vec::new();
             let mut stream = object_store
-                .list(&dir, None, None)
+                .list(&dir, None)
                 .await
                 .map_err(|e| anyhow!(e))?;
             use futures::StreamExt;
