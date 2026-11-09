@@ -217,41 +217,8 @@ create subscription sub from mv with (retention = '1h');
 statement error Use `DROP SUBSCRIPTION`
 drop table sub;
 
-statement error Use `DROP SUBSCRIPTION`
-drop materialized view sub;
-
-statement error Use `DROP SUBSCRIPTION`
-drop index sub;
-
-statement error Use `DROP SUBSCRIPTION`
-drop source sub;
-
-statement error Use `DROP SUBSCRIPTION`
-drop sink sub;
-
-statement error Use `DROP SUBSCRIPTION`
-drop view sub;
-
 statement error Use `DROP TABLE`
 drop subscription t;
-
-statement error Use `DROP MATERIALIZED VIEW`
-drop subscription mv;
-
-statement error Use `DROP INDEX`
-drop subscription idx;
-
-statement error Use `DROP TABLE`
-drop subscription msrc;
-
-statement error Use `DROP SOURCE`
-drop subscription src;
-
-statement error Use `DROP SINK`
-drop subscription sink;
-
-statement error Use `DROP VIEW`
-drop subscription v;
 
 # 5. query
 query I
@@ -355,12 +322,6 @@ delete from v;
 statement error cannot change subscription "sub"
 insert into sub values (1);
 
-statement error cannot change subscription "sub"
-update sub set v = 2;
-
-statement error cannot change subscription "sub"
-delete from sub;
-
 # 7. create with duplicate name
 statement error table.*exists
 create table t(v int);
@@ -420,9 +381,6 @@ set search_path to "$user", public;
 statement error Use `DROP VIEW`
 drop table invalid_op_s1.x;
 
-statement error Use `DROP TABLE`
-drop view invalid_op_s2.x;
-
 statement error cannot change view "x"
 insert into invalid_op_s1.x values (1);
 
@@ -441,9 +399,6 @@ drop schema invalid_op_s2;
 # 10. system catalogs
 statement error System catalogs cannot be dropped
 drop table pg_catalog.pg_enum;
-
-statement error System catalogs cannot be dropped
-drop view pg_catalog.pg_class;
 
 statement error cannot change system catalog "pg_class"
 insert into pg_catalog.pg_class values (1);

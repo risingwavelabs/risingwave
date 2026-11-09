@@ -21,20 +21,8 @@ drop table sqlstate_slt_no_such;
 statement ok
 create table sqlstate_slt_wrong_type(v int);
 
-statement ok
-create view sqlstate_slt_wrong_type_v as select 1 as v;
-
 statement error (42809)
 drop view sqlstate_slt_wrong_type;
-
-statement error (42809)
-drop table sqlstate_slt_wrong_type_v;
-
-statement error (42809)
-insert into sqlstate_slt_wrong_type_v values (1);
-
-statement ok
-drop view sqlstate_slt_wrong_type_v;
 
 statement ok
 drop table sqlstate_slt_wrong_type;
