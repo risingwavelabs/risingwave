@@ -77,11 +77,31 @@ echo "Platform: ${OS_TYPE} ${ARCH_TYPE}"
 echo "Download URL: ${DOWNLOAD_URL}"
 
 mkdir -p "${DEST_DIR}" "${TMP_DIR}"
-curl -fL -o "${TMP_DIR}/${WHEEL_FILENAME}" "${DOWNLOAD_URL}"
+WHEEL_PATH="${TMP_DIR}/${WHEEL_FILENAME}"
+if ! curl -fL -o "${WHEEL_PATH}" "${DOWNLOAD_URL}"; then
+  # The PyPI wheels below are byte-identical to the Apache ADBC 21 release assets.
+  case "${ADBC_VERSION}:${ADBC_DRIVER_VERSION}:${OS_TYPE}:${ARCH_TYPE}" in
+    21:1.9.0:Linux:x86_64)
+      WHEEL_MIRROR_PATH="1f/f2/976f7a2717da0a59a8cc600de1f8ca4b46d8ac88f5b09b144317db3cc48d"
+      WHEEL_SHA256="375d9f6e7cb66040ce7f96b3cdce199dfdd69c7622fd9575fbb6798b8f375cd2"
+      ;;
+    21:1.9.0:Linux:aarch64)
+      WHEEL_MIRROR_PATH="eb/f8/f1b17d5b0c406b931908257fd4fc856fc1a6be0f737ca95d199db2f7ba07"
+      WHEEL_SHA256="72a6f6d2ec99a75ddfb85b61d3ff56ff3c111feab690307975b74e5e90a1137f"
+      ;;
+    *)
+      exit 1
+      ;;
+  esac
+
+  echo "GitHub download failed, trying the matching wheel on PyPI"
+  curl -fL --retry 3 -o "${WHEEL_PATH}" "https://files.pythonhosted.org/packages/${WHEEL_MIRROR_PATH}/${WHEEL_FILENAME}"
+  printf '%s  %s\n' "${WHEEL_SHA256}" "${WHEEL_PATH}" | sha256sum -c -
+fi
 
 # Extract shared library from wheel (wheel is a zip file).
-unzip -j -o "${TMP_DIR}/${WHEEL_FILENAME}" "adbc_driver_snowflake/${DRIVER_NAME}" -d "${DEST_DIR}"
-rm -f "${TMP_DIR}/${WHEEL_FILENAME}"
+unzip -j -o "${WHEEL_PATH}" "adbc_driver_snowflake/${DRIVER_NAME}" -d "${DEST_DIR}"
+rm -f "${WHEEL_PATH}"
 
 if [ ! -f "${DEST_DIR}/${DRIVER_NAME}" ]; then
   echo "Error: ADBC Snowflake driver file not found after extraction" >&2
