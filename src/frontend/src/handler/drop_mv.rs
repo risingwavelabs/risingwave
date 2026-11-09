@@ -51,6 +51,10 @@ pub async fn handle_drop_mv(
                                 table_name
                             ))
                             .into())
+                    } else if let Some(err) =
+                        reader.bad_drop_error_by_name(db_name, schema_path, &table_name)
+                    {
+                        Err(err)
                     } else if let CatalogErrorInner::NotFound {
                         object_type: "table",
                         name,

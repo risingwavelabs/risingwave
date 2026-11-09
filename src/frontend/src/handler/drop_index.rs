@@ -73,6 +73,10 @@ pub async fn handle_drop_index(
                                     index_name
                                 ))
                                 .into())
+                        } else if let Some(err) =
+                            reader.bad_drop_error_by_name(db_name, schema_path, &index_name)
+                        {
+                            Err(err)
                         } else if e.is_not_found("table") {
                             Err(CatalogError::not_found("index", index_name).into())
                         } else {

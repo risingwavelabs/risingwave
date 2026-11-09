@@ -63,7 +63,9 @@ pub async fn handle_drop_source(
                         ))
                         .into())
                 } else {
-                    Err(e.into())
+                    Err(catalog_reader
+                        .bad_drop_error_by_name(db_name, schema_path, &source_name)
+                        .unwrap_or_else(|| e.into()))
                 };
             }
         }

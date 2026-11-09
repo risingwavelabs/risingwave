@@ -48,7 +48,9 @@ pub async fn handle_drop_table(
                             .notice(format!("table \"{}\" does not exist, skipping", table_name))
                             .into())
                     } else {
-                        Err(e.into())
+                        Err(reader
+                            .bad_drop_error_by_name(db_name, schema_path, &table_name)
+                            .unwrap_or_else(|| e.into()))
                     };
                 }
             };

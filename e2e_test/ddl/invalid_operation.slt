@@ -73,12 +73,10 @@ drop index t;
 statement error Use `DROP TABLE`
 drop source t;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop sink t;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop view t;
 
 # 4.2 materialized view
@@ -94,12 +92,10 @@ drop index mv;
 statement error Use `DROP MATERIALIZED VIEW`
 drop source mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP MATERIALIZED VIEW`
 drop sink mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP MATERIALIZED VIEW`
 drop view mv;
 
 # 4.3 index
@@ -115,12 +111,10 @@ drop materialized view idx;
 statement error Use `DROP INDEX`
 drop source idx;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP INDEX`
 drop sink idx;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP INDEX`
 drop view idx;
 
 # 4.4 table with connector
@@ -143,12 +137,10 @@ drop index msrc;
 statement error Use `DROP TABLE`
 drop source msrc;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop sink msrc;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop view msrc;
 
 # 4.5 source
@@ -162,75 +154,60 @@ create source src (v int) with (
     datagen.split.num = '1'
 ) FORMAT PLAIN ENCODE JSON;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop table src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop materialized view src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop index src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop sink src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop view src;
 
 # 4.6 sink
 statement ok
 CREATE SINK sink FROM mv WITH (connector='blackhole');
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop table sink;
 
 statement error sql parser error
 CREATE SINK sink FROM mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop materialized view sink;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop index sink;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop source sink;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop view sink;
 
 # 4.7 view
 statement ok
 create view v as select 1;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop table v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop materialized view v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop index v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop source v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop sink v;
 
 # 5. query
@@ -250,8 +227,7 @@ query I
 SELECT * from msrc limit 0;
 ----
 
-# FIXME: improve the error message
-query error not found
+query error cannot query sink "sink"
 SELECT * from sink limit 0;
 
 query I
@@ -300,42 +276,33 @@ statement ok
 delete from msrc;
 
 # 6.5 source
-# FIXME: improve the error message
-statement error not found
+statement error cannot change source "src"
 insert into src values (1);
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change source "src"
 update src set v = 2;
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change source "src"
 delete from src;
 
 # 6.6 sink
-# FIXME: improve the error message
-statement error not found
+statement error cannot change sink "sink"
 insert into sink values (1);
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change sink "sink"
 update sink set v = 2;
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change sink "sink"
 delete from sink;
 
 # 6.7 view
-# FIXME: improve the error message
-statement error not found
+statement error cannot change view "v"
 insert into v values (1);
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change view "v"
 update v set v = 2;
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change view "v"
 delete from v;
 
 # 7. create with duplicate name

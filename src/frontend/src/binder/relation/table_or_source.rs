@@ -308,6 +308,17 @@ impl Binder {
         as_of: Option<&AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let Some((base_name, suffix)) = relation_name.rsplit_once('$') else {
+            // Sinks and subscriptions share the namespace of relations but can't be queried.
+            let schema_path = self.bind_schema_path(schema_name);
+            if let Some(relation_type @ ("sink" | "subscription")) = self
+                .catalog
+                .get_non_table_relation_type_by_name(db_name, schema_path, relation_name)
+            {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "cannot query {relation_type} \"{relation_name}\""
+                ))
+                .into());
+            }
             return Err(CatalogError::not_found("table or source", relation_name).into());
         };
         let Some(metadata_type) = IcebergMetadataTableType::from_suffix(suffix) else {
@@ -710,7 +721,32 @@ impl Binder {
         })
     }
 
-    pub(crate) fn check_for_dml(table: &TableCatalog, is_insert: bool) -> Result<()> {
+    /// Binds the target table of `INSERT`, `UPDATE` or `DELETE`.
+    pub(crate) fn bind_table_for_dml(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        is_insert: bool,
+    ) -> Result<BoundBaseTable> {
+        let table = self.bind_table(schema_name, table_name).map_err(|e| {
+            let schema_path = self.bind_schema_path(schema_name);
+            match self.catalog.get_non_table_relation_type_by_name(
+                &self.db_name,
+                schema_path,
+                table_name,
+            ) {
+                Some(relation_type) => ErrorCode::InvalidInputSyntax(format!(
+                    "cannot change {relation_type} \"{table_name}\""
+                ))
+                .into(),
+                None => e,
+            }
+        })?;
+        Self::check_for_dml(&table.table_catalog, is_insert)?;
+        Ok(table)
+    }
+
+    fn check_for_dml(table: &TableCatalog, is_insert: bool) -> Result<()> {
         let table_name = &table.name;
         match table.table_type() {
             TableType::Table => {}
