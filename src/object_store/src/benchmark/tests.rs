@@ -936,3 +936,85 @@ async fn preflight_and_final_cleanup_failures_keep_the_primary_error_and_json() 
             .contains("incorrect content")
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn pause_limit_resets_for_each_logical_read_and_failures_stay_independent() {
+    let store = memory();
+    let keys = Arc::new((0..5).map(|i| format!("object-{i}")).collect::<Vec<_>>());
+    for key in keys.iter() {
+        store
+            .upload(key, Bytes::from_static(b"0123456789"))
+            .await
+            .unwrap();
+    }
+    let cfg = Arc::new(BenchmarkConfig {
+        objects: 5,
+        concurrency: 2,
+        pause_ms: 10,
+        max_pauses: Some(1),
+        ..config()
+    });
+    for missing in [false, true] {
+        if missing {
+            store.delete(&keys[0]).await.unwrap();
+        }
+        let s = store.clone();
+        let keys = keys.clone();
+        let cfg = cfg.clone();
+        let report = jobs(
+            "compactor_chunked",
+            5,
+            2,
+            &CancellationToken::new(),
+            move |i| {
+                read::read_object(
+                    s.clone(),
+                    keys[i].clone(),
+                    cfg.clone(),
+                    ReadMode::Chunked,
+                    i,
+                    CancellationToken::new(),
+                )
+            },
+        )
+        .await;
+        let completed = if missing { 4 } else { 5 };
+        assert_eq!(report.succeeded, completed);
+        assert_eq!(report.bytes, completed * 10);
+        assert_eq!(report.active_pause_ms, completed as f64 * 10.0);
+        assert_eq!(report.failed, u64::from(missing));
+        assert_eq!(report.interrupted, 0);
+        assert_eq!(report.status, if missing { "failed" } else { "completed" });
+        if !missing {
+            assert_eq!(report.wall_elapsed_ms, 30.0);
+            assert_eq!(report.peak_inflight_logical_operations, 2);
+        }
+    }
+}
+
+#[test]
+fn pause_options_validate_and_old_parameters_keep_the_original_defaults() {
+    let defaults: BenchmarkConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(defaults.pause_every_chunks, 1);
+    assert_eq!(defaults.max_pauses, None);
+    assert!(
+        BenchmarkConfig {
+            pause_every_chunks: 0,
+            ..config()
+        }
+        .validate()
+        .is_err()
+    );
+    for limit in [None, Some(0), Some(1)] {
+        let cfg = BenchmarkConfig {
+            pause_every_chunks: 2,
+            max_pauses: limit,
+            ..config()
+        };
+        cfg.validate().unwrap();
+        let decoded: BenchmarkConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(decoded.pause_every_chunks, 2);
+        assert_eq!(decoded.max_pauses, limit);
+    }
+}

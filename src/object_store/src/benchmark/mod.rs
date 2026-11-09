@@ -17,6 +17,9 @@
 
 mod basic;
 mod read;
+mod trace;
+
+pub use trace::{ReadTrace, TraceSummary, TraceWriter};
 // These tests measure real-time/network behavior, not simulated performance.
 #[cfg(all(test, not(madsim)))]
 mod tests;
@@ -44,6 +47,9 @@ use crate::object::object_metrics::ObjectStoreMetrics;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BenchmarkConfig {
+    /// Optional diagnostic sink; configured separately from serialized workload parameters.
+    #[serde(skip)]
+    pub read_trace: Option<ReadTrace>,
     pub profile: Profile,
     pub objects: usize,
     pub object_size: usize,
@@ -56,6 +62,10 @@ pub struct BenchmarkConfig {
     pub basic_max_operations: usize,
     pub block_size: usize,
     pub pause_ms: u64,
+    /// Pause after every N complete, nonempty chunks in non-continuous modes.
+    pub pause_every_chunks: usize,
+    /// Maximum pause opportunities per logical read; None is unlimited, Some(0) disables pauses.
+    pub max_pauses: Option<usize>,
     pub jitter_ms: u64,
     pub long_pause_every: usize,
     pub long_pause_ms: u64,
@@ -75,6 +85,7 @@ pub struct BenchmarkConfig {
 impl Default for BenchmarkConfig {
     fn default() -> Self {
         Self {
+            read_trace: None,
             profile: Profile::All,
             objects: 16,
             object_size: 64 << 20,
@@ -85,6 +96,8 @@ impl Default for BenchmarkConfig {
             basic_max_operations: 10_000,
             block_size: 64 << 10,
             pause_ms: 10_000,
+            pause_every_chunks: 1,
+            max_pauses: None,
             jitter_ms: 0,
             long_pause_every: 0,
             long_pause_ms: 1000,
@@ -133,6 +146,10 @@ impl ReadMode {
 
 impl BenchmarkConfig {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.pause_every_chunks > 0,
+            "pause_every_chunks must be positive"
+        );
         ensure!(
             self.basic_max_operations > 0,
             "basic_max_operations must be positive"
@@ -1076,7 +1093,7 @@ pub async fn run(
             "Cleanup deletes known keys; failed/cancelled multipart uploads may require server lifecycle cleanup.".into(),
             "Cache state is uncontrolled. Read order is recorded; intentional pauses are included in end-to-end latency.".into(),
             "Interference cohorts rotate disjoint object pools and reset deterministic request sequences for each comparison. Pool bytes are eligible capacity, not unique bytes read; requested object counts include readiness. Worker-seconds measure lifetimes within the observation window, not time spent in I/O. A worker failure invalidates both sides of a comparison.".into(),
-            "Compactor reads consume whole stream chunks and pause between them; chunk sizes are transport-dependent (short_get_size in chunked mode). first_poll measures the first next-chunk await (possibly lazy initialization); resume_poll measures subsequent next-chunk awaits, excluding pauses and EOF (continuous mode has no pause). Both may complete from HTTP/TCP buffers; it is not network-only latency. Readiness consumes and excludes one whole chunk before the interference window.".into(),
+            "Compactor reads consume whole stream chunks; non-continuous modes pause at configured chunk boundaries up to max_pauses. Chunk sizes are transport-dependent (short_get_size in chunked mode). first_poll measures the first next-chunk await (possibly lazy initialization); resume_poll measures subsequent next-chunk awaits, excluding pauses and EOF (continuous mode has no pause). Both may complete from HTTP/TCP buffers; it is not network-only latency. Readiness consumes and excludes one whole chunk before the interference window.".into(),
             "No automatic performance pass/fail or server-side backpressure claim is made.".into(),
         ],
     })

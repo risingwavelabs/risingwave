@@ -65,9 +65,15 @@ pub struct ObjectStoreArgs {
     /// Basic random block GET size (default: 64KiB).
     #[arg(long, value_parser = parse_size)]
     pub block_size: Option<usize>,
-    /// Pause after each nonfinal stream chunk (default: 10000 ms / 10 s).
+    /// Base pause duration at eligible chunk boundaries (default: 10000 ms / 10 s).
     #[arg(long)]
     pub pause_ms: Option<u64>,
+    /// Pause every N nonempty chunks in non-continuous modes (default: 1).
+    #[arg(long)]
+    pub pause_every_chunks: Option<usize>,
+    /// Maximum pauses per logical read; 0 disables pauses (default: unlimited).
+    #[arg(long)]
+    pub max_pauses: Option<usize>,
     /// Add deterministic jitter in 0..=N milliseconds (default: 0).
     #[arg(long)]
     pub jitter_ms: Option<u64>,
@@ -110,6 +116,10 @@ pub struct ObjectStoreArgs {
     /// Also save JSON atomically here; the parent directory must exist.
     #[arg(long)]
     pub output: Option<PathBuf>,
+    /// Write per-await compactor read diagnostics as JSONL; destination must not exist.
+    /// Uses a bounded background writer; dropped records are reported as an error.
+    #[arg(long)]
+    pub trace_output: Option<PathBuf>,
 }
 
 fn parse_size(input: &str) -> Result<usize, String> {
@@ -219,6 +229,7 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         basic_max_operations,
         block_size,
         pause_ms,
+        pause_every_chunks,
         jitter_ms,
         long_pause_every,
         long_pause_ms,
@@ -229,6 +240,9 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         interference_ms,
         seed
     );
+    if let Some(value) = args.max_pauses {
+        parameters.max_pauses = Some(value);
+    }
     parameters.keep_data |= args.keep_data;
     if args.reuse_prefix.is_some() {
         parameters.reuse_data = true;
@@ -312,6 +326,18 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         store_url.starts_with("s3://") || store_url.starts_with("minio://"),
         "this benchmark supports S3/MinIO URLs"
     );
+    let trace_writer = args
+        .trace_output
+        .as_ref()
+        .map(|path| benchmark::TraceWriter::create(path))
+        .transpose()?;
+    if let (Some(trace_path), Some(report_path)) = (&args.trace_output, &args.output) {
+        ensure!(
+            std::fs::canonicalize(trace_path).ok() != std::fs::canonicalize(report_path).ok(),
+            "trace and report output must be different files"
+        );
+    }
+    parameters.read_trace = trace_writer.as_ref().map(|writer| writer.trace());
     let object_config = Arc::new(object_config);
     let metrics = Arc::new(ObjectStoreMetrics::unused());
     // Use the standard RW backend initialization, including its credential and
@@ -341,6 +367,23 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
     });
     let result = benchmark::run(store, parameters, prefix, token).await;
     deadline.abort();
+    let trace_result = trace_writer.map(|writer| writer.finish()).transpose();
+    let trace_complete = match &trace_result {
+        Ok(Some(summary)) => summary.records_dropped == 0,
+        Ok(None) => true,
+        Err(_) => false,
+    };
+    let trace_json = match &trace_result {
+        Ok(Some(summary)) => json!({
+            "schema_version": 1, "path": args.trace_output, "summary": summary,
+            "complete": trace_complete,
+            "scope": "compactor and interference read awaits, including readiness, empty items, EOF, errors and cancellation; no payloads, SDK retry events or basic-profile operations",
+        }),
+        Ok(None) => serde_json::Value::Null,
+        Err(error) => {
+            json!({"schema_version": 1, "path": args.trace_output, "complete": false, "error": format!("{error:#}")})
+        }
+    };
     let report = result?;
     let succeeded = report.succeeded();
     let mut terminal = json!(benchmark::terminal_summary(&report));
@@ -363,6 +406,7 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         },
         "stop_reason": if report.cancelled { if shutdown.is_cancelled() { "shutdown" } else { "deadline" } } else { "finished" },
         "observed_outer_retry_events": benchmark::observed_retries(&metrics),
+        "read_trace": trace_json,
         "benchmark": report,
     });
     let mut secrets: Vec<String> = [
@@ -386,6 +430,10 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
     );
     let text = serde_json::to_string_pretty(&json)?;
     emit_report(&text, output, &mut std::io::stdout().lock())?;
+    ensure!(
+        trace_complete,
+        "read trace is incomplete; inspect read_trace in the JSON report"
+    );
     if !succeeded {
         bail!(
             "benchmark did not complete successfully; inspect the JSON phase and cleanup results"
