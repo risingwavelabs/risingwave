@@ -22,7 +22,7 @@ use risingwave_pb::secret::PbSecretRef;
 use crate::dispatch_cdc_source_type;
 use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
-use crate::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType, MYSQL_CDC_CONNECTOR};
+use crate::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType};
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     ADBC_SNOWFLAKE_CONNECTOR, AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
@@ -138,14 +138,6 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     }
 
     #[inline(always)]
-    fn is_mysql_cdc_connector(&self) -> bool {
-        let Some(connector) = self.get_connector() else {
-            return false;
-        };
-        connector == MYSQL_CDC_CONNECTOR
-    }
-
-    #[inline(always)]
     fn get_sync_call_timeout(&self) -> Option<Duration> {
         const SYNC_CALL_TIMEOUT_KEY: &str = "properties.sync.call.timeout"; // only from kafka props, add more if needed
         self.get(SYNC_CALL_TIMEOUT_KEY)
@@ -192,12 +184,16 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     }
 
     fn connector_need_pk(&self) -> bool {
-        // Currently only iceberg connector doesn't need primary key
-        // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
-        // XXX: This seems not the correct way. Iceberg doesn't necessarily lack a PK.
-        // "batch source" doesn't need a PK?
-        // For streaming, if it has a PK, do we want to use it? It seems not safe.
-        !self.is_iceberg_connector()
+        // Legacy Iceberg scans do not require a key. Retracting update ingestion uses
+        // the SQL primary key, like other non-append-only sources.
+        !self.is_iceberg_connector() || self.is_iceberg_update_source()
+    }
+
+    fn is_iceberg_update_source(&self) -> bool {
+        self.is_iceberg_connector()
+            && self
+                .get(crate::source::iceberg::STREAMING_UPDATES_KEY)
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"))
     }
 
     fn is_legacy_fs_connector(&self) -> bool {

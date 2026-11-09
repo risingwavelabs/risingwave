@@ -169,7 +169,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn abort_and_mark_blocked(
         &self,
         recovery: RecoveryStart,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) -> MetaResult<()> {
         let (database_id, database_job_ids) = match &recovery {
             RecoveryStart::Global => (None, None),
@@ -179,7 +179,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             } => (Some(*database_id), Some(job_ids.clone())),
         };
         if database_id.is_none() {
-            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason.into()));
         }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.

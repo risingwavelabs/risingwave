@@ -564,6 +564,7 @@ impl Binder {
         as_of: Option<&AsOf>,
         is_temporary: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
+        source_catalog.validate_iceberg_update_source()?;
         debug_assert_column_ids_distinct(&source_catalog.columns);
         if !is_temporary {
             self.check_privilege(
@@ -607,8 +608,14 @@ impl Binder {
             )?;
         }
 
-        let ast = Parser::parse_sql(&view_catalog.sql)
-            .expect("a view's sql should be parsed successfully");
+        // The error leaves out the SQL and the parser's message, which quotes it, as they can have
+        // secrets.
+        let ast = Parser::parse_sql(&view_catalog.sql).map_err(|_| {
+            ErrorCode::BindError(format!(
+                "failed to parse the stored definition of view {}",
+                view_catalog.name
+            ))
+        })?;
         let Statement::Query(query) = Itertools::exactly_one(ast.into_iter())
             .expect("a view should contain only one statement")
         else {
@@ -735,5 +742,36 @@ impl Binder {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DEFAULT_SUPER_USER_ID, SYS_CATALOG_START_ID};
+
+    use super::*;
+    use crate::binder::test_utils::mock_binder;
+
+    #[tokio::test]
+    async fn test_view_with_unparsable_sql() {
+        let view = ViewCatalog {
+            // A system view skips the privilege check.
+            id: (SYS_CATALOG_START_ID as u32).into(),
+            name: "v".to_owned(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
+            owner: DEFAULT_SUPER_USER_ID,
+            properties: Default::default(),
+            sql: "SELECT 'secret' FROM".to_owned(),
+            columns: vec![],
+            created_at_epoch: None,
+            created_at_cluster_version: None,
+        };
+        let error = mock_binder()
+            .resolve_view_relation(&view)
+            .unwrap_err()
+            .to_report_string();
+        assert!(error.contains("view v"), "{error}");
+        assert!(!error.contains("secret"), "{error}");
     }
 }

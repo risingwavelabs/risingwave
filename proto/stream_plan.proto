@@ -311,6 +311,10 @@ message StreamSource {
   optional Columns downstream_columns = 11;
   plan_common.SourceRefreshMode refresh_mode = 12;
   optional uint32 associated_table_id = 13;
+  // List reads this dedicated Fetch queue at committed checkpoints to confirm phase completion.
+  // The frontend sets only `table_id` to reference the paired Fetch state table; meta fills the
+  // rest of the descriptor from that table's catalog when building the actor graph.
+  optional plan_common.StorageTableDesc iceberg_fetch_state_table = 14;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -452,7 +456,13 @@ message FilterNode {
 }
 
 message ChangeLogNode {
-  message Keyed {}
+  message Keyed {
+    // Input column indices in KEY but absent from distribution_keys.
+    // Compaction uses stream_keys, distribution_keys, and these columns.
+    // We retain distribution_keys in compaction for backward compatibility:
+    // older keyed plans stored the full KEY there, so this list defaults to empty.
+    repeated uint32 additional_key_columns = 1;
+  }
 
   // Whether or not there is an op in the final output.
   bool need_op = 1;

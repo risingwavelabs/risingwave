@@ -183,6 +183,23 @@ where
         }
     }
 
+    /// Apply an operation from an upsert stream, retaining only the final operation per key.
+    /// Unlike retract input, an insertion can overwrite a row from an earlier batch, so a
+    /// subsequent deletion must retain its tombstone even if no earlier deletion was buffered.
+    pub fn apply_upsert_op_row(&mut self, op: Op, key: K, row: R) {
+        let slot = match op {
+            Op::Insert | Op::UpdateInsert => Slot {
+                old: None,
+                new: Some(row),
+            },
+            Op::Delete | Op::UpdateDelete => Slot {
+                old: Some(row),
+                new: None,
+            },
+        };
+        self.buffer.insert(key, slot);
+    }
+
     /// Consume the buffer and produce a list of change records.
     ///
     /// No-op updates are filtered out.

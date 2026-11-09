@@ -28,6 +28,7 @@
 
 - [Develop Connectors](./connector/intro.md)
     - [Source](./connector/source.md)
+    - [Iceberg streaming updates](./connector/iceberg-streaming-updates.md)
 - [Continuous Integration](./ci.md)
 
 ---

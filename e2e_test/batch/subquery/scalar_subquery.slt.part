@@ -32,3 +32,65 @@ select (select x from t) x, 1 one;
 
 statement ok
 drop table t;
+
+# Only equality on every primary key column bounds a scalar subquery to one row. Other predicates
+# on the primary key can match several rows and must keep the runtime check.
+statement ok
+create table t_pk (pk int primary key, v int);
+
+statement ok
+insert into t_pk values (1, 10), (2, 20), (3, 30);
+
+query I
+select (select v from t_pk where pk = 2);
+----
+20
+
+query error Scalar subquery produced more than one row
+select (select v from t_pk where pk > 1);
+
+query error Scalar subquery produced more than one row
+select (select v from t_pk where pk = 1 or pk = 2);
+
+statement error Scalar subquery might produce more than one row
+create materialized view mv_pk_range as select (select v from t_pk where pk > 1) v;
+
+# A lossless cast of the primary key and a row equality still fix the primary key.
+statement ok
+create table t_outer (a bigint);
+
+statement ok
+insert into t_outer values (1), (3), (4);
+
+query II
+select a, (select v from t_pk where pk::bigint = t_outer.a) from t_outer order by a;
+----
+1 10
+3 30
+4 NULL
+
+query I
+select (select v from t_pk where (pk, v) = (2, 20));
+----
+20
+
+statement ok
+drop table t_outer;
+
+statement ok
+drop table t_pk;
+
+# A boolean primary key used as a predicate fixes it to true or false.
+statement ok
+create table t_flag (pk boolean primary key, v int);
+
+statement ok
+insert into t_flag values (true, 1), (false, 0);
+
+query II
+select (select v from t_flag where pk), (select v from t_flag where not pk);
+----
+1 0
+
+statement ok
+drop table t_flag;

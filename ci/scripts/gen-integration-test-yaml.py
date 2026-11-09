@@ -23,7 +23,6 @@ CASES_MAP = {
     "debezium-postgres": ["json"],
     "debezium-sqlserver": ["json"],
     "tidb-cdc-sink": ["json"],
-    "citus-cdc": ["json"],
     "kinesis-s3-source": ["json"],
     "clickhouse-sink": ["json"],
     "cockroach-sink": ["json"],
