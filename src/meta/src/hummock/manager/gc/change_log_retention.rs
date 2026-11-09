@@ -29,7 +29,8 @@ pub(crate) struct ChangeLogObjectRetention(Arc<Mutex<RetentionState>>);
 
 #[derive(Default)]
 struct RetentionState {
-    next_epoch: u64,
+    // Internal retention sequence, independent of RisingWave data epochs.
+    next_generation: u64,
     pins: BTreeMap<u64, usize>,
     retired: BTreeMap<u64, Vec<RetainedChangeLogBatch>>,
 }
@@ -44,7 +45,7 @@ pub(crate) enum RetainedChangeLogBatch {
 
 pub(crate) struct ChangeLogObjectGuard {
     retention: ChangeLogObjectRetention,
-    epoch: u64,
+    generation: u64,
 }
 
 impl ChangeLogObjectRetention {
@@ -52,21 +53,21 @@ impl ChangeLogObjectRetention {
     /// before scanning manifests, so publication cannot release references behind its scan.
     pub(crate) fn pin(&self, inherit: bool) -> ChangeLogObjectGuard {
         let mut state = self.0.lock();
-        state.next_epoch += 1;
-        let epoch = if inherit {
+        state.next_generation += 1;
+        let generation = if inherit {
             state
                 .pins
                 .keys()
                 .next()
                 .copied()
-                .unwrap_or(state.next_epoch)
+                .unwrap_or(state.next_generation)
         } else {
-            state.next_epoch
+            state.next_generation
         };
-        *state.pins.entry(epoch).or_default() += 1;
+        *state.pins.entry(generation).or_default() += 1;
         ChangeLogObjectGuard {
             retention: self.clone(),
-            epoch,
+            generation,
         }
     }
 
@@ -75,8 +76,8 @@ impl ChangeLogObjectRetention {
     /// the tracker mutex; object IDs are enumerated later by GC.
     pub(crate) fn retain_batch(&self, batch: RetainedChangeLogBatch) {
         let mut state = self.0.lock();
-        if let Some(epoch) = state.pins.keys().next_back().copied() {
-            state.retired.entry(epoch).or_default().push(batch);
+        if let Some(generation) = state.pins.keys().next_back().copied() {
+            state.retired.entry(generation).or_default().push(batch);
         }
         // If no pin needs the batch, release the mutex before destroying its contents.
         drop(state);
@@ -98,17 +99,17 @@ impl ChangeLogObjectRetention {
 impl Drop for ChangeLogObjectGuard {
     fn drop(&mut self) {
         let mut state = self.retention.0.lock();
-        let count = state.pins.get_mut(&self.epoch).unwrap();
+        let count = state.pins.get_mut(&self.generation).unwrap();
         *count -= 1;
         if *count == 0 {
-            state.pins.remove(&self.epoch);
+            state.pins.remove(&self.generation);
         }
-        let min_epoch = state.pins.keys().next().copied();
+        let min_generation = state.pins.keys().next().copied();
         // Drop potentially large batches outside the mutex. Full GC can reclaim these
         // objects even if minor GC already consumed their original candidate entries.
         let mut released = Vec::new();
         while let Some(entry) = state.retired.first_entry() {
-            if min_epoch.is_some_and(|epoch| epoch <= *entry.key()) {
+            if min_generation.is_some_and(|generation| generation <= *entry.key()) {
                 break;
             }
             released.push(entry.remove());
@@ -182,7 +183,7 @@ mod tests {
         let weak_ids = Arc::downgrade(&ids);
         let weak_log = Arc::downgrade(&log);
         let backup = retention.pin(false);
-        // Both batches have the same retention epoch, and one ID occurs in both.
+        // Both batches have the same retention generation, and one ID occurs in both.
         retention.retain_batch(RetainedChangeLogBatch::ObjectIds(ids));
         retention.retain_batch(RetainedChangeLogBatch::ChangeLog(log));
         let gc = retention.pin(true);
