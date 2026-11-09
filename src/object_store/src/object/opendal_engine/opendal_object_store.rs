@@ -247,7 +247,7 @@ impl ObjectStore for OpendalObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str, limit: Option<usize>) -> ObjectResult<ObjectMetadataIter> {
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let object_lister = self.op.lister_with(prefix).recursive(true).await?;
 
         let op = self.op.clone();
@@ -256,7 +256,7 @@ impl ObjectStore for OpendalObjectStore {
             async move { Self::listed_object_metadata(&op, object?).await }
         });
 
-        Ok(stream.take(limit.unwrap_or(usize::MAX)).boxed())
+        Ok(stream.boxed())
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -514,7 +514,7 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list(prefix, None)
+            .list(prefix)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()
@@ -537,7 +537,7 @@ mod tests {
                     .await
                     .unwrap();
             }
-            let mut objects = store.list("prefix/", None).await.unwrap();
+            let mut objects = store.list("prefix/").await.unwrap();
             let mut seen = std::collections::HashSet::new();
             while let Some(object) = objects.next().await {
                 // Memory listing needs the adapter's stat fallback to get metadata.

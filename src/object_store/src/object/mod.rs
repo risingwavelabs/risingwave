@@ -130,7 +130,7 @@ pub trait ObjectStore: Send + Sync {
 
     /// Lists objects under `prefix`. Keep consuming the returned stream to advance
     /// through backend pages; each new call starts a fresh listing.
-    async fn list(&self, prefix: &str, limit: Option<usize>) -> ObjectResult<ObjectMetadataIter>;
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
 }
@@ -331,12 +331,8 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, delete_objects(paths).await)
     }
 
-    pub async fn list(
-        &self,
-        prefix: &str,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
-        object_store_impl_method_body!(self, list(prefix, limit).await)
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        object_store_impl_method_body!(self, list(prefix).await)
     }
 
     pub fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
@@ -830,11 +826,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn list(
-        &self,
-        prefix: &str,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = OperationType::List;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
@@ -847,7 +839,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
         let builder = || async {
             self.inner
-                .list(prefix, limit)
+                .list(prefix)
                 .instrument_await(operation_type_str.verbose())
                 .await
         };

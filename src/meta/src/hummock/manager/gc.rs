@@ -91,7 +91,7 @@ impl GcManager {
         prefix: Option<String>,
     ) -> Result<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path_prefix, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path, None).await?;
+        let raw_iter = self.store.list(&list_path).await?;
         let valid_suffixes = VALID_OBJECT_ID_SUFFIXES.map(|suffix| format!(".{}", suffix));
         let iter = raw_iter.filter(move |r| match r {
             Ok(i) => future::ready(valid_suffixes.iter().any(|suffix| i.key.ends_with(suffix))),

@@ -142,7 +142,7 @@ async fn try_clean_up_cdc_source_schema_history(
     // The path should follow that defined in OpenDalSchemaHIstory.java prefixed by data_directory.
     let object_dir: String = format!("{data_directory}/rw-cdc-schema-history/source-{source_id}");
     let mut keys: Vec<String> = Vec::new();
-    let mut stream = object_store.list(&object_dir, None).await?;
+    let mut stream = object_store.list(&object_dir).await?;
     use futures::StreamExt;
     while let Some(obj) = stream.next().await {
         let obj = obj?;

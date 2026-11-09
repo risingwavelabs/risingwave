@@ -626,16 +626,13 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str, limit: Option<usize>) -> ObjectResult<ObjectMetadataIter> {
-        Ok(Box::pin(
-            S3ObjectIter::new(
-                self.client.clone(),
-                self.bucket.clone(),
-                prefix.to_owned(),
-                self.config.clone(),
-            )
-            .take(limit.unwrap_or(usize::MAX)),
-        ))
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        Ok(Box::pin(S3ObjectIter::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            prefix.to_owned(),
+            self.config.clone(),
+        )))
     }
 
     fn store_media_type(&self) -> &'static str {

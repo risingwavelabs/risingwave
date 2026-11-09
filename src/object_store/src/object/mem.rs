@@ -181,7 +181,7 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str, limit: Option<usize>) -> ObjectResult<ObjectMetadataIter> {
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let list_result = self
             .objects
             .lock()
@@ -194,7 +194,6 @@ impl ObjectStore for InMemObjectStore {
                 None
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
-            .take(limit.unwrap_or(usize::MAX))
             .collect_vec();
         Ok(Box::pin(InMemObjectIter::new(list_result)))
     }
@@ -381,7 +380,7 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &InMemObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list(prefix, None)
+            .list(prefix)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()

@@ -221,10 +221,7 @@ impl ObjectStore for SimObjectStore {
         }
     }
 
-    async fn list(&self, path: &str, limit: Option<usize>) -> ObjectResult<ObjectMetadataIter> {
-        if let Some(limit) = limit {
-            tracing::warn!(limit, "limit is ignored by SimObjectStore");
-        }
+    async fn list(&self, path: &str) -> ObjectResult<ObjectMetadataIter> {
         let path = path.to_string();
         let resp = self
             .client
