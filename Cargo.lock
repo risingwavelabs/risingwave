@@ -57,27 +57,12 @@ dependencies = [
 
 [[package]]
 name = "addr2line"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a30b2e23b9e17a9f90641c7ab1549cd9b44f296d3ccbf309d2863cfe398a0cb"
-dependencies = [
- "gimli 0.28.0",
-]
-
-[[package]]
-name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b"
 dependencies = [
- "gimli 0.32.3",
+ "gimli",
 ]
-
-[[package]]
-name = "adler"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
 name = "adler2"
@@ -286,7 +271,7 @@ dependencies = [
  "crc32fast",
  "digest 0.10.7",
  "log",
- "miniz_oxide 0.8.9",
+ "miniz_oxide",
  "num-bigint 0.4.6",
  "quad-rand",
  "rand 0.9.5",
@@ -311,7 +296,7 @@ dependencies = [
  "bon",
  "digest 0.10.7",
  "log",
- "miniz_oxide 0.8.9",
+ "miniz_oxide",
  "num-bigint 0.4.6",
  "quad-rand",
  "rand 0.9.5",
@@ -1985,17 +1970,17 @@ dependencies = [
 
 [[package]]
 name = "backtrace"
-version = "0.3.69"
+version = "0.3.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2089b7e3f35b9dd2d0ed921ead4f6d318c27680d4a5bd167b3ee120edb105837"
+checksum = "bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6"
 dependencies = [
- "addr2line 0.21.0",
- "cc",
+ "addr2line",
  "cfg-if",
  "libc",
- "miniz_oxide 0.7.2",
- "object 0.32.1",
+ "miniz_oxide",
+ "object",
  "rustc-demangle",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -2702,8 +2687,7 @@ dependencies = [
 [[package]]
 name = "chrono-tz"
 version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+source = "git+https://github.com/risingwavelabs/chrono-tz.git?tag=v0.10.4-2026f#66a4f5d729afdec9dd3f0f0d0dec448c7b72c777"
 dependencies = [
  "chrono",
  "chrono-tz-build",
@@ -2714,8 +2698,7 @@ dependencies = [
 [[package]]
 name = "chrono-tz-build"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7d8d1efd5109b9c1cd3b7966bd071cdfb53bb6eb0b22a473a68c2f70a11a1eb"
+source = "git+https://github.com/risingwavelabs/chrono-tz.git?tag=v0.10.4-2026f#66a4f5d729afdec9dd3f0f0d0dec448c7b72c777"
 dependencies = [
  "parse-zoneinfo",
  "phf_codegen 0.12.1",
@@ -3248,7 +3231,7 @@ dependencies = [
  "cranelift-control",
  "cranelift-entity",
  "cranelift-isle",
- "gimli 0.32.3",
+ "gimli",
  "hashbrown 0.15.5",
  "log",
  "pulley-interpreter",
@@ -3867,7 +3850,7 @@ dependencies = [
  "cfg-if",
  "crossbeam-utils",
  "hashbrown 0.14.5",
- "lock_api",
+ "lock_api 0.4.14",
  "once_cell",
  "parking_lot_core 0.9.12",
 ]
@@ -6484,7 +6467,7 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "libz-sys",
- "miniz_oxide 0.8.9",
+ "miniz_oxide",
  "zlib-rs",
 ]
 
@@ -6841,7 +6824,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f"
 dependencies = [
  "futures-core",
- "lock_api",
+ "lock_api 0.4.14",
  "parking_lot 0.12.5",
 ]
 
@@ -7219,12 +7202,6 @@ dependencies = [
  "opaque-debug",
  "polyval",
 ]
-
-[[package]]
-name = "gimli"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fb8d784f27acf97159b40fc4db5ecd8aa23b9ad5ef69cdd136d3bc80665f0c0"
 
 [[package]]
 name = "gimli"
@@ -9402,9 +9379,9 @@ checksum = "2c4a545a15244c7d945065b5d392b2d2d7f21526fba56ce51467b06ed445e8f7"
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libloading"
@@ -9693,6 +9670,15 @@ name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+dependencies = [
+ "scopeguard",
+]
+
+[[package]]
+name = "lock_api"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65d91b22da179613dcf4d6ec8349563f52a363f6849e03b00dd0a185ec4a59af"
 dependencies = [
  "scopeguard",
 ]
@@ -10194,15 +10180,6 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
-
-[[package]]
-name = "miniz_oxide"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d811f3e15f28568be3407c8e7fdb6514c1cda3cb30683f15b6a1a1dc4ea14a7"
-dependencies = [
- "adler",
-]
 
 [[package]]
 name = "miniz_oxide"
@@ -10846,15 +10823,6 @@ checksum = "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15"
 dependencies = [
  "libc",
  "objc2-core-foundation",
-]
-
-[[package]]
-name = "object"
-version = "0.32.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
@@ -11849,7 +11817,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
 dependencies = [
  "instant",
- "lock_api",
+ "lock_api 0.4.14",
  "parking_lot_core 0.8.6",
 ]
 
@@ -11859,8 +11827,18 @@ version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
 dependencies = [
- "lock_api",
+ "lock_api 0.4.14",
  "parking_lot_core 0.9.12",
+]
+
+[[package]]
+name = "parking_lot"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9cf937ca4e1d0b7578784559063422fc39ae7c5a00f02471f2614d5486fd226"
+dependencies = [
+ "lock_api 0.5.0",
+ "parking_lot_core 0.10.0",
 ]
 
 [[package]]
@@ -11883,11 +11861,23 @@ version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
- "backtrace",
  "cfg-if",
  "libc",
- "petgraph 0.6.5",
  "redox_syscall 0.5.7",
+ "smallvec",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cfff060068cc18aa7815010fcaf80c68c7fb9e85fc7f5c0f9bf142c21d19826"
+dependencies = [
+ "backtrace",
+ "libc",
+ "petgraph 0.8.3",
+ "redox_syscall 0.9.5",
  "smallvec",
  "windows-link 0.2.1",
 ]
@@ -12007,8 +11997,7 @@ dependencies = [
 [[package]]
 name = "parse-zoneinfo"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3c406c9e2aa74554e662d2c2ee11cd3e73756988800be7e6f5eddb16fed4699"
+source = "git+https://github.com/risingwavelabs/chrono-tz.git?tag=v0.10.4-2026f#66a4f5d729afdec9dd3f0f0d0dec448c7b72c777"
 
 [[package]]
 name = "paste"
@@ -12211,7 +12200,7 @@ dependencies = [
  "madsim-tokio",
  "openssl",
  "panic-message",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "peekable",
  "postgres-types",
  "reqwest 0.13.4",
@@ -13687,6 +13676,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_syscall"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "580c875845b41ecb1564ad1ae4703044cef774145e3d7a94dc2b3fa7c97868fd"
+dependencies = [
+ "bitflags 2.13.1",
+]
+
+[[package]]
 name = "redox_users"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14210,7 +14208,7 @@ dependencies = [
  "mysql_async",
  "opendal 0.58.1",
  "panic-message",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parquet",
  "prometheus",
  "rand 0.9.5",
@@ -14410,7 +14408,7 @@ dependencies = [
  "num-traits",
  "opentelemetry",
  "opentelemetry_sdk",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parquet-variant",
  "parquet-variant-compute",
  "parquet-variant-json",
@@ -14495,7 +14493,7 @@ dependencies = [
  "itertools 0.14.0",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "pprof",
  "risingwave_common",
  "risingwave_pb",
@@ -14537,7 +14535,7 @@ dependencies = [
  "mach2 0.7.0",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "pin-project-lite",
  "procfs 0.18.0",
  "prometheus",
@@ -14547,7 +14545,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -14568,7 +14565,7 @@ version = "3.2.0-alpha"
 dependencies = [
  "arc-swap",
  "madsim-tokio",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "pin-project-lite",
  "prometheus",
  "rand 0.9.5",
@@ -14587,7 +14584,7 @@ dependencies = [
  "hex",
  "madsim-tokio",
  "moka",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "prost 0.14.3",
  "reqwest 0.13.4",
  "risingwave_pb",
@@ -14791,7 +14788,7 @@ dependencies = [
  "opendal 0.58.1",
  "opensearch",
  "openssl",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parquet",
  "paste",
  "pg_bigdecimal",
@@ -14945,7 +14942,7 @@ dependencies = [
  "futures-async-stream",
  "itertools 0.14.0",
  "madsim-tokio",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "paste",
  "risingwave_common",
  "tempfile",
@@ -15139,7 +15136,7 @@ dependencies = [
  "memcomparable",
  "mysql_async",
  "num-integer",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parse-display",
  "paste",
  "percent-encoding",
@@ -15233,7 +15230,7 @@ dependencies = [
  "futures-async-stream",
  "itertools 0.14.0",
  "madsim-tokio",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "prometheus",
  "rand 0.9.5",
  "risingwave_common",
@@ -15265,7 +15262,7 @@ dependencies = [
  "itertools 0.14.0",
  "madsim-tokio",
  "mockall",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "prost 0.14.3",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -15390,7 +15387,7 @@ dependencies = [
  "maplit",
  "notify",
  "otlp-embedded",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "pretty_assertions",
  "prometheus",
  "prometheus-http-query",
@@ -15554,6 +15551,7 @@ dependencies = [
 name = "risingwave_object_store"
 version = "3.2.0-alpha"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "await-tree",
  "aws-config",
@@ -15567,6 +15565,10 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
+ "http 1.5.0",
+ "http-body-util",
+ "hyper 1.12.0",
+ "hyper-util",
  "itertools 0.14.0",
  "madsim",
  "madsim-aws-sdk-s3",
@@ -15699,7 +15701,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "pprof",
  "risingwave_common",
  "risingwave_variables",
@@ -15878,7 +15880,7 @@ dependencies = [
  "moka",
  "more-asserts",
  "num-integer",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parquet",
  "prometheus",
  "prost 0.14.3",
@@ -15952,7 +15954,7 @@ dependencies = [
  "memcomparable",
  "moka",
  "multimap",
- "parking_lot 0.12.5",
+ "parking_lot 0.13.0",
  "parquet",
  "paste",
  "pin-project",
@@ -16246,9 +16248,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.23"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d626bb9dae77e28219937af045c257c28bfd3f69333c512553507f5f9798cb76"
+checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
 
 [[package]]
 name = "rustc-hash"
@@ -17575,7 +17577,7 @@ version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
- "lock_api",
+ "lock_api 0.4.14",
 ]
 
 [[package]]
@@ -17584,7 +17586,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
 dependencies = [
- "lock_api",
+ "lock_api 0.4.14",
 ]
 
 [[package]]
@@ -17593,7 +17595,7 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
 dependencies = [
- "lock_api",
+ "lock_api 0.4.14",
 ]
 
 [[package]]
@@ -17602,7 +17604,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d96d2d1d716fb500937168cc09353ffdc7a012be8475ac7308e1bdf0e3923300"
 dependencies = [
- "lock_api",
+ "lock_api 0.4.14",
 ]
 
 [[package]]
@@ -19882,7 +19884,7 @@ version = "36.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60e5f244a2c9d40afa9e9a607ee7f048c0648bb1c22cc28b130c5fc71e23d71d"
 dependencies = [
- "addr2line 0.25.1",
+ "addr2line",
  "anyhow",
  "async-trait",
  "bitflags 2.13.1",
@@ -19891,7 +19893,7 @@ dependencies = [
  "cfg-if",
  "encoding_rs",
  "fxprof-processed-profile",
- "gimli 0.32.3",
+ "gimli",
  "hashbrown 0.15.5",
  "indexmap 2.14.0",
  "ittapi",
@@ -19899,7 +19901,7 @@ dependencies = [
  "log",
  "mach2 0.4.3",
  "memfd",
- "object 0.37.3",
+ "object",
  "once_cell",
  "postcard",
  "pulley-interpreter",
@@ -19941,10 +19943,10 @@ dependencies = [
  "cpp_demangle",
  "cranelift-bitset",
  "cranelift-entity",
- "gimli 0.32.3",
+ "gimli",
  "indexmap 2.14.0",
  "log",
- "object 0.37.3",
+ "object",
  "postcard",
  "rustc-demangle",
  "semver",
@@ -20021,10 +20023,10 @@ dependencies = [
  "cranelift-entity",
  "cranelift-frontend",
  "cranelift-native",
- "gimli 0.32.3",
+ "gimli",
  "itertools 0.14.0",
  "log",
- "object 0.37.3",
+ "object",
  "pulley-interpreter",
  "smallvec",
  "target-lexicon",
@@ -20058,7 +20060,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21d33adf2d1eae36df9b6b033a1d549c7553ea607f4f9a81f75d51627725c354"
 dependencies = [
  "cc",
- "object 0.37.3",
+ "object",
  "rustix 1.1.4",
  "wasmtime-internal-versioned-export-macros",
 ]
@@ -20100,7 +20102,7 @@ dependencies = [
  "cfg-if",
  "cranelift-codegen",
  "log",
- "object 0.37.3",
+ "object",
 ]
 
 [[package]]
@@ -20122,8 +20124,8 @@ checksum = "1757c8b0626385c93994c7a3c7a23ee5b469061465b601c1fdce71ff61b11c82"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
- "gimli 0.32.3",
- "object 0.37.3",
+ "gimli",
+ "object",
  "target-lexicon",
  "wasmparser 0.236.1",
  "wasmtime-environ",
@@ -20326,7 +20328,7 @@ dependencies = [
  "anyhow",
  "cranelift-assembler-x64",
  "cranelift-codegen",
- "gimli 0.32.3",
+ "gimli",
  "regalloc2",
  "smallvec",
  "target-lexicon",
