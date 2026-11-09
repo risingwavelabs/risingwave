@@ -604,8 +604,8 @@ impl HummockVersionReader {
         assert!(sstable_meta_fetch_concurrency > 0);
         Self {
             sstable_store,
-            state_store_metrics,
             sstable_meta_fetch_concurrency,
+            state_store_metrics,
         }
     }
 
