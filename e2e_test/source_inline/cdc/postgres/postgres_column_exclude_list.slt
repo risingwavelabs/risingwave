@@ -39,6 +39,10 @@ statement error primary key column `id` cannot be excluded
 create table excl_t (*) with (column.exclude.list = 'id')
 from excl_src table 'public.excl_e2e';
 
+statement error must list at least one column
+create table excl_t (*) with (column.exclude.list = ' , , ')
+from excl_src table 'public.excl_e2e';
+
 statement error does not exist in the upstream table
 create table excl_t (*) with (column.exclude.list = 'nope')
 from excl_src table 'public.excl_e2e';
