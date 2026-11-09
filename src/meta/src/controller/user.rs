@@ -36,7 +36,7 @@ use sea_orm::{
     QuerySelect, TransactionTrait,
 };
 
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
     PartialUserPrivilege, check_user_name_duplicate, ensure_object_id,
     ensure_privileges_not_referred, ensure_user_id, extract_grant_obj_id,
@@ -59,15 +59,16 @@ impl CatalogController {
 
     pub(crate) async fn notify_users_update(
         &self,
+        inner: &mut CatalogControllerInner,
         user_infos: Vec<PbUserInfo>,
     ) -> Option<NotificationVersion> {
         let mut notifications = self.frontend_notification_batch();
         Self::add_users_update_notifications(&mut notifications, user_infos);
-        notifications.publish().await
+        notifications.publish(&mut *inner).await
     }
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         check_user_name_duplicate(&pb_user.name, &txn).await?;
 
@@ -98,6 +99,7 @@ impl CatalogController {
         user_info.grant_privileges = grant_privileges;
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Add,
                 NotificationInfo::User(user_info),
             )
@@ -111,7 +113,7 @@ impl CatalogController {
         update_user: PbUserInfo,
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
@@ -143,6 +145,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::User(user_info),
             )
@@ -173,7 +176,7 @@ impl CatalogController {
     }
 
     pub async fn drop_user(&self, user_id: UserId) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let user = User::find_by_id(user_id)
             .one(&txn)
@@ -218,6 +221,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Delete,
                 NotificationInfo::User(PbUserInfo {
                     id: user_id as _,
@@ -236,7 +240,7 @@ impl CatalogController {
         grantor: UserId,
         with_grant_option: bool,
     ) -> MetaResult<Option<NotificationVersion>> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
@@ -341,7 +345,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let version = self.notify_users_update(user_infos).await;
+        let version = self.notify_users_update(&mut inner, user_infos).await;
         Ok(version)
     }
 
@@ -354,7 +358,7 @@ impl CatalogController {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<Option<NotificationVersion>> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
@@ -521,7 +525,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        Ok(self.notify_users_update(user_infos).await)
+        Ok(self.notify_users_update(&mut inner, user_infos).await)
     }
 
     pub async fn grant_default_privileges(

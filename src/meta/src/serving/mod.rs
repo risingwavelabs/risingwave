@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
@@ -26,7 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMappings,
-    PbTableRefillRuntimeConfig,
+    PbTableRefillRuntimeConfig, SubscribeType,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -34,41 +34,92 @@ use tokio::task::JoinHandle;
 use crate::MetaResult;
 use crate::controller::fragment::FragmentServingInfo;
 use crate::controller::session_params::SessionParamsControllerRef;
-use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef, WorkerKey};
+use crate::manager::{
+    LocalNotification, MetadataManager, NotificationManagerRef, SnapshotPart, SnapshotPartState,
+    SnapshotSubscription, WorkerKey,
+};
 use crate::model::FragmentId;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
+struct ServingFragment {
+    mapping: WorkerSlotMapping,
+    /// The query-visible result table of the fragment. Kept with the mapping so that the vnodes
+    /// of a table can be computed under this lock alone.
+    result_table_id: Option<TableId>,
+}
+
+/// The serving mappings behind the lock.
+#[derive(Default)]
+pub struct ServingVnodeMappingsInner(HashMap<FragmentId, ServingFragment>);
+
+impl SnapshotPartState for ServingVnodeMappingsInner {
+    const PART: SnapshotPart = SnapshotPart::ServingMappings;
+}
+
 #[derive(Default)]
 pub struct ServingVnodeMapping {
-    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerSlotMapping>>,
+    serving_vnode_mappings: RwLock<ServingVnodeMappingsInner>,
 }
 
 impl ServingVnodeMapping {
     pub fn all(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
-        self.serving_vnode_mappings.read().clone()
+        self.serving_vnode_mappings.read().mappings()
+    }
+
+    pub fn all_for_snapshot(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> HashMap<FragmentId, WorkerSlotMapping> {
+        let mappings = self.serving_vnode_mappings.read();
+        subscription.start_forwarding(&*mappings);
+        mappings.mappings()
+    }
+
+    /// The vnodes that one worker serves for each table, for a snapshot.
+    pub fn table_vnode_mapping_for_snapshot(
+        &self,
+        worker_id: WorkerId,
+        subscription: &mut SnapshotSubscription,
+    ) -> PbServingTableVnodeMappings {
+        let mappings = self.serving_vnode_mappings.read();
+        subscription.start_forwarding(&*mappings);
+        let table_vnode_mapping = mappings
+            .table_vnode_mappings_by_worker([worker_id])
+            .remove(&worker_id)
+            .expect("requested worker must have a table vnode mapping");
+        to_pb_serving_table_vnode_mappings(&table_vnode_mapping)
+    }
+
+    /// Lock the mappings for writing. Hold the guard while notifying about the changes.
+    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, ServingVnodeMappingsInner> {
+        self.serving_vnode_mappings.write()
+    }
+}
+
+impl ServingVnodeMappingsInner {
+    fn mappings(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
+        self.0
+            .iter()
+            .map(|(fragment_id, fragment)| (*fragment_id, fragment.mapping.clone()))
+            .collect()
     }
 
     pub(crate) fn table_vnode_mappings_by_worker(
         &self,
         worker_ids: impl IntoIterator<Item = WorkerId>,
-        fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
     ) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
         let mut result = worker_ids
             .into_iter()
             .map(|worker_id| (worker_id, HashMap::new()))
             .collect::<HashMap<_, _>>();
-        let serving_vnode_mappings = self.all();
 
-        for (fragment_id, info) in fragment_serving_infos {
-            let Some(table_id) = info.result_table_id else {
-                continue;
-            };
-            let Some(mapping) = serving_vnode_mappings.get(fragment_id) else {
+        for fragment in self.0.values() {
+            let Some(table_id) = fragment.result_table_id else {
                 continue;
             };
 
-            for (worker_slot_id, bitmap) in mapping.to_bitmaps() {
+            for (worker_slot_id, bitmap) in fragment.mapping.to_bitmaps() {
                 let Some(table_mappings) = result.get_mut(&worker_slot_id.worker_id()) else {
                     continue;
                 };
@@ -81,45 +132,24 @@ impl ServingVnodeMapping {
         result
     }
 
-    /// Upsert mapping for given fragments according to the latest `workers`.
-    /// Returns (successful updates, failed updates).
-    pub fn upsert(
-        &self,
-        fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
-        workers: &[WorkerNode],
-        max_serving_parallelism: Option<u64>,
-    ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
-        let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
-        Self::upsert_locked(
-            &mut serving_vnode_mappings,
-            fragment_serving_infos,
-            workers,
-            max_serving_parallelism,
-        )
-    }
-
     /// Rebuild mappings from a complete catalog snapshot.
     ///
     /// Unlike [`Self::upsert`], this removes mappings for fragments absent from the snapshot.
     pub(crate) fn reconcile(
-        &self,
+        &mut self,
         fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
         workers: &[WorkerNode],
         max_serving_parallelism: Option<u64>,
     ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
-        let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
-        serving_vnode_mappings
+        self.0
             .retain(|fragment_id, _| fragment_serving_infos.contains_key(fragment_id));
-        Self::upsert_locked(
-            &mut serving_vnode_mappings,
-            fragment_serving_infos,
-            workers,
-            max_serving_parallelism,
-        )
+        self.upsert(fragment_serving_infos, workers, max_serving_parallelism)
     }
 
-    fn upsert_locked(
-        serving_vnode_mappings: &mut HashMap<FragmentId, WorkerSlotMapping>,
+    /// Upsert mapping for given fragments according to the latest `workers`.
+    /// Returns (successful updates, failed updates).
+    pub(crate) fn upsert(
+        &mut self,
         fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
         workers: &[WorkerNode],
         max_serving_parallelism: Option<u64>,
@@ -128,7 +158,7 @@ impl ServingVnodeMapping {
         let mut failed: HashSet<FragmentId> = HashSet::default();
         for (fragment_id, info) in fragment_serving_infos {
             let new_mapping = {
-                let old_mapping = serving_vnode_mappings.get(fragment_id);
+                let old_mapping = self.0.get(fragment_id).map(|fragment| &fragment.mapping);
                 let max_parallelism = match info.distribution_type {
                     FragmentDistributionType::Unspecified => unreachable!(),
                     FragmentDistributionType::Single => Some(1),
@@ -139,11 +169,17 @@ impl ServingVnodeMapping {
             };
             match new_mapping {
                 None => {
-                    serving_vnode_mappings.remove(fragment_id);
+                    self.0.remove(fragment_id);
                     failed.insert(*fragment_id);
                 }
                 Some(mapping) => {
-                    serving_vnode_mappings.insert(*fragment_id, mapping.clone());
+                    self.0.insert(
+                        *fragment_id,
+                        ServingFragment {
+                            mapping: mapping.clone(),
+                            result_table_id: info.result_table_id,
+                        },
+                    );
                     upserted.insert(*fragment_id, mapping);
                 }
             }
@@ -151,11 +187,24 @@ impl ServingVnodeMapping {
         (upserted, failed)
     }
 
-    fn remove(&self, fragment_ids: &[FragmentId]) {
-        let mut mappings = self.serving_vnode_mappings.write();
+    fn remove(&mut self, fragment_ids: &[FragmentId]) {
         for fragment_id in fragment_ids {
-            mappings.remove(fragment_id);
+            self.0.remove(fragment_id);
         }
+    }
+
+    fn notify_frontends(
+        &mut self,
+        notification_manager: &NotificationManagerRef,
+        operation: Operation,
+        mappings: Vec<FragmentWorkerSlotMapping>,
+    ) {
+        notification_manager.notify_part(
+            self,
+            SubscribeType::Frontend,
+            operation,
+            Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings { mappings }),
+        );
     }
 }
 
@@ -191,7 +240,8 @@ pub async fn on_meta_start(
     let (serving_compute_nodes, fragment_serving_infos) = fetch_serving_infos(metadata_manager)
         .await
         .expect("fail to fetch serving infos");
-    let (mappings, failed) = serving_vnode_mapping.reconcile(
+    let mut guard = serving_vnode_mapping.write();
+    let (mappings, failed) = guard.reconcile(
         &fragment_serving_infos,
         &serving_compute_nodes,
         max_serving_parallelism,
@@ -206,15 +256,14 @@ pub async fn on_meta_start(
             failed
         );
     }
-    notification_manager.notify_frontend_without_version(
+    guard.notify_frontends(
+        &notification_manager,
         Operation::Snapshot,
-        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
-            mappings: to_fragment_worker_slot_mapping(&mappings),
-        }),
+        to_fragment_worker_slot_mapping(&mappings),
     );
 }
 
-pub(crate) async fn fetch_serving_infos(
+async fn fetch_serving_infos(
     metadata_manager: &MetadataManager,
 ) -> MetaResult<(Vec<WorkerNode>, HashMap<FragmentId, FragmentServingInfo>)> {
     let fragment_serving_infos = metadata_manager
@@ -234,16 +283,13 @@ pub(crate) async fn fetch_serving_infos(
     ))
 }
 
-pub(crate) async fn sync_serving_table_vnode_mappings_to_hummock(
+pub(crate) fn sync_serving_table_vnode_mappings_to_hummock(
     notification_manager: &NotificationManagerRef,
-    serving_vnode_mapping: &ServingVnodeMappingRef,
+    serving_vnode_mappings: &mut ServingVnodeMappingsInner,
     workers: &[WorkerNode],
-    fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
 ) {
-    let mut table_vnode_mappings = serving_vnode_mapping.table_vnode_mappings_by_worker(
-        workers.iter().map(|worker| worker.id),
-        fragment_serving_infos,
-    );
+    let mut table_vnode_mappings = serving_vnode_mappings
+        .table_vnode_mappings_by_worker(workers.iter().map(|worker| worker.id));
     for worker in workers {
         let Some(host) = worker.host.clone() else {
             tracing::warn!(worker_id = %worker.id, "serving worker host not found");
@@ -259,6 +305,7 @@ pub(crate) async fn sync_serving_table_vnode_mappings_to_hummock(
             ..Default::default()
         };
         notification_manager.notify_hummock_targeted_update(
+            serving_vnode_mappings,
             WorkerKey(host),
             Info::TableRefillRuntimeConfig(config),
         );
@@ -284,11 +331,9 @@ pub fn start_serving_vnode_mapping_worker(
                 .await
                 .batch_parallelism()
                 .map(|p| p.get());
-            let (mappings, failed) = serving_vnode_mapping.reconcile(
-                &fragment_serving_infos,
-                &workers,
-                max_serving_parallelism,
-            );
+            let mut guard = serving_vnode_mapping.write();
+            let (mappings, failed) =
+                guard.reconcile(&fragment_serving_infos, &workers, max_serving_parallelism);
             tracing::debug!(
                 "Update serving vnode mapping snapshot for fragments {:?}.",
                 mappings.keys()
@@ -299,19 +344,16 @@ pub fn start_serving_vnode_mapping_worker(
                     failed
                 );
             }
-            notification_manager.notify_frontend_without_version(
+            guard.notify_frontends(
+                &notification_manager,
                 Operation::Snapshot,
-                Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
-                    mappings: to_fragment_worker_slot_mapping(&mappings),
-                }),
+                to_fragment_worker_slot_mapping(&mappings),
             );
             sync_serving_table_vnode_mappings_to_hummock(
                 &notification_manager,
-                &serving_vnode_mapping,
+                &mut guard,
                 &workers,
-                &fragment_serving_infos,
-            )
-            .await;
+            );
         };
         loop {
             tokio::select! {
@@ -349,22 +391,21 @@ pub fn start_serving_vnode_mapping_worker(
                                         .await
                                         .batch_parallelism()
                                         .map(|p|p.get());
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(&filtered_fragment_serving_infos, &workers, max_serving_parallelism);
+                                    let mut guard = serving_vnode_mapping.write();
+                                    let (upserted, failed) = guard.upsert(&filtered_fragment_serving_infos, &workers, max_serving_parallelism);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
-                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
+                                        guard.notify_frontends(&notification_manager, Operation::Update, to_fragment_worker_slot_mapping(&upserted));
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.iter().cloned())}));
+                                        guard.notify_frontends(&notification_manager, Operation::Delete, to_deleted_fragment_worker_slot_mapping(failed.iter().cloned()));
                                     }
                                     sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,
-                                        &serving_vnode_mapping,
+                                        &mut guard,
                                         &workers,
-                                        &fragment_serving_infos,
-                                    )
-                                    .await;
+                                    );
                                 }
                                 LocalNotification::ServingFragmentMappingsDelete(fragment_ids) => {
                                     if fragment_ids.is_empty() {
@@ -373,18 +414,18 @@ pub fn start_serving_vnode_mapping_worker(
 
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
 
-                                    serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
-                                    let (workers, fragment_serving_infos) = fetch_serving_infos(&metadata_manager)
+                                    let workers = metadata_manager
+                                        .list_active_serving_compute_nodes()
                                         .await
-                                        .expect("fail to fetch serving infos");
+                                        .expect("fail to fetch serving workers");
+                                    let mut guard = serving_vnode_mapping.write();
+                                    guard.remove(&fragment_ids);
+                                    guard.notify_frontends(&notification_manager, Operation::Delete, to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()));
                                     sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,
-                                        &serving_vnode_mapping,
+                                        &mut guard,
                                         &workers,
-                                        &fragment_serving_infos,
-                                    )
-                                    .await;
+                                    );
                                 }
                                 _ => {}
                             }
@@ -462,20 +503,16 @@ mod tests {
             VirtualNode::COUNT_FOR_TEST,
         );
         let slot_bitmaps = mapping.to_bitmaps();
-        let serving_vnode_mapping = ServingVnodeMapping {
-            serving_vnode_mappings: RwLock::new(HashMap::from([(fragment_id, mapping)])),
-        };
-        let fragment_serving_infos = HashMap::from([(
+        let serving_vnode_mappings = ServingVnodeMappingsInner(HashMap::from([(
             fragment_id,
-            FragmentServingInfo {
+            ServingFragment {
+                mapping,
                 result_table_id: Some(table_id),
-                distribution_type: FragmentDistributionType::Hash,
-                vnode_count: VirtualNode::COUNT_FOR_TEST,
             },
-        )]);
+        )]));
 
-        let mappings = serving_vnode_mapping
-            .table_vnode_mappings_by_worker([worker1, worker2, worker3], &fragment_serving_infos);
+        let mappings =
+            serving_vnode_mappings.table_vnode_mappings_by_worker([worker1, worker2, worker3]);
         let mut worker1_bitmap = slot_bitmaps[&slot1].clone();
         worker1_bitmap |= &slot_bitmaps[&slot2];
         assert_eq!(mappings[&worker1][&table_id], worker1_bitmap);
@@ -500,7 +537,7 @@ mod tests {
         let table_id = TableId::new(233);
         let fragment_id = FragmentId::new(234);
         let private_fragment_id = FragmentId::new(235);
-        let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+        let serving_vnode_mapping = ServingVnodeMapping::default();
         let fragment_serving_infos = HashMap::from([
             (
                 fragment_id,
@@ -520,7 +557,9 @@ mod tests {
             ),
         ]);
         let (upserted, failed) =
-            serving_vnode_mapping.upsert(&fragment_serving_infos, &workers, None);
+            serving_vnode_mapping
+                .write()
+                .upsert(&fragment_serving_infos, &workers, None);
         assert_eq!(upserted.len(), 2);
         assert!(failed.is_empty());
         let expected_bitmaps = upserted[&fragment_id]
@@ -530,32 +569,36 @@ mod tests {
             .collect::<HashMap<_, _>>();
         // Give the non-result fragment a distinct mapping. If it were incorrectly
         // associated with `table_id`, it would expand the table's ownership to all vnodes.
-        serving_vnode_mapping.serving_vnode_mappings.write().insert(
+        serving_vnode_mapping.write().0.insert(
             private_fragment_id,
-            WorkerSlotMapping::new_single(WorkerSlotId::new(worker1.id, 0)),
+            ServingFragment {
+                mapping: WorkerSlotMapping::new_single(WorkerSlotId::new(worker1.id, 0)),
+                result_table_id: None,
+            },
         );
 
         sync_serving_table_vnode_mappings_to_hummock(
             &notification_manager,
-            &serving_vnode_mapping,
+            &mut serving_vnode_mapping.write(),
             &workers,
-            &fragment_serving_infos,
-        )
-        .await;
+        );
 
         let response1 = rx1.recv().await.unwrap().unwrap();
         let response2 = rx2.recv().await.unwrap().unwrap();
         assert!(rx1.try_recv().is_err());
         assert!(rx2.try_recv().is_err());
 
+        let to_bitmap = |mappings: PbServingTableVnodeMappings| {
+            let mappings = mappings.mappings;
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].table_id, table_id.as_raw_id());
+            Bitmap::from(mappings[0].bitmap.clone().unwrap())
+        };
         let serving_bitmap = |response: SubscribeResponse| {
             let Some(Info::TableRefillRuntimeConfig(config)) = response.info else {
                 panic!("expect table refill runtime config");
             };
-            let mappings = config.serving_table_vnode_mappings.unwrap().mappings;
-            assert_eq!(mappings.len(), 1);
-            assert_eq!(mappings[0].table_id, table_id.as_raw_id());
-            Bitmap::from(mappings[0].bitmap.clone().unwrap())
+            to_bitmap(config.serving_table_vnode_mappings.unwrap())
         };
         let bitmap1 = serving_bitmap(response1);
         let bitmap2 = serving_bitmap(response2);
@@ -565,6 +608,17 @@ mod tests {
             bitmap1.count_ones() + bitmap2.count_ones(),
             VirtualNode::COUNT_FOR_TEST
         );
+
+        // A snapshot of the worker agrees with what it was notified of.
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut subscription = notification_manager.start_subscription(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress::default()),
+            tx,
+        );
+        let snapshot =
+            serving_vnode_mapping.table_vnode_mapping_for_snapshot(worker1.id, &mut subscription);
+        assert_eq!(to_bitmap(snapshot), bitmap1);
     }
 
     fn hash_serving_info() -> FragmentServingInfo {
@@ -587,7 +641,9 @@ mod tests {
             (stale_fragment, hash_serving_info()),
             (retained_fragment, hash_serving_info()),
         ]);
-        mapping.upsert(&initial_snapshot, std::slice::from_ref(&worker), None);
+        mapping
+            .write()
+            .upsert(&initial_snapshot, std::slice::from_ref(&worker), None);
         assert!(mapping.all().contains_key(&stale_fragment));
         let retained_mapping = mapping.all()[&retained_fragment].clone();
 
@@ -595,7 +651,9 @@ mod tests {
             (retained_fragment, hash_serving_info()),
             (added_fragment, hash_serving_info()),
         ]);
-        let (reconciled, failed) = mapping.reconcile(&current_snapshot, &[worker], None);
+        let (reconciled, failed) = mapping
+            .write()
+            .reconcile(&current_snapshot, &[worker], None);
         assert!(failed.is_empty());
         assert_eq!(reconciled.len(), 2);
         assert!(reconciled.contains_key(&retained_fragment));
@@ -608,7 +666,7 @@ mod tests {
         assert_eq!(mappings[&retained_fragment], retained_mapping);
 
         let final_snapshot = HashMap::from([(retained_fragment, hash_serving_info())]);
-        let (reconciled, failed) = mapping.reconcile(&final_snapshot, &[], None);
+        let (reconciled, failed) = mapping.write().reconcile(&final_snapshot, &[], None);
         assert!(reconciled.is_empty());
         assert_eq!(failed, HashSet::from([retained_fragment]));
         assert!(mapping.all().is_empty());
@@ -622,9 +680,11 @@ mod tests {
         let second_fragment = FragmentId::new(2);
 
         let first_update = HashMap::from([(first_fragment, hash_serving_info())]);
-        mapping.upsert(&first_update, std::slice::from_ref(&worker), None);
+        mapping
+            .write()
+            .upsert(&first_update, std::slice::from_ref(&worker), None);
         let second_update = HashMap::from([(second_fragment, hash_serving_info())]);
-        mapping.upsert(&second_update, &[worker], None);
+        mapping.write().upsert(&second_update, &[worker], None);
 
         let mappings = mapping.all();
         assert!(mappings.contains_key(&first_fragment));

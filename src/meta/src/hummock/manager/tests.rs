@@ -262,7 +262,7 @@ async fn check_truncate_table_change_log_persisted_and_in_memory(is_iceberg_pk_i
             },
         );
         version.apply_version_delta(&delta);
-        versioning.current_version = Arc::new(version);
+        versioning.current_version.set(version);
         versioning
             .table_change_log
             .insert(table_id, TableChangeLog::new(change_logs.clone()));
@@ -407,7 +407,7 @@ async fn check_truncate_table_change_log_persisted_and_in_memory(is_iceberg_pk_i
                 },
             );
             version.apply_version_delta(&delta);
-            versioning.current_version = Arc::new(version);
+            versioning.current_version.set(version);
             let log = versioning.table_change_log.get_mut(&table_id).unwrap();
             assert_eq!(log.next_epoch(committed_epoch), Ok(None));
             log.add_change_log(next_log);
