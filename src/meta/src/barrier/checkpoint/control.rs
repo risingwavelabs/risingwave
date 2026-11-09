@@ -45,7 +45,6 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
-use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphStat};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
@@ -231,23 +230,17 @@ impl CheckpointControl {
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
-        new_barrier: NewBarrier,
+        mut new_barrier: NewBarrier<'_>,
         partial_graph_manager: &mut PartialGraphManager,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
-        let NewBarrier {
-            database_id,
-            command,
-            span,
-            checkpoint,
-        } = new_barrier;
-
-        if let Some((mut command, notifiers)) = command {
+        let database_id = new_barrier.database_id;
+        if let Some((command, _)) = &mut new_barrier.command {
             if let &mut Command::CreateStreamingJob {
                 ref mut cross_db_snapshot_backfill_info,
                 ref info,
                 ..
-            } = &mut command
+            } = command
             {
                 for (table_id, snapshot_epoch) in
                     &mut cross_db_snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
@@ -273,6 +266,9 @@ impl CheckpointControl {
                         let err: MetaError =
                             anyhow!("database of cross db upstream table {} not found", table_id)
                                 .into();
+                        let (_, notifiers) = new_barrier
+                            .command
+                            .expect("matched command should still exist");
                         for notifier in notifiers {
                             notifier.notify_start_failed(err.clone());
                         }
@@ -286,7 +282,7 @@ impl CheckpointControl {
                 Entry::Occupied(entry) => entry
                     .into_mut()
                     .expect_running("should not have command when not running"),
-                Entry::Vacant(entry) => match &command {
+                Entry::Vacant(entry) => match &*command {
                     Command::CreateStreamingJob { info, job_type, .. } => {
                         let CreateStreamingJobType::Normal = job_type else {
                             if cfg!(debug_assertions) {
@@ -294,8 +290,16 @@ impl CheckpointControl {
                                     "unexpected first job of type {job_type:?} with info {info:?}"
                                 );
                             } else {
+                                let err: MetaError = anyhow!(
+                                    "unexpected job_type {job_type:?} for first job {} in database {database_id}",
+                                    info.streaming_job.id()
+                                )
+                                .into();
+                                let (_, notifiers) = new_barrier
+                                    .command
+                                    .expect("matched command should still exist");
                                 for notifier in notifiers {
-                                    notifier.notify_start_failed(anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into());
+                                    notifier.notify_start_failed(err.clone());
                                 }
                                 return Ok(());
                             }
@@ -318,11 +322,14 @@ impl CheckpointControl {
                     | Command::Resume
                     | Command::DropStreamingJobs { .. }
                     | Command::DropSubscription { .. } => {
+                        warn!(?command, "skip command for empty database");
+                        let (_, notifiers) = new_barrier
+                            .command
+                            .expect("matched command should still exist");
                         for mut notifier in notifiers {
                             notifier.notify_started();
                             notifier.notify_collected();
                         }
-                        warn!(?command, "skip command for empty database");
                         return Ok(());
                     }
                     Command::RescheduleIntent { .. }
@@ -345,8 +352,15 @@ impl CheckpointControl {
                             )
                         } else {
                             warn!(%database_id, ?command, "database not exist when handling command");
+                            let err: MetaError = anyhow!(
+                                "database {database_id} not exist when handling command {command:?}"
+                            )
+                            .into();
+                            let (_, notifiers) = new_barrier
+                                .command
+                                .expect("matched command should still exist");
                             for notifier in notifiers {
-                                notifier.notify_start_failed(anyhow!("database {database_id} not exist when handling command {command:?}").into());
+                                notifier.notify_start_failed(err.clone());
                             }
                             return Ok(());
                         }
@@ -355,9 +369,7 @@ impl CheckpointControl {
             };
 
             database.handle_new_barrier(
-                Some((command, notifiers)),
-                checkpoint,
-                span,
+                new_barrier,
                 partial_graph_manager,
                 &self.hummock_version_stats,
                 worker_nodes,
@@ -382,9 +394,7 @@ impl CheckpointControl {
                 return Ok(());
             }
             database.handle_new_barrier(
-                None,
-                checkpoint,
-                span,
+                new_barrier,
                 partial_graph_manager,
                 &self.hummock_version_stats,
                 worker_nodes,
@@ -1074,20 +1084,19 @@ impl DatabaseCheckpointControl {
     /// Handle the new barrier from the scheduled queue and inject it.
     fn handle_new_barrier(
         &mut self,
-        command: Option<(Command, Vec<Notifier>)>,
-        checkpoint: bool,
-        span: tracing::Span,
+        mut new_barrier: NewBarrier<'_>,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let curr_epoch = self.state.in_flight_prev_epoch().next();
 
-        let (command, mut notifiers) = if let Some((command, notifiers)) = command {
-            (Some(command), notifiers)
-        } else {
-            (None, vec![])
-        };
+        let (command, mut notifiers) =
+            if let Some((command, notifiers)) = new_barrier.command.take() {
+                (Some(command), notifiers)
+            } else {
+                (None, vec![])
+            };
 
         debug_assert!(
             !matches!(
@@ -1220,12 +1229,14 @@ impl DatabaseCheckpointControl {
             return Ok(());
         }
 
-        let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
+        let barrier_info = self
+            .state
+            .next_barrier_info(new_barrier.checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch(), "new barrier enqueued");
         });
-        span.record("epoch", barrier_info.curr_epoch());
+        new_barrier.span.record("epoch", barrier_info.curr_epoch());
 
         let epoch = barrier_info.epoch();
         let ApplyCommandInfo { jobs_to_wait } = match self.apply_command(
@@ -1248,6 +1259,8 @@ impl DatabaseCheckpointControl {
                 return Err(err);
             }
         };
+
+        new_barrier.injected();
 
         // Record the in-flight barrier.
         self.enqueue_command(epoch, jobs_to_wait);
