@@ -18,6 +18,7 @@ use std::ops::{Bound, Range};
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor8Ref, Xor16, Xor16BytesRef};
@@ -96,7 +97,7 @@ impl Xor16FilterBuilder {
         let start = buf.len();
         buf.resize(start + std::mem::size_of_val(fingerprints.as_ref()), 0);
         let (bytes, _) = buf[start..].as_chunks_mut::<2>();
-        for (bytes, fingerprint) in bytes.iter_mut().zip(fingerprints.iter()) {
+        for (bytes, fingerprint) in bytes.iter_mut().zip_eq_fast(fingerprints.iter()) {
             *bytes = fingerprint.to_le_bytes();
         }
         buf.push(FOOTER_XOR16);
