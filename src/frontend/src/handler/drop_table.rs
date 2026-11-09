@@ -18,6 +18,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
+use crate::catalog::RelationKind;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::Result;
@@ -49,8 +50,14 @@ pub async fn handle_drop_table(
                             .into())
                     } else {
                         Err(reader
-                            .bad_drop_error_by_name(db_name, schema_path, &table_name)
-                            .unwrap_or_else(|| e.into()))
+                            .wrong_kind_for_drop(
+                                db_name,
+                                schema_path,
+                                &table_name,
+                                RelationKind::Table,
+                            )
+                            .unwrap_or(e)
+                            .into())
                     };
                 }
             };

@@ -37,9 +37,11 @@ use crate::binder::{BindFor, Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableType};
+use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{CatalogError, CatalogResult, DatabaseId, IndexCatalog, TableId};
+use crate::catalog::{
+    CatalogError, CatalogResult, DatabaseId, IndexCatalog, RelationKind, TableId,
+};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::privilege::ObjectCheckItem;
@@ -300,6 +302,26 @@ impl Binder {
         Ok(ret)
     }
 
+    /// Returns the error for a name that doesn't resolve to anything queryable. Sinks and
+    /// subscriptions share the namespace of relations but can't be queried. Only the current
+    /// database is inspected, so the error doesn't reveal objects in other databases.
+    fn relation_not_found_error(
+        &self,
+        db_name: &str,
+        schema_name: Option<&str>,
+        relation_name: &str,
+        not_found: CatalogError,
+    ) -> RwError {
+        if db_name == self.db_name
+            && let Some(kind @ (RelationKind::Sink | RelationKind::Subscription)) = self
+                .catalog
+                .relation_kind(db_name, self.bind_schema_path(schema_name), relation_name)
+        {
+            return kind.cannot_query_error(relation_name).into();
+        }
+        not_found.into()
+    }
+
     fn resolve_iceberg_metadata_relation(
         &mut self,
         db_name: &str,
@@ -307,26 +329,20 @@ impl Binder {
         relation_name: &str,
         as_of: Option<&AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
-        let Some((base_name, suffix)) = relation_name.rsplit_once('$') else {
-            // Sinks and subscriptions share the namespace of relations but can't be queried.
-            let schema_path = self.bind_schema_path(schema_name);
-            if let Some(relation_type @ ("sink" | "subscription")) = self
-                .catalog
-                .get_non_table_relation_type_by_name(db_name, schema_path, relation_name)
-            {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot query {relation_type} \"{relation_name}\""
-                ))
-                .into());
-            }
-            return Err(CatalogError::not_found("table or source", relation_name).into());
+        let metadata_relation = relation_name
+            .rsplit_once('$')
+            .filter(|(base_name, _)| !base_name.is_empty())
+            .and_then(|(base_name, suffix)| {
+                Some((base_name, IcebergMetadataTableType::from_suffix(suffix)?))
+            });
+        let Some((base_name, metadata_type)) = metadata_relation else {
+            return Err(self.relation_not_found_error(
+                db_name,
+                schema_name,
+                relation_name,
+                CatalogError::not_found("table or source", relation_name),
+            ));
         };
-        let Some(metadata_type) = IcebergMetadataTableType::from_suffix(suffix) else {
-            return Err(CatalogError::not_found("table or source", relation_name).into());
-        };
-        if base_name.is_empty() {
-            return Err(CatalogError::not_found("table or source", relation_name).into());
-        }
 
         if metadata_type == IcebergMetadataTableType::Snapshots && as_of.is_some() {
             return Err(ErrorCode::BindError(
@@ -371,9 +387,12 @@ impl Binder {
                         }))
                 })?
             else {
-                return Err(
-                    CatalogError::not_found("Iceberg table, source, or sink", base_name).into(),
-                );
+                return Err(self.relation_not_found_error(
+                    db_name,
+                    schema_name,
+                    relation_name,
+                    CatalogError::not_found("Iceberg table, source, or sink", base_name),
+                ));
             };
             (base_relation, Some(resolved_schema_name.to_owned()))
         };
@@ -730,16 +749,14 @@ impl Binder {
     ) -> Result<BoundBaseTable> {
         let table = self.bind_table(schema_name, table_name).map_err(|e| {
             let schema_path = self.bind_schema_path(schema_name);
-            match self.catalog.get_non_table_relation_type_by_name(
-                &self.db_name,
-                schema_path,
-                table_name,
-            ) {
-                Some(relation_type) => ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change {relation_type} \"{table_name}\""
-                ))
-                .into(),
-                None => e,
+            match self
+                .catalog
+                .relation_kind(&self.db_name, schema_path, table_name)
+            {
+                Some(kind) if kind != RelationKind::Table => {
+                    kind.cannot_change_error(table_name).into()
+                }
+                _ => e,
             }
         })?;
         Self::check_for_dml(&table.table_catalog, is_insert)?;
@@ -747,27 +764,9 @@ impl Binder {
     }
 
     fn check_for_dml(table: &TableCatalog, is_insert: bool) -> Result<()> {
-        let table_name = &table.name;
-        match table.table_type() {
-            TableType::Table => {}
-            TableType::Index | TableType::VectorIndex => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change index \"{table_name}\""
-                ))
-                .into());
-            }
-            TableType::MaterializedView => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change materialized view \"{table_name}\""
-                ))
-                .into());
-            }
-            TableType::Internal => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change internal table \"{table_name}\""
-                ))
-                .into());
-            }
+        let kind = RelationKind::from(table.table_type());
+        if kind != RelationKind::Table {
+            return Err(kind.cannot_change_error(&table.name).into());
         }
 
         if table.append_only && !is_insert {

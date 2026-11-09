@@ -44,8 +44,7 @@ use crate::catalog::system_catalog::{
     SystemTableCatalog, get_sys_tables_in_schema, get_sys_views_in_schema,
 };
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
-use crate::error::{ErrorCode, RwError};
+use crate::catalog::{DatabaseId, IndexCatalog, RelationKind, SchemaId};
 use crate::expr::{Expr, ExprImpl};
 
 #[derive(Copy, Clone)]
@@ -950,60 +949,34 @@ impl Catalog {
             .ok_or_else(|| CatalogError::not_found("view", view_name))
     }
 
-    /// Returns the type of the source, sink, view or subscription named `relation_name`, if any.
-    /// Used to report a clear error when a statement is used on the wrong type of relation.
-    pub fn get_non_table_relation_type_by_name(
+    /// Returns what `name` refers to in the first schema on `schema_path` that has it.
+    pub fn relation_kind(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'_>,
-        relation_name: &str,
-    ) -> Option<&'static str> {
-        if self
-            .get_source_by_name(db_name, schema_path, relation_name)
-            .is_ok()
-        {
-            Some("source")
-        } else if self
-            .get_any_sink_by_name(db_name, schema_path, relation_name)
-            .is_ok()
-        {
-            Some("sink")
-        } else if self
-            .get_view_by_name(db_name, schema_path, relation_name)
-            .is_ok()
-        {
-            Some("view")
-        } else if self
-            .get_subscription_by_name(db_name, schema_path, relation_name)
-            .is_ok()
-        {
-            Some("subscription")
-        } else {
-            None
-        }
+        name: &str,
+    ) -> Option<RelationKind> {
+        let (kind, _) = schema_path
+            .try_find(|schema_name| -> CatalogResult<_> {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .relation_kind(name))
+            })
+            .ok()??;
+        Some(kind)
     }
 
-    /// Returns the error for a `DROP` statement whose type doesn't match the relation named
-    /// `relation_name`, e.g. `DROP VIEW` on a table, or `None` if there's no such relation.
-    pub fn bad_drop_error_by_name(
+    /// Returns the error for a `DROP` statement of the `expected` kind whose lookup of `name`
+    /// failed, or `None` if `name` is not a relation of another kind.
+    pub fn wrong_kind_for_drop(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'_>,
-        relation_name: &str,
-    ) -> Option<RwError> {
-        if let Ok((table, _)) = self.get_created_table_by_name(db_name, schema_path, relation_name)
-        {
-            return Some(table.bad_drop_error());
-        }
-        let relation_type =
-            self.get_non_table_relation_type_by_name(db_name, schema_path, relation_name)?;
-        Some(
-            ErrorCode::InvalidInputSyntax(format!(
-                "Use `DROP {}` to drop a {relation_type}.",
-                relation_type.to_uppercase()
-            ))
-            .into(),
-        )
+        name: &str,
+        expected: RelationKind,
+    ) -> Option<CatalogError> {
+        let kind = self.relation_kind(db_name, schema_path, name)?;
+        (kind != expected).then(|| kind.bad_drop_error())
     }
 
     pub fn get_view_by_id(&self, db_name: &str, view_id: u32) -> CatalogResult<Arc<ViewCatalog>> {

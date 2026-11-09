@@ -210,6 +210,49 @@ drop source v;
 statement error Use `DROP VIEW`
 drop sink v;
 
+# 4.8 subscription
+statement ok
+create subscription sub from mv with (retention = '1h');
+
+statement error Use `DROP SUBSCRIPTION`
+drop table sub;
+
+statement error Use `DROP SUBSCRIPTION`
+drop materialized view sub;
+
+statement error Use `DROP SUBSCRIPTION`
+drop index sub;
+
+statement error Use `DROP SUBSCRIPTION`
+drop source sub;
+
+statement error Use `DROP SUBSCRIPTION`
+drop sink sub;
+
+statement error Use `DROP SUBSCRIPTION`
+drop view sub;
+
+statement error Use `DROP TABLE`
+drop subscription t;
+
+statement error Use `DROP MATERIALIZED VIEW`
+drop subscription mv;
+
+statement error Use `DROP INDEX`
+drop subscription idx;
+
+statement error Use `DROP TABLE`
+drop subscription msrc;
+
+statement error Use `DROP SOURCE`
+drop subscription src;
+
+statement error Use `DROP SINK`
+drop subscription sink;
+
+statement error Use `DROP VIEW`
+drop subscription v;
+
 # 5. query
 query I
 SELECT * from t limit 0;
@@ -233,6 +276,9 @@ SELECT * from sink limit 0;
 query I
 SELECT * from v limit 0;
 ----
+
+query error cannot query subscription "sub"
+SELECT * from sub limit 0;
 
 # 6. DML
 # 6.1 table
@@ -305,6 +351,16 @@ update v set v = 2;
 statement error cannot change view "v"
 delete from v;
 
+# 6.8 subscription
+statement error cannot change subscription "sub"
+insert into sub values (1);
+
+statement error cannot change subscription "sub"
+update sub set v = 2;
+
+statement error cannot change subscription "sub"
+delete from sub;
+
 # 7. create with duplicate name
 statement error table.*exists
 create table t(v int);
@@ -338,7 +394,74 @@ create table err_t1 (v int) with (
     datagen.split.num = '1'
 ) FORMAT DEBEZIUM ENCODE JSON;
 
+# 9. name resolution
+statement ok
+create schema invalid_op_s1;
+
+statement ok
+create schema invalid_op_s2;
+
+statement ok
+create view invalid_op_s1.x as select 1 as v;
+
+statement ok
+create table invalid_op_s2.x (v int);
+
+statement ok
+set search_path to invalid_op_s1, invalid_op_s2;
+
+# The first visible `x` is the view.
+statement error Use `DROP VIEW`
+drop sink x;
+
+statement ok
+set search_path to "$user", public;
+
+statement error Use `DROP VIEW`
+drop table invalid_op_s1.x;
+
+statement error Use `DROP TABLE`
+drop view invalid_op_s2.x;
+
+statement error cannot change view "x"
+insert into invalid_op_s1.x values (1);
+
+statement ok
+drop table invalid_op_s2.x;
+
+statement ok
+drop view invalid_op_s1.x;
+
+statement ok
+drop schema invalid_op_s1;
+
+statement ok
+drop schema invalid_op_s2;
+
+# 10. system catalogs
+statement error System catalogs cannot be dropped
+drop table pg_catalog.pg_enum;
+
+statement error System catalogs cannot be dropped
+drop view pg_catalog.pg_class;
+
+statement error cannot change system catalog "pg_class"
+insert into pg_catalog.pg_class values (1);
+
+# 11. names that look like Iceberg metadata relations
+statement ok
+create sink "sink$x" from mv with (connector = 'blackhole');
+
+query error cannot query sink
+select * from "sink$x";
+
+statement ok
+drop sink "sink$x";
+
 # cleanup
+
+statement ok
+drop subscription sub;
 
 statement ok
 drop view v;

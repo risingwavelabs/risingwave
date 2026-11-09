@@ -20,9 +20,9 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{CatalogError, RelationKind};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
@@ -73,10 +73,13 @@ pub async fn handle_drop_index(
                                     index_name
                                 ))
                                 .into())
-                        } else if let Some(err) =
-                            reader.bad_drop_error_by_name(db_name, schema_path, &index_name)
-                        {
-                            Err(err)
+                        } else if let Some(err) = reader.wrong_kind_for_drop(
+                            db_name,
+                            schema_path,
+                            &index_name,
+                            RelationKind::Index,
+                        ) {
+                            Err(err.into())
                         } else if e.is_not_found("table") {
                             Err(CatalogError::not_found("index", index_name).into())
                         } else {
