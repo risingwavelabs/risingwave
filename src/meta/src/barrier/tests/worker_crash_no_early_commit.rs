@@ -51,7 +51,8 @@ use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
-    BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
+    BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, RecoveryStatus,
+    Scheduled,
 };
 use crate::controller::scale::{LoadedFragment, LoadedFragmentContext, NoShuffleEnsemble};
 use crate::controller::utils::StreamingJobExtraInfo;
@@ -60,7 +61,7 @@ use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
 use crate::model::{FragmentDownstreamRelation, FragmentId};
 
 enum ContextRequest {
-    AbortAndMarkBlocked(RecoveryReason),
+    AbortAndMarkBlocked(RecoveryStatus),
     MarkReady,
     ReloadRuntimeInfo(oneshot::Sender<BarrierWorkerRuntimeInfoSnapshot>),
     NewControlStream(WorkerNode, oneshot::Sender<StreamingControlHandle>),
@@ -79,14 +80,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     async fn abort_and_mark_blocked(
         &self,
         recovery: crate::manager::sink_coordination::RecoveryStart,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) -> MetaResult<()> {
         assert!(matches!(
             recovery,
             crate::manager::sink_coordination::RecoveryStart::Global
         ));
         self.0
-            .send(ContextRequest::AbortAndMarkBlocked(recovery_reason))
+            .send(ContextRequest::AbortAndMarkBlocked(recovery_reason.into()))
             .unwrap();
         Ok(())
     }
@@ -178,17 +179,29 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let (_request_tx, request_rx) = mpsc::unbounded_channel();
     let mut worker = GlobalBarrierWorker::new_inner(env, request_rx, context).await;
     let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let (initial_workers_tx, mut initial_workers_rx) = oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {
-        worker.recovery(false, RecoveryReason::Bootstrap).await;
+        worker
+            .recovery(false, RecoveryReason::Bootstrap(initial_workers_tx))
+            .await;
         Box::pin(worker.run_inner(shutdown_rx)).await
     });
 
     // bootstrap recovery
-    let ContextRequest::AbortAndMarkBlocked(RecoveryReason::Bootstrap) = rx.recv().await.unwrap()
+    let ContextRequest::AbortAndMarkBlocked(RecoveryStatus::Bootstrap) = rx.recv().await.unwrap()
     else {
         unreachable!()
     };
+    let ContextRequest::ReloadRuntimeInfo(tx) = rx.recv().await.unwrap() else {
+        unreachable!()
+    };
+    // A failed bootstrap attempt must retain the completion sender for the successful retry.
+    drop(tx);
+    assert!(matches!(
+        initial_workers_rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
     let ContextRequest::ReloadRuntimeInfo(tx) = rx.recv().await.unwrap() else {
         unreachable!()
     };
@@ -398,6 +411,17 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
 
     let (partial_graph_id, initial_epoch) =
         handle_initial_barrier(&mut request_rx1, &response_tx1, &worker1).await;
+    for _ in 0..10 {
+        yield_now().await;
+    }
+    assert!(matches!(
+        rx.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        initial_workers_rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
     assert_eq!(
         handle_initial_barrier(&mut request_rx2, &response_tx2, &worker2).await,
         (partial_graph_id, initial_epoch)
@@ -406,6 +430,10 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let ContextRequest::MarkReady = rx.recv().await.unwrap() else {
         unreachable!()
     };
+    assert_eq!(
+        initial_workers_rx.await.unwrap(),
+        HashMap::from([(worker1.id, worker1.clone()), (worker2.id, worker2.clone())])
+    );
 
     // correctly collect from worker1
     let Request::InjectBarrier(init_inject_request) =
@@ -454,7 +482,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     drop(response_tx2);
 
     // enter recovery
-    let ContextRequest::AbortAndMarkBlocked(RecoveryReason::Failover(_)) = rx.recv().await.unwrap()
+    let ContextRequest::AbortAndMarkBlocked(RecoveryStatus::Failover(_)) = rx.recv().await.unwrap()
     else {
         unreachable!()
     };

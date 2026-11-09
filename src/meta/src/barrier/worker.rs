@@ -335,11 +335,14 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         Self::new_inner(env, request_rx, context).await
     }
 
-    pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start(
+        self,
+        initial_workers_tx: Sender<HashMap<WorkerId, WorkerNode>>,
+    ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let fut = (self.env.await_tree_reg())
             .register_derived_root("Global Barrier Worker")
-            .instrument(self.run(shutdown_rx));
+            .instrument(self.run(shutdown_rx, initial_workers_tx));
         let join_handle = tokio::spawn(fut);
 
         (join_handle, shutdown_tx)
@@ -370,7 +373,11 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
-    async fn run(mut self, shutdown_rx: Receiver<()>) {
+    async fn run(
+        mut self,
+        shutdown_rx: Receiver<()>,
+        initial_workers_tx: Sender<HashMap<WorkerId, WorkerNode>>,
+    ) {
         tracing::info!(
             "Starting barrier manager with: enable_recovery={}, in_flight_barrier_nums={}",
             self.enable_recovery,
@@ -410,9 +417,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            // Keep the bootstrap recovery future boxed so the outer barrier worker future
+            // stays below clippy's large-futures threshold.
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap(initial_workers_tx))
+                    .instrument(span),
+            )
+            .await;
         }
 
         Box::pin(self.run_inner(shutdown_rx)).await
@@ -431,7 +442,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     database_id: entering_recovery.database_id(),
                     job_ids: entering_recovery.job_ids(),
                 },
-                RecoveryReason::Failover(err.into()),
+                &RecoveryReason::Failover(err.into()),
             )
             .await
     }
@@ -982,14 +993,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, is_paused: bool, recovery_reason: RecoveryReason) {
         let reason_str = match &recovery_reason {
-            RecoveryReason::Bootstrap => "bootstrap".to_owned(),
+            RecoveryReason::Bootstrap(_) => "bootstrap".to_owned(),
             RecoveryReason::Failover(err) => {
                 format!("failed over: {}", err.as_report())
             }
             RecoveryReason::Adhoc => "adhoc recovery".to_owned(),
         };
         self.context
-            .abort_and_mark_blocked(RecoveryStart::Global, recovery_reason)
+            .abort_and_mark_blocked(RecoveryStart::Global, &recovery_reason)
             .await
             .expect("sink coordinator manager should be running during global recovery");
 
@@ -1002,6 +1013,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             .mark_ready(MarkReadyOptions::Global { failed_databases })
             .await
             .expect("sink coordinator manager should be running after global recovery");
+
+        if let RecoveryReason::Bootstrap(tx) = recovery_reason {
+            // recovery_inner installs the successful attempt's placement snapshot. Send it
+            // only after recovery is ready, before the normal loop consumes worker updates.
+            let _ = tx.send(self.active_streaming_nodes.current().clone());
+        }
     }
 
     #[await_tree::instrument("recovery({recovery_reason})")]
