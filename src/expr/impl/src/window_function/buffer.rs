@@ -20,7 +20,8 @@ use risingwave_common::array::Op;
 use risingwave_common::types::Sentinelled;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_expr::window_function::{
-    FrameExclusion, RangeFrameBounds, RowsFrameBounds, SessionFrameBounds, StateKey,
+    FrameExclusion, RangeFrameBounds, Readiness, RowsFrameBounds, SessionFrameBounds, StateKey,
+    WatermarkBound,
 };
 
 use super::range_utils::{range_diff, range_except};
@@ -87,19 +88,41 @@ impl<W: WindowImpl> WindowBuffer<W> {
         self.buffer.get(self.curr_idx).map(|Entry { key, .. }| key)
     }
 
-    /// Get the current window info.
-    pub fn curr_window(&self) -> CurrWindow<'_, W::Key> {
-        let window = BufferRef {
+    fn buffer_ref(&self) -> BufferRef<'_, W::Key, W::Value> {
+        BufferRef {
             buffer: &self.buffer,
             curr_idx: self.curr_idx,
             left_idx: self.left_idx,
             right_excl_idx: self.right_excl_idx,
-        };
+        }
+    }
+
+    /// Get the current window info.
+    pub fn curr_window(&self) -> CurrWindow<'_, W::Key> {
+        let window = self.buffer_ref();
         CurrWindow {
             key: self.curr_key(),
             preceding_saturated: self.window_impl.preceding_saturated(window),
             following_saturated: self.window_impl.following_saturated(window),
         }
+    }
+
+    /// Get the readiness of the current window.
+    pub fn readiness(&self) -> Readiness {
+        let window = self.buffer_ref();
+        if self.curr_key().is_none() {
+            Readiness::WaitForInput
+        } else if self.window_impl.closed_by_input(window) {
+            Readiness::Ready
+        } else if let Some(bound) = self.window_impl.watermark_bound(window) {
+            Readiness::OnWatermark(bound)
+        } else {
+            Readiness::WaitForInput
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
     }
 
     fn curr_window_outer(&self) -> Range<usize> {
@@ -245,6 +268,23 @@ pub(super) trait WindowImpl {
     /// Whether the following half of the current window is saturated.
     fn following_saturated(&self, window: BufferRef<'_, Self::Key, Self::Value>) -> bool;
 
+    /// Whether the current row exists and its window is closed by the rows in the buffer, given
+    /// that no future row is less than the last one in the order of the order key.
+    fn closed_by_input(&self, window: BufferRef<'_, Self::Key, Self::Value>) -> bool {
+        self.following_saturated(window)
+    }
+
+    /// The watermark of the order key that closes the current window, called only when the
+    /// current row exists and its window is not closed by input. `None` means only future rows
+    /// can close it, which is also the case for a non-ascending order, since a watermark only
+    /// bounds future order values from below.
+    fn watermark_bound(
+        &self,
+        _window: BufferRef<'_, Self::Key, Self::Value>,
+    ) -> Option<WatermarkBound> {
+        None
+    }
+
     /// Recalculate the left and right indices of the current window, according to the latest
     /// `curr_idx` and the hint.
     fn recalculate_left_right(
@@ -365,6 +405,9 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
 /// The sliding window implementation for `RANGE` frames.
 pub(super) struct RangeWindow<V: Clone> {
     frame_bounds: RangeFrameBounds,
+    /// The memcmp-encoded frame end of the current row, `None` if unbounded. It's maintained by
+    /// `recalculate_left_right`, so it's valid while the current row exists.
+    curr_frame_end: Option<MemcmpEncoded>,
     _phantom: std::marker::PhantomData<V>,
 }
 
@@ -372,6 +415,7 @@ impl<V: Clone> RangeWindow<V> {
     pub fn new(frame_bounds: RangeFrameBounds) -> Self {
         Self {
             frame_bounds,
+            curr_frame_end: None,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -402,6 +446,25 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
                 // Right OK? Ditto.
                 window.right_excl_idx < window.buffer.len()
             }
+    }
+
+    fn closed_by_input(&self, window: BufferRef<'_, Self::Key, Self::Value>) -> bool {
+        // A row after the frame end is enough, no matter whether there are rows in the frame.
+        window.curr_idx < window.buffer.len() && window.right_excl_idx < window.buffer.len()
+    }
+
+    fn watermark_bound(
+        &self,
+        _window: BufferRef<'_, Self::Key, Self::Value>,
+    ) -> Option<WatermarkBound> {
+        if !self.frame_bounds.order_type.is_ascending() {
+            return None;
+        }
+        // Future rows equal to the frame end still fall into the frame.
+        self.curr_frame_end.clone().map(|value| WatermarkBound {
+            value,
+            exclusive: true,
+        })
     }
 
     fn recalculate_left_right(
@@ -452,6 +515,7 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
             Sentinelled::Largest => {
                 // unbounded frame end
                 *window.right_excl_idx = window.buffer.len();
+                self.curr_frame_end = None;
             }
             Sentinelled::Normal(value) => {
                 // bounded, find the end position
@@ -460,6 +524,7 @@ impl<V: Clone> WindowImpl for RangeWindow<V> {
                 *window.right_excl_idx = window
                     .buffer
                     .partition_point(|elem| elem.key.order_key <= value_enc);
+                self.curr_frame_end = Some(value_enc);
             }
             Sentinelled::Smallest => unreachable!("frame end never be UNBOUNDED PRECEDING"),
         }
@@ -524,6 +589,25 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
                 .as_ref()
                 .is_some_and(|LatestSession { start_idx, .. }| window.left_idx < *start_idx)
         }
+    }
+
+    fn watermark_bound(
+        &self,
+        _window: BufferRef<'_, Self::Key, Self::Value>,
+    ) -> Option<WatermarkBound> {
+        if !self.frame_bounds.order_type.is_ascending() {
+            return None;
+        }
+        // The current window is the latest session, which is closed once any future row would
+        // start a new session.
+        self.latest_session.as_ref().map(
+            |LatestSession {
+                 minimal_next_start, ..
+             }| WatermarkBound {
+                value: minimal_next_start.clone(),
+                exclusive: false,
+            },
+        )
     }
 
     fn recalculate_left_right(
@@ -654,7 +738,7 @@ mod tests {
     use risingwave_expr::window_function::FrameBound::{
         CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding,
     };
-    use risingwave_expr::window_function::SessionFrameGap;
+    use risingwave_expr::window_function::{FrameBound, RangeFrameOffset, SessionFrameGap};
 
     use super::*;
 
@@ -1060,6 +1144,94 @@ mod tests {
                 .cloned()
                 .collect_vec()
                 .is_empty()
+        );
+    }
+
+    fn key_of(order: ScalarImpl) -> StateKey {
+        StateKey {
+            order_key: memcmp_encoding::encode_value(Some(order), OrderType::ascending()).unwrap(),
+            pk: OwnedRow::empty().into(),
+        }
+    }
+
+    fn key(order: i64) -> StateKey {
+        key_of(order.into())
+    }
+
+    fn range_buffer_of(
+        data_type: DataType,
+        start: FrameBound<ScalarImpl>,
+        end: FrameBound<ScalarImpl>,
+    ) -> WindowBuffer<RangeWindow<&'static str>> {
+        let offset = |bound: FrameBound<ScalarImpl>| {
+            bound.map(|offset| RangeFrameOffset::new_for_test(offset, &data_type, &data_type))
+        };
+        WindowBuffer::new(
+            RangeWindow::new(RangeFrameBounds {
+                order_data_type: data_type.clone(),
+                order_type: OrderType::ascending(),
+                offset_data_type: data_type.clone(),
+                start: offset(start),
+                end: offset(end),
+            }),
+            FrameExclusion::NoOthers,
+            true,
+        )
+    }
+
+    fn range_buffer(
+        start: FrameBound<i64>,
+        end: FrameBound<i64>,
+    ) -> WindowBuffer<RangeWindow<&'static str>> {
+        range_buffer_of(
+            DataType::Int64,
+            start.map(ScalarImpl::from),
+            end.map(ScalarImpl::from),
+        )
+    }
+
+    #[test]
+    fn test_range_frame_readiness() {
+        // The frame ending before the current row is closed once the row arrives, while the
+        // conservative `following_saturated` waits for the next row.
+        let mut buffer = range_buffer(Preceding(10), Preceding(5));
+        buffer.append(key(102), "a");
+        assert_eq!(buffer.readiness(), Readiness::Ready);
+        assert!(!buffer.curr_window().following_saturated);
+
+        let mut buffer = range_buffer(CurrentRow, UnboundedFollowing);
+        buffer.append(key(1), "a");
+        buffer.append(key(2), "b");
+        assert_eq!(buffer.readiness(), Readiness::WaitForInput);
+
+        // The bound follows the current row as the window slides.
+        let bound = |order: i64| {
+            Readiness::OnWatermark(WatermarkBound {
+                value: key(order).order_key,
+                exclusive: true,
+            })
+        };
+        let mut buffer = range_buffer(CurrentRow, Following(2));
+        buffer.append(key(1), "a");
+        buffer.append(key(2), "b");
+        assert_eq!(buffer.readiness(), bound(3));
+        buffer.append(key(4), "c");
+        assert_eq!(buffer.readiness(), Readiness::Ready);
+        let _ = buffer.slide();
+        assert_eq!(buffer.readiness(), bound(4));
+
+        // A float frame end may round back to the current row, `2^54 - 1.0 == 2^54` in `float8`,
+        // so the row stays in its own frame until the watermark passes it.
+        let x = ScalarImpl::from(2f64.powi(54));
+        let one = ScalarImpl::from(1.0f64);
+        let mut buffer = range_buffer_of(DataType::Float64, Preceding(one.clone()), Preceding(one));
+        buffer.append(key_of(x.clone()), "a");
+        assert_eq!(
+            buffer.readiness(),
+            Readiness::OnWatermark(WatermarkBound {
+                value: key_of(x).order_key,
+                exclusive: true,
+            })
         );
     }
 }
