@@ -134,12 +134,13 @@ pub trait EncoderBuild: Sized {
 
 impl EncoderBuild for JsonEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        let date_mode = DateHandlingMode::from_options(&b.format_desc.options)?;
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&b.format_desc.options)?;
         let jsonb_handling_mode = JsonbHandlingMode::from_options(&b.format_desc.options)?;
         let encoder = JsonEncoder::new(
             b.schema,
             pk_indices,
-            DateHandlingMode::FromCe,
+            date_mode,
             TimestampHandlingMode::Milli,
             timestamptz_mode,
             TimeHandlingMode::Milli,
