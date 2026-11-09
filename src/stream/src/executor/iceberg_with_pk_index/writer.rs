@@ -28,6 +28,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
 
@@ -206,8 +207,14 @@ where
         // (Insert / Update::new), and `records()` yields at most `capacity` records per chunk.
         let insert_capacity = chunks.iter().map(|c| c.capacity()).sum::<usize>() + 1;
 
-        let chunks = StreamChunkCompactor::new(self.pk_indices.clone(), chunks)
-            .into_compacted_chunks_inline::<{ output_kind::RETRACT }>(InconsistencyBehavior::Panic);
+        // `StreamSink::sink_type_in_prop` maps Iceberg's `type='upsert'` to a retract sink,
+        // and `derive_sink_type` rejects upsert input. Only retract or append-only input can
+        // reach this writer, so inserts cannot replace existing Iceberg rows.
+        let chunks =
+            StreamChunkCompactor::new(self.pk_indices.clone(), chunks, StreamKind::Retract)
+                .into_compacted_chunks_inline::<{ output_kind::RETRACT }>(
+                    InconsistencyBehavior::Panic,
+                );
         let pk_indices = self.pk_indices.clone();
         let records = chunks.iter().flat_map(|c| c.records()).collect_vec();
 

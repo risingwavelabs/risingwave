@@ -20,6 +20,7 @@ import com.risingwave.proto.ConnectorServiceProto;
 
 public enum SourceTypeE {
     MYSQL,
+    MARIADB,
     POSTGRES,
     MONGODB,
     SQL_SERVER,
@@ -30,6 +31,8 @@ public enum SourceTypeE {
         switch (type) {
             case MYSQL:
                 return SourceTypeE.MYSQL;
+            case MARIADB:
+                return SourceTypeE.MARIADB;
             case POSTGRES:
                 return SourceTypeE.POSTGRES;
             case MONGODB:

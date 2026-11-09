@@ -22,6 +22,7 @@ use opendal_http_transport_reqwest::ReqwestTransport;
 use risingwave_common::config::ObjectStoreConfig;
 use thiserror_ext::AsReport as _;
 
+use super::rotating_transport::RotatingTransport;
 use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{ObjectError, ObjectResult};
@@ -44,8 +45,7 @@ impl OpendalObjectStore {
             builder = builder.enable_virtual_host_style();
         }
 
-        let http_client = Self::new_http_client(&config)?;
-        let transport = HttpTransporter::new(ReqwestTransport::new(http_client));
+        let transport = Self::new_http_transport(config.clone())?;
 
         let op = new_operator(
             &config,
@@ -90,8 +90,7 @@ impl OpendalObjectStore {
             .endpoint(&format!("{}{}", endpoint_prefix, address))
             .disable_config_load();
 
-        let http_client = Self::new_http_client(&config)?;
-        let transport = HttpTransporter::new(ReqwestTransport::new(http_client));
+        let transport = Self::new_http_transport(config.clone())?;
 
         let op = new_operator(
             &config,
@@ -106,6 +105,28 @@ impl OpendalObjectStore {
             config,
             metrics,
         })
+    }
+
+    fn new_http_transport(config: Arc<ObjectStoreConfig>) -> ObjectResult<HttpTransporter> {
+        match config.s3.http_client_rotation_interval_ms {
+            None => Ok(HttpTransporter::new(ReqwestTransport::new(
+                Self::new_http_client(&config)?,
+            ))),
+            Some(interval_ms) => Ok(HttpTransporter::new(RotatingTransport::new(
+                move || {
+                    Self::new_http_client(&config)
+                        .map(ReqwestTransport::new)
+                        .map_err(|err| {
+                            opendal::Error::new(
+                                opendal::ErrorKind::Unexpected,
+                                "failed to build rotating HTTP client",
+                            )
+                            .set_source(err)
+                        })
+                },
+                Duration::from_millis(interval_ms),
+            )?)),
+        }
     }
 
     pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<reqwest::Client> {
