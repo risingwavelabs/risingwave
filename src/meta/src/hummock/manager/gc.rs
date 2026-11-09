@@ -342,9 +342,6 @@ impl HummockManager {
         if object_ids.is_empty() {
             return Ok(0);
         }
-        // A time-travel snapshot published during this batch can be missed by the scan.
-        // Keep its version references until the batch completes.
-        let _safe_point = self.register_gc_safe_point().await;
         // It's crucial to collect_min_uncommitted_object_id (i.e. `min_object_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_object_id`, new compute nodes may join and generate new uncommitted objects that are not covered by `min_sst_id`.
         // By getting `min_object_id` after `object_ids`, it's ensured `object_ids` won't include any objects from those new compute nodes.
@@ -358,19 +355,30 @@ impl HummockManager {
         metrics
             .full_gc_candidate_object_count
             .observe(candidate_object_number as _);
-        // filter by time travel archive
-        let filter_by_time_travel_start_time = Instant::now();
-        let object_ids = self
-            .filter_out_objects_by_time_travel(object_ids.into_iter())
-            .await?;
-        tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in full GC");
-        let after_time_travel = object_ids.len();
-        // filter by object id watermark, i.e. minimum id of uncommitted objects reported by compute nodes.
-        let mut object_ids = object_ids
+        // Filter the uncommitted-object watermark before scanning references.
+        let object_ids = object_ids
             .into_iter()
             .filter(|id| id.as_raw() < min_object_id)
             .collect_vec();
         let after_min_object_id = object_ids.len();
+        let _change_log_guard = self.gc_manager.change_log_retention.pin(true);
+        // As in minor GC, exclude version/changelog references before scanning time travel
+        // and backups. Even if those owners publish after their scans and the live references
+        // disappear, these objects cannot reenter this batch. No version safe point is needed.
+        let object_ids = {
+            let version_pinned = self.get_gc_tracked_object_ids().await;
+            object_ids
+                .into_iter()
+                .filter(|id| !version_pinned.contains(id))
+                .collect_vec()
+        };
+        let after_initial_version = object_ids.len();
+        let filter_by_time_travel_start_time = Instant::now();
+        let mut object_ids = self
+            .filter_out_objects_by_time_travel(object_ids.into_iter())
+            .await?;
+        tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in full GC");
+        let after_time_travel = object_ids.len();
         // The batch pin retains changelog references even if a backup publishes after
         // this manifest scan and releases its own pin. No backup job lock is needed.
         if let Some(backup_manager) = &backup_manager {
@@ -380,7 +388,9 @@ impl HummockManager {
         let after_metadata_backup = object_ids.len();
         #[cfg(test)]
         retention_tests::pause_gc_retention_handoff(self).await;
-        // filter by version
+        // Recheck references and write history under the same versioning read lock so
+        // commits and compaction reports observe the final deletion decision. Only objects
+        // that passed time-travel and backup filtering may be recorded in GC history.
         let after_version = self
             .finalize_objects_to_delete(object_ids.into_iter())
             .await?;
@@ -390,8 +400,9 @@ impl HummockManager {
             .observe(after_version_count as _);
         tracing::info!(
             candidate_object_number,
-            after_time_travel,
             after_min_object_id,
+            after_initial_version,
+            after_time_travel,
             after_metadata_backup,
             after_version_count,
             "complete gc batch"
@@ -529,6 +540,23 @@ impl HummockManager {
         Ok(total)
     }
 
+    /// Snapshot references before scanning time travel and backup manifests. The caller
+    /// must already hold a changelog retention pin and have collected its GC candidates.
+    async fn get_gc_tracked_object_ids(&self) -> HashSet<HummockObjectId> {
+        let versioning = self
+            .versioning
+            .read_with_process_name("get_gc_tracked_object_ids")
+            .await;
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("get_gc_tracked_object_ids")
+            .await
+            .min_pinned_version_id();
+        let mut pinned = versioning.get_tracked_object_ids(min_pinned_version_id);
+        pinned.extend(self.gc_manager.change_log_retention.objects());
+        pinned
+    }
+
     /// Minor GC checks queued stale objects for references before deleting them.
     pub async fn try_start_minor_gc(&self, backup_manager: BackupManagerRef) -> Result<()> {
         const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
@@ -542,20 +570,7 @@ impl HummockManager {
         #[cfg(test)]
         retention_tests::pause_gc_retention_handoff(self).await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
-        let version_pinned = {
-            let versioning = self
-                .versioning
-                .read_with_process_name("try_start_minor_gc")
-                .await;
-            let min_pinned_version_id = self
-                .context_info
-                .read_with_process_name("try_start_minor_gc")
-                .await
-                .min_pinned_version_id();
-            let mut pinned = versioning.get_tracked_object_ids(min_pinned_version_id);
-            pinned.extend(self.gc_manager.change_log_retention.objects());
-            pinned
-        };
+        let version_pinned = self.get_gc_tracked_object_ids().await;
         let object_ids = object_ids
             .into_iter()
             .filter(|s| !version_pinned.contains(s));

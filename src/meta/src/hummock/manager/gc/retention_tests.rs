@@ -25,12 +25,15 @@ use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::version::MAX_HUMMOCK_VERSION_ID;
-use risingwave_hummock_sdk::{HummockObjectId, SyncResult, get_object_data_path};
+use risingwave_hummock_sdk::{
+    HummockObjectId, SyncResult, get_object_data_path, get_object_id_from_path,
+};
+use risingwave_meta_model::hummock_gc_history;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::table::{self, HandleConflictBehavior, TableType};
 use risingwave_pb::backup_service::BackupJobStatus;
 use risingwave_rpc_client::HummockMetaClient;
-use sea_orm::{ActiveModelTrait, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, EntityTrait, Set, TransactionTrait};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout};
 
@@ -160,6 +163,17 @@ async fn publish_while_gc_is_running(
         .expect("GC did not reach the retention handoff")
         .unwrap();
 
+    if matches!(kind, GcKind::Full) {
+        assert!(
+            manager
+                .context_info
+                .read()
+                .await
+                .version_safe_points
+                .is_empty()
+        );
+    }
+
     let snapshot_epoch = test_epoch(2);
     let backup_job = match retained_by {
         RetainedBy::Backup => {
@@ -205,6 +219,20 @@ async fn publish_while_gc_is_running(
             .any(|id| id == *object_id)
     );
 
+    if matches!(kind, GcKind::Full) {
+        // Full GC must not hold version deltas alive. For version-only references, the
+        // final recheck can no longer find this object; the early filter must protect it.
+        assert!(manager.delete_version_deltas().await.unwrap() > 0);
+        if !capture_old_value {
+            assert!(
+                !manager
+                    .get_gc_tracked_object_ids()
+                    .await
+                    .contains(object_id)
+            );
+        }
+    }
+
     resume_tx.send(()).unwrap();
     gc_task.await.unwrap();
     if backup_job.is_some() {
@@ -239,7 +267,7 @@ async fn publish_while_gc_is_running(
             "old-value SST must remain exactly when captured by the backup"
         );
     }
-    // The full-GC batch must release its safe point so a later GC can reclaim the object.
+    // Backup safe points must be released so a later GC can reclaim the object.
     timeout(Duration::from_secs(10), async {
         while manager.get_min_pinned_version_id().await != MAX_HUMMOCK_VERSION_ID {
             tokio::task::yield_now().await;
@@ -674,4 +702,182 @@ async fn test_full_gc_preserves_changelog_after_backup_manifest_scan() {
 #[tokio::test]
 async fn test_minor_gc_preserves_changelog_after_table_removal() {
     publish_while_gc_is_running(GcKind::Minor, RetainedBy::Backup, true).await;
+}
+
+#[tokio::test]
+async fn test_full_gc_excludes_backup_only_objects_from_history() {
+    full_gc_records_only_unreferenced_objects(RetainedBy::Backup).await;
+}
+
+#[tokio::test]
+async fn test_full_gc_excludes_time_travel_only_objects_from_history() {
+    full_gc_records_only_unreferenced_objects(RetainedBy::TimeTravel).await;
+}
+
+async fn full_gc_records_only_unreferenced_objects(retained_by: RetainedBy) {
+    let fixture = RetentionFixture::new(GcKind::Full, false).await;
+    let manager = &fixture.manager;
+    match retained_by {
+        RetainedBy::Backup => {
+            let job = fixture.backup.start_backup_job(None).await.unwrap();
+            wait_for_backup(&fixture.backup, job).await;
+            timeout(Duration::from_secs(10), async {
+                while !manager
+                    .context_info
+                    .read()
+                    .await
+                    .version_safe_points
+                    .is_empty()
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        RetainedBy::TimeTravel => {
+            manager
+                .env
+                .system_params_manager_impl_ref()
+                .set_param(
+                    "time_travel_retention_ms",
+                    Some((10 * 60 * 1000).to_string()),
+                )
+                .await
+                .unwrap();
+            fixture
+                .client
+                .commit_epoch(test_epoch(2), SyncResult::default())
+                .await
+                .unwrap();
+        }
+    }
+    manager
+        .unregister_table_ids([fixture.table_id])
+        .await
+        .unwrap();
+    manager.create_version_checkpoint(1).await.unwrap();
+    assert!(manager.delete_version_deltas().await.unwrap() > 0);
+    // Only the later backup/time-travel scan can exclude this object.
+    assert!(
+        !manager
+            .get_gc_tracked_object_ids()
+            .await
+            .contains(&fixture.object_id)
+    );
+    let garbage_path = fixture.add_garbage().await;
+    let garbage_id = get_object_id_from_path(&garbage_path);
+    assert_eq!(
+        manager
+            .complete_gc_batch(
+                [fixture.object_id, garbage_id].into(),
+                Some(fixture.backup.clone()),
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    let gc = &manager.gc_manager;
+    assert!(
+        gc.store
+            .metadata(&object_path(gc, fixture.object_id))
+            .await
+            .is_ok()
+    );
+    assert!(gc.store.metadata(&garbage_path).await.is_err());
+    let history = hummock_gc_history::Entity::find()
+        .all(&manager.env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(
+        history[0].object_id.as_raw_id(),
+        garbage_id.as_raw().as_raw_id()
+    );
+}
+
+#[tokio::test]
+async fn test_full_gc_filters_older_backup_version_before_publication() {
+    let fixture = RetentionFixture::new(GcKind::Full, false).await;
+    let manager = &fixture.manager;
+    let (captured_tx, captured_rx) = oneshot::channel();
+    let (publish_tx, publish_rx) = oneshot::channel();
+    *fixture.backup.snapshot_captured.lock().await = Some((captured_tx, publish_rx));
+    let job = fixture.backup.start_backup_job(None).await.unwrap();
+    timeout(Duration::from_secs(10), captured_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    manager
+        .unregister_table_ids([fixture.table_id])
+        .await
+        .unwrap();
+    manager.create_version_checkpoint(1).await.unwrap();
+    // The live version has lost the object, but the unpublished backup's older pin
+    // still exposes it to the early version filter.
+    assert!(
+        !manager
+            .get_current_version()
+            .await
+            .get_object_ids()
+            .any(|id| id == fixture.object_id)
+    );
+    assert!(
+        manager
+            .get_gc_tracked_object_ids()
+            .await
+            .contains(&fixture.object_id)
+    );
+    let garbage_path = fixture.add_garbage().await;
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let (resume_tx, resume_rx) = oneshot::channel();
+    GC_HANDOFF_GATES
+        .lock()
+        .unwrap()
+        .insert(Arc::as_ptr(manager) as usize, (entered_tx, resume_rx));
+    let gc_task = {
+        let manager = manager.clone();
+        let backup = fixture.backup.clone();
+        tokio::spawn(async move { GcKind::Full.run(&manager, backup).await })
+    };
+    timeout(Duration::from_secs(10), entered_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        manager.context_info.read().await.version_safe_points.len(),
+        1
+    );
+    publish_tx.send(()).unwrap();
+    wait_for_backup(&fixture.backup, job).await;
+    timeout(Duration::from_secs(10), async {
+        while !manager
+            .context_info
+            .read()
+            .await
+            .version_safe_points
+            .is_empty()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(manager.delete_version_deltas().await.unwrap() > 0);
+    assert!(
+        !manager
+            .get_gc_tracked_object_ids()
+            .await
+            .contains(&fixture.object_id)
+    );
+    resume_tx.send(()).unwrap();
+    gc_task.await.unwrap();
+    let gc = &manager.gc_manager;
+    assert!(
+        gc.store
+            .metadata(&object_path(gc, fixture.object_id))
+            .await
+            .is_ok()
+    );
+    assert!(gc.store.metadata(&garbage_path).await.is_err());
 }
