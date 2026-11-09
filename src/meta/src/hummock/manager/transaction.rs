@@ -35,6 +35,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 use super::TableCommittedEpochNotifiers;
+use super::gc::change_log_retention::RetainedChangeLogBatch;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::model::ext::to_table_change_log_meta_store_model;
 use crate::manager::{MetaOpts, NotificationManager};
@@ -278,15 +279,14 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                     &change_log_delta,
                 );
             }
-            self.orig_table_change_log.retain(|table_id, change_log| {
-                if table_change_log_delta.delete_all.contains(table_id) {
+            for table_id in table_change_log_delta.delete_all {
+                if let Some(change_log) = self.orig_table_change_log.remove(&table_id) {
+                    // Move the whole changelog into retention. GC enumerates its object
+                    // IDs later, outside the tracker mutex and this versioning write lock.
                     self.change_log_retention
-                        .retain(change_log.get_object_ids());
-                    false
-                } else {
-                    true
+                        .retain_batch(RetainedChangeLogBatch::ChangeLog(Arc::new(change_log)));
                 }
-            });
+            }
 
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();

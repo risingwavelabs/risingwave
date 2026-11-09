@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockObjectId;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 
 /// Retains removed changelog references across backup publication and GC scans.
 ///
@@ -30,7 +31,15 @@ pub(crate) struct ChangeLogObjectRetention(Arc<Mutex<RetentionState>>);
 struct RetentionState {
     next_epoch: u64,
     pins: BTreeMap<u64, usize>,
-    retired: BTreeMap<u64, Arc<HashSet<HummockObjectId>>>,
+    retired: BTreeMap<u64, Vec<RetainedChangeLogBatch>>,
+}
+
+/// Own the removed collection without enumerating or copying its object IDs. Cloning
+/// a batch only clones its Arc, so GC can snapshot handles under the tracker mutex.
+#[derive(Clone)]
+pub(crate) enum RetainedChangeLogBatch {
+    ObjectIds(Arc<HashSet<HummockObjectId>>),
+    ChangeLog(Arc<TableChangeLog>),
 }
 
 pub(crate) struct ChangeLogObjectGuard {
@@ -61,18 +70,28 @@ impl ChangeLogObjectRetention {
         }
     }
 
-    /// Record references removed by truncation or whole-table removal, while the caller
-    /// still holds the versioning write lock that protects those live references.
-    pub(crate) fn retain(&self, objects: impl Iterator<Item = HummockObjectId>) {
+    /// Publish an immutable batch while the caller still holds the versioning write
+    /// lock that protects the removed references. Only batch bookkeeping runs under
+    /// the tracker mutex; object IDs are enumerated later by GC.
+    pub(crate) fn retain_batch(&self, batch: RetainedChangeLogBatch) {
         let mut state = self.0.lock();
         if let Some(epoch) = state.pins.keys().next_back().copied() {
-            Arc::make_mut(state.retired.entry(epoch).or_default()).extend(objects);
+            state.retired.entry(epoch).or_default().push(batch);
         }
+        // If no pin needs the batch, release the mutex before destroying its contents.
+        drop(state);
     }
 
     pub(crate) fn objects(&self) -> HashSet<HummockObjectId> {
-        let batches: Vec<_> = self.0.lock().retired.values().cloned().collect();
-        batches.iter().flat_map(|ids| ids.iter().copied()).collect()
+        let batches: Vec<_> = self.0.lock().retired.values().flatten().cloned().collect();
+        let mut objects = HashSet::new();
+        for batch in batches {
+            match batch {
+                RetainedChangeLogBatch::ObjectIds(ids) => objects.extend(ids.iter().copied()),
+                RetainedChangeLogBatch::ChangeLog(log) => objects.extend(log.get_object_ids()),
+            }
+        }
+        objects
     }
 }
 
@@ -101,6 +120,9 @@ impl Drop for ChangeLogObjectGuard {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+
     use super::*;
 
     #[test]
@@ -108,21 +130,74 @@ mod tests {
         let retention = ChangeLogObjectRetention::default();
         let first = HummockObjectId::Sstable(1.into());
         let second = HummockObjectId::Sstable(2.into());
-        retention.retain([first].into_iter());
+        retention.retain_batch(RetainedChangeLogBatch::ObjectIds(Arc::new(HashSet::from(
+            [first],
+        ))));
         assert!(retention.objects().is_empty());
         let backup = retention.pin(false);
-        retention.retain([first].into_iter());
+        retention.retain_batch(RetainedChangeLogBatch::ObjectIds(Arc::new(HashSet::from(
+            [first],
+        ))));
         let full_gc = retention.pin(true);
         let minor_gc = retention.pin(true);
         drop(backup);
         assert_eq!(retention.objects(), HashSet::from([first]));
         let next_backup = retention.pin(false);
-        retention.retain([second].into_iter());
+        retention.retain_batch(RetainedChangeLogBatch::ObjectIds(Arc::new(HashSet::from(
+            [second],
+        ))));
         drop(full_gc);
         assert_eq!(retention.objects(), HashSet::from([first, second]));
         drop(minor_gc);
         assert_eq!(retention.objects(), HashSet::from([second]));
         drop(next_backup);
         assert!(retention.objects().is_empty());
+    }
+
+    #[test]
+    fn mixed_batches_preserve_all_references_until_last_inherited_pin_drops() {
+        let retention = ChangeLogObjectRetention::default();
+        let first = HummockObjectId::Sstable(1.into());
+        let second = HummockObjectId::Sstable(2.into());
+        let third = HummockObjectId::Sstable(3.into());
+        let ids = Arc::new(HashSet::from([first, second]));
+        let log = Arc::new(TableChangeLog::new([EpochNewChangeLog {
+            new_value: vec![
+                SstableInfoInner {
+                    object_id: 3.into(),
+                    ..Default::default()
+                }
+                .into(),
+            ],
+            old_value: vec![
+                SstableInfoInner {
+                    object_id: 2.into(),
+                    ..Default::default()
+                }
+                .into(),
+            ],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch: 1,
+        }]));
+        let weak_ids = Arc::downgrade(&ids);
+        let weak_log = Arc::downgrade(&log);
+        let backup = retention.pin(false);
+        // Both batches have the same retention epoch, and one ID occurs in both.
+        retention.retain_batch(RetainedChangeLogBatch::ObjectIds(ids));
+        retention.retain_batch(RetainedChangeLogBatch::ChangeLog(log));
+        let gc = retention.pin(true);
+        drop(backup);
+        assert_eq!(retention.objects(), HashSet::from([first, second, third]));
+        assert!(weak_ids.upgrade().is_some());
+        assert!(weak_log.upgrade().is_some());
+        drop(gc);
+        assert!(retention.objects().is_empty());
+        assert!(weak_ids.upgrade().is_none());
+        assert!(weak_log.upgrade().is_none());
+
+        let unpinned = Arc::new(HashSet::from([first]));
+        let weak_unpinned = Arc::downgrade(&unpinned);
+        retention.retain_batch(RetainedChangeLogBatch::ObjectIds(unpinned));
+        assert!(weak_unpinned.upgrade().is_none());
     }
 }
