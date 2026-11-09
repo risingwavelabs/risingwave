@@ -2102,6 +2102,154 @@ mod tests {
         assert_eq!(rows[0].3, None);
     }
 
+    /// After a replace job finishes, recovery builds the coordinator from writers that already have
+    /// the new schema, while the schema change can still be pending in the meta store. The pending
+    /// change must be committed before any writer receives its start response, because writers
+    /// validate the sink table against their new schema once they start.
+    #[tokio::test]
+    async fn test_recovered_schema_change_committed_before_writer_start() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+        let metadata = vec![1u8, 2u8];
+        let schema_change = PbSinkSchemaChange {
+            original_schema: vec![PbField {
+                data_type: Some(PbDataType {
+                    type_name: PbTypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+                name: "col_v1".into(),
+            }],
+            op: Some(SinkSchemachangeOp::AddColumns(PbSinkAddColumnsOp {
+                fields: vec![PbField {
+                    data_type: Some(PbDataType {
+                        type_name: PbTypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    name: "new_col".into(),
+                }],
+            })),
+        };
+        crate::manager::exactly_once_util::persist_pre_commit_metadata(
+            &db,
+            param.sink_id,
+            epoch1,
+            Some(metadata.clone()),
+            Some(&schema_change),
+        )
+        .await
+        .unwrap();
+
+        let all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        for i in all_vnode {
+            builder.set(i, true);
+        }
+        let vnode = builder.finish();
+
+        // Keep the sender alive so that the coordinator keeps waiting for new committed epochs.
+        let epoch_sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
+            let (sender, receiver) = unbounded_channel();
+            let epoch_sender = epoch_sender.clone();
+            async move {
+                *epoch_sender.lock().await = Some(sender);
+                Ok((epoch1, receiver))
+            }
+            .boxed()
+        });
+
+        let commits = Arc::new(std::sync::Mutex::new(vec![]));
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let db = db.clone();
+                let commits = commits.clone();
+                move |param, new_writer_rx| {
+                    let db = db.clone();
+                    let metadata = metadata.clone();
+                    let schema_change = schema_change.clone();
+                    let data_commits = commits.clone();
+                    let schema_change_commits = commits.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param,
+                                new_writer_rx,
+                                MockTwoPhaseCoordinator::new_coordinator(
+                                    move |_epoch, _metadata_list, _schema_change| {
+                                        Err(SinkError::Coordinator(anyhow!(
+                                            "pre_commit should not be called for a recovered pending epoch"
+                                        )))
+                                    },
+                                    move |epoch, commit_metadata| {
+                                        assert_eq!(epoch, epoch1);
+                                        assert_eq!(commit_metadata, metadata);
+                                        data_commits.lock().unwrap().push("data");
+                                        Ok(())
+                                    },
+                                    move |epoch, committed_schema_change| {
+                                        assert_eq!(epoch, epoch1);
+                                        assert_eq!(committed_schema_change, schema_change);
+                                        let mut commits = schema_change_commits.lock().unwrap();
+                                        // Fail the first attempt so that a writer started before
+                                        // the retry would observe an uncommitted schema change.
+                                        if !commits.contains(&"schema_change_failed") {
+                                            commits.push("schema_change_failed");
+                                            return Err(SinkError::Coordinator(anyhow!(
+                                                "injected schema change commit failure"
+                                            )));
+                                        }
+                                        commits.push("schema_change");
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let (_client, log_store_rewind_start_epoch) =
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(log_store_rewind_start_epoch, Some(epoch1));
+        assert_eq!(
+            *commits.lock().unwrap(),
+            vec!["data", "schema_change_failed", "data", "schema_change"]
+        );
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch1 as i64);
+        assert_eq!(rows[0].2, "COMMITTED");
+    }
+
     #[tokio::test]
     async fn test_pre_commit_failed() {
         let db = prepare_db_backend().await;
