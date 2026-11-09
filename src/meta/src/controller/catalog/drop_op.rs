@@ -338,7 +338,7 @@ impl CatalogController {
             }
         }
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the drop notification batch contains the dropped object");
 

@@ -31,11 +31,13 @@ use risingwave_pb::hummock::{
     CompatibilityVersion, GroupConstruct, HummockVersionDeltas, HummockVersionStats,
     StateTableInfoDelta,
 };
+use risingwave_pb::meta::SubscribeType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 use super::TableCommittedEpochNotifiers;
 use super::gc::change_log_retention::RetainedChangeLogBatch;
+use super::versioning::CurrentHummockVersion;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::model::ext::to_table_change_log_meta_store_model;
 use crate::manager::{MetaOpts, NotificationManager};
@@ -64,7 +66,7 @@ pub(super) fn trigger_version_stat(metrics: &MetaMetrics, current_version: &Humm
 }
 
 pub(super) struct HummockVersionTransaction<'a> {
-    orig_version: &'a mut Arc<HummockVersion>,
+    orig_version: &'a mut CurrentHummockVersion,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
     orig_table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
     change_log_retention: &'a super::gc::change_log_retention::ChangeLogObjectRetention,
@@ -84,7 +86,7 @@ pub(super) struct HummockVersionTransaction<'a> {
 
 impl<'a> HummockVersionTransaction<'a> {
     pub(super) fn new(
-        version: &'a mut Arc<HummockVersion>,
+        version: &'a mut CurrentHummockVersion,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
         table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
         change_log_retention: &'a super::gc::change_log_retention::ChangeLogObjectRetention,
@@ -272,7 +274,7 @@ impl<'a> HummockVersionTransaction<'a> {
 impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
         if let Some((version, deltas, table_change_log_delta)) = self.pre_applied_version {
-            *self.orig_version = Arc::new(version);
+            self.orig_version.set(version);
             for change_log_delta in table_change_log_delta.updates {
                 HummockVersion::apply_change_log_delta(
                     self.orig_table_change_log,
@@ -290,13 +292,17 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
 
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
-                self.notification_manager.notify_hummock(
+                self.notification_manager.notify_part(
+                    &mut *self.orig_version,
+                    SubscribeType::Hummock,
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: pb_deltas,
                     }),
                 );
-                self.notification_manager.notify_frontend_without_version(
+                self.notification_manager.notify_part(
+                    &mut *self.orig_version,
+                    SubscribeType::Frontend,
                     Operation::Update,
                     Info::HummockVersionDeltas(HummockVersionDeltas {
                         version_deltas: deltas

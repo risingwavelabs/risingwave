@@ -96,7 +96,7 @@ impl CatalogController {
             OverrideValidate::checkpoint_frequency(frequency).map_err(|e| anyhow::anyhow!(e))?;
         }
 
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -129,7 +129,7 @@ impl CatalogController {
             notifications.add(NotificationOperation::Add, NotificationInfo::Schema(schema));
         }
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the database notification batch contains the database");
 
@@ -137,7 +137,7 @@ impl CatalogController {
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = schema.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -169,7 +169,7 @@ impl CatalogController {
         // notify default privileges for schemas
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the schema notification batch contains the schema");
 
@@ -371,7 +371,7 @@ impl CatalogController {
         // notify default privileges for source
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the source notification batch contains the source");
 
@@ -395,7 +395,7 @@ impl CatalogController {
         &self,
         mut pb_function: PbFunction,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = pb_function.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -432,7 +432,7 @@ impl CatalogController {
         // notify default privileges for functions
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the function notification batch contains the function");
 
@@ -443,7 +443,7 @@ impl CatalogController {
         &self,
         mut pb_connection: PbConnection,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = pb_connection.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -526,7 +526,7 @@ impl CatalogController {
         // notify default privileges for connections
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the connection notification batch contains the connection");
 
@@ -538,7 +538,7 @@ impl CatalogController {
         mut pb_secret: PbSecret,
         secret_plain_payload: Vec<u8>,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -567,9 +567,12 @@ impl CatalogController {
         secret_plain.value.clone_from(&secret_plain_payload);
 
         LocalSecretManager::global().add_secret(secret_plain.id, secret_plain_payload);
-        self.env
-            .notification_manager()
-            .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
+        self.env.notification_manager().notify_part(
+            &mut *inner,
+            SubscribeType::Compute,
+            Operation::Add,
+            Info::Secret(secret_plain.clone()),
+        );
 
         let mut notifications = self.frontend_notification_batch();
         notifications.add(
@@ -580,7 +583,7 @@ impl CatalogController {
         // notify default privileges for secrets
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the secret notification batch contains the secret");
 
@@ -592,7 +595,7 @@ impl CatalogController {
         mut pb_view: PbView,
         dependencies: HashSet<ObjectId>,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = pb_view.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -651,7 +654,7 @@ impl CatalogController {
         // notify default privileges for views
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the view notification batch contains the view");
 

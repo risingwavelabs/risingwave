@@ -865,7 +865,12 @@ mod tests {
         assert_eq!(serving_infos[&internal_fragment].result_table_id, None);
         assert_eq!(serving_infos[&sink_fragment].result_table_id, None);
 
-        let policies = mgr.table_cache_refill_policies_snapshot().await?;
+        let policies = mgr
+            .inner
+            .read()
+            .await
+            .table_cache_refill_policies_snapshot()
+            .await?;
         assert_eq!(
             policies
                 .table_policies
@@ -1491,7 +1496,11 @@ mod tests {
         };
         let serving_vnode_mapping = ServingVnodeMapping::default();
         let initial_snapshot = mgr.fragment_serving_infos().await?;
-        serving_vnode_mapping.upsert(&initial_snapshot, std::slice::from_ref(&worker), None);
+        serving_vnode_mapping.write().upsert(
+            &initial_snapshot,
+            std::slice::from_ref(&worker),
+            None,
+        );
         assert!(serving_vnode_mapping.all().contains_key(&fragment_id));
 
         mgr.clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
@@ -1499,7 +1508,9 @@ mod tests {
         let current_snapshot = mgr.fragment_serving_infos().await?;
         assert!(!current_snapshot.contains_key(&fragment_id));
 
-        serving_vnode_mapping.reconcile(&current_snapshot, &[worker], None);
+        serving_vnode_mapping
+            .write()
+            .reconcile(&current_snapshot, &[worker], None);
         assert!(!serving_vnode_mapping.all().contains_key(&fragment_id));
 
         Ok(())

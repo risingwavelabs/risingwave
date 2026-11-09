@@ -63,7 +63,8 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
 use risingwave_pb::meta::{
-    PbObject, PbObjectGroup, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
+    ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup, PbTableCacheRefillPolicies,
+    PbTableRefillRuntimeConfig, SubscribeType,
 };
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
@@ -91,7 +92,8 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::*;
 use crate::manager::{
     FrontendNotificationBatch, IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
-    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source,
+    SnapshotPart, SnapshotPartState, get_referred_connection_ids_from_source,
+    get_referred_secret_ids_from_source,
 };
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::{MetaTelemetryJobDesc, report_event};
@@ -300,29 +302,40 @@ impl CatalogController {
 
     pub(crate) async fn notify_hummock_table_cache_refill_policy_if_explicit(
         &self,
-        inner: &CatalogControllerInner,
+        inner: &mut CatalogControllerInner,
         job_id: JobId,
     ) -> MetaResult<()> {
         if let Some(policies) = inner
             .table_cache_refill_policies_snapshot_if_job_has_explicit_policy(job_id)
             .await?
         {
-            self.env.notification_manager().notify_hummock(
-                NotificationOperation::Update,
-                NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                    table_cache_refill_policies: Some(policies),
-                    ..Default::default()
-                }),
-            );
+            self.notify_hummock_table_cache_refill_policies(inner, policies);
         }
         Ok(())
     }
 
-    pub async fn table_cache_refill_policies_snapshot(
+    /// Send the current table cache refill policies to hummock subscribers.
+    pub async fn notify_table_cache_refill_policies(&self) -> MetaResult<()> {
+        let mut inner = self.inner.write().await;
+        let policies = inner.table_cache_refill_policies_snapshot().await?;
+        self.notify_hummock_table_cache_refill_policies(&mut inner, policies);
+        Ok(())
+    }
+
+    fn notify_hummock_table_cache_refill_policies(
         &self,
-    ) -> MetaResult<PbTableCacheRefillPolicies> {
-        let inner = self.inner.read().await;
-        inner.table_cache_refill_policies_snapshot().await
+        inner: &mut CatalogControllerInner,
+        policies: PbTableCacheRefillPolicies,
+    ) {
+        self.env.notification_manager().notify_part(
+            inner,
+            SubscribeType::Hummock,
+            NotificationOperation::Update,
+            NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(policies),
+                ..Default::default()
+            }),
+        );
     }
 
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
@@ -364,17 +377,22 @@ pub struct CatalogControllerInner {
     pub dropped_tables: HashMap<TableId, PbTable>,
 }
 
+impl SnapshotPartState for CatalogControllerInner {
+    const PART: SnapshotPart = SnapshotPart::Catalog;
+}
+
 impl CatalogController {
     #[must_use]
     pub(crate) async fn notify_frontend(
         &self,
+        inner: &mut CatalogControllerInner,
         operation: NotificationOperation,
         info: NotificationInfo,
     ) -> NotificationVersion {
         let mut notifications = self.frontend_notification_batch();
         notifications.add(operation, info);
         notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the frontend notification batch contains the added notification")
     }
@@ -382,10 +400,12 @@ impl CatalogController {
     #[must_use]
     pub(crate) async fn notify_frontend_relation_info(
         &self,
+        inner: &mut CatalogControllerInner,
         operation: NotificationOperation,
         relation_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_frontend(
+            inner,
             operation,
             NotificationInfo::ObjectGroup(PbObjectGroup {
                 objects: vec![PbObject {
@@ -408,7 +428,7 @@ impl CatalogController {
         &self,
         subscription_id: SubscriptionId,
     ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
@@ -436,28 +456,17 @@ impl CatalogController {
         };
         Subscription::update(job).exec(&txn).await?;
 
-        let _ = grant_default_privileges_automatically(&txn, subscription_id).await?;
+        let updated_user_infos =
+            grant_default_privileges_automatically(&txn, subscription_id).await?;
 
-        txn.commit().await?;
-
-        Ok(())
-    }
-
-    pub async fn notify_create_subscription(
-        &self,
-        subscription_id: SubscriptionId,
-    ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
         let (subscription, obj) = Subscription::find_by_id(subscription_id)
             .find_also_related(Object)
-            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
-
         let dependencies =
             list_object_dependencies_by_object_id(&txn, subscription_id.into()).await?;
+
         txn.commit().await?;
 
         let mut notifications = self.frontend_notification_batch();
@@ -473,27 +482,13 @@ impl CatalogController {
                 dependencies,
             }),
         );
-
-        // notify default privileges about the new subscription
-        let updated_user_ids: Vec<UserId> = UserPrivilege::find()
-            .select_only()
-            .distinct()
-            .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.eq(subscription_id.as_object_id()))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        if !updated_user_ids.is_empty() {
-            let updated_user_infos = list_user_info_by_ids(updated_user_ids, &inner.db).await?;
-            Self::add_users_update_notifications(&mut notifications, updated_user_infos);
-        }
-        let version = notifications
-            .publish()
+        Self::add_users_update_notifications(&mut notifications, updated_user_infos);
+        notifications
+            .publish(&mut *inner)
             .await
             .expect("the subscription notification batch contains the subscription");
 
-        Ok(version)
+        Ok(())
     }
 
     // for telemetry
@@ -816,7 +811,7 @@ impl CatalogController {
         let object_group = build_object_group_for_delete(objects_to_notify);
 
         let _version = self
-            .notify_frontend(NotificationOperation::Delete, object_group)
+            .notify_frontend(&mut inner, NotificationOperation::Delete, object_group)
             .await;
 
         Ok(CleanedDirtyStreamingJobs {
@@ -828,7 +823,7 @@ impl CatalogController {
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
         ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
@@ -879,6 +874,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend_relation_info(
+                &mut inner,
                 NotificationOperation::Update,
                 PbObjectInfo::Table(ObjectModel(table, table_obj, streaming_job).into()),
             )
@@ -887,7 +883,11 @@ impl CatalogController {
         Ok(version)
     }
 
-    fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
+    fn notify_hummock_dropped_tables(
+        &self,
+        inner: &mut CatalogControllerInner,
+        tables: Vec<PbTable>,
+    ) {
         if tables.is_empty() {
             return;
         }
@@ -901,24 +901,31 @@ impl CatalogController {
             objects,
             dependencies: vec![],
         });
-        self.env
-            .notification_manager()
-            .notify_hummock(NotificationOperation::Delete, group.clone());
-        self.env
-            .notification_manager()
-            .notify_compactor(NotificationOperation::Delete, group);
+        let notification_manager = self.env.notification_manager();
+        notification_manager.notify_part(
+            inner,
+            SubscribeType::Hummock,
+            NotificationOperation::Delete,
+            group.clone(),
+        );
+        notification_manager.notify_part(
+            inner,
+            SubscribeType::Compactor,
+            NotificationOperation::Delete,
+            group,
+        );
     }
 
     pub async fn complete_dropped_tables(&self, table_ids: impl IntoIterator<Item = TableId>) {
         let mut inner = self.inner.write().await;
         let tables = inner.complete_dropped_tables(table_ids);
-        self.notify_hummock_dropped_tables(tables);
+        self.notify_hummock_dropped_tables(&mut inner, tables);
     }
 
     pub async fn cleanup_dropped_tables(&self) {
         let mut inner = self.inner.write().await;
         let tables = inner.dropped_tables.drain().map(|(_, t)| t).collect();
-        self.notify_hummock_dropped_tables(tables);
+        self.notify_hummock_dropped_tables(&mut inner, tables);
     }
 
     pub async fn stats(&self) -> MetaResult<CatalogStats> {
@@ -1062,6 +1069,13 @@ pub struct CatalogStats {
 }
 
 impl CatalogControllerInner {
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
+        let txn = self.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, false).await?;
+        txn.commit().await?;
+        Ok(dependencies)
+    }
+
     pub async fn snapshot(&self) -> MetaResult<(Catalog, Vec<PbUserInfo>)> {
         let databases = self.list_databases().await?;
         let schemas = self.list_schemas().await?;

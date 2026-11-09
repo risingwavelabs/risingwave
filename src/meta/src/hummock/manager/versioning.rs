@@ -15,6 +15,7 @@
 use std::cmp;
 use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -36,6 +37,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 use risingwave_pb::id::TableId;
+use risingwave_pb::meta::SubscribeType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::GroupStateValidator;
@@ -48,7 +50,30 @@ use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
+use crate::manager::{SnapshotPart, SnapshotPartState, SnapshotSubscription};
 use crate::model::VarTransaction;
+
+/// The latest hummock version, owned only by [`Versioning`].
+#[derive(Default)]
+pub struct CurrentHummockVersion(Arc<HummockVersion>);
+
+impl CurrentHummockVersion {
+    pub(super) fn set(&mut self, version: HummockVersion) {
+        self.0 = Arc::new(version);
+    }
+}
+
+impl Deref for CurrentHummockVersion {
+    type Target = Arc<HummockVersion>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl SnapshotPartState for CurrentHummockVersion {
+    const PART: SnapshotPart = SnapshotPart::HummockVersion;
+}
 
 #[derive(Default)]
 pub struct Versioning {
@@ -57,7 +82,7 @@ pub struct Versioning {
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
     /// Latest hummock version
-    pub current_version: Arc<HummockVersion>,
+    pub current_version: CurrentHummockVersion,
     pub local_metrics: HashMap<TableId, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
@@ -171,6 +196,19 @@ impl HummockManager {
             .as_ref())
     }
 
+    pub async fn on_current_version_for_snapshot<T>(
+        &self,
+        subscription: &mut SnapshotSubscription,
+        f: impl FnOnce(&HummockVersion) -> T,
+    ) -> T {
+        let guard = self
+            .versioning
+            .read_with_process_name("on_current_version_for_snapshot")
+            .await;
+        subscription.start_forwarding(&guard.current_version);
+        f(&guard.current_version)
+    }
+
     pub async fn on_current_version_and_table_change_log<T>(
         &self,
         mut f: impl FnMut(&HummockVersion, &TableChangeLogs) -> T,
@@ -264,11 +302,14 @@ impl HummockManager {
         tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
         cg_manager.write_limit = new_write_limits;
-        self.env.notification_manager().notify_hummock(
+        let info = Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
+            write_limits: cg_manager.write_limit.clone(),
+        });
+        self.env.notification_manager().notify_part(
+            &mut *cg_manager,
+            SubscribeType::Hummock,
             Operation::Add,
-            Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
-                write_limits: cg_manager.write_limit.clone(),
-            }),
+            info,
         );
         true
     }
@@ -280,6 +321,18 @@ impl HummockManager {
             .compaction_group_manager
             .read_with_process_name("write_limits")
             .await;
+        guard.write_limit.clone()
+    }
+
+    pub async fn write_limits_for_snapshot(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> HashMap<CompactionGroupId, WriteLimit> {
+        let guard = self
+            .compaction_group_manager
+            .read_with_process_name("write_limits_for_snapshot")
+            .await;
+        subscription.start_forwarding(&*guard);
         guard.write_limit.clone()
     }
 

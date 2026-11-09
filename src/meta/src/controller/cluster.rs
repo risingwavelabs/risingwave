@@ -36,6 +36,7 @@ use risingwave_pb::common::worker_node::{
 use risingwave_pb::common::{
     ClusterResource, HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 };
+use risingwave_pb::meta::SubscribeType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -43,13 +44,16 @@ use sea_orm::{
     TransactionTrait,
 };
 use thiserror_ext::AsReport;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::controller::utils::filter_workers_by_resource_group;
-use crate::manager::{LocalNotification, META_NODE_ID, MetaSrvEnv, WorkerKey};
+use crate::manager::{
+    LocalNotification, META_NODE_ID, MetaSrvEnv, SnapshotPart, SnapshotPartState,
+    SnapshotSubscription, WorkerKey,
+};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
@@ -113,29 +117,54 @@ impl ClusterController {
         })
     }
 
-    /// Used in `NotificationService::subscribe`.
-    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
-    pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, ClusterControllerInner> {
-        self.inner.read().await
+    /// The running compute nodes and frontends and the total resource of the cluster, for a
+    /// snapshot.
+    pub async fn get_worker_nodes_snapshot(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<(Vec<WorkerNode>, ClusterResource)> {
+        let inner = self.inner.read().await;
+        let compute_nodes = inner
+            .list_workers(Some(WorkerType::ComputeNode), Some(WorkerStatus::Running))
+            .await?;
+        let frontends = inner
+            .list_workers(Some(WorkerType::Frontend), Some(WorkerStatus::Running))
+            .await?;
+        let cluster_resource = inner.cluster_resource().await?;
+        subscription.start_forwarding(&*inner);
+        Ok((
+            compute_nodes.into_iter().chain(frontends).collect(),
+            cluster_resource,
+        ))
+    }
+
+    /// The total resource of the cluster, for a snapshot.
+    pub async fn get_cluster_resource_snapshot(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<ClusterResource> {
+        let inner = self.inner.read().await;
+        let cluster_resource = inner.cluster_resource().await?;
+        subscription.start_forwarding(&*inner);
+        Ok(cluster_resource)
     }
 
     pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
         self.inner.read().await.count_worker_by_type().await
     }
 
-    /// Get the total resource of the cluster.
-    pub async fn cluster_resource(&self) -> MetaResult<ClusterResource> {
-        self.inner.read().await.cluster_resource().await
-    }
-
     /// Get the total resource of the cluster, then update license manager and notify all other nodes.
-    async fn update_cluster_resource_for_license(&self) -> MetaResult<()> {
-        let resource = self.cluster_resource().await?;
+    async fn update_cluster_resource_for_license(
+        &self,
+        inner: &mut ClusterControllerInner,
+    ) -> MetaResult<()> {
+        let resource = inner.cluster_resource().await?;
 
         // Update local license manager.
         LicenseManager::get().update_cluster_resource(resource);
         // Notify all other nodes.
-        self.env.notification_manager().notify_all_without_version(
+        self.env.notification_manager().notify_part_to_all(
+            inner,
             Operation::Update, // unused
             Info::ClusterResource(resource),
         );
@@ -154,10 +183,8 @@ impl ClusterController {
         property: AddNodeProperty,
         resource: PbResource,
     ) -> MetaResult<WorkerId> {
-        let worker_id = self
-            .inner
-            .write()
-            .await
+        let mut inner = self.inner.write().await;
+        let worker_id = inner
             .add_worker(
                 r#type,
                 host_address,
@@ -168,22 +195,25 @@ impl ClusterController {
             .await?;
 
         // Keep license manager in sync with the latest cluster resource.
-        self.update_cluster_resource_for_license().await?;
+        self.update_cluster_resource_for_license(&mut inner).await?;
 
         Ok(worker_id)
     }
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let worker = inner.activate_worker(worker_id).await?;
 
         // Notify frontends of new compute node and frontend node.
         // Always notify because a running worker's property may have been changed.
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
-            self.env
-                .notification_manager()
-                .notify_frontend_without_version(Operation::Add, Info::Node(worker.clone()));
+            self.env.notification_manager().notify_part(
+                &mut *inner,
+                SubscribeType::Frontend,
+                Operation::Add,
+                Info::Node(worker.clone()),
+            );
         }
         self.env
             .notification_manager()
@@ -193,17 +223,22 @@ impl ClusterController {
     }
 
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
-        let worker = self.inner.write().await.delete_worker(host_address).await?;
+        let mut inner = self.inner.write().await;
+        let worker = inner.delete_worker(host_address).await?;
 
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
-            self.env
-                .notification_manager()
-                .notify_frontend_without_version(Operation::Delete, Info::Node(worker.clone()));
+            self.env.notification_manager().notify_part(
+                &mut *inner,
+                SubscribeType::Frontend,
+                Operation::Delete,
+                Info::Node(worker.clone()),
+            );
         }
 
         // Keep license manager in sync with the latest cluster resource.
-        self.update_cluster_resource_for_license().await?;
+        self.update_cluster_resource_for_license(&mut inner).await?;
+        drop(inner);
 
         // Notify local subscribers.
         // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
@@ -493,6 +528,10 @@ pub struct ClusterControllerInner {
     available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
     disable_automatic_parallelism_control: bool,
+}
+
+impl SnapshotPartState for ClusterControllerInner {
+    const PART: SnapshotPart = SnapshotPart::Cluster;
 }
 
 impl ClusterControllerInner {
@@ -975,6 +1014,7 @@ impl ClusterControllerInner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manager::Notification;
 
     fn mock_worker_hosts_for_test(count: usize) -> Vec<HostAddress> {
         (0..count)
@@ -983,6 +1023,80 @@ mod tests {
                 port: 5000 + i as i32,
             })
             .collect_vec()
+    }
+
+    async fn add_active_compute_node(
+        cluster_ctl: &ClusterController,
+        host: HostAddress,
+    ) -> MetaResult<()> {
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host,
+                AddNodeProperty {
+                    parallelism: 4,
+                    is_streaming: true,
+                    is_serving: true,
+                    ..Default::default()
+                },
+                PbResource::default(),
+            )
+            .await?;
+        cluster_ctl.activate_worker(worker_id).await
+    }
+
+    async fn next_worker_notification(
+        rx: &mut UnboundedReceiver<Notification>,
+    ) -> (Operation, HostAddress) {
+        loop {
+            let notification = rx.recv().await.unwrap().unwrap();
+            let operation = notification.operation();
+            if let Some(Info::Node(node)) = notification.info {
+                return (operation, node.host.unwrap());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_worker_snapshots_start_forwarding() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let notification_manager = env.notification_manager_ref();
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+        let hosts = mock_worker_hosts_for_test(2);
+        let subscribe = |subscribe_type| {
+            let (tx, rx) = unbounded_channel();
+            let worker_key = WorkerKey(HostAddress::default());
+            (
+                notification_manager.start_subscription(subscribe_type, worker_key, tx),
+                rx,
+            )
+        };
+        let (mut frontend, mut frontend_rx) = subscribe(SubscribeType::Frontend);
+        let (mut compute, mut compute_rx) = subscribe(SubscribeType::Compute);
+
+        add_active_compute_node(&cluster_ctl, hosts[0].clone()).await?;
+        let (workers, _) = cluster_ctl.get_worker_nodes_snapshot(&mut frontend).await?;
+        assert_eq!(workers.len(), 1);
+        cluster_ctl
+            .get_cluster_resource_snapshot(&mut compute)
+            .await?;
+
+        add_active_compute_node(&cluster_ctl, hosts[1].clone()).await?;
+        let notification = compute_rx.recv().await.unwrap().unwrap();
+        assert!(matches!(notification.info, Some(Info::ClusterResource(_))));
+        assert!(compute_rx.try_recv().is_err());
+
+        cluster_ctl.delete_worker(hosts[0].clone()).await?;
+        assert_eq!(
+            next_worker_notification(&mut frontend_rx).await,
+            (Operation::Add, hosts[1].clone())
+        );
+        assert_eq!(
+            next_worker_notification(&mut frontend_rx).await,
+            (Operation::Delete, hosts[0].clone())
+        );
+
+        Ok(())
     }
 
     #[tokio::test]

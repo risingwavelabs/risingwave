@@ -53,7 +53,7 @@ use crate::barrier::{
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
-use crate::manager::NotificationManagerRef;
+use crate::manager::{NotificationManagerRef, SnapshotPart, SnapshotPartState};
 use crate::model::{
     ActorId, ActorNewNoShuffle, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments,
 };
@@ -120,6 +120,10 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
 #[derive(Default, Debug)]
 pub struct SharedActorInfosInner {
     info: HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>,
+}
+
+impl SnapshotPartState for SharedActorInfosInner {
+    const PART: SnapshotPart = SnapshotPart::StreamingMappings;
 }
 
 impl SharedActorInfosInner {
@@ -212,14 +216,18 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
-        if let Some(database) = self.inner.write().info.remove(&database_id) {
+        let mut inner = self.inner.write();
+        if let Some(database) = inner.info.remove(&database_id) {
             let mapping = database
                 .into_values()
                 .map(|fragment| rebuild_fragment_mapping(&fragment))
                 .collect_vec();
             if !mapping.is_empty() {
-                self.notification_manager
-                    .notify_streaming_fragment_mapping(Operation::Delete, mapping);
+                self.notification_manager.notify_streaming_fragment_mapping(
+                    &mut inner,
+                    Operation::Delete,
+                    mapping,
+                );
             }
         }
     }
@@ -227,10 +235,9 @@ impl SharedActorInfos {
     pub(super) fn retain_databases(&self, database_ids: impl IntoIterator<Item = DatabaseId>) {
         let database_ids: HashSet<_> = database_ids.into_iter().collect();
 
+        let mut inner = self.inner.write();
         let mut mapping = Vec::new();
-        for fragment in self
-            .inner
-            .write()
+        for fragment in inner
             .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
@@ -238,8 +245,11 @@ impl SharedActorInfos {
             mapping.push(rebuild_fragment_mapping(&fragment));
         }
         if !mapping.is_empty() {
-            self.notification_manager
-                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
+            self.notification_manager.notify_streaming_fragment_mapping(
+                &mut inner,
+                Operation::Delete,
+                mapping,
+            );
         }
     }
 
@@ -350,18 +360,19 @@ impl SharedActorInfoWriter<'_> {
         }
     }
 
-    pub(super) fn finish(self) {
-        if let Some(mapping) = self.added_fragment_mapping {
-            self.notification_manager
-                .notify_streaming_fragment_mapping(Operation::Add, mapping);
-        }
-        if let Some(mapping) = self.updated_fragment_mapping {
-            self.notification_manager
-                .notify_streaming_fragment_mapping(Operation::Update, mapping);
-        }
-        if let Some(mapping) = self.deleted_fragment_mapping {
-            self.notification_manager
-                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
+    pub(super) fn finish(mut self) {
+        for (operation, mapping) in [
+            (Operation::Add, self.added_fragment_mapping),
+            (Operation::Update, self.updated_fragment_mapping),
+            (Operation::Delete, self.deleted_fragment_mapping),
+        ] {
+            if let Some(mapping) = mapping {
+                self.notification_manager.notify_streaming_fragment_mapping(
+                    &mut self.write_guard,
+                    operation,
+                    mapping,
+                );
+            }
         }
     }
 }
@@ -1433,5 +1444,81 @@ impl InflightDatabaseInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::stream_plan::PbStreamNode;
+    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+
+    use super::*;
+    use crate::controller::catalog::CatalogController;
+    use crate::manager::{MetaSrvEnv, Notification, WorkerKey};
+
+    fn single_actor_fragment(fragment_id: u32) -> InflightFragmentInfo {
+        InflightFragmentInfo {
+            fragment_id: fragment_id.into(),
+            distribution_type: DistributionType::Single,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 1,
+            nodes: PbStreamNode::default(),
+            actors: HashMap::from([(
+                fragment_id.into(),
+                InflightActorInfo {
+                    worker_id: WorkerId::new(1),
+                    vnode_bitmap: None,
+                    splits: vec![],
+                },
+            )]),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    async fn next_mapping_operation(rx: &mut UnboundedReceiver<Notification>) -> Operation {
+        rx.recv().await.unwrap().unwrap().operation()
+    }
+
+    #[tokio::test]
+    async fn test_mapping_snapshot_starts_forwarding() {
+        let env = MetaSrvEnv::for_test().await;
+        let catalog_controller = CatalogController::new(env.clone()).await.unwrap();
+        let (tx, mut rx) = unbounded_channel();
+        let mut subscription = env.notification_manager().start_subscription(
+            SubscribeType::Frontend,
+            WorkerKey(HostAddress::default()),
+            tx,
+        );
+
+        let infos = env.shared_actor_infos();
+        let database_1 = DatabaseId::new(1);
+        let database_2 = DatabaseId::new(2);
+        let job_id = JobId::new(1);
+        let fragment_1 = single_actor_fragment(1);
+        let fragment_2 = single_actor_fragment(2);
+        let fragment_3 = single_actor_fragment(3);
+
+        infos.upsert(database_1, [(&fragment_1, job_id), (&fragment_2, job_id)]);
+        let mappings = catalog_controller.get_worker_slot_mappings(&mut subscription);
+        assert_eq!(mappings.len(), 2);
+
+        let mut writer = infos.start_writer(database_1);
+        writer.upsert([(&fragment_1, job_id), (&fragment_3, job_id)]);
+        writer.remove(&fragment_2);
+        writer.finish();
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Add);
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Update);
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Delete);
+
+        infos.remove_database(database_1);
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Delete);
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Delete);
+
+        infos.upsert(database_2, [(&fragment_1, job_id)]);
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Add);
+        infos.retain_databases([]);
+        assert_eq!(next_mapping_operation(&mut rx).await, Operation::Delete);
     }
 }

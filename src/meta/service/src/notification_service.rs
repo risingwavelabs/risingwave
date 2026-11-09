@@ -12,26 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{Context, anyhow};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
-use risingwave_meta::controller::fragment::FragmentServingInfo;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::{FragmentId, WorkerId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
+use risingwave_pb::common::ClusterResource;
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, PbTableCacheRefillPolicies,
-    SubscribeRequest, SubscribeType,
+    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, ObjectDependency,
+    PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig, SubscribeRequest, SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -40,9 +36,10 @@ use tonic::{Request, Response, Status};
 
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
+use crate::manager::{
+    MetaSrvEnv, Notification, NotificationVersion, SnapshotSubscription, WorkerKey,
+};
 use crate::serving::ServingVnodeMappingRef;
-use crate::table_refill::build_hummock_table_refill_runtime_config;
 
 pub struct NotificationServiceImpl {
     env: MetaSrvEnv,
@@ -68,70 +65,53 @@ impl NotificationServiceImpl {
             backup_manager,
             serving_vnode_mapping,
         };
-        let (secrets, _catalog_version) = service.get_decrypted_secret_snapshot().await?;
-        LocalSecretManager::global().init_secrets(secrets);
+        let secrets = service
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await
+            .list_secrets()
+            .await?;
+        LocalSecretManager::global().init_secrets(service.decrypt_secrets(secrets)?);
         Ok(service)
     }
 
     async fn get_catalog_snapshot(
         &self,
-    ) -> MetaResult<(Catalog, Vec<UserInfo>, NotificationVersion)> {
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<(
+        Catalog,
+        Vec<UserInfo>,
+        Vec<ObjectDependency>,
+        NotificationVersion,
+    )> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
             .get_inner_read_guard()
             .await;
-        let (
-            (
-                databases,
-                schemas,
-                tables,
-                sources,
-                sinks,
-                subscriptions,
-                indexes,
-                views,
-                functions,
-                connections,
-                secrets,
-            ),
-            users,
-        ) = catalog_guard.snapshot().await?;
+        let (catalog, users) = catalog_guard.snapshot().await?;
+        let object_dependencies = catalog_guard.list_created_object_dependencies().await?;
+        subscription.start_forwarding(&*catalog_guard);
+        // The version only changes under the write lock of the catalog.
         let notification_version = self.env.notification_manager().current_version().await;
-        Ok((
-            (
-                databases,
-                schemas,
-                tables,
-                sources,
-                sinks,
-                subscriptions,
-                indexes,
-                views,
-                functions,
-                connections,
-                secrets,
-            ),
-            users,
-            notification_version,
-        ))
+        Ok((catalog, users, object_dependencies, notification_version))
     }
 
     /// Get decrypted secret snapshot
     async fn get_decrypted_secret_snapshot(
         &self,
-    ) -> MetaResult<(Vec<Secret>, NotificationVersion)> {
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<Vec<Secret>> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
             .get_inner_read_guard()
             .await;
         let secrets = catalog_guard.list_secrets().await?;
-        let notification_version = self.env.notification_manager().current_version().await;
+        subscription.start_forwarding(&*catalog_guard);
 
-        let decrypted_secrets = self.decrypt_secrets(secrets)?;
-
-        Ok((decrypted_secrets, notification_version))
+        self.decrypt_secrets(secrets)
     }
 
     fn decrypt_secrets(&self, secrets: Vec<Secret>) -> MetaResult<Vec<Secret>> {
@@ -158,21 +138,12 @@ impl NotificationServiceImpl {
         Ok(decrypted_secrets)
     }
 
-    async fn get_worker_slot_mapping_snapshot(
+    fn get_serving_vnode_mappings(
         &self,
-    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        let mappings = self
-            .metadata_manager
-            .catalog_controller
-            .get_worker_slot_mappings();
-
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((mappings, notification_version))
-    }
-
-    fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
+        subscription: &mut SnapshotSubscription,
+    ) -> Vec<FragmentWorkerSlotMapping> {
         self.serving_vnode_mapping
-            .all()
+            .all_for_snapshot(subscription)
             .iter()
             .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
                 fragment_id,
@@ -181,24 +152,10 @@ impl NotificationServiceImpl {
             .collect()
     }
 
-    async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
-        let cluster_guard = self
-            .metadata_manager
-            .cluster_controller
-            .get_inner_read_guard()
-            .await;
-        let compute_nodes = cluster_guard
-            .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
-            .await?;
-        let frontends = cluster_guard
-            .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
-            .await?;
-        let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((worker_nodes, notification_version))
-    }
-
-    async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {
+    async fn get_tables_snapshot(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<Vec<Table>> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
@@ -206,18 +163,14 @@ impl NotificationServiceImpl {
             .await;
         let mut tables = catalog_guard.list_all_state_tables().await?;
         tables.extend(catalog_guard.dropped_tables.values().cloned());
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((tables, notification_version))
+        subscription.start_forwarding(&*catalog_guard);
+        Ok(tables)
     }
 
     async fn get_hummock_catalog_snapshot(
         &self,
-    ) -> MetaResult<(
-        Vec<Table>,
-        PbTableCacheRefillPolicies,
-        HashMap<FragmentId, FragmentServingInfo>,
-        NotificationVersion,
-    )> {
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<(Vec<Table>, PbTableCacheRefillPolicies)> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
@@ -227,40 +180,39 @@ impl NotificationServiceImpl {
         tables.extend(catalog_guard.dropped_tables.values().cloned());
         let table_cache_refill_policies =
             catalog_guard.table_cache_refill_policies_snapshot().await?;
-        let fragment_serving_infos = catalog_guard.fragment_serving_infos().await?;
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((
-            tables,
-            table_cache_refill_policies,
-            fragment_serving_infos,
-            notification_version,
-        ))
+        subscription.start_forwarding(&*catalog_guard);
+        Ok((tables, table_cache_refill_policies))
     }
 
-    /// Get the total resource of the cluster.
-    async fn get_cluster_resource(&self) -> MetaResult<ClusterResource> {
+    async fn get_cluster_resource(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<ClusterResource> {
         self.metadata_manager
             .cluster_controller
-            .cluster_resource()
+            .get_cluster_resource_snapshot(subscription)
             .await
     }
 
-    async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
-        let (tables, catalog_version) = self.get_tables_snapshot().await?;
-        let cluster_resource = self.get_cluster_resource().await?;
+    async fn compactor_subscribe(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<MetaSnapshot> {
+        let tables = self.get_tables_snapshot(subscription).await?;
+        let cluster_resource = self.get_cluster_resource(subscription).await?;
 
         Ok(MetaSnapshot {
             tables,
-            version: Some(SnapshotVersion {
-                catalog_version,
-                ..Default::default()
-            }),
+            version: Some(SnapshotVersion::default()),
             cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
 
-    async fn frontend_subscribe(&self) -> MetaResult<MetaSnapshot> {
+    async fn frontend_subscribe(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<MetaSnapshot> {
         let (
             (
                 databases,
@@ -276,19 +228,17 @@ impl NotificationServiceImpl {
                 secrets,
             ),
             users,
+            object_dependencies,
             catalog_version,
-        ) = self.get_catalog_snapshot().await?;
-        let object_dependencies = self
-            .metadata_manager
-            .catalog_controller
-            .list_created_object_dependencies()
-            .await?;
+        ) = self.get_catalog_snapshot(subscription).await?;
 
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
-        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
-            self.get_worker_slot_mapping_snapshot().await?;
+        let streaming_worker_slot_mappings = self
+            .metadata_manager
+            .catalog_controller
+            .get_worker_slot_mappings(subscription);
 
         let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
         if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
@@ -298,13 +248,17 @@ impl NotificationServiceImpl {
             );
         }
 
-        let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
+        let serving_worker_slot_mappings = self.get_serving_vnode_mappings(subscription);
 
-        let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
+        let (nodes, cluster_resource) = self
+            .metadata_manager
+            .cluster_controller
+            .get_worker_nodes_snapshot(subscription)
+            .await?;
 
         let hummock_version = self
             .hummock_manager
-            .on_current_version(|version| {
+            .on_current_version_for_snapshot(subscription, |version| {
                 FrontendHummockVersion::from_version(version).to_protobuf()
             })
             .await;
@@ -312,15 +266,13 @@ impl NotificationServiceImpl {
         let session_params = self
             .env
             .session_params_manager_impl_ref()
-            .get_params()
+            .get_params_for_snapshot(subscription)
             .await;
 
         let session_params = Some(GetSessionParamsResponse {
             params: serde_json::to_string(&session_params)
                 .context("failed to encode session params")?,
         });
-
-        let cluster_resource = self.get_cluster_resource().await?;
 
         Ok(MetaSnapshot {
             databases,
@@ -339,8 +291,7 @@ impl NotificationServiceImpl {
             hummock_version: Some(hummock_version),
             version: Some(SnapshotVersion {
                 catalog_version,
-                worker_node_version,
-                streaming_worker_slot_mapping_version,
+                ..Default::default()
             }),
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
@@ -351,31 +302,31 @@ impl NotificationServiceImpl {
         })
     }
 
-    async fn hummock_subscribe(&self, worker_id: WorkerId) -> MetaResult<MetaSnapshot> {
-        let (tables, table_cache_refill_policies, fragment_serving_infos, catalog_version) =
-            self.get_hummock_catalog_snapshot().await?;
+    async fn hummock_subscribe(
+        &self,
+        worker_id: WorkerId,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<MetaSnapshot> {
+        let (tables, table_cache_refill_policies) =
+            self.get_hummock_catalog_snapshot(subscription).await?;
         let hummock_version = self
             .hummock_manager
-            .on_current_version(|version| version.into())
+            .on_current_version_for_snapshot(subscription, |version| version.into())
             .await;
-        let hummock_write_limits = self.hummock_manager.write_limits().await;
+        let hummock_write_limits = self
+            .hummock_manager
+            .write_limits_for_snapshot(subscription)
+            .await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
-        let cluster_resource = self.get_cluster_resource().await?;
-        let table_refill_runtime_config = build_hummock_table_refill_runtime_config(
-            &self.serving_vnode_mapping,
-            worker_id,
-            table_cache_refill_policies,
-            &fragment_serving_infos,
-            catalog_version,
-        );
+        let cluster_resource = self.get_cluster_resource(subscription).await?;
+        let serving_table_vnode_mappings = self
+            .serving_vnode_mapping
+            .table_vnode_mapping_for_snapshot(worker_id, subscription);
 
         Ok(MetaSnapshot {
             tables,
             hummock_version: Some(hummock_version),
-            version: Some(SnapshotVersion {
-                catalog_version,
-                ..Default::default()
-            }),
+            version: Some(SnapshotVersion::default()),
             meta_backup_manifest_id: Some(MetaBackupManifestId {
                 id: meta_backup_manifest_id,
             }),
@@ -383,21 +334,25 @@ impl NotificationServiceImpl {
                 write_limits: hummock_write_limits,
             }),
             cluster_resource: Some(cluster_resource),
-            table_refill_runtime_config: Some(table_refill_runtime_config),
+            table_refill_runtime_config: Some(PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(table_cache_refill_policies),
+                serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
+                ..Default::default()
+            }),
             ..Default::default()
         })
     }
 
-    async fn compute_subscribe(&self) -> MetaResult<MetaSnapshot> {
-        let (secrets, catalog_version) = self.get_decrypted_secret_snapshot().await?;
-        let cluster_resource = self.get_cluster_resource().await?;
+    async fn compute_subscribe(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> MetaResult<MetaSnapshot> {
+        let secrets = self.get_decrypted_secret_snapshot(subscription).await?;
+        let cluster_resource = self.get_cluster_resource(subscription).await?;
 
         Ok(MetaSnapshot {
             secrets,
-            version: Some(SnapshotVersion {
-                catalog_version,
-                ..Default::default()
-            }),
+            version: Some(SnapshotVersion::default()),
             cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
@@ -419,26 +374,26 @@ impl NotificationService for NotificationServiceImpl {
         let worker_key = WorkerKey(host_address);
 
         let (tx, rx) = mpsc::unbounded_channel();
-        self.env
-            .notification_manager()
-            .insert_sender(subscribe_type, worker_key, tx.clone());
+        let mut subscription =
+            self.env
+                .notification_manager()
+                .start_subscription(subscribe_type, worker_key, tx);
 
         let meta_snapshot = match subscribe_type {
-            SubscribeType::Compactor => self.compactor_subscribe().await?,
-            SubscribeType::Frontend => self.frontend_subscribe().await?,
+            SubscribeType::Compactor => self.compactor_subscribe(&mut subscription).await?,
+            SubscribeType::Frontend => self.frontend_subscribe(&mut subscription).await?,
             SubscribeType::Hummock => {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())
                     .await?;
-                self.hummock_subscribe(req.get_worker_id()).await?
+                self.hummock_subscribe(req.get_worker_id(), &mut subscription)
+                    .await?
             }
-            SubscribeType::Compute => self.compute_subscribe().await?,
+            SubscribeType::Compute => self.compute_subscribe(&mut subscription).await?,
             SubscribeType::Unspecified => unreachable!(),
         };
 
-        self.env
-            .notification_manager()
-            .notify_snapshot(tx, meta_snapshot);
+        subscription.send_snapshot(meta_snapshot);
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
