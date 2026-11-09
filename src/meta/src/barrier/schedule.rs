@@ -851,7 +851,7 @@ mod tests {
         async fn abort_and_mark_blocked(
             &self,
             _recovery: crate::manager::sink_coordination::RecoveryStart,
-            _recovery_reason: crate::barrier::RecoveryReason,
+            _recovery_reason: &crate::barrier::RecoveryReason,
         ) -> MetaResult<()> {
             unimplemented!()
         }

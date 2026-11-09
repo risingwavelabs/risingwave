@@ -378,8 +378,10 @@ impl IcebergV3JobCheckpointControl {
             Default::default(),
         );
 
+        let opts = &partial_graph_manager.control_stream_manager().env.opts;
         let max_pending_barrier_num = super::snapshot_backfill_max_pending_barrier_num(
-            &partial_graph_manager.control_stream_manager().env.opts,
+            opts.in_flight_barrier_nums,
+            opts.snapshot_backfill_barrier_amplification_factor,
         );
         let commit_checkpoint_interval = CommitCheckpointInterval::from_fragment_nodes(
             fragment_infos.values().map(|fragment| &fragment.nodes),
@@ -593,8 +595,10 @@ impl IcebergV3JobCheckpointControl {
             actors_to_create,
             IcebergV3BarrierStats::new(job_id, snapshot_epoch),
         )?;
+        let opts = &partial_graph_recoverer.control_stream_manager().env.opts;
         let max_pending_barrier_num = super::snapshot_backfill_max_pending_barrier_num(
-            &partial_graph_recoverer.control_stream_manager().env.opts,
+            opts.in_flight_barrier_nums,
+            opts.snapshot_backfill_barrier_amplification_factor,
         );
         Ok(Self {
             control,
