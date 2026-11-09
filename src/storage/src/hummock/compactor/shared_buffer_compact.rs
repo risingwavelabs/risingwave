@@ -196,9 +196,16 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         } else {
             PbSstableFilterLayout::Plain
         };
+    let sstable_filter_type = if IS_NEW_VALUE {
+        // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
+        PbSstableFilterType::SstableFilterXor16
+    } else {
+        // Changelog readers scan old-value SSTs without probing the filter.
+        PbSstableFilterType::SstableFilterNone
+    };
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new::<IS_NEW_VALUE>(
+        let compactor = SharedBufferCompactRunner::new(
             split_index,
             key_range,
             context.clone(),
@@ -206,6 +213,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             estimated_output_key_count,
             table_vnode_partition.clone(),
             sstable_filter_layout,
+            sstable_filter_type,
             object_id_manager.clone(),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
@@ -416,7 +424,7 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new<const IS_NEW_VALUE: bool>(
+    pub fn new(
         split_index: usize,
         key_range: KeyRange,
         context: CompactorContext,
@@ -424,6 +432,7 @@ impl SharedBufferCompactRunner {
         estimated_output_key_count: usize,
         table_vnode_partition: BTreeMap<TableId, u32>,
         sstable_filter_layout: PbSstableFilterLayout,
+        sstable_filter_type: PbSstableFilterType,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
@@ -440,13 +449,7 @@ impl SharedBufferCompactRunner {
                 retain_multiple_version: true,
                 table_vnode_partition,
                 sstable_filter_layout,
-                sstable_filter_type: if IS_NEW_VALUE {
-                    // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
-                    PbSstableFilterType::SstableFilterXor16
-                } else {
-                    // Changelog readers scan old-value SSTs without probing the filter.
-                    PbSstableFilterType::SstableFilterNone
-                },
+                sstable_filter_type,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },
