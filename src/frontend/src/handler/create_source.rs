@@ -1221,7 +1221,7 @@ pub async fn handle_create_source(
         return handle_create_cdc_table_source(handler_args, stmt).await;
     }
 
-    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -1556,7 +1556,7 @@ pub(super) fn generate_stream_graph_for_source(
     handler_args: HandlerArgs,
     source_catalog: SourceCatalog,
 ) -> Result<PbStreamFragmentGraph> {
-    let context = OptimizerContext::from_handler_args(handler_args);
+    let context = OptimizerContext::from_handler_args(handler_args)?;
     let source_node = LogicalSource::with_catalog(
         Rc::new(source_catalog),
         SourceNodeKind::CreateSharedSource,

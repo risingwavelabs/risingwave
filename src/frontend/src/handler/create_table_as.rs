@@ -109,7 +109,7 @@ pub async fn handle_create_as(
     });
 
     let (graph, source, table) = {
-        let context = OptimizerContext::from_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args.clone())?;
         let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
         if !secret_refs.is_empty() || !connection_refs.is_empty() {
             return Err(crate::error::ErrorCode::InvalidParameterValue(
