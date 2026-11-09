@@ -86,10 +86,10 @@ pub struct StorageConfig {
     )]
     pub max_prefetch_block_number: usize,
 
-    /// Maximum number of concurrent SSTable metadata fetches per state store scan during
+    /// Maximum number of concurrent `SSTable` metadata fetches per state store scan during
     /// iterator initialization. Must be greater than 0. The default of 1 fetches sequentially;
     /// set a larger value to opt in to concurrent fetching. Does not affect point lookups or
-    /// the lazy metadata reads within concatenated SSTable iterators.
+    /// the lazy metadata reads within concatenated `SSTable` iterators.
     #[serde(
         default = "default::storage::sstable_meta_fetch_concurrency",
         deserialize_with = "deserialize_sstable_meta_fetch_concurrency"
