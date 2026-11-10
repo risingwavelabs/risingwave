@@ -30,6 +30,7 @@ use sea_orm::{
 };
 
 use crate::MetaResult;
+use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::load_progress::{LoadProgress, LoadReport};
 use crate::controller::fragment::InflightFragmentInfo;
 
@@ -82,8 +83,6 @@ pub(super) struct BoundedLoadTracker {
     list_finished: HashSet<ActorId>,
     read_finished: HashSet<ActorId>,
     phase: Phase,
-    /// Whether `Load { Start }` has been sent to the job's actors.
-    pub start_sent: bool,
     /// Actions of the collected barriers, applied once their checkpoint commits.
     actions: Vec<BoundedLoadAction>,
 }
@@ -127,20 +126,8 @@ impl BoundedLoadTracker {
             list_finished: HashSet::new(),
             read_finished: HashSet::new(),
             phase,
-            start_sent: false,
             actions: vec![],
         }
-    }
-
-    /// Returns the source to send `Load { Start }` for, if it has not been sent yet.
-    pub fn take_pending_start(&mut self) -> Option<SourceId> {
-        if self.start_sent {
-            return None;
-        }
-
-        self.start_sent = true;
-
-        Some(self.source_id)
     }
 
     pub fn apply_progress(&mut self, report: &LoadReport) {
@@ -195,6 +182,75 @@ impl BoundedLoadTracker {
     /// Takes the queued actions, once their checkpoint commits.
     pub fn take_actions(&mut self) -> Vec<BoundedLoadAction> {
         take(&mut self.actions)
+    }
+}
+
+/// The bounded loads of a database.
+///
+/// A load is registered when its job is created, whatever the creation path, and from its
+/// `LOADING` row on recovery. It starts once its job's actors are in the database graph.
+#[derive(Debug, Default)]
+pub(super) struct BoundedLoads {
+    loads: HashMap<(JobId, SourceId), Option<BoundedLoadTracker>>,
+}
+
+impl BoundedLoads {
+    pub fn register(&mut self, job_id: JobId, source_id: SourceId) {
+        self.loads.entry((job_id, source_id)).or_default();
+    }
+
+    pub fn is_bounded_source(&self, source_id: SourceId) -> bool {
+        self.loads.keys().any(|(_, id)| *id == source_id)
+    }
+
+    pub fn retain(&mut self, keep: impl Fn(JobId) -> bool) {
+        self.loads.retain(|(job_id, _), _| keep(*job_id));
+    }
+
+    pub fn has_pending_start(&self, jobs: &HashMap<JobId, InflightStreamingJobInfo>) -> bool {
+        self.loads
+            .iter()
+            .any(|((job_id, _), tracker)| tracker.is_none() && jobs.contains_key(job_id))
+    }
+
+    pub fn take_pending_start(
+        &mut self,
+        database_id: DatabaseId,
+        jobs: &HashMap<JobId, InflightStreamingJobInfo>,
+    ) -> Option<SourceId> {
+        let ((job_id, source_id), tracker) = self
+            .loads
+            .iter_mut()
+            .find(|((job_id, _), tracker)| tracker.is_none() && jobs.contains_key(job_id))?;
+
+        let fragments = jobs[job_id].fragment_infos.values();
+        *tracker = Some(BoundedLoadTracker::new(
+            database_id,
+            *job_id,
+            *source_id,
+            fragments,
+        ));
+
+        Some(*source_id)
+    }
+
+    pub fn apply_progress(&mut self, report: &LoadReport) {
+        if let Some(tracker) = self
+            .loads
+            .values_mut()
+            .flatten()
+            .find(|tracker| tracker.source_id == report.source_id)
+        {
+            tracker.apply_progress(report);
+        }
+    }
+
+    pub fn take_actions(&mut self) -> Vec<BoundedLoadAction> {
+        self.loads
+            .values_mut()
+            .flatten()
+            .flat_map(|tracker| tracker.take_actions())
+            .collect()
     }
 }
 
@@ -415,6 +471,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::barrier::info::CreateStreamingJobStatus;
     use crate::controller::fragment::InflightActorInfo;
 
     const DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -512,6 +569,69 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(bounded_load_source([&streaming]).unwrap(), None);
+    }
+
+    #[test]
+    fn test_load_starts_once_its_job_is_in_the_database_graph() {
+        let mut loads = BoundedLoads::default();
+        let mut jobs = HashMap::new();
+
+        loads.register(JOB_ID, SOURCE_ID);
+        assert!(loads.is_bounded_source(SOURCE_ID));
+        assert!(!loads.has_pending_start(&jobs));
+        assert_eq!(loads.take_pending_start(DATABASE_ID, &jobs), None);
+
+        jobs.insert(JOB_ID, job());
+        assert!(loads.has_pending_start(&jobs));
+        assert_eq!(
+            loads.take_pending_start(DATABASE_ID, &jobs),
+            Some(SOURCE_ID)
+        );
+        assert!(!loads.has_pending_start(&jobs));
+        assert_eq!(loads.take_pending_start(DATABASE_ID, &jobs), None);
+    }
+
+    #[test]
+    fn test_registering_again_keeps_a_started_load() {
+        let mut loads = BoundedLoads::default();
+        let jobs = HashMap::from([(JOB_ID, job())]);
+
+        loads.register(JOB_ID, SOURCE_ID);
+        assert_eq!(
+            loads.take_pending_start(DATABASE_ID, &jobs),
+            Some(SOURCE_ID)
+        );
+
+        loads.register(JOB_ID, SOURCE_ID);
+        assert!(!loads.has_pending_start(&jobs));
+    }
+
+    #[test]
+    fn test_progress_reaches_a_started_load() {
+        let mut loads = BoundedLoads::default();
+        let jobs = HashMap::from([(JOB_ID, job())]);
+
+        loads.register(JOB_ID, SOURCE_ID);
+        loads.apply_progress(&list_finished(1));
+        assert!(loads.take_actions().is_empty());
+
+        loads.take_pending_start(DATABASE_ID, &jobs);
+        loads.apply_progress(&list_finished(1));
+        loads.apply_progress(&list_finished(2));
+        assert_eq!(loads.take_actions(), vec![list_finish()]);
+    }
+
+    fn job() -> InflightStreamingJobInfo {
+        InflightStreamingJobInfo {
+            job_id: JOB_ID,
+            fragment_infos: two_phase()
+                .into_iter()
+                .map(|fragment| (fragment.fragment_id, fragment))
+                .collect(),
+            subscribers: HashMap::new(),
+            status: CreateStreamingJobStatus::Created,
+            cdc_table_backfill_tracker: None,
+        }
     }
 
     fn list_finish() -> BoundedLoadAction {
