@@ -73,12 +73,10 @@ drop index t;
 statement error Use `DROP TABLE`
 drop source t;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop sink t;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop view t;
 
 # 4.2 materialized view
@@ -94,12 +92,10 @@ drop index mv;
 statement error Use `DROP MATERIALIZED VIEW`
 drop source mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP MATERIALIZED VIEW`
 drop sink mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP MATERIALIZED VIEW`
 drop view mv;
 
 # 4.3 index
@@ -115,12 +111,10 @@ drop materialized view idx;
 statement error Use `DROP INDEX`
 drop source idx;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP INDEX`
 drop sink idx;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP INDEX`
 drop view idx;
 
 # 4.4 table with connector
@@ -143,12 +137,10 @@ drop index msrc;
 statement error Use `DROP TABLE`
 drop source msrc;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop sink msrc;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP TABLE`
 drop view msrc;
 
 # 4.5 source
@@ -162,76 +154,71 @@ create source src (v int) with (
     datagen.split.num = '1'
 ) FORMAT PLAIN ENCODE JSON;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop table src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop materialized view src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop index src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop sink src;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SOURCE`
 drop view src;
 
 # 4.6 sink
 statement ok
 CREATE SINK sink FROM mv WITH (connector='blackhole');
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop table sink;
 
 statement error sql parser error
 CREATE SINK sink FROM mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop materialized view sink;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop index sink;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop source sink;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP SINK`
 drop view sink;
 
 # 4.7 view
 statement ok
 create view v as select 1;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop table v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop materialized view v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop index v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop source v;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP VIEW`
 drop sink v;
+
+# 4.8 subscription
+statement ok
+create subscription sub from mv with (retention = '1h');
+
+statement error Use `DROP SUBSCRIPTION`
+drop table sub;
+
+statement error Use `DROP TABLE`
+drop subscription t;
 
 # 5. query
 query I
@@ -250,13 +237,15 @@ query I
 SELECT * from msrc limit 0;
 ----
 
-# FIXME: improve the error message
-query error not found
+query error cannot query sink "sink"
 SELECT * from sink limit 0;
 
 query I
 SELECT * from v limit 0;
 ----
+
+query error cannot query subscription "sub"
+SELECT * from sub limit 0;
 
 # 6. DML
 # 6.1 table
@@ -300,43 +289,38 @@ statement ok
 delete from msrc;
 
 # 6.5 source
-# FIXME: improve the error message
-statement error not found
+statement error cannot change source "src"
 insert into src values (1);
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change source "src"
 update src set v = 2;
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change source "src"
 delete from src;
 
 # 6.6 sink
-# FIXME: improve the error message
-statement error not found
+statement error cannot change sink "sink"
 insert into sink values (1);
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change sink "sink"
 update sink set v = 2;
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change sink "sink"
 delete from sink;
 
 # 6.7 view
-# FIXME: improve the error message
-statement error not found
+statement error cannot change view "v"
 insert into v values (1);
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change view "v"
 update v set v = 2;
 
-# FIXME: improve the error message
-statement error not found
+statement error cannot change view "v"
 delete from v;
+
+# 6.8 subscription
+statement error cannot change subscription "sub"
+insert into sub values (1);
 
 # 7. create with duplicate name
 statement error table.*exists
@@ -381,7 +365,68 @@ create table err_t1 (v int) with (
     datagen.split.num = '1'
 ) FORMAT DEBEZIUM ENCODE JSON;
 
+# 9. name resolution
+statement ok
+create schema invalid_op_s1;
+
+statement ok
+create schema invalid_op_s2;
+
+statement ok
+create view invalid_op_s1.x as select 1 as v;
+
+statement ok
+create table invalid_op_s2.x (v int);
+
+statement ok
+set search_path to invalid_op_s1, invalid_op_s2;
+
+# The first visible `x` is the view.
+statement error Use `DROP VIEW`
+drop sink x;
+
+statement ok
+set search_path to "$user", public;
+
+statement error Use `DROP VIEW`
+drop table invalid_op_s1.x;
+
+statement error cannot change view "x"
+insert into invalid_op_s1.x values (1);
+
+statement ok
+drop table invalid_op_s2.x;
+
+statement ok
+drop view invalid_op_s1.x;
+
+statement ok
+drop schema invalid_op_s1;
+
+statement ok
+drop schema invalid_op_s2;
+
+# 10. system catalogs
+statement error System catalogs cannot be dropped
+drop table pg_catalog.pg_enum;
+
+statement error cannot change system catalog "pg_class"
+insert into pg_catalog.pg_class values (1);
+
+# 11. names that look like Iceberg metadata relations
+statement ok
+create sink "sink$x" from mv with (connector = 'blackhole');
+
+query error cannot query sink
+select * from "sink$x";
+
+statement ok
+drop sink "sink$x";
+
 # cleanup
+
+statement ok
+drop subscription sub;
 
 statement ok
 drop view v;
