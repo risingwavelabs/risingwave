@@ -24,7 +24,7 @@ use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::id::{SourceId, TableId};
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
@@ -43,7 +43,7 @@ use crate::executor::source::{
     ChunksWithState, StreamSourceCore, pad_row_id, prune_additional_cols,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::{LoadProgress, LocalBarrierManager};
+use crate::task::{FragmentId, LoadProgress, LocalBarrierManager};
 
 #[derive(PartialEq, Eq)]
 enum FetchPhase {
@@ -245,7 +245,6 @@ pub struct BatchIcebergFetchExecutor<S: StateStore> {
 
     streaming_config: Arc<StreamingConfig>,
 
-    associated_table_id: TableId,
     retry_policy: LoadRetryPolicy,
 
     scan_metrics: Option<IcebergScanMetricsLabels>,
@@ -260,17 +259,14 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         upstream: Executor,
         barrier_manager: LocalBarrierManager,
         streaming_config: Arc<StreamingConfig>,
-        associated_table_id: Option<TableId>,
         retry_policy: LoadRetryPolicy,
     ) -> Self {
-        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             barrier_manager,
             streaming_config,
-            associated_table_id: associated_table_id.unwrap(),
             retry_policy,
             scan_metrics: None,
             file_scan_metrics: None,
@@ -347,8 +343,8 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),
                         core.source_id.to_string(),
+                        core.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
-                        self.associated_table_id.to_string(),
                     ]);
 
                     scan_metrics.record_fetch_error();
@@ -356,7 +352,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     let Some(delay) = state.backoff.next() else {
                         tracing::error!(
                             source_id = %core.source_id,
-                            table_id = %self.associated_table_id,
+                            fragment_id = %self.actor_ctx.fragment_id,
                             error = %e.as_report(),
                             "load failed after repeated fetch errors"
                         );
@@ -371,7 +367,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     if in_flight_count > 0 {
                         tracing::info!(
                             source_id = %core.source_id,
-                            table_id = %self.associated_table_id,
+                            fragment_id = %self.actor_ctx.fragment_id,
                             in_flight_count = %in_flight_count,
                             "re-queued unfinished files for retry"
                         );
@@ -379,7 +375,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
                     tracing::info!(
                         source_id = %core.source_id,
-                        table_id = %self.associated_table_id,
+                        fragment_id = %self.actor_ctx.fragment_id,
                         remaining_files = %state.file_queue.len(),
                         ?delay,
                         "attempting to recover from fetch error, will retry after the delay"
@@ -404,6 +400,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         let mut need_rebuild = Self::handle_barrier_mutations(
                             &barrier,
                             core.source_id,
+                            self.actor_ctx.fragment_id,
                             &mut state,
                             &mut stream,
                             &mut assignments,
@@ -428,7 +425,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 ?barrier.epoch,
                                 actor_id = %self.actor_ctx.id,
                                 source_id = %core.source_id,
-                                table_id = %self.associated_table_id,
+                                fragment_id = %self.actor_ctx.fragment_id,
                                 "Reporting load finished"
                             );
                             self.barrier_manager.report_load_progress(
@@ -523,6 +520,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
     async fn handle_barrier_mutations(
         barrier: &Barrier,
         source_id: SourceId,
+        fragment_id: FragmentId,
         state: &mut FetchState,
         stream: &mut StreamReaderWithPause<true, ChunksWithState>,
         assignments: &mut FileAssignments<S>,
@@ -540,34 +538,34 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 stream.resume_stream();
                 false
             }
-            Mutation::Load {
-                source_id: load_source_id,
-                attempt,
-                action,
-            } if *load_source_id == source_id => match action {
-                LoadAction::Start => {
-                    tracing::info!(
-                        ?barrier.epoch,
-                        source_id = %source_id,
-                        is_checkpoint = barrier.is_checkpoint(),
-                        "load started"
-                    );
-                    assignments.start(*attempt).await?;
-                    state.start_load(assignments.pending().await?);
-                    stream.replace_data_stream(stream::pending().boxed());
-                    true
+            Mutation::Load { target, action } if target.addresses(source_id, fragment_id) => {
+                match action {
+                    LoadAction::Start => {
+                        tracing::info!(
+                            ?barrier.epoch,
+                            source_id = %source_id,
+                            is_checkpoint = barrier.is_checkpoint(),
+                            "load started"
+                        );
+
+                        assignments.start(target.attempt).await?;
+                        state.start_load(assignments.pending().await?);
+                        stream.replace_data_stream(stream::pending().boxed());
+
+                        true
+                    }
+                    LoadAction::ListFinish => {
+                        tracing::info!(
+                            ?barrier.epoch,
+                            source_id = %source_id,
+                            is_checkpoint = barrier.is_checkpoint(),
+                            "listing finished, reading the remaining files"
+                        );
+                        state.finish_listing();
+                        false
+                    }
                 }
-                LoadAction::ListFinish => {
-                    tracing::info!(
-                        ?barrier.epoch,
-                        source_id = %source_id,
-                        is_checkpoint = barrier.is_checkpoint(),
-                        "listing finished, reading the remaining files"
-                    );
-                    state.finish_listing();
-                    false
-                }
-            },
+            }
             _ => false,
         })
     }

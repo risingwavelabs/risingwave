@@ -416,7 +416,7 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn list_unfinished_bounded_jobs(&self) -> MetaResult<HashMap<JobId, SourceId>> {
+    pub async fn list_unfinished_bounded_jobs(&self) -> MetaResult<HashMap<JobId, Vec<SourceId>>> {
         self.catalog_controller.list_unfinished_bounded_jobs().await
     }
 

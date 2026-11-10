@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
 use chrono::NaiveDateTime;
@@ -369,7 +369,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
-    pub bounded_load_source: Option<SourceId>,
+    pub bounded_load_sources: BTreeSet<SourceId>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
@@ -570,9 +570,10 @@ pub enum Command {
         staging_table_id: TableId,
         trigger_time: NaiveDateTime,
     },
-    /// Seals the listing of the load of `source_id`: its readers finish once their assigned
-    /// input is read.
+    /// Seals the listing of the load of `source_id` in `job_id`: its readers finish once their
+    /// assigned input is read.
     ListFinish {
+        job_id: JobId,
         source_id: SourceId,
         attempt: u64,
     },
@@ -691,8 +692,15 @@ impl std::fmt::Display for Command {
                 "Refresh: {} (source: {}, cycle: {})",
                 table_id, associated_source_id, trigger_time
             ),
-            Command::ListFinish { source_id, attempt } => {
-                write!(f, "ListFinish: {source_id} (attempt: {attempt})")
+            Command::ListFinish {
+                job_id,
+                source_id,
+                attempt,
+            } => {
+                write!(
+                    f,
+                    "ListFinish: {job_id} (source: {source_id}, attempt: {attempt})"
+                )
             }
             Command::LoadFinish {
                 table_id,
@@ -1452,24 +1460,46 @@ impl Command {
         }
     }
 
-    /// Build the `Load { Start }` mutation for load `attempt` of `source_id`.
-    pub(super) fn start_load_mutation(source_id: SourceId, attempt: u64) -> Mutation {
-        Self::load_mutation(source_id, attempt, PbLoadAction::Start(Default::default()))
-    }
-
-    /// Build the `Load { ListFinish }` mutation for load `attempt` of `source_id`.
-    pub(super) fn list_finish_mutation(source_id: SourceId, attempt: u64) -> Mutation {
+    /// Build the `Load { Start }` mutation for load `attempt` of `source_id` in the job of
+    /// `fragment_ids`.
+    pub(super) fn start_load_mutation(
+        source_id: SourceId,
+        attempt: u64,
+        fragment_ids: Vec<FragmentId>,
+    ) -> Mutation {
         Self::load_mutation(
             source_id,
             attempt,
+            fragment_ids,
+            PbLoadAction::Start(Default::default()),
+        )
+    }
+
+    /// Build the `Load { ListFinish }` mutation for load `attempt` of `source_id` in the job of
+    /// `fragment_ids`.
+    pub(super) fn list_finish_mutation(
+        source_id: SourceId,
+        attempt: u64,
+        fragment_ids: Vec<FragmentId>,
+    ) -> Mutation {
+        Self::load_mutation(
+            source_id,
+            attempt,
+            fragment_ids,
             PbLoadAction::ListFinish(Default::default()),
         )
     }
 
-    fn load_mutation(source_id: SourceId, attempt: u64, action: PbLoadAction) -> Mutation {
+    fn load_mutation(
+        source_id: SourceId,
+        attempt: u64,
+        fragment_ids: Vec<FragmentId>,
+        action: PbLoadAction,
+    ) -> Mutation {
         Mutation::Load(LoadMutation {
             load_id: Some(LoadId { source_id, attempt }),
             action: Some(action),
+            fragment_ids,
         })
     }
 

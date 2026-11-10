@@ -534,11 +534,11 @@ impl DatabaseCheckpointControl {
         // upstream barrier into the same partial graph a second time.
         let mut skip_forward_to_iceberg_job = None;
 
-        if let Some(Command::CreateStreamingJob { info, .. }) = &command
-            && let Some(source_id) = info.bounded_load_source
-        {
-            self.database_info
-                .register_bounded_load(info.streaming_job.id(), source_id);
+        if let Some(Command::CreateStreamingJob { info, .. }) = &command {
+            for &source_id in &info.bounded_load_sources {
+                self.database_info
+                    .register_bounded_load(info.streaming_job.id(), source_id);
+            }
         }
 
         // Each variant handles its own pre-apply, edge building, mutation generation,
@@ -1641,7 +1641,11 @@ impl DatabaseCheckpointControl {
                 trigger_time,
             }) => {
                 let attempt = barrier_info.curr_epoch();
-                let mutation = Some(Command::start_load_mutation(associated_source_id, attempt));
+                let mutation = Some(Command::start_load_mutation(
+                    associated_source_id,
+                    attempt,
+                    self.database_info.job_fragment_ids(table_id.as_job_id()),
+                ));
                 let actors = RefreshCycleActors::from_fragments(
                     self.database_info.job_fragment_infos(table_id.as_job_id()),
                 );
@@ -1663,8 +1667,16 @@ impl DatabaseCheckpointControl {
                 )
             }
 
-            Some(Command::ListFinish { source_id, attempt }) => {
-                let mutation = Some(Command::list_finish_mutation(source_id, attempt));
+            Some(Command::ListFinish {
+                job_id,
+                source_id,
+                attempt,
+            }) => {
+                let mutation = Some(Command::list_finish_mutation(
+                    source_id,
+                    attempt,
+                    self.database_info.job_fragment_ids(job_id),
+                ));
                 self.apply_simple_command(mutation, "ListFinish")
             }
 
@@ -2006,11 +2018,15 @@ impl DatabaseCheckpointControl {
                                 .contains_key(&job_id)
                         });
 
-                        self.database_info
-                            .take_pending_bounded_load_start()
-                            .map(|source_id| {
-                                Command::start_load_mutation(source_id, BOUNDED_LOAD_ATTEMPT)
-                            })
+                        self.database_info.take_pending_bounded_load_start().map(
+                            |(job_id, source_id)| {
+                                Command::start_load_mutation(
+                                    source_id,
+                                    BOUNDED_LOAD_ATTEMPT,
+                                    self.database_info.job_fragment_ids(job_id),
+                                )
+                            },
+                        )
                     } else {
                         Some(PbMutation::StartFragmentBackfill(
                             PbStartFragmentBackfillMutation { fragment_ids },

@@ -15,6 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::mem::take;
 
+use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
@@ -39,6 +40,7 @@ use crate::controller::fragment::InflightFragmentInfo;
 pub(super) enum BoundedLoadAction {
     ListFinish {
         database_id: DatabaseId,
+        job_id: JobId,
         source_id: SourceId,
     },
     Complete {
@@ -152,6 +154,7 @@ impl BoundedLoadTracker {
 
                     BoundedLoadAction::ListFinish {
                         database_id: self.database_id,
+                        job_id: self.job_id,
                         source_id: self.source_id,
                     }
                 })
@@ -177,6 +180,10 @@ impl BoundedLoadTracker {
         };
 
         self.actions.extend(action);
+    }
+
+    pub fn has_actor(&self, actor_id: ActorId) -> bool {
+        self.listers.contains(&actor_id) || self.readers.contains(&actor_id)
     }
 
     /// Takes the queued actions, once their checkpoint commits.
@@ -217,7 +224,7 @@ impl BoundedLoads {
         &mut self,
         database_id: DatabaseId,
         jobs: &HashMap<JobId, InflightStreamingJobInfo>,
-    ) -> Option<SourceId> {
+    ) -> Option<(JobId, SourceId)> {
         let ((job_id, source_id), tracker) = self
             .loads
             .iter_mut()
@@ -231,16 +238,13 @@ impl BoundedLoads {
             fragments,
         ));
 
-        Some(*source_id)
+        Some((*job_id, *source_id))
     }
 
     pub fn apply_progress(&mut self, report: &LoadReport) {
-        if let Some(tracker) = self
-            .loads
-            .values_mut()
-            .flatten()
-            .find(|tracker| tracker.source_id == report.source_id)
-        {
+        if let Some(tracker) = self.loads.values_mut().flatten().find(|tracker| {
+            tracker.source_id == report.source_id && tracker.has_actor(report.actor_id)
+        }) {
             tracker.apply_progress(report);
         }
     }
@@ -311,7 +315,7 @@ fn bounded_roles<'a>(
 pub(crate) async fn load_unfinished_bounded_jobs(
     conn: &impl ConnectionTrait,
     database_id: Option<DatabaseId>,
-) -> MetaResult<HashMap<JobId, SourceId>> {
+) -> MetaResult<HashMap<JobId, Vec<SourceId>>> {
     let mut query = bounded_job::Entity::find()
         .select_only()
         .column(bounded_job::Column::JobId)
@@ -329,13 +333,13 @@ pub(crate) async fn load_unfinished_bounded_jobs(
         .all(conn)
         .await?
         .into_iter()
-        .collect())
+        .into_group_map())
 }
 
-/// Returns the bounded source that the fragments of a new job read, if any.
-pub(crate) fn bounded_load_source<'a>(
+/// Returns the bounded sources that the fragments of a new job read.
+pub(crate) fn bounded_load_sources<'a>(
     fragments: impl IntoIterator<Item = &'a StreamNode>,
-) -> MetaResult<Option<SourceId>> {
+) -> MetaResult<BTreeSet<SourceId>> {
     let mut readers = vec![];
 
     for nodes in fragments {
@@ -366,24 +370,23 @@ pub(crate) fn bounded_load_source<'a>(
         }
     }
 
-    if sources.len() > 1 {
-        bail!("a job can load at most one bounded source, found {sources:?}");
-    }
-
-    Ok(sources.pop_first())
+    Ok(sources)
 }
 
-pub(crate) async fn insert_bounded_job(
+pub(crate) async fn insert_bounded_jobs(
     conn: &impl ConnectionTrait,
     job_id: JobId,
-    source_id: SourceId,
+    source_ids: impl IntoIterator<Item = SourceId>,
 ) -> MetaResult<()> {
-    bounded_job::Entity::insert(bounded_job::ActiveModel {
-        job_id: ActiveValue::Set(job_id),
-        source_id: ActiveValue::Set(source_id),
-        status: ActiveValue::Set(BoundedJobStatus::Loading),
-        completed_at: ActiveValue::Set(None),
-    })
+    bounded_job::Entity::insert_many(source_ids.into_iter().map(|source_id| {
+        bounded_job::ActiveModel {
+            job_id: ActiveValue::Set(job_id),
+            source_id: ActiveValue::Set(source_id),
+            status: ActiveValue::Set(BoundedJobStatus::Loading),
+            completed_at: ActiveValue::Set(None),
+        }
+    }))
+    .on_empty_do_nothing()
     .exec(conn)
     .await?;
 
@@ -552,12 +555,16 @@ mod tests {
         assert_eq!(tracker.take_actions(), vec![fail()]);
     }
 
-    /// The bounded source comes from the fragments that read it, and streaming sources are skipped.
+    /// The bounded sources come from the fragments that read them, and streaming sources are
+    /// skipped.
     #[test]
-    fn test_bounded_load_source() {
+    fn test_bounded_load_sources() {
         let fragments = two_phase();
         let nodes = fragments.iter().map(|fragment| &fragment.nodes);
-        assert_eq!(bounded_load_source(nodes).unwrap(), Some(SOURCE_ID));
+        assert_eq!(
+            bounded_load_sources(nodes).unwrap(),
+            BTreeSet::from([SOURCE_ID])
+        );
 
         let streaming = PbStreamNode {
             node_body: Some(NodeBody::Source(Box::new(SourceNode {
@@ -568,7 +575,7 @@ mod tests {
             }))),
             ..Default::default()
         };
-        assert_eq!(bounded_load_source([&streaming]).unwrap(), None);
+        assert!(bounded_load_sources([&streaming]).unwrap().is_empty());
     }
 
     #[test]
@@ -585,7 +592,7 @@ mod tests {
         assert!(loads.has_pending_start(&jobs));
         assert_eq!(
             loads.take_pending_start(DATABASE_ID, &jobs),
-            Some(SOURCE_ID)
+            Some((JOB_ID, SOURCE_ID))
         );
         assert!(!loads.has_pending_start(&jobs));
         assert_eq!(loads.take_pending_start(DATABASE_ID, &jobs), None);
@@ -599,7 +606,7 @@ mod tests {
         loads.register(JOB_ID, SOURCE_ID);
         assert_eq!(
             loads.take_pending_start(DATABASE_ID, &jobs),
-            Some(SOURCE_ID)
+            Some((JOB_ID, SOURCE_ID))
         );
 
         loads.register(JOB_ID, SOURCE_ID);
@@ -637,6 +644,7 @@ mod tests {
     fn list_finish() -> BoundedLoadAction {
         BoundedLoadAction::ListFinish {
             database_id: DATABASE_ID,
+            job_id: JOB_ID,
             source_id: SOURCE_ID,
         }
     }

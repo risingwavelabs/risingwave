@@ -32,7 +32,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
+use risingwave_connector::source::iceberg::{IcebergBoundedScan, IcebergTimeTravelInfo};
 use risingwave_sqlparser::ast::AsOf;
 use thiserror_ext::AsReport;
 
@@ -111,10 +111,7 @@ impl Planner {
     /// can't read a fixed snapshot, and its plan would silently read the latest data instead.
     /// `FOR SYSTEM_TIME AS OF PROCTIME()` stays allowed: it marks the lookup side of a temporal join.
     fn check_no_time_travel_in_stream(&self, as_of: Option<&AsOf>) -> Result<()> {
-        let is_stream = matches!(
-            self.plan_for(),
-            PlanFor::Stream | PlanFor::StreamIcebergEngineInternal
-        );
+        let is_stream = self.plan_for().is_stream();
         let is_time_travel = matches!(
             as_of,
             Some(
@@ -424,7 +421,27 @@ impl Planner {
             )
             .into())
         } else {
-            let as_of = source.as_of.clone();
+            let mut as_of = source.as_of.clone();
+
+            if let Some(scan) = source.catalog.ingest_mode.iceberg_bounded_scan() {
+                if as_of.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "AS OF on a bounded source is not supported".to_owned(),
+                        "A bounded source always reads its pinned snapshot. Remove the AS OF clause"
+                            .to_owned(),
+                    )
+                    .into());
+                }
+
+                if self.plan_for().is_batch() {
+                    as_of = Some(match scan {
+                        IcebergBoundedScan::Snapshot { snapshot_id } => {
+                            AsOf::VersionNum(snapshot_id)
+                        }
+                    });
+                }
+            }
+
             self.check_no_time_travel_in_stream(as_of.as_ref())?;
             match as_of {
                 None

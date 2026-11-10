@@ -357,6 +357,7 @@ impl GlobalRefreshManager {
         );
         let command = match stage {
             RefreshStage::List => Command::ListFinish {
+                job_id: table_id.as_job_id(),
                 source_id: associated_source_id,
                 attempt,
             },
