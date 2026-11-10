@@ -48,7 +48,7 @@
     select cnt from v order by cnt;
   logical_plan: |-
     LogicalProject { exprs: [v.cnt] }
-    └─LogicalScan { table: v, columns: [v.cnt, v._rw_timestamp], cardinality: 0..=1 }
+    └─LogicalScan { table: v, columns: [v.cnt, v._rw_timestamp], cardinality: 1..=1 }
   batch_plan: |-
     BatchExchange { order: [v.cnt ASC], dist: Single }
     └─BatchSort { order: [v.cnt ASC] }

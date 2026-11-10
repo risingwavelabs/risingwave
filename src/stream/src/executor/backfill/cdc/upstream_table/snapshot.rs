@@ -365,7 +365,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_connector::source::cdc::external::mysql::MySqlExternalTableReader;
+    use risingwave_connector::source::cdc::external::mysql::MysqlExternalTableReader;
     use risingwave_connector::source::cdc::external::{
         ExternalTableConfig, ExternalTableReader, SchemaTableName,
     };
@@ -394,7 +394,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema.clone(), vec![0])
+        let reader = MysqlExternalTableReader::new(config, rw_schema.clone(), vec![0])
             .await
             .unwrap();
 

@@ -77,6 +77,13 @@ pub struct BackupManager {
     meta_metrics: Arc<MetaMetrics>,
     /// (job id, status, message)
     latest_job_info: ArcSwap<(MetaBackupJobId, BackupJobStatus, String)>,
+    #[cfg(test)]
+    pub(crate) snapshot_captured: tokio::sync::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
 }
 
 impl BackupManager {
@@ -160,6 +167,8 @@ impl BackupManager {
             metrics: BackupManagerMetrics::default(),
             meta_metrics,
             latest_job_info: ArcSwap::from_pointee((0, BackupJobStatus::NotFound, "".into())),
+            #[cfg(test)]
+            snapshot_captured: Default::default(),
         }
     }
 
@@ -356,6 +365,14 @@ impl BackupWorker {
                 .build(job_id, hummock_version_builder)
                 .await?;
             let snapshot = snapshot_builder.finish()?;
+            #[cfg(test)]
+            {
+                let gate = backup_manager_clone.snapshot_captured.lock().await.take();
+                if let Some((captured, publish)) = gate {
+                    captured.send(()).unwrap();
+                    publish.await.unwrap();
+                }
+            }
             backup_manager_clone
                 .backup_store
                 .load()

@@ -437,6 +437,10 @@ pub mod default {
             1024
         }
 
+        pub fn iceberg_update_ordered_max_tasks() -> u64 {
+            16
+        }
+
         pub fn iceberg_sink_positional_delete_cache_size() -> usize {
             1024
         }
@@ -689,6 +693,58 @@ pub mod tests {
         {
             item_doc.default = format!("{}", value);
         }
+    }
+
+    #[test]
+    fn test_opendal_chunked_streaming_read_config() {
+        let config: ObjectStoreConfig = toml::from_str("").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 1);
+
+        let config: ObjectStoreConfig = toml::from_str(
+            "opendal_streaming_read_chunk_size = 1024\nopendal_streaming_read_chunk_concurrency = 4",
+        )
+        .unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 1024);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 4);
+
+        let config: ObjectStoreConfig =
+            toml::from_str("opendal_streaming_read_chunk_size = 0").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+    }
+
+    #[test]
+    fn test_http_client_rotation_config() {
+        for (input, expected) in [
+            ("", None),
+            ("http_client_rotation_interval_ms = \"\"", None),
+            ("http_client_rotation_interval_ms = 60000", Some(60000)),
+        ] {
+            let config: RwConfig =
+                toml::from_str(&format!("[storage.object_store.s3]\n{input}")).unwrap();
+            assert_eq!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .http_client_rotation_interval_ms,
+                expected
+            );
+            let roundtrip: RwConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(
+                roundtrip
+                    .storage
+                    .object_store
+                    .s3
+                    .http_client_rotation_interval_ms,
+                expected
+            );
+        }
+        let error = toml::from_str::<RwConfig>(
+            "[storage.object_store.s3]\nhttp_client_rotation_interval_ms = 0",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must be greater than 0"));
     }
 
     #[test]

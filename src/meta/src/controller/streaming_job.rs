@@ -38,10 +38,13 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type, match_sink_name_str,
+};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
@@ -231,6 +234,30 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
             specific_resource_group: model.specific_resource_group,
         }
     }
+}
+
+fn update_source_node_rate_limit(
+    node: &mut PbNodeBody,
+    rate_limit: Option<u32>,
+) -> MetaResult<bool> {
+    let (properties, current_limit) = match node {
+        PbNodeBody::Source(node) => match &mut node.source_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        PbNodeBody::StreamFsFetch(node) => match &mut node.node_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        _ => return Ok(false),
+    };
+    if properties.is_iceberg_update_source() {
+        return Err(MetaError::invalid_parameter(
+            "Iceberg streaming_updates does not support rate limiting",
+        ));
+    }
+    *current_limit = rate_limit;
+    Ok(true)
 }
 
 fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -> MetaResult<bool> {
@@ -2576,6 +2603,15 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
+        if source
+            .with_properties
+            .inner_ref()
+            .is_iceberg_update_source()
+        {
+            return Err(MetaError::invalid_parameter(
+                "Iceberg streaming_updates does not support rate limiting",
+            ));
+        }
         let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id.as_job_id()]
@@ -2971,14 +3007,21 @@ impl CatalogController {
 
         // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
         if !skip_alter_on_fly_check {
-            let prop_keys: Vec<String> = alter_props
-                .keys()
-                .chain(alter_secret_refs.keys())
-                .cloned()
-                .collect();
-            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-                &connector, &prop_keys,
-            )?;
+            dispatch_cdc_source_type!(
+                CdcSourceType::from(connector.as_str()),
+                T,
+                T::check_alter_with_options(&alter_props, &alter_secret_refs)?,
+                {
+                    let prop_keys: Vec<String> = alter_props
+                        .keys()
+                        .chain(alter_secret_refs.keys())
+                        .cloned()
+                        .collect();
+                    risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                        &connector, &prop_keys,
+                    )?
+                }
+            );
         }
 
         let mut options_with_secret = WithOptionsSecResolved::new(
@@ -3802,20 +3845,15 @@ impl CatalogController {
             let mut found = Ok(false);
             match throttle_type {
                 ThrottleType::Source => {
-                    visit_stream_node_mut(stream_node, |node| match node {
-                        PbNodeBody::Source(node) => {
-                            if let Some(node_inner) = &mut node.source_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                    visit_stream_node_mut(stream_node, |node| {
+                        if found.is_err() {
+                            return;
                         }
-                        PbNodeBody::StreamFsFetch(node) => {
-                            if let Some(node_inner) = &mut node.node_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                        match update_source_node_rate_limit(node, rate_limit) {
+                            Ok(true) => found = Ok(true),
+                            Ok(false) => {}
+                            Err(err) => found = Err(err),
                         }
-                        _ => {}
                     });
                 }
                 ThrottleType::Backfill => {

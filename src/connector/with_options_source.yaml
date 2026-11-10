@@ -185,6 +185,11 @@ GcsProperties:
     default: Default::default
 IcebergProperties:
   fields:
+  - name: streaming_updates
+    field_type: bool
+    comments: Opt in to Insert/Delete ingestion of RisingWave PK-index sink output.
+    required: false
+    default: Default::default
   - name: catalog.type
     field_type: String
     required: false
@@ -531,11 +536,6 @@ KafkaProperties:
   - name: properties.sasl.kerberos.principal
     field_type: String
     comments: Client's Kerberos principal name under SASL/GSSAPI.
-    required: false
-    allow_alter_on_fly: true
-  - name: properties.sasl.kerberos.kinit.cmd
-    field_type: String
-    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
     required: false
     allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin

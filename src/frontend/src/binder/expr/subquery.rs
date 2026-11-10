@@ -35,6 +35,6 @@ impl Binder {
         {
             bail_bind_error!("Subquery must return only one column");
         }
-        Ok(Subquery::new(query, kind).into())
+        Ok(Subquery::new(query, kind, self.context.scope).into())
     }
 }
