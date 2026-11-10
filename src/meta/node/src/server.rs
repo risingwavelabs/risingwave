@@ -246,7 +246,7 @@ pub async fn rpc_serve_with_store(
     }
 
     // Run the leader service.
-    let result = start_service_as_election_leader(
+    let result = Box::pin(start_service_as_election_leader(
         meta_store_impl,
         address_info,
         max_cluster_heartbeat_interval,
@@ -256,7 +256,7 @@ pub async fn rpc_serve_with_store(
         server_config,
         election_client,
         shutdown,
-    )
+    ))
     .await;
 
     // Leader service has stopped, shutdown the election service to gracefully resign.

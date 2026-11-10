@@ -522,6 +522,18 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::http_concurrent_limit")]
     pub http_concurrent_limit: usize,
 
+    /// Maximum bytes per request for fully buffered `OpenDAL` streaming reads.
+    /// 0 (the default) disables chunking.
+    /// Each chunk uses the existing `OpenDAL` streaming read retry and timeout layers.
+    /// Other object store backends are unaffected.
+    #[serde(default)]
+    pub opendal_streaming_read_chunk_size: usize,
+
+    /// Maximum concurrent range requests when `opendal_streaming_read_chunk_size` is positive.
+    /// Defaults to 1 for sequential reads. `OpenDAL` treats 0 as 1.
+    #[serde(default = "default::object_store_config::opendal_streaming_read_chunk_concurrency")]
+    pub opendal_streaming_read_chunk_concurrency: usize,
+
     // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
@@ -1341,6 +1353,10 @@ pub mod default {
         const DEFAULT_REQ_BACKOFF_INTERVAL_MS: u64 = 1000; // 1s
         const DEFAULT_REQ_BACKOFF_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
         const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 3;
+
+        pub fn opendal_streaming_read_chunk_concurrency() -> usize {
+            1
+        }
 
         pub fn set_atomic_write_dir() -> bool {
             false
