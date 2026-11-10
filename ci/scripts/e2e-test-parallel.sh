@@ -43,6 +43,7 @@ python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 mode=ci-3streaming-2serving-3fe
 start_cluster() {
     risedev ci-start $mode
+    bash ci/scripts/wait-for-auto-parallelism.sh
 }
 
 kill_cluster() {

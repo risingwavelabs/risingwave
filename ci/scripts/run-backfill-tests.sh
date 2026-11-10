@@ -74,6 +74,7 @@ restart_cluster() {
   kill_cluster
   rename_logs_with_prefix "before-restart"
   risedev dev $CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
 }
 
 restart_cn() {
@@ -105,6 +106,7 @@ restart_cn() {
 test_snapshot_and_upstream_read() {
   echo "--- e2e, ci-backfill, test_snapshot_and_upstream_read"
   risedev ci-start ci-backfill
+  bash ci/scripts/wait-for-auto-parallelism.sh
   run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
@@ -130,6 +132,7 @@ test_snapshot_and_upstream_read() {
 test_backfill_tombstone() {
   echo "--- e2e, test_backfill_tombstone"
   risedev ci-start $CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
   risedev psql -c "
   CREATE TABLE tomb (v1 int)
   WITH (
@@ -162,6 +165,7 @@ test_backfill_tombstone() {
 test_replication_with_column_pruning() {
   echo "--- e2e, test_replication_with_column_pruning"
   RUST_LOG="risingwave_storage::hummock::event_handler::hummock_event_handler=error" risedev ci-start ci-backfill
+  bash ci/scripts/wait-for-auto-parallelism.sh
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
   # Provide snapshot
   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
@@ -183,6 +187,7 @@ test_replication_with_column_pruning() {
 test_sink_backfill_recovery() {
   echo "--- e2e, test_sink_backfill_recovery"
   risedev ci-start $CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
 
   # Check progress
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
@@ -213,6 +218,7 @@ test_sink_backfill_recovery() {
 test_sink_backfill_order_validation() {
   echo "--- e2e, test_sink_backfill_order_validation"
   risedev ci-start ci-backfill
+  bash ci/scripts/wait-for-auto-parallelism.sh
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/test_sink_backfill_order_validation.slt'
   kill_cluster
 }
@@ -220,6 +226,7 @@ test_sink_backfill_order_validation() {
 test_arrangement_backfill_snapshot_and_upstream_runtime() {
   echo "--- e2e, test_arrangement_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
@@ -236,6 +243,7 @@ test_arrangement_backfill_snapshot_and_upstream_runtime() {
 test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
   echo "--- e2e, test_no_shuffle_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_upstream.slt' 2>&1 1>out.log &
@@ -252,6 +260,7 @@ test_no_shuffle_backfill_snapshot_and_upstream_runtime() {
 test_backfill_snapshot_runtime() {
   echo "--- e2e, test_backfill_snapshot_runtime, $RUNTIME_CLUSTER_PROFILE"
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
@@ -267,6 +276,7 @@ test_backfill_snapshot_runtime() {
 test_backfill_snapshot_with_limited_storage_throughput() {
   echo "--- e2e, test_backfill_snapshot_with_limited_storage_throughput, $MINIO_RATE_LIMIT_CLUSTER_PROFILE"
   risedev ci-start $MINIO_RATE_LIMIT_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
@@ -281,6 +291,7 @@ test_backfill_snapshot_with_limited_storage_throughput() {
 test_backfill_snapshot_with_wider_rows() {
   echo "--- e2e, test_backfill_snapshot_with_wider_rows, $RUNTIME_CLUSTER_PROFILE"
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_wide_table.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/insert_wide_snapshot.slt'
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt'
@@ -295,6 +306,7 @@ test_snapshot_backfill() {
   echo "--- e2e, snapshot backfill test, $RUNTIME_CLUSTER_PROFILE"
 
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt'
 
@@ -339,6 +351,7 @@ test_snapshot_backfill() {
 test_scale_in() {
   echo "--- e2e, test_scale_in, 3cn -> 1cn"
   RUST_LOG=info risedev ci-start ci-3cn-1fe-with-recovery
+  bash ci/scripts/wait-for-auto-parallelism.sh
   risedev psql-env
   source .risingwave/config/psql-env
 
@@ -433,6 +446,7 @@ test_cross_db_snapshot_backfill() {
   echo "--- e2e, cross db snapshot backfill test, $RUNTIME_CLUSTER_PROFILE"
 
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/cross_db/cross_db_mv.slt'
 
@@ -443,6 +457,7 @@ test_locality_backfill() {
   echo "--- e2e, locality backfill test, $RUNTIME_CLUSTER_PROFILE"
 
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
+  bash ci/scripts/wait-for-auto-parallelism.sh
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/locality_backfill/*.slt'
 

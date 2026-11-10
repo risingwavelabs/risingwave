@@ -55,6 +55,7 @@ export VAULT_TOKEN="root-token"
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-inline-source-test
+bash ci/scripts/wait-for-auto-parallelism.sh
 
 # check if run debug only test
 if [ "$profile" == "ci-dev" ]; then
@@ -114,6 +115,7 @@ psql < ./e2e_test/source_legacy/cdc/postgres_cdc.sql
 echo "--- starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
+bash ci/scripts/wait-for-auto-parallelism.sh
 
 
 echo "--- mongodb cdc test"
@@ -140,6 +142,7 @@ echo "--- mysql offline schema change test done --- \n\n"
 echo "--- re-starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
+bash ci/scripts/wait-for-auto-parallelism.sh
 
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
 
@@ -184,6 +187,7 @@ unset RISINGWAVE_CI
 export RUST_LOG="risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info"
 
 risedev dev ci-1cn-1fe-with-recovery
+bash ci/scripts/wait-for-auto-parallelism.sh
 echo "> wait for cluster recovery finish"
 sleep 20
 echo "> check mviews after cluster recovery"
@@ -200,6 +204,7 @@ export RISINGWAVE_CI=true
 echo "--- e2e, ci-kafka-plus-pubsub, legacy kafka tests"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-kafka
+bash ci/scripts/wait-for-auto-parallelism.sh
 ./e2e_test/source_legacy/basic/scripts/prepare_ci_kafka.sh
 risedev slt './e2e_test/source_legacy/basic/*.slt'
 risedev slt './e2e_test/source_legacy/basic/old_row_format_syntax/*.slt'
@@ -213,6 +218,7 @@ echo "--- cluster killed "
 
 echo "--- starting risingwave cluster for webhook source test"
 risedev ci-start ci-1cn-1fe-with-recovery
+bash ci/scripts/wait-for-auto-parallelism.sh
 sleep 5
 # check results
 risedev slt "e2e_test/webhook/webhook_source.slt"
@@ -220,6 +226,7 @@ risedev slt "e2e_test/webhook/webhook_source.slt"
 risedev kill
 
 risedev dev ci-1cn-1fe-with-recovery
+bash ci/scripts/wait-for-auto-parallelism.sh
 echo "--- wait for cluster recovery finish"
 sleep 20
 risedev slt "e2e_test/webhook/webhook_source_recovery.slt"

@@ -51,11 +51,11 @@ cluster_start() {
     risedev clean-data
     risedev pre-start-dev
     start_single_node "$PREFIX_LOG"/single-node.log &
-    # Give it a while to make sure the single-node is ready.
-    sleep 30
+    wait_single_node
   else
     risedev ci-start "$mode"
   fi
+  bash ci/scripts/wait-for-auto-parallelism.sh
 }
 
 cluster_stop() {
@@ -148,6 +148,7 @@ cluster_stop
 if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
   echo "--- e2e, ci-3cn-1fe-with-recovery, error ui"
   risedev ci-start ci-3cn-1fe-with-recovery
+  bash ci/scripts/wait-for-auto-parallelism.sh
   risedev slt -p 4566 -d dev './e2e_test/error_ui/simple/**/*.slt'
   risedev slt -p 4566 -d dev -e postgres-extended './e2e_test/error_ui/extended/**/*.slt'
 

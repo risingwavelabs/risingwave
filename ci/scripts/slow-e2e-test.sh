@@ -31,6 +31,7 @@ echo "--- e2e, $mode, slow tests"
 python3 -m pip install --break-system-packages -r e2e_test/udf/remote_python/requirements.txt
 RUST_LOG="info" \
 risedev ci-start "$mode"
+bash ci/scripts/wait-for-auto-parallelism.sh
 risedev slt -p 4566 -d dev './e2e_test/slow_tests/**/*.slt'
 
 echo "--- Kill cluster"
@@ -39,6 +40,7 @@ risedev ci-kill
 echo "--- e2e, $mode, backfill"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
 risedev ci-start "$mode"
+bash ci/scripts/wait-for-auto-parallelism.sh
 
 risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 

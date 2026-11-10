@@ -762,6 +762,7 @@ mod tests {
         assert!(reader.read_bytes().await.is_none());
     }
 
+    #[cfg(not(madsim))] // OpenDAL's TimeoutLayer requires the real Tokio runtime.
     #[tokio::test]
     async fn test_opendal_chunked_streaming_read_range_bounds() {
         use std::ops::Bound::{Excluded, Included, Unbounded};

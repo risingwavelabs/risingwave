@@ -593,13 +593,49 @@ impl Cluster {
             .ip([192, 168, 101, 1].into())
             .build();
 
-        Ok(Self {
+        let mut cluster = Self {
             config: conf,
             handle,
             client,
             ctl,
             sqlite_file_handle,
+        };
+
+        // Registration can finish before the scale monitor's delayed first control pass.
+        // Wait with an empty cluster so startup reconciliation cannot restart test actors.
+        let mut session = cluster.start_session();
+        let expected_workers = cluster.config.compute_nodes.to_string();
+        let worker_query = format!(
+            "SELECT count(*) FROM rw_catalog.rw_worker_nodes WHERE type = '{}' AND state = 'RUNNING'",
+            risingwave_pb::common::WorkerType::ComputeNode.as_str_name(),
+        );
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Ok(workers) = session.run(&worker_query).await
+                    && workers == expected_workers
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         })
+        .await
+        .map_err(|_| anyhow!("timed out waiting for all compute workers to register"))?;
+
+        let config = risingwave_common::config::load_config(
+            cluster.config.config_path.as_str(),
+            risingwave_common::config::NoOverride,
+        );
+        if !config.meta.disable_automatic_parallelism_control {
+            let settle_secs = config
+                .meta
+                .parallelism_control_trigger_first_delay_sec
+                .saturating_add(config.meta.parallelism_control_trigger_period_sec)
+                .saturating_add(5);
+            tokio::time::sleep(Duration::from_secs(settle_secs)).await;
+        }
+
+        Ok(cluster)
     }
 
     #[cfg_or_panic(madsim)]
