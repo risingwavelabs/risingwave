@@ -26,7 +26,7 @@ use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::schema::types::SchemaDescriptor;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
+use risingwave_common::array::{ArrayImpl, BytesArray, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::id::SinkId;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -287,7 +287,7 @@ impl CompactionResolverExecutor {
         let splits: Vec<OutputScanSplit> = futures::stream::iter(
             output_data_file_paths
                 .iter()
-                .map(|path| plan_output_file_splits(file_io, path)),
+                .map(|path| plan_output_file_splits(file_io, path, data_file_locator)),
         )
         .buffered(OUTPUT_FILE_OPEN_CONCURRENCY)
         .try_collect::<Vec<_>>()
@@ -345,6 +345,7 @@ impl CompactionResolverExecutor {
                 output_projection = Some(OutputTypeProjection::new(
                     chunk.data_types(),
                     &output_data_types,
+                    self.pk_data_types.len(),
                 )?);
             }
             yield output_projection
@@ -650,7 +651,8 @@ async fn scan_input_pks_at_positions(
 type OutputChunkSender = mpsc::Sender<Result<DataChunk, SinkError>>;
 
 /// Like the cast projection after an Iceberg engine-table scan, restores the writer's
-/// declared types using SQL casts. Build expressions once and reuse unchanged columns.
+/// declared PK types using SQL casts. Metadata columns must match exactly.
+/// Build expressions once and reuse unchanged columns.
 /// Delete-diff comparisons remain in physical types on both sides.
 struct OutputTypeProjection {
     input_types: Vec<DataType>,
@@ -662,7 +664,11 @@ struct OutputTypeProjection {
     reason = "PK index rebuilds must fail on cast errors instead of substituting NULL keys"
 )]
 impl OutputTypeProjection {
-    fn new(input_types: Vec<DataType>, output_types: &[DataType]) -> Result<Self, SinkError> {
+    fn new(
+        input_types: Vec<DataType>,
+        output_types: &[DataType],
+        pk_column_count: usize,
+    ) -> Result<Self, SinkError> {
         if input_types.len() != output_types.len() {
             return Err(SinkError::Iceberg(anyhow!(
                 "compaction resolver output column count mismatch: expected {}, got {}",
@@ -677,6 +683,11 @@ impl OutputTypeProjection {
             .map(|(index, (source, target))| {
                 if source == target {
                     return Ok(None);
+                }
+                if index >= pk_column_count {
+                    return Err(SinkError::Iceberg(anyhow!(
+                        "compaction resolver metadata column {index} type mismatch: expected {target}, got {source}"
+                    )));
                 }
                 build_func(
                     PbType::Cast,
@@ -720,6 +731,8 @@ impl OutputTypeProjection {
 /// One row group of an output data file, scanned by its own task.
 struct OutputScanSplit {
     path: Arc<str>,
+    /// UUID stored in the PK index, or `None` for legacy file paths.
+    file_uuid: Option<Uuid>,
     file_size: u64,
     /// The parquet footer, loaded once per file and shared by all of its splits.
     reader_metadata: ArrowReaderMetadata,
@@ -732,7 +745,11 @@ struct OutputScanSplit {
 async fn plan_output_file_splits(
     file_io: &FileIO,
     path: &str,
+    data_file_locator: Option<&PkIndexDataFileLocator>,
 ) -> Result<Vec<OutputScanSplit>, SinkError> {
+    let file_uuid = data_file_locator
+        .map(|locator| locator.file_uuid(path))
+        .transpose()?;
     let input_file = file_io.new_input(path)?;
     let file_metadata = input_file.metadata().await?;
     let file_size = file_metadata.size;
@@ -747,6 +764,7 @@ async fn plan_output_file_splits(
         .map(|(row_group, row_group_metadata)| {
             let split = OutputScanSplit {
                 path: path.clone(),
+                file_uuid,
                 file_size,
                 reader_metadata: reader_metadata.clone(),
                 row_group,
@@ -823,9 +841,14 @@ async fn scan_output_split_inner(
             .map_err(|e| anyhow!(e).context(format!("convert parquet batch of {path}")))?
             .project(&pk_order);
         let row_count = pk_chunk.capacity();
-        if let Some(chunk) =
-            survivor_chunk(pk_chunk, path, position, delete_diff_pk_set, &mut conflicts)
-            && chunk_tx.send(Ok(chunk)).await.is_err()
+        if let Some(chunk) = survivor_chunk(
+            pk_chunk,
+            path,
+            split.file_uuid,
+            position,
+            delete_diff_pk_set,
+            &mut conflicts,
+        ) && chunk_tx.send(Ok(chunk)).await.is_err()
         {
             return Ok(None);
         }
@@ -835,15 +858,17 @@ async fn scan_output_split_inner(
     Ok((!conflicts.is_empty()).then_some(conflicts))
 }
 
-/// Builds the survivor chunk `[pk_columns.., file_path, position]` of a batch of output rows whose
+/// Builds the survivor chunk `[pk_columns.., data_file, position]` of a batch of output rows whose
 /// first row is at `first_position` in `path`. Rows whose pk was deleted during the compaction
 /// window are recorded in `conflicts` instead. Returns `None` if no row survives.
+/// `data_file` is the UUID in UUID mode, or the path in legacy mode.
 ///
 /// The chunk is assembled column by column: the pk columns are reused as-is, so the common case
 /// where nothing was deleted never touches individual rows.
 fn survivor_chunk(
     pk_chunk: DataChunk,
     path: &str,
+    file_uuid: Option<Uuid>,
     first_position: i64,
     delete_diff_pk_set: &HashSet<OwnedRow>,
     conflicts: &mut DeleteVector,
@@ -869,9 +894,12 @@ fn survivor_chunk(
     }
 
     let (mut columns, _) = pk_chunk.into_parts();
-    columns.push(Arc::new(ArrayImpl::Utf8(
-        std::iter::repeat_n(path, row_count).collect::<Utf8Array>(),
-    )));
+    columns.push(Arc::new(match file_uuid {
+        Some(uuid) => ArrayImpl::Bytea(
+            std::iter::repeat_n(uuid.as_bytes().as_slice(), row_count).collect::<BytesArray>(),
+        ),
+        None => ArrayImpl::Utf8(std::iter::repeat_n(path, row_count).collect::<Utf8Array>()),
+    }));
     columns.push(Arc::new(ArrayImpl::Int64(positions.collect::<I64Array>())));
     let chunk = DataChunk::new(columns, visibility);
     Some(if chunk.is_vis_compacted() {
@@ -1002,8 +1030,15 @@ mod tests {
         let pk = |id: i64| OwnedRow::new(vec![Some(ScalarImpl::Int64(id))]);
         let mut conflicts = DeleteVector::default();
 
-        let chunk =
-            survivor_chunk(pk_chunk.clone(), "f", 10, &HashSet::new(), &mut conflicts).unwrap();
+        let chunk = survivor_chunk(
+            pk_chunk.clone(),
+            "f",
+            None,
+            10,
+            &HashSet::new(),
+            &mut conflicts,
+        )
+        .unwrap();
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
@@ -1016,7 +1051,8 @@ mod tests {
         assert!(conflicts.is_empty());
 
         let deleted = HashSet::from([pk(2)]);
-        let chunk = survivor_chunk(pk_chunk.clone(), "f", 10, &deleted, &mut conflicts).unwrap();
+        let chunk =
+            survivor_chunk(pk_chunk.clone(), "f", None, 10, &deleted, &mut conflicts).unwrap();
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
@@ -1029,7 +1065,7 @@ mod tests {
 
         let all_deleted = HashSet::from([pk(1), pk(2), pk(3)]);
         let mut conflicts = DeleteVector::default();
-        assert!(survivor_chunk(pk_chunk, "f", 0, &all_deleted, &mut conflicts).is_none());
+        assert!(survivor_chunk(pk_chunk, "f", None, 0, &all_deleted, &mut conflicts).is_none());
         assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![0, 1, 2]);
     }
 
@@ -1045,6 +1081,7 @@ mod tests {
         let chunk = restore_output_types(
             chunk,
             &[DataType::Int16, DataType::Varchar, DataType::Int64],
+            1,
         )
         .await
         .unwrap();
@@ -1061,30 +1098,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_restore_output_types_rejects_metadata_casts() {
+        for (input_types, output_types) in [
+            (
+                vec![DataType::Int32, DataType::Varchar, DataType::Int64],
+                vec![DataType::Int16, DataType::Bytea, DataType::Int64],
+            ),
+            (
+                vec![DataType::Int32, DataType::Bytea, DataType::Int64],
+                vec![DataType::Int16, DataType::Varchar, DataType::Int64],
+            ),
+            (
+                vec![DataType::Int32, DataType::Varchar, DataType::Int32],
+                vec![DataType::Int16, DataType::Varchar, DataType::Int64],
+            ),
+        ] {
+            assert!(
+                OutputTypeProjection::new(input_types.clone(), &output_types, 1).is_err(),
+                "must reject metadata casts from {input_types:?} to {output_types:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_restore_output_types_rejects_mismatches() {
         for value in [-32769, 32768] {
             let chunk = DataChunk::from_pretty(&format!("i\n{value}"));
             assert!(
-                restore_output_types(chunk, &[DataType::Int16])
+                restore_output_types(chunk, &[DataType::Int16], 1)
                     .await
                     .is_err()
             );
         }
         let chunk = DataChunk::from_pretty("i\n1");
         assert!(
-            restore_output_types(chunk.clone(), &[DataType::Bytea])
+            restore_output_types(chunk.clone(), &[DataType::Bytea], 1)
                 .await
                 .is_err()
         );
-        assert!(restore_output_types(chunk.clone(), &[]).await.is_err());
+        assert!(restore_output_types(chunk.clone(), &[], 1).await.is_err());
         assert_eq!(
-            restore_output_types(chunk.clone(), &[DataType::Int32])
+            restore_output_types(chunk.clone(), &[DataType::Int32], 1)
                 .await
                 .unwrap(),
             chunk
         );
         let projection =
-            OutputTypeProjection::new(vec![DataType::Int32], &[DataType::Int16]).unwrap();
+            OutputTypeProjection::new(vec![DataType::Int32], &[DataType::Int16], 1).unwrap();
         assert!(
             projection
                 .execute(DataChunk::from_pretty("T\nx"))
@@ -1096,8 +1156,9 @@ mod tests {
     async fn restore_output_types(
         chunk: DataChunk,
         output_types: &[DataType],
+        pk_column_count: usize,
     ) -> Result<DataChunk, SinkError> {
-        OutputTypeProjection::new(chunk.data_types(), output_types)?
+        OutputTypeProjection::new(chunk.data_types(), output_types, pk_column_count)?
             .execute(chunk)
             .await
     }
@@ -1138,7 +1199,7 @@ mod tests {
             let physical = IcebergArrowConvert.chunk_from_record_batch(&batch).unwrap();
             assert_ne!(physical.data_types(), original.data_types(), "{data_type}");
             assert_eq!(
-                restore_output_types(physical, std::slice::from_ref(&data_type))
+                restore_output_types(physical, std::slice::from_ref(&data_type), 1)
                     .await
                     .unwrap(),
                 original,
@@ -1150,6 +1211,16 @@ mod tests {
     #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
     #[tokio::test]
     async fn test_output_scan_preserves_positions_across_row_groups() {
+        check_output_scan_preserves_positions_across_row_groups(false).await;
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_output_scan_preserves_file_uuids_across_row_groups() {
+        check_output_scan_preserves_positions_across_row_groups(true).await;
+    }
+
+    async fn check_output_scan_preserves_positions_across_row_groups(stores_file_uuid: bool) {
         let pk_chunk = DataChunk::from_pretty(
             "i
              1
@@ -1176,14 +1247,18 @@ mod tests {
         writer.close().unwrap();
 
         let file_io = FileIO::new_with_memory();
-        let path = "memory:/output.parquet";
+        let path = "memory:/data/00112233-4455-6677-8899-aabbccddeeff.parquet";
+        let locator =
+            stores_file_uuid.then(|| PkIndexDataFileLocator::with_data_location("memory:/data"));
         file_io
             .new_output(path)
             .unwrap()
             .write(bytes.into())
             .await
             .unwrap();
-        let splits = plan_output_file_splits(&file_io, path).await.unwrap();
+        let splits = plan_output_file_splits(&file_io, path, locator.as_ref())
+            .await
+            .unwrap();
         assert_eq!(
             splits
                 .iter()
@@ -1217,18 +1292,37 @@ mod tests {
         drop(tx);
         let mut survivors = Vec::new();
         while let Some(chunk) = rx.recv().await {
+            let chunk = chunk.unwrap();
+            let data_file_column = chunk.column_at(1).clone();
+            let data_file_type = if stores_file_uuid {
+                DataType::Bytea
+            } else {
+                DataType::Varchar
+            };
             let chunk = restore_output_types(
-                chunk.unwrap(),
-                &[DataType::Int16, DataType::Varchar, DataType::Int64],
+                chunk,
+                &[DataType::Int16, data_file_type, DataType::Int64],
+                1,
             )
             .await
             .unwrap();
+            assert!(Arc::ptr_eq(chunk.column_at(1), &data_file_column));
             for row in chunk.rows() {
                 survivors.push((
                     row.datum_at(0).unwrap().into_int16(),
                     row.datum_at(2).unwrap().into_int64(),
                 ));
-                assert_eq!(row.datum_at(1).unwrap().into_utf8(), path);
+                if stores_file_uuid {
+                    assert_eq!(
+                        row.datum_at(1).unwrap().into_bytea(),
+                        &[
+                            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+                            0xcc, 0xdd, 0xee, 0xff,
+                        ]
+                    );
+                } else {
+                    assert_eq!(row.datum_at(1).unwrap().into_utf8(), path);
+                }
             }
         }
         survivors.sort_unstable();
