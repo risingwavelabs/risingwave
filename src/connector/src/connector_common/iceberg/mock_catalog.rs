@@ -41,7 +41,7 @@ mod test_tables {
         UnboundPartitionSpec,
     };
     use iceberg::table::Table;
-    use iceberg::{NamespaceIdent, Runtime, TableIdent};
+    use iceberg::{NamespaceIdent, Runtime, TableCommit, TableIdent};
     use parking_lot::Mutex;
 
     use super::MockCatalog;
@@ -97,6 +97,18 @@ mod test_tables {
             TABLES.lock().contains_key(ident) || matches!(ident.name(), "updates_v2" | "updates_v3")
         }
 
+        /// Apply a commit to a registered table. Returns the commit back if the table is not
+        /// registered.
+        pub(super) fn update_test_table(
+            commit: TableCommit,
+        ) -> Result<iceberg::Result<Table>, Box<TableCommit>> {
+            let mut tables = TABLES.lock();
+            let Some(table) = tables.get_mut(commit.identifier()) else {
+                return Err(Box::new(commit));
+            };
+            Ok(apply_commit(table, commit))
+        }
+
         pub(super) fn updates_table(name: &str, version: FormatVersion) -> Table {
             let schema = Schema::builder()
                 .with_fields(vec![
@@ -131,6 +143,30 @@ mod test_tables {
                 .build()
                 .unwrap()
         }
+    }
+
+    fn apply_commit(table: &mut Table, mut commit: TableCommit) -> iceberg::Result<Table> {
+        for requirement in commit.take_requirements() {
+            requirement.check(Some(table.metadata()))?;
+        }
+        let mut metadata_builder = table
+            .metadata()
+            .clone()
+            .into_builder(table.metadata_location().map(str::to_owned));
+        for update in commit.take_updates() {
+            metadata_builder = update.apply(metadata_builder)?;
+        }
+        let mut builder = Table::builder()
+            .identifier(table.identifier().clone())
+            .file_io(table.file_io().clone())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata_builder.build()?.metadata);
+        if let Some(location) = table.metadata_location() {
+            builder = builder.metadata_location(location);
+        }
+        let updated = builder.build()?;
+        *table = updated.clone();
+        Ok(updated)
     }
 }
 
@@ -364,7 +400,13 @@ impl CatalogV2 for MockCatalog {
     }
 
     /// Update a table to the catalog.
-    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
+    async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        #[cfg(any(test, feature = "test"))]
+        let commit = match Self::update_test_table(commit) {
+            Ok(result) => return result,
+            Err(commit) => *commit,
+        };
+        let _ = commit;
         todo!()
     }
 
