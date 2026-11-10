@@ -315,6 +315,30 @@ impl Condition {
         .unwrap()
     }
 
+    /// Split the condition expressions into 2 groups: those that cannot be pushed down a node
+    /// and those that can.
+    ///
+    /// A node computes each output row from a group of input rows, such as an aggregation group or
+    /// a window partition. An expression can be pushed down only if it gives the same
+    /// result for every input row in such a group, so that it keeps or drops whole groups.
+    ///
+    /// `columns` are the output columns that do not satisfy this, either because the node
+    /// computes them or because their values differ within a group.
+    ///
+    /// An expression is pushed only if it reads none of them and is pure,
+    /// since an impure expression can give different results even for identical inputs.
+    #[must_use]
+    pub fn split_pushable(self, columns: &FixedBitSet) -> (Self, Self) {
+        let [kept, pushed] = self.group_by::<_, 2>(|expr| {
+            let input_bits = expr.collect_input_refs(columns.len());
+            let index = expr.is_pure() && input_bits.is_disjoint(columns);
+
+            index as usize
+        });
+
+        (kept, pushed)
+    }
+
     /// Generate range scans from each arm of `OR` clause and merge them.
     /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
