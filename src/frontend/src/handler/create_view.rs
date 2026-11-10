@@ -134,3 +134,72 @@ pub async fn handle_create_view(
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))
 }
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::types::DataType;
+    use risingwave_pb::catalog::PbView;
+
+    use crate::test_utils::LocalFrontend;
+
+    /// A view binds its SQL again on each use. If its columns bind to other types than the
+    /// recorded ones, e.g. after a fix of the binder, the view keeps the recorded types.
+    #[tokio::test]
+    async fn test_view_keeps_recorded_column_types() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("create table t (x bigint, y bigint)")
+            .await
+            .unwrap();
+
+        // Record views as if an older binder had bound `x` to other types.
+        let session = frontend.session_ref();
+        let (database_id, schema_id) = session.get_database_and_schema_id_for_create(None).unwrap();
+        let view = |name: &str, x_type: DataType| PbView {
+            id: 0.into(),
+            schema_id,
+            database_id,
+            name: name.to_owned(),
+            properties: Default::default(),
+            owner: session.user_id(),
+            sql: "SELECT x, y FROM t".to_owned(),
+            columns: vec![
+                Field::with_name(x_type, "x").to_prost(),
+                Field::with_name(DataType::Int64, "y").to_prost(),
+            ],
+            created_at_epoch: None,
+            created_at_cluster_version: None,
+        };
+        {
+            let _guard = session.txn_begin_implicit();
+            let catalog_writer = session.catalog_writer().unwrap();
+            for (name, x_type) in [("v_int", DataType::Int32), ("v_bytea", DataType::Bytea)] {
+                catalog_writer
+                    .create_view(view(name, x_type), Default::default())
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let plan = frontend
+            .get_explain_output("explain select x, pg_typeof(x), y from v_int")
+            .await;
+        expect![[r#"
+            BatchExchange { order: [], dist: Single }
+            └─BatchProject { exprs: [t.x::Int32 as $expr1, 'integer':Varchar, t.y] }
+              └─BatchScan { table: t, columns: [x, y] }
+        "#]]
+        .assert_eq(&plan);
+
+        // `bigint` can't be cast to `bytea` in assignment context.
+        let err = frontend.run_sql("select x from v_bytea").await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("The SQL's schema is different from catalog's schema"),
+            "{}",
+            err
+        );
+    }
+}

@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    Engine, Field, debug_assert_column_ids_distinct, is_system_schema,
+    Engine, Field, Schema, debug_assert_column_ids_distinct, is_system_schema,
 };
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::iceberg::IcebergMetadataTableType;
@@ -31,9 +32,11 @@ use risingwave_sqlparser::ast::{AsOf, ObjectName, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
-use super::BoundShare;
+use super::{BoundShare, BoundSubquery};
 use crate::binder::relation::BoundShareInput;
-use crate::binder::{BindFor, Binder, Relation};
+use crate::binder::{
+    BindFor, Binder, BoundDistinct, BoundQuery, BoundSelect, BoundSetExpr, Relation,
+};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
@@ -42,7 +45,9 @@ use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, CatalogResult, DatabaseId, IndexCatalog, TableId};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::{ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
+use crate::utils::GroupBy;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
@@ -632,15 +637,15 @@ impl Binder {
 
         let columns = view_catalog.columns.clone();
 
-        if !itertools::equal(
-            query.schema().fields().iter().map(|f| &f.data_type),
-            view_catalog.columns.iter().map(|f| &f.data_type),
-        ) {
-            return Err(ErrorCode::BindError(format!(
-                "failed to bind view {}. The SQL's schema is different from catalog's schema sql: {}, bound schema: {:?}, catalog schema: {:?}",
-                view_catalog.name, view_catalog.sql, query.schema(), columns
-            )).into());
-        }
+        let query = match Self::cast_view_query(query, &columns) {
+            Ok(query) => query,
+            Err(query) => {
+                return Err(ErrorCode::BindError(format!(
+                    "failed to bind view {}. The SQL's schema is different from catalog's schema sql: {}, bound schema: {:?}, catalog schema: {:?}",
+                    view_catalog.name, view_catalog.sql, query.schema(), columns
+                )).into());
+            }
+        };
 
         let share_id = match self.shared_views.get(&view_catalog.id) {
             Some(share_id) => *share_id,
@@ -659,6 +664,63 @@ impl Binder {
             })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
+    }
+
+    /// A view binds its SQL again on each use, which can bind its columns to other types than the
+    /// recorded ones, e.g. after a fix of the binder. Keeps the recorded types by casting the
+    /// columns of `query` to them in assignment context, or returns `query` back if they differ in
+    /// number or a column can't be cast.
+    fn cast_view_query(
+        query: BoundQuery,
+        columns: &[Field],
+    ) -> std::result::Result<BoundQuery, BoundQuery> {
+        let fields = query.schema().fields().to_vec();
+        if fields.len() != columns.len() {
+            return Err(query);
+        }
+        if fields
+            .iter()
+            .zip_eq_fast(columns)
+            .all(|(field, column)| field.data_type == column.data_type)
+        {
+            return Ok(query);
+        }
+        let Ok(select_items) = fields
+            .iter()
+            .enumerate()
+            .zip_eq_fast(columns)
+            .map(|((index, field), column)| {
+                ExprImpl::from(InputRef::new(index, field.data_type.clone()))
+                    .cast_assign(&column.data_type)
+            })
+            .try_collect()
+        else {
+            return Err(query);
+        };
+        Ok(BoundQuery {
+            body: BoundSetExpr::Select(Box::new(BoundSelect {
+                distinct: BoundDistinct::All,
+                select_items,
+                aliases: columns
+                    .iter()
+                    .map(|column| Some(column.name.clone()))
+                    .collect(),
+                from: Some(Relation::Subquery(Box::new(BoundSubquery {
+                    query,
+                    lateral: false,
+                }))),
+                where_clause: None,
+                group_by: GroupBy::GroupKey(vec![]),
+                having: None,
+                window: HashMap::new(),
+                schema: Schema::new(columns.to_vec()),
+            })),
+            order: vec![],
+            limit: None,
+            offset: None,
+            with_ties: false,
+            extra_order_exprs: vec![],
+        })
     }
 
     fn resolve_table_indexes(
