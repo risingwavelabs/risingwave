@@ -50,3 +50,21 @@ message WindowStateSnapshot {
     DenseRankState dense_rank_state = 4;
   }
 }
+
+// The watermark of the order key that closes a window. The window closes once the
+// watermark is greater than `value`, or equal to it when `exclusive` is false.
+message WatermarkBound {
+  // The memcmp-encoded order key value.
+  bytes value = 1;
+  bool exclusive = 2;
+}
+
+// Output progress of a partition in an EOWC over window whose windows may be closed
+// by watermark, stored in the `progress` column of the intermediate_state_table.
+message EowcPartitionProgress {
+  // The key of the last output row. Absent when no row of the partition is retained.
+  optional StateKey last_output_key = 1;
+  // The bound of the trigger registered in the watermark trigger table, which is not later
+  // than the watermark that closes the window of the next row to output.
+  optional WatermarkBound trigger = 2;
+}

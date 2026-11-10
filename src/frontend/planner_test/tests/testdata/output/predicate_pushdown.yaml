@@ -147,6 +147,62 @@
     LogicalFilter { predicate: (Random < 0.5:Decimal::Float64) }
     └─LogicalAgg { group_key: [t.g], aggs: [count] }
       └─LogicalScan { table: t, columns: [t.g], predicate: (t.g = 1:Int32) }
+- name: impure filter should not transpose over window
+  sql: |
+    create table t(g int, v int);
+    select *
+    from (
+      select g, v, row_number() over (partition by g order by v) as rn
+      from t
+    ) ranked
+    where g = 1 and random() < 0.5;
+  logical_plan: |-
+    LogicalProject { exprs: [t.g, t.v, row_number] }
+    └─LogicalFilter { predicate: (t.g = 1:Int32) AND (Random < 0.5:Decimal::Float64) }
+      └─LogicalProject { exprs: [t.g, t.v, row_number] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.g ORDER BY t.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.g, t.v, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.g, t.v, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalFilter { predicate: (Random < 0.5:Decimal::Float64) }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.g ORDER BY t.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─LogicalScan { table: t, columns: [t.g, t.v], predicate: (t.g = 1:Int32) }
+- name: impure filter should not transpose hop window
+  sql: |
+    create table t(v int, ts timestamp);
+    select *
+    from hop(t, ts, interval '1' minute, interval '5' minute)
+    where v > 0 and v + random() > 1;
+  logical_plan: |-
+    LogicalProject { exprs: [t.v, t.ts, window_start, window_end] }
+    └─LogicalFilter { predicate: (t.v > 0:Int32) AND ((t.v::Float64 + Random) > 1:Int32::Float64) }
+      └─LogicalHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:05:00, output: all }
+        └─LogicalFilter { predicate: IsNotNull(t.ts) }
+          └─LogicalScan { table: t, columns: [t.v, t.ts, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalFilter { predicate: ((t.v::Float64 + Random) > 1:Int32::Float64) }
+    └─LogicalHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:05:00, output: all }
+      └─LogicalScan { table: t, columns: [t.v, t.ts], predicate: (t.v > 0:Int32) AND IsNotNull(t.ts) }
+- name: impure filter should not transpose project set
+  sql: |
+    create table t(v int, arr int[]);
+    select *
+    from (
+      select v, unnest(arr) as u
+      from t
+    ) expanded
+    where v > 0 and random() < 0.5;
+  logical_plan: |-
+    LogicalProject { exprs: [t.v, Unnest($1)] }
+    └─LogicalFilter { predicate: (t.v > 0:Int32) AND (Random < 0.5:Decimal::Float64) }
+      └─LogicalProject { exprs: [t.v, Unnest($1)] }
+        └─LogicalProjectSet { select_list: [$0, Unnest($1)] }
+          └─LogicalScan { table: t, columns: [t.v, t.arr, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.v, Unnest($1)] }
+    └─LogicalFilter { predicate: (Random < 0.5:Decimal::Float64) }
+      └─LogicalProjectSet { select_list: [$0, Unnest($1)] }
+        └─LogicalScan { table: t, columns: [t.v, t.arr], predicate: (t.v > 0:Int32) }
 - name: filter project set transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, arr int[]);

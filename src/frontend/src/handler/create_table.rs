@@ -518,7 +518,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
     let rate_limit = overwrite_options.source_rate_limit;
     let source = bind_create_source_or_table_with_connector(
         handler_args.clone(),
@@ -540,7 +540,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let context = OptimizerContext::new(handler_args, explain_options);
+    let context = OptimizerContext::new(handler_args, explain_options)?;
 
     let (plan, table) = gen_table_plan_with_source(
         context.into(),
@@ -1058,7 +1058,7 @@ pub(super) async fn handle_create_table_plan(
             None,
         ),
         (None, None) => {
-            let context = OptimizerContext::new(handler_args, explain_options);
+            let context = OptimizerContext::new(handler_args, explain_options)?;
             let (plan, table) = gen_create_table_plan(
                 context,
                 table_name.clone(),
@@ -1178,7 +1178,7 @@ pub(super) async fn handle_create_table_plan(
             reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
-                OptimizerContext::new(handler_args, explain_options).into();
+                OptimizerContext::new(handler_args, explain_options)?.into();
             let shared_source_id = source.id;
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
@@ -1732,7 +1732,7 @@ pub async fn create_iceberg_engine_table(
     source_handler_args.with_options =
         WithOptions::new(source_with, Default::default(), connection_ref);
 
-    let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut source_handler_args)?;
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
     let (with_properties, refresh_mode) =
         bind_connector_props(&source_handler_args, &format_encode, true)?;
@@ -1962,7 +1962,7 @@ pub async fn generate_stream_graph_for_replace_table(
             TableJobType::General,
         ),
         (None, None) => {
-            let context = OptimizerContext::from_handler_args(handler_args);
+            let context = OptimizerContext::from_handler_args(handler_args)?;
             let (plan, table) = gen_create_table_plan(
                 context,
                 table_name,
@@ -2005,7 +2005,7 @@ pub async fn generate_stream_graph_for_replace_table(
             reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
-                OptimizerContext::new(handler_args, ExplainOptions::default()).into();
+                OptimizerContext::new(handler_args, ExplainOptions::default())?.into();
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,

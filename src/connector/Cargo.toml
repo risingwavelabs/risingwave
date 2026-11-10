@@ -80,8 +80,10 @@ easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.7"
+firestore = "0.47"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+gcloud-sdk = { version = "0.28", features = ["google-firestore-admin-v1"] }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [
@@ -100,6 +102,7 @@ iceberg-storage-opendal = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 jni = { workspace = true }
+jsonbb = { workspace = true }
 lance = { workspace = true, optional = true }
 lance-table = { workspace = true, optional = true }
 lancedb = { workspace = true, optional = true }
@@ -238,6 +241,7 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
+tonic-prost = "0.14"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 typetag = "0.2"

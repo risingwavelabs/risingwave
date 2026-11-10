@@ -23,6 +23,7 @@ mod engine_options;
 mod metadata;
 #[cfg(any(test, madsim))]
 pub mod mock_v3_catalog_registry;
+mod pk_index_file;
 mod position_delete;
 mod prometheus;
 mod writer;
@@ -38,6 +39,7 @@ pub use create_table::*;
 pub use engine_options::*;
 use iceberg::table::Table;
 pub use metadata::*;
+pub use pk_index_file::*;
 pub use position_delete::*;
 use risingwave_common::bail;
 use risingwave_common::license::Feature;
@@ -150,6 +152,10 @@ fn validate_compaction_option_compatibility(config: &IcebergConfig) -> Result<()
 impl IcebergSink {
     pub async fn create_and_validate_table(&self) -> Result<Table> {
         create_and_validate_table_impl(&self.config, &self.param).await
+    }
+
+    async fn create_and_load_table(&self) -> Result<Table> {
+        create_and_load_table_impl(&self.config, &self.param).await
     }
 
     /// Returns `true` if this call created the table, `false` if it already existed.
@@ -424,7 +430,11 @@ impl Sink for IcebergSink {
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<SinkCommitCoordinator> {
         let catalog = self.config.create_catalog().await?;
-        let table = self.create_and_validate_table().await?;
+        // Do not require the current Iceberg schema to match `self.param` here. During recovery,
+        // `self.param` may already include a sink schema change that is still pending in the meta
+        // store. The coordinator commits that change before it starts writer handles, and writers
+        // validate the table schema against their own params in `begin_epoch`.
+        let table = self.create_and_load_table().await?;
         let coordinator = IcebergSinkCommitter {
             catalog,
             table,

@@ -20,7 +20,7 @@ use super::util::{LongRunningNotificationAction, execute_with_long_running_notif
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{CatalogError, CatalogErrorInner};
+use crate::catalog::{CatalogError, CatalogErrorInner, RelationKind};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -51,6 +51,13 @@ pub async fn handle_drop_mv(
                                 table_name
                             ))
                             .into())
+                    } else if let Some(err) = reader.wrong_kind_for_drop(
+                        db_name,
+                        schema_path,
+                        &table_name,
+                        RelationKind::MaterializedView,
+                    ) {
+                        Err(err.into())
                     } else if let CatalogErrorInner::NotFound {
                         object_type: "table",
                         name,
