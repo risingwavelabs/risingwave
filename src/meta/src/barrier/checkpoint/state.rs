@@ -36,7 +36,6 @@ use risingwave_pb::stream_plan::{
 };
 use tracing::warn;
 
-use crate::barrier::bounded_progress::BoundedLoadTracker;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::IcebergV3JobCheckpointControl;
 use crate::barrier::checkpoint::{
@@ -533,6 +532,13 @@ impl DatabaseCheckpointControl {
         // directly. Remember that job so the common forwarding loop does not inject the original
         // upstream barrier into the same partial graph a second time.
         let mut skip_forward_to_iceberg_job = None;
+
+        if let Some(Command::CreateStreamingJob { info, .. }) = &command
+            && let Some(source_id) = info.bounded_load_source
+        {
+            self.database_info
+                .register_bounded_load(info.streaming_job.id(), source_id);
+        }
 
         // Each variant handles its own pre-apply, edge building, mutation generation,
         // collect base info, and post-apply. The match produces values consumed by the
@@ -1085,20 +1091,8 @@ impl DatabaseCheckpointControl {
                     )
                     .collect();
 
-                let bounded_load_tracker = info.bounded_load_source.map(|source_id| {
-                    BoundedLoadTracker::new(
-                        self.database_id,
-                        info.streaming_job.id(),
-                        source_id,
-                        new_fragment_infos.iter().map(|(_, fragment)| fragment),
-                    )
-                });
-
-                self.database_info.pre_apply_new_job(
-                    info.streaming_job.id(),
-                    cdc_tracker,
-                    bounded_load_tracker,
-                );
+                self.database_info
+                    .pre_apply_new_job(info.streaming_job.id(), cdc_tracker);
 
                 self.database_info
                     .pre_apply_new_fragments(new_fragment_infos.into_iter().map(
@@ -1993,7 +1987,6 @@ impl DatabaseCheckpointControl {
                             fragment_infos: new_fragment_info,
                             subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
                             status: CreateStreamingJobStatus::Created,
-                            bounded_load_tracker: None, // no bounded ingestion for snapshot backfill
                             cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                         });
                     }
@@ -2005,6 +1998,11 @@ impl DatabaseCheckpointControl {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
 
                     if fragment_ids.is_empty() {
+                        self.database_info.retain_bounded_loads(|job_id| {
+                            self.independent_checkpoint_job_controls
+                                .contains_key(&job_id)
+                        });
+
                         self.database_info
                             .take_pending_bounded_load_start()
                             .map(Command::start_load_mutation)
