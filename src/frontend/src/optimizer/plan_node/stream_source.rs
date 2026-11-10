@@ -18,6 +18,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{Columns, PbStreamSource, SourceNode};
 
@@ -67,10 +68,18 @@ impl StreamSource {
             generic::Source::infer_internal_table_catalog(false)
         } else {
             // iceberg list node (singleton) stores last_snapshot (just 1 row, no pk)
+            let is_streaming = self
+                .source_catalog()
+                .is_none_or(|catalog| catalog.ingest_mode == IngestMode::Streaming);
+            let name = if is_streaming {
+                "last_snapshot"
+            } else {
+                "last_attempt"
+            };
             let mut builder = TableCatalogBuilder::default();
             builder.add_column(&Field {
                 data_type: DataType::Int64,
-                name: "last_snapshot".to_owned(),
+                name: name.to_owned(),
             });
             builder.build(vec![], 0)
         }

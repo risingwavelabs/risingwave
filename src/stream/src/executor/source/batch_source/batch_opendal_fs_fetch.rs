@@ -247,6 +247,7 @@ where
                                     Mutation::Load {
                                         source_id,
                                         action: LoadAction::Start,
+                                        ..
                                     } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
@@ -266,6 +267,7 @@ where
                                     Mutation::Load {
                                         source_id,
                                         action: LoadAction::ListFinish,
+                                        ..
                                     } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,

@@ -332,6 +332,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     Mutation::Load {
                                         source_id,
                                         action: LoadAction::Start,
+                                        ..
                                     } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
@@ -355,6 +356,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     Mutation::Load {
                                         source_id,
                                         action: LoadAction::ListFinish,
+                                        ..
                                     } if *source_id == core.source_id => {
                                         // Listing is finished for our source
                                         tracing::info!(
