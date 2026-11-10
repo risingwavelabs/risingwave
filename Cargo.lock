@@ -6504,6 +6504,7 @@ checksum = "7f19b9f54f7c7f55e31401bb647626ce0cf0f67b0004982ce815b3ee72a02aa8"
 dependencies = [
  "base64 0.13.1",
  "byteorder",
+ "crossbeam-channel",
  "flate2",
  "nom",
  "num-traits",
@@ -12642,7 +12643,9 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "size",
+ "tempfile",
  "thiserror-ext",
+ "toml 1.1.2+spec-1.1.0",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -13260,6 +13263,7 @@ dependencies = [
 name = "risingwave_object_store"
 version = "3.0.5"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "async-trait",
  "await-tree",
@@ -13274,6 +13278,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
+ "hdrhistogram",
  "http 1.4.0",
  "http-body-util",
  "hyper 1.9.0",
@@ -13285,9 +13290,13 @@ dependencies = [
  "opendal 0.55.0",
  "pin-project-lite",
  "prometheus",
+ "rand 0.9.2",
  "reqwest 0.12.25",
  "risingwave_common",
+ "serde",
+ "serde_json",
  "spin 0.10.0",
+ "tempfile",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tokio-retry",
