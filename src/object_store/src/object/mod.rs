@@ -46,9 +46,11 @@ pub mod error;
 pub mod object_metrics;
 
 pub mod prefix;
+mod read_scheduler;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use read_scheduler::ReadScheduler;
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -292,6 +294,21 @@ impl StreamingUploaderImpl {
 }
 
 impl ObjectStoreImpl {
+    /// Enable coalescing for a store whose objects are immutable after publication.
+    pub fn with_read_coalescing(mut self) -> Self {
+        match &mut self {
+            Self::S3(store) => store.enable_read_coalescing(),
+            Self::Opendal(store)
+                if store.media_type() == MediaType::S3.as_str()
+                    || store.media_type() == MediaType::Minio.as_str() =>
+            {
+                store.enable_read_coalescing();
+            }
+            _ => {}
+        }
+        self
+    }
+
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload(path, obj).await)
     }
@@ -541,6 +558,7 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     config: Arc<ObjectStoreConfig>,
+    read_scheduler: Option<ReadScheduler>,
 }
 
 /// Manually dispatch trait methods.
@@ -569,7 +587,30 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             object_store_metrics,
             inner: store,
             config,
+            read_scheduler: None,
         }
+    }
+
+    fn enable_read_coalescing(&mut self)
+    where
+        OS: Clone + 'static,
+    {
+        tracing::info!(config = ?self.config.read_scheduler, "Hummock read scheduler enabled");
+        // The worker owns a direct reader and cannot enqueue into its own channel.
+        let direct = Arc::new(Self::new(
+            self.inner.clone(),
+            self.object_store_metrics.clone(),
+            self.config.clone(),
+        ));
+        self.read_scheduler = Some(ReadScheduler::new(
+            &self.object_store_metrics,
+            self.media_type(),
+            self.config.read_scheduler,
+            move |path, range| {
+                let direct = direct.clone();
+                async move { direct.read_direct(&path, range).await }
+            },
+        ));
     }
 
     fn media_type(&self) -> &'static str {
@@ -650,51 +691,121 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        let operation_type = OperationType::Read;
-        let operation_type_str = operation_type.as_str();
-        let media_type = self.media_type();
+        use std::ops::Bound::{Excluded, Included};
 
+        static NEXT_TRACE_REQUEST: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(1);
+        let trace_id = tracing::enabled!(target: "state_store_read_batch", tracing::Level::TRACE)
+            .then(|| NEXT_TRACE_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let media_type = self.media_type();
+        let mut read_guard = self.object_store_metrics.begin_read(media_type, "logical");
+        let (route, response) = match &self.read_scheduler {
+            None => ("direct", None),
+            Some(scheduler) => match (range.start_bound(), range.end_bound()) {
+                (Included(&start), Excluded(&end)) if start >= end => ("empty_range", None),
+                (Included(&start), Excluded(&end)) if scheduler.can_schedule(&(start..end)) => {
+                    match scheduler.try_submit(path, start..end, trace_id) {
+                        Some(response) => ("scheduled", Some(response)),
+                        None => ("scheduler_bypass", None),
+                    }
+                }
+                (Included(_), Excluded(_)) => ("oversized", None),
+                _ => ("unbounded", None),
+            },
+        };
+        if let Some(request_id) = trace_id {
+            tracing::trace!(target: "state_store_read_batch", request_id, route,
+                range = ?range, "object read submitted");
+        }
+        let labels = &[media_type, route];
+        self.object_store_metrics
+            .read_requests
+            .with_label_values(labels)
+            .inc();
         let _timer = self
             .object_store_metrics
-            .operation_latency
-            .with_label_values(&[media_type, operation_type_str])
+            .read_request_duration
+            .with_label_values(labels)
             .start_timer();
-
-        let builder = || async {
-            self.inner
-                .read(path, range.clone())
-                .instrument_await(operation_type_str.verbose())
-                .await
-        };
-
-        let res = retry_request(
-            builder,
-            &self.config,
-            operation_type,
-            self.object_store_metrics.clone(),
-            media_type,
-        )
-        .await;
-
-        if let Err(e) = &res
-            && e.is_object_not_found_error()
-            && !path.ends_with(".data")
-        {
-            // Some not_found_error is expected, e.g. metadata backup's manifest.json.
-            // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
-        } else {
-            try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+        if let (Included(&start), Excluded(&end)) = (range.start_bound(), range.end_bound()) {
+            self.object_store_metrics
+                .read_request_bytes
+                .with_label_values(labels)
+                .observe(end.saturating_sub(start) as f64);
         }
+        let result = match response {
+            Some(response) => response.await.unwrap_or_else(|error| Err(error.into())),
+            None => self.read_direct(path, range).await,
+        };
+        if let Some(request_id) = trace_id {
+            tracing::trace!(target: "state_store_read_batch", request_id, route,
+                ok = result.is_ok(), "object read completed");
+        }
+        read_guard.finish(&result);
+        result
+    }
 
-        let data = res?;
-        self.object_store_metrics
-            .read_bytes
-            .inc_by(data.len() as u64);
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type_str])
-            .observe(data.len() as f64);
-        Ok(data)
+    // Isolate retry/IO state from cache-facing read futures. Callers reach this factory
+    // only while executing an object read, so cache hits and shared fetch followers do
+    // not allocate here. The timer and retry loop still start when the future is polled.
+    fn read_direct<'a>(
+        &'a self,
+        path: &'a str,
+        range: impl ObjectRangeBounds,
+    ) -> impl Future<Output = ObjectResult<Bytes>> + Send + 'a {
+        Box::pin(async move {
+            let operation_type = OperationType::Read;
+            let operation_type_str = operation_type.as_str();
+            let media_type = self.media_type();
+
+            let mut read_guard = self.object_store_metrics.begin_read(media_type, "physical");
+            let _timer = self
+                .object_store_metrics
+                .operation_latency
+                .with_label_values(&[media_type, operation_type_str])
+                .start_timer();
+
+            let builder = || async {
+                let mut attempt = self.object_store_metrics.begin_read(media_type, "attempt");
+                let result = self
+                    .inner
+                    .read(path, range.clone())
+                    .instrument_await(operation_type_str.verbose())
+                    .await;
+                attempt.finish(&result);
+                result
+            };
+
+            let res = retry_request(
+                builder,
+                &self.config,
+                operation_type,
+                self.object_store_metrics.clone(),
+                media_type,
+            )
+            .await;
+
+            read_guard.finish(&res);
+            if let Err(e) = &res
+                && e.is_object_not_found_error()
+                && !path.ends_with(".data")
+            {
+                // Some not_found_error is expected, e.g. metadata backup's manifest.json.
+                // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
+            } else {
+                try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+            }
+
+            let data = res?;
+            self.object_store_metrics
+                .read_bytes
+                .inc_by(data.len() as u64);
+            self.object_store_metrics
+                .operation_size
+                .with_label_values(&[operation_type_str])
+                .observe(data.len() as f64);
+            Ok(data)
+        })
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the

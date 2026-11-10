@@ -436,6 +436,17 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         let mut backfill_state = LocalityBackfillState::new(progress_table.vnodes().iter_vnodes());
         let mut total_snapshot_rows = 0;
 
+        let mut prepared = if progress_table.native_point_batch_enabled() {
+            let keys: Vec<[Datum; 1]> = progress_table
+                .vnodes()
+                .iter_vnodes()
+                .map(|vnode| [Some(vnode.to_scalar().into())])
+                .collect();
+            Some(progress_table.get_rows(&keys).await?.into_iter())
+        } else {
+            None
+        };
+
         // For each vnode, try to get its progress state
         for vnode in progress_table.vnodes().iter_vnodes() {
             // Build key: vnode + NULL values for locality columns (to match progress table schema)
@@ -443,7 +454,11 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
             let key = OwnedRow::new(key_data);
 
-            if let Some(row) = progress_table.get_row(&key).await? {
+            let row = match &mut prepared {
+                Some(rows) => rows.next().expect("aligned vnode progress"),
+                None => progress_table.get_row(&key).await?,
+            };
+            if let Some(row) = row {
                 // Parse is_finished flag (second to last column)
                 let finished_col_idx = row.len() - 2;
                 let is_finished = row

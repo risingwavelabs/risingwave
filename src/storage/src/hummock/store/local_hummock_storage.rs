@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
+use futures::{StreamExt, TryStreamExt, stream};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -269,6 +270,10 @@ pub struct LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.hummock_version_reader.read_batch_config()
+    }
+
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
@@ -317,6 +322,78 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockStorage {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.hummock_version_reader.read_batch_config()
+    }
+
+    async fn on_key_values<'a, O: Send + 'a>(
+        &'a self,
+        requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        project: impl crate::store::BatchKeyValueFn<'a, O>,
+    ) -> StorageResult<Vec<Option<O>>> {
+        if requests.len() == 1 {
+            let (key, options) = requests.into_iter().next().unwrap();
+            return Ok(vec![self.on_key_value(key, options, project).await?]);
+        }
+        let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+        let config = self.read_batch_config();
+        let metadata = crate::hummock::sst_meta_batch::SstMetaBatch::new(config);
+        tracing::trace!(target: "state_store_read_batch", keys = requests.len(), concurrency = config.concurrency.get(), "native point batch");
+        // Prepare versions only when a key is admitted. Completed keys release their slots
+        // immediately; neither input order nor shared metadata requires waiting for a batch.
+        let mut reads = stream::iter(requests.into_iter().enumerate().map(
+            |(index, (key, options))| {
+                let project = &project;
+                let metadata = &metadata;
+                async move {
+                    let row = match self.mem_table.buffer.get(&key) {
+                        Some(KeyOp::Insert(value) | KeyOp::Update((_, value))) => Some(project(
+                            FullKey::new_with_gap_epoch(
+                                self.table_id,
+                                key.to_ref(),
+                                self.current_epoch_with_gap(),
+                            ),
+                            value.as_ref(),
+                        )?),
+                        Some(KeyOp::Delete(_)) => None,
+                        None => {
+                            let range =
+                                (Bound::Included(key.clone()), Bound::Included(key.clone()));
+                            let (range, version) = read_filter_for_version(
+                                self.epoch(),
+                                self.table_id,
+                                range,
+                                &self.read_version,
+                            )?;
+                            if is_empty_key_range(&range) {
+                                None
+                            } else {
+                                self.hummock_version_reader
+                                    .get_with_metadata(
+                                        key,
+                                        self.epoch(),
+                                        self.table_id,
+                                        self.table_option,
+                                        options,
+                                        version,
+                                        metadata,
+                                        project,
+                                    )
+                                    .await?
+                            }
+                        }
+                    };
+                    Ok::<_, crate::error::StorageError>((index, row))
+                }
+            },
+        ))
+        .buffer_unordered(config.concurrency.get());
+        while let Some((index, row)) = reads.try_next().await? {
+            output[index] = row;
+        }
+        Ok(output)
+    }
+
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

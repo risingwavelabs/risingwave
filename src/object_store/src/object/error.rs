@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::io;
+use std::sync::Arc;
 
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
@@ -52,11 +53,39 @@ pub enum ObjectErrorInner {
 
     #[error("Timeout error: {0}")]
     Timeout(String),
+
+    #[error("Internal error: {0}")]
+    ReadLengthMismatch(String),
+
+    #[error(transparent)]
+    SharedRead(Arc<ObjectError>),
 }
 
 impl ObjectError {
     pub fn internal(msg: impl ToString) -> Self {
         ObjectErrorInner::Internal(msg.to_string()).into()
+    }
+
+    pub(crate) fn is_read_range_error(&self) -> bool {
+        match self.inner() {
+            ObjectErrorInner::ReadLengthMismatch(_) => true,
+            ObjectErrorInner::SharedRead(error) => error.is_read_range_error(),
+            ObjectErrorInner::Opendal(error) => {
+                error.kind() == opendal::ErrorKind::RangeNotSatisfied
+            }
+            ObjectErrorInner::S3 { inner, .. } => {
+                let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(error)) =
+                    inner.downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+                        GetObjectError,
+                        aws_smithy_runtime_api::http::Response,
+                    >>()
+                else {
+                    return false;
+                };
+                error.raw().status().as_u16() == 416
+            }
+            _ => false,
+        }
     }
 
     /// Tells whether the error indicates the target object is not found.
@@ -92,6 +121,7 @@ impl ObjectError {
             ObjectErrorInner::Mem(e) => {
                 return e.is_object_not_found_error();
             }
+            ObjectErrorInner::SharedRead(error) => return error.is_object_not_found_error(),
             #[cfg(madsim)]
             ObjectErrorInner::Sim(e) => {
                 return e.is_object_not_found_error();
@@ -115,6 +145,9 @@ impl ObjectError {
             }
 
             ObjectErrorInner::Timeout(_) => true,
+            ObjectErrorInner::SharedRead(error) => {
+                error.should_retry(retry_opendal_s3_unknown_error)
+            }
 
             _ => false,
         }

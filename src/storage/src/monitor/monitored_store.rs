@@ -26,6 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::types::VectorRef;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
@@ -141,6 +142,43 @@ impl<S, E> MonitoredStateStore<S, E> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.inner.read_batch_config()
+    }
+
+    async fn on_key_values<'a, O: Send + 'a>(
+        &'a self,
+        requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        project: impl BatchKeyValueFn<'a, O>,
+    ) -> StorageResult<Vec<Option<O>>> {
+        let mut batch_stats = super::monitored_storage_metrics::MonitoredBatchStats::new(
+            &self.storage_metrics,
+            self.table_id(),
+            requests.len(),
+            self.read_batch_config().concurrency.get(),
+        );
+        let stats = MonitoredStateStoreGetStats::new(self.table_id(), self.storage_metrics.clone());
+        let key_sizes: Vec<_> = requests.iter().map(|(key, _)| key.len()).collect();
+        let rows = self
+            .inner
+            .on_key_values(requests, |key, value| {
+                project(key, value).map(|row| (row, value.len()))
+            })
+            .await;
+        batch_stats.finish(&rows);
+        let rows = rows?;
+        stats.report_batch(
+            key_sizes.into_iter().zip_eq_fast(
+                rows.iter()
+                    .map(|row| row.as_ref().map_or(0, |(_, len)| *len)),
+            ),
+        );
+        Ok(rows
+            .into_iter()
+            .map(|row| row.map(|(row, _)| row))
+            .collect())
+    }
+
     fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

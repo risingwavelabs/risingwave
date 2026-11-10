@@ -160,6 +160,7 @@ idle_timeout_sec = 30
 acquire_timeout_sec = 30
 
 [batch]
+point_get_concurrency = 1
 worker_threads_num = ""
 distributed_query_limit = ""
 max_batch_queries_per_frontend_node = ""
@@ -370,6 +371,18 @@ algorithm = "Lru"
 [storage.cache.vector_meta_cache_eviction_config]
 algorithm = "Lru"
 
+[storage.blockwise_prefetch]
+enabled = false
+max_blocks = 3
+max_bytes = 262144
+
+[storage.read_batch]
+enabled = false
+concurrency = 10
+meta_reuse = false
+meta_max_entries = 16
+meta_max_bytes = 1048576
+
 [storage.data_file_cache]
 dir = ""
 direct_io = false
@@ -445,6 +458,7 @@ skip_inheritance_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+enable_hummock_read_coalescing = false
 req_concurrency_limit = 0
 http_concurrent_limit = 0
 opendal_upload_concurrency = 256
@@ -485,6 +499,11 @@ identity_resolution_timeout_s = 5
 retry_unknown_service_error = false
 retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 use_opendal = true
+
+[storage.object_store.read_scheduler]
+max_batch_requests = 16
+max_admitted_requests = 32
+max_read_bytes = 262144
 
 [system]
 barrier_interval_ms = 1000

@@ -74,6 +74,31 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     ) -> StreamExecutorResult<()> {
         let n_calls = visibilities.len();
 
+        // Resolve each independent distinct key before applying this chunk's count changes.
+        // Repeated values still consume/update the ordinary cache in input order below.
+        let mut prepared = HashMap::new();
+        if dedup_table.native_point_batch_enabled() {
+            let mut missing = HashMap::new();
+            for (index, datum) in column.iter().enumerate() {
+                if !visibilities.iter().any(|vis| vis.is_set(index)) {
+                    continue;
+                }
+                let cache_key =
+                    CompactedRow::from(group_key.map(GroupKey::cache_key).chain(row::once(datum)));
+                if !self.cache.contains(&cache_key) {
+                    missing.entry(cache_key).or_insert_with(|| {
+                        group_key
+                            .map(GroupKey::table_pk)
+                            .chain(row::once(datum))
+                            .into_owned_row()
+                    });
+                }
+            }
+            let (keys, pks): (Vec<_>, Vec<_>) = missing.into_iter().unzip();
+            let rows = dedup_table.get_rows(&pks).await?;
+            prepared.extend(keys.into_iter().zip_eq_fast(rows));
+        }
+
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
 
         // inverted masks for visibilities, 1 means hidden, 0 means visible
@@ -100,9 +125,11 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             } else {
                 self.metrics.agg_distinct_cache_miss_count.inc();
                 // load from table into the cache
-                let counts = if let Some(counts_row) =
-                    dedup_table.get_row(&table_pk).await? as Option<OwnedRow>
-                {
+                let counts_row = match prepared.remove(&cache_key) {
+                    Some(row) => row,
+                    None => dedup_table.get_row(&table_pk).await?,
+                };
+                let counts = if let Some(counts_row) = counts_row {
                     counts_row
                         .iter()
                         .map(|v| v.map_or(0, ScalarRefImpl::into_int64))

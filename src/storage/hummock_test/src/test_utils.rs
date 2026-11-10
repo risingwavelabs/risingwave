@@ -306,8 +306,15 @@ impl HummockTestEnv {
 }
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
-    let sstable_store = mock_sstable_store().await;
-    let hummock_options = Arc::new(default_opts_for_test());
+    prepare_hummock_test_env_with_store(mock_sstable_store().await, default_opts_for_test()).await
+}
+
+/// Use an existing object-store namespace with fresh caches, e.g. for fixed-SST read replay.
+pub async fn prepare_hummock_test_env_with_store(
+    sstable_store: risingwave_storage::hummock::SstableStoreRef,
+    options: risingwave_storage::opts::StorageOpts,
+) -> HummockTestEnv {
+    let hummock_options = Arc::new(options);
     let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
 
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(

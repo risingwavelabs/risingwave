@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
@@ -20,13 +21,15 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use sync_point::sync_point;
 use thiserror_ext::AsReport;
+use tracing::Instrument;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::{PrefetchBlockStream, PrefetchLookup};
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockEntry, BlockIterator, BlockResponse, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::PrefetchMode;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
     fn create(
@@ -49,6 +52,11 @@ pub struct SstableIterator {
     /// Reference to the sst
     pub sst: TableHolder,
     preload_end_block_idx: usize,
+    /// End of the last blockwise window. Advancing within it does not issue more lookahead.
+    read_ahead_end: usize,
+    /// Registered neighbor responses, starting at `read_ahead_end - read_ahead.len()`.
+    /// Keep the Foyer handles until consumption instead of looking the blocks up again.
+    read_ahead: VecDeque<HummockResult<BlockResponse>>,
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -68,8 +76,6 @@ impl SstableIterator {
         options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        let mut block_start_idx_inclusive = 0;
-        let mut block_end_idx_exclusive = sstable.meta.block_metas.len();
         assert!(
             !sstable_info_ref.table_ids.is_empty(),
             "SstableIterator: SST {} (object {}) has empty table_ids",
@@ -97,8 +103,10 @@ impl SstableIterator {
         );
         let block_meta_count = sstable.meta.block_metas.len();
         assert!(block_meta_count > 0);
+        let first_table_id = sstable.meta.block_metas[0].table_id();
+        let last_table_id = sstable.meta.block_metas[block_meta_count - 1].table_id();
         assert!(
-            sstable.meta.block_metas[0].table_id() <= read_table_id_range.0,
+            first_table_id <= read_table_id_range.0,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.0,
             sstable
@@ -109,7 +117,7 @@ impl SstableIterator {
                 .collect::<Vec<_>>()
         );
         assert!(
-            sstable.meta.block_metas[block_meta_count - 1].table_id() >= read_table_id_range.1,
+            last_table_id >= read_table_id_range.1,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.1,
             sstable
@@ -120,12 +128,16 @@ impl SstableIterator {
                 .collect::<Vec<_>>()
         );
 
-        while block_start_idx_inclusive < block_meta_count
-            && sstable.meta.block_metas[block_start_idx_inclusive].table_id()
-                < read_table_id_range.0
-        {
-            block_start_idx_inclusive += 1;
-        }
+        // SST blocks are ordered by full key, whose first component is the table ID.
+        // Keep full-table-range reads constant-time; only search when clipping is needed.
+        let block_start_idx_inclusive = if first_table_id == read_table_id_range.0 {
+            0
+        } else {
+            sstable
+                .meta
+                .block_metas
+                .partition_point(|meta| meta.table_id() < read_table_id_range.0)
+        };
         // We assume that the table id read must exist in the sstable, otherwise it is a fatal error.
         assert!(
             block_start_idx_inclusive < block_meta_count,
@@ -139,12 +151,13 @@ impl SstableIterator {
                 .collect::<Vec<_>>()
         );
 
-        while block_end_idx_exclusive > block_start_idx_inclusive
-            && sstable.meta.block_metas[block_end_idx_exclusive - 1].table_id()
-                > read_table_id_range.1
-        {
-            block_end_idx_exclusive -= 1;
-        }
+        let mut block_end_idx_exclusive = if last_table_id == read_table_id_range.1 {
+            block_meta_count
+        } else {
+            block_start_idx_inclusive
+                + sstable.meta.block_metas[block_start_idx_inclusive..]
+                    .partition_point(|meta| meta.table_id() <= read_table_id_range.1)
+        };
         assert!(
             block_end_idx_exclusive > block_start_idx_inclusive,
             "block_end_idx_exclusive {} <= block_start_idx_inclusive {} block_meta_count {}",
@@ -177,8 +190,29 @@ impl SstableIterator {
             stats: StoreLocalStatistic::default(),
             options,
             preload_end_block_idx: 0,
+            read_ahead_end: 0,
+            read_ahead: VecDeque::new(),
             block_start_idx_inclusive,
             block_end_idx_exclusive,
+        }
+    }
+
+    fn discard_read_ahead(&mut self) {
+        if !self.read_ahead.is_empty() {
+            self.sstable_store
+                .read_metrics
+                .prefetch_discarded
+                .inc_by(self.read_ahead.len() as u64);
+            let start = self.read_ahead_end - self.read_ahead.len();
+            let bytes: u64 = self.sst.meta.block_metas[start..self.read_ahead_end]
+                .iter()
+                .map(|meta| u64::from(meta.len))
+                .sum();
+            self.sstable_store
+                .read_metrics
+                .prefetch_discarded_bytes
+                .inc_by(bytes);
+            self.read_ahead.clear();
         }
     }
 
@@ -187,8 +221,11 @@ impl SstableIterator {
             start_idx >= self.block_start_idx_inclusive && start_idx < self.block_end_idx_exclusive
         );
 
+        // Discard accounting uses the old window indices, so release before resetting them.
+        self.discard_read_ahead();
         self.preload_end_block_idx = 0;
-        if !self.options.prefetch {
+        self.read_ahead_end = 0;
+        if self.options.prefetch != PrefetchMode::Range {
             return;
         }
 
@@ -218,6 +255,7 @@ impl SstableIterator {
 
         if idx >= self.block_end_idx_exclusive {
             self.block_iter = None;
+            self.discard_read_ahead();
             return Ok(());
         }
         let mut prefetched_block = None;
@@ -242,18 +280,7 @@ impl SstableIterator {
         // Try at most once per seek. Even an empty prefetch result must reach the block-get
         // fallback instead of repeatedly recreating a stream without making progress.
         if should_prefetch && idx + 1 < self.preload_end_block_idx {
-            match self
-                .sstable_store
-                .prefetch_blocks(
-                    &self.sst,
-                    idx,
-                    self.preload_end_block_idx,
-                    self.options.cache_policy,
-                    &mut self.stats,
-                )
-                .instrument_await("prefetch_blocks".verbose())
-                .await
-            {
+            match self.prefetch_blocks(idx).await {
                 Ok(mut stream) => {
                     if let PrefetchLookup::Hit(block) = stream.take_block(idx) {
                         prefetched_block = Some(block);
@@ -265,13 +292,73 @@ impl SstableIterator {
                 }
             }
         }
+        if prefetched_block.is_none() && self.options.prefetch == PrefetchMode::Blockwise {
+            if idx >= self.read_ahead_end
+                && let Some(register) = self.register_read_ahead(idx)
+            {
+                register.await;
+            }
+            if !self.read_ahead.is_empty() && idx == self.read_ahead_end - self.read_ahead.len() {
+                self.sstable_store.read_metrics.prefetch_consumed.inc();
+                self.sstable_store
+                    .read_metrics
+                    .prefetch_consumed_bytes
+                    .inc_by(u64::from(self.sst.meta.block_metas[idx].len));
+                let result = match self.read_ahead.pop_front().unwrap() {
+                    Ok(response) => {
+                        let ready = match &response {
+                            BlockResponse::Fetch(fetch) => !fetch.need_await(),
+                            BlockResponse::Block(_) => true,
+                        };
+                        if ready {
+                            self.sstable_store.read_metrics.prefetch_consume_ready.inc();
+                        } else {
+                            self.sstable_store
+                                .read_metrics
+                                .prefetch_consume_pending
+                                .inc();
+                        }
+                        let _timer = self
+                            .sstable_store
+                            .read_metrics
+                            .blockwise_prefetch_wait_duration
+                            .start_timer();
+                        response.wait().await
+                    }
+                    Err(error) => Err(error),
+                };
+                match result {
+                    Ok(block) => {
+                        self.stats.cache_data_block_total += 1;
+                        if let BlockEntry::HybridCache(entry) = block.entry()
+                            && entry.source() == foyer::Source::Outer
+                        {
+                            self.stats.cache_data_block_miss += 1;
+                        }
+                        self.sstable_store.read_metrics.prefetch_consume_ok.inc();
+                        prefetched_block = Some(block);
+                    }
+                    Err(error) => {
+                        self.sstable_store.read_metrics.prefetch_consume_error.inc();
+                        tracing::warn!(error = %error.as_report(),
+                            "failed to read ahead block, fall back to block get");
+                    }
+                }
+            }
+        }
         let block = match prefetched_block {
             Some(block) => block,
-            None => {
-                self.sstable_store
-                    .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
-                    .await?
-            }
+            None => match self
+                .sstable_store
+                .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
+                .await
+            {
+                Ok(block) => block,
+                Err(error) => {
+                    self.discard_read_ahead();
+                    return Err(error);
+                }
+            },
         };
         self.block_iter = Some(BlockIterator::new(block));
         let block_iter = self.block_iter.as_mut().unwrap();
@@ -286,6 +373,110 @@ impl SstableIterator {
         Ok(())
     }
 
+    // Keep construction of the large Range refill future off the common seek stack too.
+    // The caller checks whether a refill is needed before reaching this allocation.
+    fn prefetch_blocks(
+        &mut self,
+        idx: usize,
+    ) -> impl Future<Output = HummockResult<Box<PrefetchBlockStream>>> + Send + '_ {
+        Box::pin(
+            self.sstable_store
+                .prefetch_blocks(
+                    &self.sst,
+                    idx,
+                    self.preload_end_block_idx,
+                    self.options.cache_policy,
+                    &mut self.stats,
+                )
+                .instrument_await("prefetch_blocks".verbose()),
+        )
+    }
+
+    /// Select the window synchronously; allocate a registration future only for real lookahead.
+    /// Polling that future registers Foyer responses. The iterator retains the responses, while
+    /// Foyer continues to own any started producer shared with other readers.
+    fn register_read_ahead(&mut self, idx: usize) -> Option<impl Future<Output = ()> + Send + '_> {
+        use crate::hummock::CachePolicy;
+
+        if !matches!(self.options.cache_policy, CachePolicy::Fill(_)) {
+            self.sstable_store
+                .read_metrics
+                .prefetch_policy_skipped
+                .inc();
+            return None;
+        }
+        self.read_ahead_end = idx + 1;
+        let config = self.sstable_store.blockwise_prefetch;
+        let metas = &self.sst.meta.block_metas;
+        let mut bytes = metas[idx].len.max(metas[idx].uncompressed_size) as usize;
+        let mut end = idx + 1;
+        let mut limit =
+            if idx.saturating_add(config.max_blocks.get()) < self.block_end_idx_exclusive {
+                "blocks"
+            } else {
+                "range"
+            };
+        for meta in metas
+            .iter()
+            .take(
+                idx.saturating_add(config.max_blocks.get())
+                    .min(self.block_end_idx_exclusive),
+            )
+            .skip(idx + 1)
+        {
+            let next_bytes = bytes.saturating_add(meta.len.max(meta.uncompressed_size) as usize);
+            if next_bytes > config.max_bytes.get() {
+                limit = "bytes";
+                break;
+            }
+            bytes = next_bytes;
+            end += 1;
+        }
+        self.sstable_store
+            .read_metrics
+            .blockwise_prefetch_window_blocks
+            .with_label_values(&[limit])
+            .observe((end - idx) as f64);
+        self.sstable_store
+            .read_metrics
+            .blockwise_prefetch_window_bytes
+            .observe(bytes as f64);
+        if end == idx + 1 {
+            return None;
+        }
+        // Keep registration's async state out of ordinary seek futures. Only a new window
+        // pays for this box, not rejected lookahead or consumption of existing responses.
+        Some(Box::pin(async move {
+            let span = tracing::trace_span!(target: "state_store_read_batch", "block_read_ahead",
+                object_id = %self.sst.id, head = idx, scan_end = self.block_end_idx_exclusive);
+            for next in idx + 1..end {
+                self.read_ahead.push_back(
+                    self.sstable_store
+                        .get_block_response(&self.sst, next, CachePolicy::Fill(foyer::Hint::Low))
+                        .instrument(span.clone())
+                        .await,
+                );
+                let result = self.read_ahead.back().unwrap();
+                match result {
+                    Ok(BlockResponse::Fetch(fetch)) if !fetch.need_await() => {
+                        &self.sstable_store.read_metrics.prefetch_registered_ready
+                    }
+                    Ok(_) => &self.sstable_store.read_metrics.prefetch_registered_pending,
+                    Err(_) => &self.sstable_store.read_metrics.prefetch_registration_error,
+                }
+                .inc();
+                self.sstable_store
+                    .read_metrics
+                    .prefetch_registered_bytes
+                    .inc_by(u64::from(self.sst.meta.block_metas[next].len));
+                self.read_ahead_end = next + 1;
+            }
+            tracing::trace!(target: "state_store_read_batch", object_id = %self.sst.id,
+                head = idx, end = self.read_ahead_end, scan_end = self.block_end_idx_exclusive,
+                "blockwise read-ahead window");
+        }))
+    }
+
     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
         self.block_start_idx_inclusive
             + self.sst.meta.block_metas
@@ -297,6 +488,12 @@ impl SstableIterator {
                     FullKey::decode(&block_meta.smallest_key).le(&key)
                 })
                 .saturating_sub(1) // considering the boundary of 0
+    }
+}
+
+impl Drop for SstableIterator {
+    fn drop(&mut self) {
+        self.discard_read_ahead();
     }
 }
 
@@ -331,6 +528,7 @@ impl HummockIterator for SstableIterator {
     async fn rewind(&mut self) -> HummockResult<()> {
         if self.block_start_idx_inclusive >= self.block_end_idx_exclusive {
             self.block_iter = None;
+            self.discard_read_ahead();
             return Ok(());
         }
         self.init_block_prefetch_range(self.block_start_idx_inclusive);
@@ -342,6 +540,7 @@ impl HummockIterator for SstableIterator {
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
         if self.block_start_idx_inclusive >= self.block_end_idx_exclusive {
             self.block_iter = None;
+            self.discard_read_ahead();
             return Ok(());
         }
         let block_idx = self.calculate_block_idx_by_key(key);
@@ -403,6 +602,290 @@ mod tests {
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_default_test_sstable,
         gen_test_sstable_info, gen_test_sstable_with_table_ids, test_key_of, test_value_of,
     };
+
+    #[tokio::test]
+    async fn test_blockwise_config_limits_and_handle_accounting() {
+        for (blocks, bytes, expected, reason) in [
+            (2, usize::MAX, 2, "blocks"),
+            (8, 1, 1, "bytes"),
+            (8, usize::MAX, 3, "range"),
+            (1, usize::MAX, 1, "blocks"),
+        ] {
+            let mut store = mock_sstable_store().await;
+            let inner = Arc::get_mut(&mut store).unwrap();
+            inner.blockwise_prefetch.max_blocks = blocks.try_into().unwrap();
+            inner.blockwise_prefetch.max_bytes = bytes.try_into().unwrap();
+            inner.read_metrics = Arc::new(crate::monitor::HummockStateStoreMetrics::new(
+                &prometheus::Registry::new(),
+                risingwave_common::config::MetricLevel::Info,
+            ));
+            let (sst, info) =
+                gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch: PrefetchMode::Blockwise,
+                scan_end_user_key: Some(Excluded(
+                    FullKey::decode(&sst.meta.block_metas[3].smallest_key)
+                        .user_key
+                        .copy_into(),
+                )),
+                ..Default::default()
+            });
+            let mut iter = SstableIterator::new(sst, store.clone(), options, &info);
+            iter.rewind().await.unwrap();
+            assert_eq!(iter.read_ahead_end, expected);
+            assert_eq!(iter.read_ahead.len(), expected - 1);
+            assert_eq!(
+                store
+                    .read_metrics
+                    .blockwise_prefetch_window_blocks
+                    .with_label_values(&[reason])
+                    .get_sample_sum(),
+                expected as f64
+            );
+            // A seek abandons the old neighbors; Drop abandons the replacement window.
+            iter.rewind().await.unwrap();
+            drop(iter);
+            let events = &store.read_metrics.blockwise_prefetch_events;
+            let registered = events.with_label_values(&["registered_ready"]).get()
+                + events.with_label_values(&["registered_pending"]).get()
+                + events.with_label_values(&["registration_error"]).get();
+            assert_eq!(registered, 2 * (expected - 1) as u64);
+            assert_eq!(events.with_label_values(&["discarded"]).get(), registered);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_blockwise_prefetch_window_and_single_flight() {
+        use std::time::Duration;
+
+        use foyer::HybridCacheProperties;
+        use tokio::sync::Notify;
+
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_recent_filter;
+        use crate::hummock::simple::SimpleRecentFilter;
+        use crate::hummock::{Block, HummockError, RecentFilterTrait, SstableBlockIndex};
+
+        let recent: Arc<crate::hummock::RecentFilter<_>> =
+            Arc::new(SimpleRecentFilter::new(2, Duration::from_secs(3600)).into());
+        let store = mock_sstable_store_with_recent_filter(recent.clone()).await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+        assert!(sst.meta.block_metas.len() > 7);
+        store.clear_block_cache().await.unwrap();
+        let block_key = |idx| SstableBlockIndex {
+            sst_id: sst.id,
+            block_idx: idx,
+        };
+        let path = store.get_sst_data_path(sst.id);
+        let data = store.store().read(&path, ..).await.unwrap();
+
+        // A B C D E F G: C is cached; E belongs to a pre-existing slow reader.
+        drop(
+            store
+                .get(
+                    &sst,
+                    2,
+                    CachePolicy::default(),
+                    &mut StoreLocalStatistic::default(),
+                )
+                .await
+                .unwrap(),
+        );
+        let (range, capacity) = sst.calculate_block_info(4);
+        let block_e = Box::new(Block::decode(data.slice(range), capacity).unwrap());
+        let release = Arc::new(Notify::new());
+        let existing = store.block_cache().get_or_fetch(&block_key(4), {
+            let release = release.clone();
+            move || async move {
+                release.notified().await;
+                Ok::<_, HummockError>((block_e, HybridCacheProperties::default()))
+            }
+        });
+        // Rereading C or E remotely now fails decoding. The real cache and single-flight
+        // must supply them; a contiguous range reader cannot substitute for this path.
+        let mut damaged = data.to_vec();
+        for idx in [2, 4] {
+            damaged[sst.meta.block_metas[idx].offset as usize] ^= 1;
+        }
+        store.store().upload(&path, damaged.into()).await.unwrap();
+        let options = Arc::new(SstableIteratorReadOptions {
+            prefetch: PrefetchMode::Blockwise,
+            scan_end_user_key: Some(Excluded(
+                FullKey::decode(&sst.meta.block_metas[7].smallest_key)
+                    .user_key
+                    .copy_into(),
+            )),
+            ..Default::default()
+        });
+        let mut iter = SstableIterator::new(sst.clone(), store.clone(), options.clone(), &info);
+        iter.rewind().await.unwrap();
+        assert_eq!(iter.read_ahead_end, 3);
+        // The observer and read-ahead window each hold C. Remove it from the cache so a
+        // second lookup at consumption would read the corrupted backing block and fail.
+        assert_eq!(
+            store
+                .block_cache()
+                .memory()
+                .get(&block_key(2))
+                .unwrap()
+                .refs(),
+            2
+        );
+        store.block_cache().remove(&block_key(2));
+        assert!(recent.contains(&(sst.id, 1)));
+        assert!(!recent.contains(&(sst.id, 3)));
+        // Consuming A and B does not slide the window ahead of consumption.
+        while iter.cur_idx < 2 {
+            iter.next().await.unwrap();
+        }
+        assert_eq!(iter.read_ahead_end, 3);
+        assert!(!recent.contains(&(sst.id, 3)));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while iter.cur_idx < 3 {
+                iter.next().await.unwrap();
+            }
+        })
+        .await
+        .expect("lookahead must not wait for E before returning D");
+        assert_eq!(iter.read_ahead_end, 6);
+        assert!(recent.contains(&(sst.id, 4)));
+        assert!(recent.contains(&(sst.id, 5)));
+        assert!(!recent.contains(&(sst.id, 6)));
+        assert!(iter.preload_stream.is_none());
+        assert_eq!(store.get_prefetch_memory_usage(), 0);
+
+        // Abandoning the iterator must not cancel the shared E producer or retain neighbors.
+        drop(iter);
+        release.notify_one();
+        drop(
+            tokio::time::timeout(Duration::from_secs(5), existing)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        // C was removed from the cache above. Restore its backing bytes for the next scan.
+        store.store().upload(&path, data).await.unwrap();
+        let mut iter = SstableIterator::new(sst.clone(), store.clone(), options, &info);
+        iter.rewind().await.unwrap();
+        while iter.is_valid() {
+            iter.next().await.unwrap();
+        }
+        assert_eq!(iter.read_ahead_end, 7);
+        assert!(!recent.contains(&(sst.id, 7)));
+        drop(iter);
+        for idx in 0..7 {
+            assert_eq!(
+                store
+                    .block_cache()
+                    .memory()
+                    .get(&block_key(idx))
+                    .unwrap()
+                    .refs(),
+                1
+            );
+        }
+        store.clear_block_cache().await.unwrap();
+        assert_eq!(store.block_cache().memory().entries(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_blockwise_prefetch_failure_and_seek_release() {
+        use foyer::HybridCacheProperties;
+        use tokio::sync::Notify;
+
+        use crate::hummock::{Block, HummockError, SstableBlockIndex};
+
+        let store = mock_sstable_store().await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+        store.clear_block_cache().await.unwrap();
+        let key = |idx| SstableBlockIndex {
+            sst_id: sst.id,
+            block_idx: idx,
+        };
+        drop(
+            store
+                .get(
+                    &sst,
+                    2,
+                    CachePolicy::default(),
+                    &mut StoreLocalStatistic::default(),
+                )
+                .await
+                .unwrap(),
+        );
+        let release = Arc::new(Notify::new());
+        let failed = store.block_cache().get_or_fetch(&key(1), {
+            let release = release.clone();
+            move || async move {
+                release.notified().await;
+                Err::<(Box<Block>, HybridCacheProperties), _>(HummockError::other(
+                    "injected speculative failure",
+                ))
+            }
+        });
+        let mut iter = SstableIterator::new(
+            sst.clone(),
+            store.clone(),
+            Arc::new(SstableIteratorReadOptions {
+                prefetch: PrefetchMode::Blockwise,
+                ..Default::default()
+            }),
+            &info,
+        );
+        iter.rewind().await.unwrap();
+        release.notify_one();
+        assert!(failed.await.is_err());
+        // B's registered response failed. Demand must retry through the normal cache path.
+        while iter.cur_idx < 1 {
+            iter.next().await.unwrap();
+        }
+        assert_eq!(store.block_cache().memory().get(&key(2)).unwrap().refs(), 2);
+        // Seeking to D abandons the retained C handle before registering the new window.
+        iter.seek(FullKey::decode(&sst.meta.block_metas[3].smallest_key))
+            .await
+            .unwrap();
+        assert_eq!(store.block_cache().memory().get(&key(2)).unwrap().refs(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_blockwise_prefetch_respects_bound_and_cache_policy() {
+        use std::time::Duration;
+
+        use crate::hummock::RecentFilterTrait;
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_recent_filter;
+        use crate::hummock::simple::SimpleRecentFilter;
+
+        for (policy, end, requested_end) in [
+            (CachePolicy::default(), 1, 1),
+            (CachePolicy::default(), 2, 2),
+            (CachePolicy::NotFill, 3, 1),
+            (CachePolicy::Disable, 3, 1),
+        ] {
+            let recent: Arc<crate::hummock::RecentFilter<_>> =
+                Arc::new(SimpleRecentFilter::new(2, Duration::from_secs(3600)).into());
+            let store = mock_sstable_store_with_recent_filter(recent.clone()).await;
+            let (sst, info) =
+                gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+            store.clear_block_cache().await.unwrap();
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch: PrefetchMode::Blockwise,
+                cache_policy: policy,
+                scan_end_user_key: Some(Excluded(
+                    FullKey::decode(&sst.meta.block_metas[end].smallest_key)
+                        .user_key
+                        .copy_into(),
+                )),
+                ..Default::default()
+            });
+            let mut iter = SstableIterator::new(sst.clone(), store, options, &info);
+            iter.rewind().await.unwrap();
+            for idx in 0..4 {
+                assert_eq!(recent.contains(&(sst.id, idx)), idx < requested_end);
+            }
+            assert!(iter.preload_stream.is_none());
+        }
+    }
 
     async fn inner_test_forward_iterator(
         sstable_store: SstableStoreRef,
@@ -561,7 +1044,7 @@ mod tests {
             cache_policy: CachePolicy::Fill(Hint::Normal),
             read_table_id: None,
             scan_end_user_key: Some(Bound::Included(uk.clone())),
-            prefetch: true,
+            prefetch: crate::store::PrefetchMode::Range,
         });
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
@@ -644,7 +1127,7 @@ mod tests {
             sstable.clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
+                prefetch: crate::store::PrefetchMode::Range,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -654,7 +1137,7 @@ mod tests {
             sstable.clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: false,
+                prefetch: crate::store::PrefetchMode::Disabled,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -750,7 +1233,11 @@ mod tests {
                 cache_policy: CachePolicy::Disable,
                 read_table_id: None,
                 scan_end_user_key: Some(Bound::Excluded(table_3_start.clone())),
-                prefetch,
+                prefetch: if prefetch {
+                    PrefetchMode::Range
+                } else {
+                    PrefetchMode::Disabled
+                },
             });
             let mut sstable_iter = SstableIterator::create(
                 sstable.clone(),
@@ -799,7 +1286,7 @@ mod tests {
             cache_policy: CachePolicy::Disable,
             read_table_id: Some(TableId::new(2)),
             scan_end_user_key: None,
-            prefetch: false,
+            prefetch: crate::store::PrefetchMode::Disabled,
         });
         let mut sstable_iter = SstableIterator::create(
             sstable.clone(),
@@ -849,7 +1336,7 @@ mod tests {
             cache_policy: CachePolicy::Disable,
             read_table_id: None,
             scan_end_user_key: Some(Bound::Excluded(table_2_start)),
-            prefetch: false,
+            prefetch: crate::store::PrefetchMode::Disabled,
         });
         let mut sstable_iter =
             SstableIterator::create(sstable, sstable_store, options, &table_2_sstable_info);

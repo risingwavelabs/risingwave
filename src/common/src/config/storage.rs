@@ -79,6 +79,16 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_cached_recent_versions_number")]
     pub max_cached_recent_versions_number: usize,
 
+    /// Block-cache-backed lookahead for bounded prefix scans. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub blockwise_prefetch: BlockwisePrefetchConfig,
+
+    /// Concurrent point reads and batch-local SST metadata reuse. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub read_batch: ReadBatchConfig,
+
     /// max prefetch block number
     #[serde(
         default = "default::storage::max_prefetch_block_number",
@@ -208,6 +218,7 @@ pub struct StorageConfig {
     /// 2. Some special configuration of Backend
     /// 3. Retry and timeout configuration
     #[serde(default)]
+    #[config_doc(nested)]
     pub object_store: ObjectStoreConfig,
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
@@ -546,7 +557,7 @@ pub struct FileCacheConfig {
 
 /// The subsections `[storage.object_store]`.
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct ObjectStoreConfig {
     // alias is for backward compatibility
     #[serde(
@@ -564,6 +575,14 @@ pub struct ObjectStoreConfig {
     /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    /// Coalesce concurrent small range reads in the Hummock state store on S3 and MinIO.
+    #[serde(default)]
+    pub enable_hummock_read_coalescing: bool,
+    /// Scheduling bounds used when Hummock read coalescing is enabled. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub read_scheduler: ReadSchedulerConfig,
 
     /// Maximum number of concurrent object store requests (read, `streaming_read`, metadata, etc.).
     /// 0 means unlimited. When set to a positive value, a semaphore will be used to limit
@@ -587,6 +606,93 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+/// Bounded blockwise lookahead. The current demand block counts towards both budgets.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct BlockwisePrefetchConfig {
+    /// Enable blockwise lookahead requested by prefix scans. Point reads are unaffected.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum blocks per iterator window, including the demand block. 1 disables lookahead.
+    #[serde(default = "default_read_window_blocks")]
+    pub max_blocks: NonZeroUsize,
+    /// Sum of max(compressed, decoded) block sizes per window. An oversized demand block
+    /// is read alone; speculative blocks never exceed this budget.
+    #[serde(default = "default_read_window_bytes")]
+    pub max_bytes: NonZeroUsize,
+}
+
+/// Rolling independent point reads. Metadata retention ends with each API call.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ReadBatchConfig {
+    /// Adapted streaming operators use `MultiGet` when enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum keys executing concurrently in each `MultiGet`, not a node-wide limit.
+    #[serde(default = "default_read_batch_concurrency")]
+    pub concurrency: NonZeroUsize,
+    /// Share SST metadata within `MultiGet` independently of concurrent key reads.
+    #[serde(default)]
+    pub meta_reuse: bool,
+    /// Maximum retained regular metadata entries. Loading cells are bounded by concurrency.
+    #[serde(default = "default_read_meta_entries")]
+    pub meta_max_entries: NonZeroUsize,
+    /// Retained regular metadata bytes; one oversized SST may additionally be retained.
+    #[serde(default = "default_read_meta_bytes")]
+    pub meta_max_bytes: NonZeroUsize,
+}
+
+/// Ready-only range coalescing. No timer waits for additional requests.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ReadSchedulerConfig {
+    /// Maximum ready requests planned per dequeue. Effective limit is also bounded by admission.
+    #[serde(default = "default_read_meta_entries")]
+    pub max_batch_requests: NonZeroUsize,
+    /// Maximum retained logical requests, including queued and in-flight reads. When full,
+    /// reads bypass the scheduler. This does not limit total object-store concurrency.
+    #[serde(
+        default = "default_read_admitted_requests",
+        deserialize_with = "deserialize_read_admission"
+    )]
+    pub max_admitted_requests: NonZeroUsize,
+    /// Maximum input or merged range length. Larger reads bypass scheduling.
+    #[serde(default = "default_read_window_bytes")]
+    pub max_read_bytes: NonZeroUsize,
+}
+
+fn deserialize_read_admission<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<NonZeroUsize, D::Error> {
+    let value = NonZeroUsize::deserialize(deserializer)?;
+    if value.get() > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err(D::Error::custom(
+            "read scheduler admission exceeds semaphore capacity",
+        ));
+    }
+    Ok(value)
+}
+
+fn default_read_window_blocks() -> NonZeroUsize {
+    NonZeroUsize::new(3).unwrap()
+}
+fn default_read_window_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(256 * 1024).unwrap()
+}
+fn default_read_batch_concurrency() -> NonZeroUsize {
+    NonZeroUsize::new(10).unwrap()
+}
+fn default_read_meta_entries() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
+fn default_read_meta_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(1024 * 1024).unwrap()
+}
+fn default_read_admitted_requests() -> NonZeroUsize {
+    NonZeroUsize::new(32).unwrap()
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>

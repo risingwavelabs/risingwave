@@ -1032,6 +1032,38 @@ async fn test_delete_get() {
             .unwrap()
             .is_none()
     );
+
+    // Use a fresh local reader to exercise native SST batching, not the snapshot's scalar
+    // fallback or the writer's memtable. The newer tombstone must stop the older put.
+    let epoch3 = epoch2.next_epoch();
+    hummock_storage.start_epoch(epoch3, HashSet::from_iter([local.table_id()]));
+    let mut reader = hummock_storage
+        .new_local(NewLocalOptions::for_test(local.table_id()))
+        .await;
+    reader.init_for_test(epoch3).await.unwrap();
+    let names = [
+        "bb", "aa", "missing", "bb", "aa", "missing", "bb", "aa", "missing", "bb", "aa", "bb",
+    ];
+    let rows = reader
+        .on_key_values(
+            names
+                .iter()
+                .map(|name| {
+                    (
+                        gen_key_from_str(VirtualNode::ZERO, name),
+                        risingwave_storage::store::ReadOptions::default(),
+                    )
+                })
+                .collect(),
+            |_, value| Ok(Bytes::copy_from_slice(value)),
+        )
+        .await
+        .unwrap();
+    let expected: Vec<_> = names
+        .iter()
+        .map(|name| (*name == "aa").then(|| Bytes::from_static(b"111")))
+        .collect();
+    assert_eq!(rows, expected);
 }
 
 #[tokio::test]

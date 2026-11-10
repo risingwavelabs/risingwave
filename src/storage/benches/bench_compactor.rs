@@ -82,6 +82,8 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
+        blockwise_prefetch: Default::default(),
+        read_batch: Default::default(),
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
@@ -356,7 +358,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         cache_policy: CachePolicy::Fill(Hint::Normal),
         read_table_id: None,
         scan_end_user_key: None,
-        prefetch: false,
+        prefetch: risingwave_storage::store::PrefetchMode::Disabled,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {

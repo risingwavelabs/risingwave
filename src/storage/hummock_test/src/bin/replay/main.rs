@@ -132,6 +132,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         path: storage_opts.data_directory.clone(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
+        blockwise_prefetch: storage_opts.blockwise_prefetch,
+        read_batch: storage_opts.read_batch,
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: state_store_metrics.clone(),
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,

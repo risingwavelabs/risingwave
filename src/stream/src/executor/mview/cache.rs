@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::ops::Deref as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
@@ -27,6 +28,7 @@ use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer as _};
 use risingwave_storage::StateStore;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
+use tracing::Instrument;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -168,7 +170,16 @@ impl MaterializeCache {
 
         // Populate the LRU cache with the keys in input chunk.
         // For new keys, row values are set to None.
+        static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(0);
+        let span = tracing::trace_span!(
+            target: "state_store_read_batch",
+            "materialize_read_batch",
+            batch_id = NEXT_BATCH_ID.fetch_add(1, Ordering::Relaxed),
+            table_id = %table.table_id(),
+            keys = key_set.len(),
+        );
         self.fetch_keys(key_set.iter().map(|v| v.deref()), table)
+            .instrument(span)
             .await?;
 
         let mut change_buffer = ChangeBuffer::new();
@@ -351,7 +362,7 @@ impl MaterializeCache {
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
     ) -> StreamExecutorResult<()> {
-        let mut futures = vec![];
+        let mut missing_keys = vec![];
         for key in keys {
             self.metrics.materialize_cache_total_count.inc();
 
@@ -367,6 +378,31 @@ impl MaterializeCache {
                 continue;
             }
 
+            missing_keys.push(key);
+        }
+        if table.native_point_batch_enabled() {
+            let keys = missing_keys
+                .iter()
+                .map(|key| table.pk_serde().deserialize(key).unwrap())
+                .collect_vec();
+            for (key, row) in missing_keys
+                .into_iter()
+                .zip_eq_fast(table.get_rows(&keys).await?)
+            {
+                let row = row.map(CompactedRow::from);
+                let row = match row {
+                    Some(row) if row_below_watermark(&self.row_serde, table, &row)? => None,
+                    other => other,
+                };
+                if row.is_some() {
+                    self.metrics.materialize_data_exist_count.inc();
+                }
+                self.lru_cache.put(key.to_vec(), row);
+            }
+            return Ok(());
+        }
+        let mut futures = vec![];
+        for key in missing_keys {
             let row_serde = self.row_serde.clone();
             futures.push(async move {
                 let key_row = table.pk_serde().deserialize(key).unwrap();

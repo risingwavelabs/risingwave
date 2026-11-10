@@ -1,0 +1,8 @@
+{
+  "keys": 16,
+  "rows_per_key": 256,
+  "value_bytes": 1024,
+  "probe_chunk_size": 8,
+  "warm_every_nth_block": null,
+  "repeats": 3
+}

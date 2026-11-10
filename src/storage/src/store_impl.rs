@@ -431,6 +431,41 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+            self.actual.read_batch_config()
+        }
+
+        async fn on_key_values<'a, O: Send + 'a>(
+            &'a self,
+            requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+            project: impl BatchKeyValueFn<'a, O>,
+        ) -> StorageResult<Vec<Option<O>>> {
+            use futures::{StreamExt, TryStreamExt};
+
+            // Debug builds install this wrapper even when verification is disabled.
+            // Forward in that case so the wrapper does not erase native batch execution.
+            if self.expected.is_none() {
+                return self.actual.on_key_values(requests, project).await;
+            }
+            // Verification keeps its existing per-key value/epoch comparison and callback
+            // behavior. Bound the fallback exactly like the default batch implementation.
+            let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+            let mut reads = futures::stream::iter(requests.into_iter().enumerate().map(
+                |(index, (key, options))| {
+                    let project = &project;
+                    async move {
+                        let row = self.on_key_value(key, options, project).await?;
+                        Ok::<_, crate::error::StorageError>((index, row))
+                    }
+                },
+            ))
+            .buffer_unordered(self.read_batch_config().concurrency.get());
+            while let Some((index, row)) = reads.try_next().await? {
+                output[index] = row;
+            }
+            Ok(output)
+        }
+
         async fn on_key_value<'a, O: Send + 'a>(
             &'a self,
             key: TableKey<Bytes>,
@@ -958,12 +993,19 @@ impl StateStoreImpl {
                     Arc::new(opts.object_store_config.clone()),
                 )
                 .await;
+                let object_store = if opts.object_store_config.enable_hummock_read_coalescing {
+                    object_store.with_read_coalescing()
+                } else {
+                    object_store
+                };
 
                 let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
                     store: Arc::new(object_store),
                     path: opts.data_directory.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
+                    blockwise_prefetch: opts.blockwise_prefetch,
+                    read_batch: opts.read_batch,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
                     use_new_object_prefix_strategy,
@@ -1102,6 +1144,12 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     pub trait DynStateStoreGet: StaticSendSync {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig;
+        async fn get_keyed_rows(
+            &self,
+            requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        ) -> StorageResult<Vec<Option<StateStoreKeyedRow>>>;
+
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
@@ -1143,6 +1191,20 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreGet> DynStateStoreGet for S {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+            StateStoreGet::read_batch_config(self)
+        }
+
+        async fn get_keyed_rows(
+            &self,
+            requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        ) -> StorageResult<Vec<Option<StateStoreKeyedRow>>> {
+            self.on_key_values(requests, |key, value| {
+                Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+            })
+            .await
+        }
+
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
@@ -1558,6 +1620,26 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+            self.as_ref().read_batch_config()
+        }
+
+        async fn on_key_values<'a, O: Send + 'a>(
+            &'a self,
+            requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+            project: impl BatchKeyValueFn<'a, O>,
+        ) -> StorageResult<Vec<Option<O>>> {
+            self.as_ref()
+                .get_keyed_rows(requests)
+                .await?
+                .into_iter()
+                .map(|row| {
+                    row.map(|(key, value)| project(key.to_ref(), &value))
+                        .transpose()
+                })
+                .collect()
+        }
+
         async fn on_key_value<'a, O: Send + 'a>(
             &'a self,
             key: TableKey<Bytes>,

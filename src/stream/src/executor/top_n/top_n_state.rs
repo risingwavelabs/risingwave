@@ -148,10 +148,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             .iter_with_prefix(
                 &group_key,
                 sub_range,
-                PrefetchOptions {
-                    prefetch: cache_size_limit == usize::MAX,
-                    for_large_query: false,
-                },
+                PrefetchOptions::new(cache_size_limit == usize::MAX, false),
             )
             .await?;
         pin_mut!(state_table_iter);
@@ -214,10 +211,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             .iter_with_prefix(
                 &group_key,
                 sub_range,
-                PrefetchOptions {
-                    prefetch: topn_cache.limit == usize::MAX,
-                    for_large_query: false,
-                },
+                PrefetchOptions::new(topn_cache.limit == usize::MAX, false),
             )
             .await?;
         pin_mut!(state_table_iter);

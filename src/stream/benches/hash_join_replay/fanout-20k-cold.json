@@ -1,0 +1,16 @@
+{
+  "value_bytes": 0,
+  "probe_chunk_size": 256,
+  "probe_rounds": 1,
+  "probe_order": "shuffled",
+  "probe_pattern": "insert_only",
+  "warm_every_nth_block": null,
+  "repeats": 1,
+  "trace": false,
+  "schedulers": [
+    false,
+    true
+  ],
+  "keys": 10,
+  "rows_per_key": 20000
+}

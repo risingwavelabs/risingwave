@@ -59,5 +59,6 @@ pub fn compactor(opts: CompactorOpts) -> ! {
 
 pub fn ctl(opts: CtlOpts) -> ! {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-    main_okk(|shutdown| risingwave_ctl::start(opts, shutdown));
+    // Bound the layout depth of the CLI's large command-dispatch future at its entry point.
+    main_okk(|shutdown| Box::pin(risingwave_ctl::start(opts, shutdown)));
 }

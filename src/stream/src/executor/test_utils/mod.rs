@@ -18,11 +18,14 @@ pub mod hash_join_executor;
 mod mock_source;
 pub mod top_n_executor;
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 pub use mock_source::*;
 use risingwave_common::catalog::Schema;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use tokio::sync::mpsc;
@@ -32,6 +35,15 @@ use super::{
     Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, MessageStream,
     StreamChunk, StreamExecutorResult, Watermark,
 };
+
+/// Install the actor's streaming configuration when polling executors without `Actor::run`.
+/// As in production, spawned tasks do not inherit this task-local scope.
+pub async fn with_streaming_config<F: Future>(
+    config: Arc<StreamingConfig>,
+    future: F,
+) -> F::Output {
+    crate::CONFIG.scope(config, future).await
+}
 
 // Keep the prelude module here since it imports from multiple submodules
 pub mod prelude {

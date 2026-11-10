@@ -152,7 +152,13 @@ impl<S> TracedStateStore<S, TableSnapshot> {
     }
 }
 
+// Hummock replay tracing intentionally uses the default scalar batch fallback so every
+// key retains its existing Get trace record. This is separate from diagnostic tracing spans.
 impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, TableSnapshot> {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.inner.read_batch_config()
+    }
+
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

@@ -143,6 +143,11 @@ pub async fn prepare_start_parameters(
             0,
             meta_cache_capacity_bytes,
             system_params_reader.use_new_object_prefix_strategy(),
+            Arc::new(
+                risingwave_storage::monitor::global_hummock_state_store_metrics(
+                    config.server.metrics_level,
+                ),
+            ),
         )
         .await
         // FIXME(MrCroxx): Handle this error.

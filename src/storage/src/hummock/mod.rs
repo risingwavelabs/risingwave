@@ -33,6 +33,7 @@ mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
 pub mod shared_buffer;
+mod sst_meta_batch;
 pub mod sstable_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
@@ -116,13 +117,18 @@ impl<TI: HummockIterator> Drop for IteratorStatsGuard<'_, TI> {
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
+    prepared_sstable: Option<TableHolder>,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
-) -> HummockResult<Option<impl HummockIterator>> {
-    let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
-
+) -> HummockResult<Option<SstableIterator>> {
+    // A point batch may already own this metadata. Keep both callers in one async body so
+    // scalar reads do not construct another seek future before Bloom rejection.
+    let sstable = match prepared_sstable {
+        Some(sstable) => sstable,
+        None => sstable_store_ref.sstable(sstable_info, local_stats).await?,
+    };
     // SST filter key is the distribution key, which does not need to be the prefix of pk, and does not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash
@@ -229,24 +235,34 @@ mod tests {
             sstable_store.clone(),
         )
         .await;
-        let mut stats = StoreLocalStatistic::default();
         let key = iterator_test_key_of(10);
         let read_options = ReadOptions::default();
+        let mut preparation_stats = StoreLocalStatistic::default();
+        let prepared = sstable_store
+            .sstable(&sstable_info, &mut preparation_stats)
+            .await
+            .unwrap();
+        preparation_stats.discard();
+        for prepared in [None, Some(prepared)] {
+            let expected_meta_reads = u64::from(prepared.is_none());
+            let mut stats = StoreLocalStatistic::default();
+            let result = get_from_sstable_info(
+                sstable_store.clone(),
+                &sstable_info,
+                prepared,
+                key.to_ref(),
+                &read_options,
+                None,
+                &mut stats,
+            )
+            .await
+            .unwrap();
 
-        let result = get_from_sstable_info(
-            sstable_store,
-            &sstable_info,
-            key.to_ref(),
-            &read_options,
-            None,
-            &mut stats,
-        )
-        .await
-        .unwrap();
-
-        assert!(result.is_none());
-        drop(result);
-        assert_eq!(stats.cache_data_block_total, 1);
+            assert!(result.is_none());
+            drop(result);
+            assert_eq!(stats.cache_data_block_total, 1);
+            assert_eq!(stats.cache_meta_block_total, expected_meta_reads);
+        }
     }
 
     #[tokio::test]
@@ -302,6 +318,7 @@ mod tests {
             let result = get_from_sstable_info(
                 sstable_store,
                 &sstable_info,
+                None,
                 full_key.to_ref(),
                 &read_options,
                 None,

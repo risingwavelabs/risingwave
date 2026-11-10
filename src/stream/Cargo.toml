@@ -91,9 +91,10 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
+risingwave_object_store = { workspace = true }
 risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"
-tracing-subscriber = "0.3.20"
+tracing-subscriber = { version = "0.3.20", features = ["json"] }
 tracing-test = "0.2"
 
 [[bench]]
@@ -110,6 +111,10 @@ harness = false
 
 [[bench]]
 name = "stream_hash_join_mem"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_replay"
 harness = false
 
 [lints]

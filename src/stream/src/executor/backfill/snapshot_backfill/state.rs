@@ -25,6 +25,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -249,6 +250,12 @@ impl<S: StateStore> BackfillState<S> {
     async fn load_vnode_progress_row(
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Vec<(VirtualNode, Option<OwnedRow>)>> {
+        if state_table.native_point_batch_enabled() {
+            let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
+            let keys: Vec<_> = vnodes.iter().map(|vnode| [vnode.to_datum()]).collect();
+            let rows = state_table.get_rows(&keys).await?;
+            return Ok(vnodes.into_iter().zip_eq_fast(rows).collect());
+        }
         let rows = try_join_all(state_table.vnodes().iter_vnodes().map(|vnode| {
             state_table
                 .get_row([vnode.to_datum()])

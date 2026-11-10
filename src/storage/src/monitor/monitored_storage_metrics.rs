@@ -24,8 +24,9 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::id::TableId;
 use risingwave_common::metrics::{
-    LabelGuardedIntGauge, LabelGuardedLocalHistogram, LabelGuardedLocalIntCounter,
-    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+    LabelGuardedLocalHistogram, LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec,
+    RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -42,6 +43,11 @@ use crate::store::{
 #[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
     pub get_duration: RelabeledGuardedHistogramVec,
+    pub get_batch_duration: RelabeledGuardedHistogramVec,
+    pub get_batch_keys: RelabeledGuardedHistogramVec,
+    pub get_batch_concurrency: RelabeledGuardedHistogramVec,
+    pub get_batch_outcomes: RelabeledGuardedIntCounterVec,
+    pub get_batch_in_flight: RelabeledGuardedIntGaugeVec,
     pub get_key_size: RelabeledGuardedHistogramVec,
     pub get_value_size: RelabeledGuardedHistogramVec,
 
@@ -118,6 +124,72 @@ impl MonitoredStorageMetrics {
         state_store_read_time_buckets.push(40.0);
         state_store_read_time_buckets.push(100.0);
 
+        let get_batch_duration = register_guarded_histogram_vec_with_registry!(
+            histogram_opts!(
+                "state_store_get_batch_duration",
+                "Latency of one explicit point-read batch",
+                state_store_read_time_buckets.clone()
+            ),
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let get_batch_duration = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            get_batch_duration,
+            metric_level,
+        );
+
+        let get_batch_keys = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            register_guarded_histogram_vec_with_registry!(
+                histogram_opts!(
+                    "state_store_get_batch_keys",
+                    "Input keys per explicit point batch, including duplicates and missing keys",
+                    exponential_buckets(1.0, 2.0, 17).unwrap()
+                ),
+                &["table_id"],
+                registry
+            )
+            .unwrap(),
+            metric_level,
+        );
+        let get_batch_concurrency = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            register_guarded_histogram_vec_with_registry!(
+                histogram_opts!(
+                    "state_store_get_batch_concurrency",
+                    "Configured per-batch concurrency clipped to the input key count",
+                    exponential_buckets(1.0, 2.0, 17).unwrap()
+                ),
+                &["table_id"],
+                registry
+            )
+            .unwrap(),
+            metric_level,
+        );
+        let get_batch_outcomes = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Info,
+            register_guarded_int_counter_vec_with_registry!(
+                "state_store_get_batch_outcomes",
+                "Explicit point batches completed, failed or cancelled",
+                &["table_id", "outcome"],
+                registry
+            )
+            .unwrap(),
+            metric_level,
+        );
+        let get_batch_in_flight = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Info,
+            register_guarded_int_gauge_vec_with_registry!(
+                "state_store_get_batch_in_flight",
+                "Active explicit point batches",
+                &["table_id"],
+                registry
+            )
+            .unwrap(),
+            metric_level,
+        );
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
             "Total latency of get that have been issued to state store",
@@ -283,6 +355,11 @@ impl MonitoredStorageMetrics {
 
         Self {
             get_duration,
+            get_batch_duration,
+            get_batch_keys,
+            get_batch_concurrency,
+            get_batch_outcomes,
+            get_batch_in_flight,
             get_key_size,
             get_value_size,
             iter_size,
@@ -675,6 +752,33 @@ impl MonitoredStateStoreGetStats {
         }
     }
 
+    pub(crate) fn report_batch(&self, sizes: impl Iterator<Item = (usize, usize)>) {
+        // Retain the label guards as for scalar local metrics; dropping a temporary guard
+        // after observe would remove an otherwise unreferenced metric series.
+        thread_local! {
+            static BATCH_METRICS: RefCell<HashMap<TableId, (LabelGuardedHistogram, LabelGuardedHistogram)>> = RefCell::new(HashMap::new());
+        }
+        BATCH_METRICS.with_borrow_mut(|metrics| {
+            let (keys, values) = metrics.entry(self.table_id).or_insert_with(|| {
+                let label = self.table_id.to_string();
+                (
+                    self.metrics
+                        .get_key_size
+                        .with_guarded_label_values(&[&label]),
+                    self.metrics
+                        .get_value_size
+                        .with_guarded_label_values(&[&label]),
+                )
+            });
+            for (key, value) in sizes {
+                keys.observe(key as _);
+                if value > 0 {
+                    values.observe(value as _);
+                }
+            }
+        });
+    }
+
     pub(crate) fn report(&self) {
         thread_local!(static LOCAL_GET_METRICS: RefCell<HashMap<TableId, LocalGetMetrics>> = RefCell::new(HashMap::default()));
         LOCAL_GET_METRICS.with_borrow_mut(|local_metrics| {
@@ -694,5 +798,151 @@ impl MonitoredStateStoreGetStats {
             }
             table_metrics.may_flush();
         });
+    }
+}
+
+#[derive(Clone)]
+struct BatchMetrics {
+    duration: LabelGuardedHistogram,
+    keys: LabelGuardedHistogram,
+    concurrency: LabelGuardedHistogram,
+    in_flight: LabelGuardedIntGauge,
+    outcomes: [LabelGuardedIntCounter; 3],
+}
+
+/// Lives for one polled batch, including early errors and cancellation. Keep the duration
+/// separate from scalar latency: recording a batch once per key would distort percentiles.
+pub(crate) struct MonitoredBatchStats {
+    metrics: BatchMetrics,
+    start: Instant,
+    outcome: usize,
+}
+impl MonitoredBatchStats {
+    pub(crate) fn new(
+        metrics: &Arc<MonitoredStorageMetrics>,
+        table_id: TableId,
+        keys: usize,
+        concurrency: usize,
+    ) -> Self {
+        // Retain label guards as with scalar table-local metrics. A completed batch must
+        // remain visible to the next Prometheus scrape even when no batch is active.
+        thread_local! { static METRICS: RefCell<HashMap<TableId, BatchMetrics>> = RefCell::new(HashMap::new()); }
+        let metrics = METRICS.with_borrow_mut(|cache| {
+            cache
+                .entry(table_id)
+                .or_insert_with(|| {
+                    let label = table_id.to_string();
+                    BatchMetrics {
+                        duration: metrics
+                            .get_batch_duration
+                            .with_guarded_label_values(&[&label]),
+                        keys: metrics.get_batch_keys.with_guarded_label_values(&[&label]),
+                        concurrency: metrics
+                            .get_batch_concurrency
+                            .with_guarded_label_values(&[&label]),
+                        in_flight: metrics
+                            .get_batch_in_flight
+                            .with_guarded_label_values(&[&label]),
+                        outcomes: ["ok", "error", "cancelled"].map(|outcome| {
+                            metrics
+                                .get_batch_outcomes
+                                .with_guarded_label_values(&[&label, outcome])
+                        }),
+                    }
+                })
+                .clone()
+        });
+        metrics.keys.observe(keys as f64);
+        metrics.concurrency.observe(concurrency.min(keys) as f64);
+        metrics.in_flight.inc();
+        Self {
+            metrics,
+            start: Instant::now(),
+            outcome: 2,
+        }
+    }
+
+    pub(crate) fn finish<T, E>(&mut self, result: &Result<T, E>) {
+        self.outcome = usize::from(result.is_err());
+    }
+}
+impl Drop for MonitoredBatchStats {
+    fn drop(&mut self) {
+        self.metrics.in_flight.dec();
+        self.metrics
+            .duration
+            .observe(self.start.elapsed().as_secs_f64());
+        self.metrics.outcomes[self.outcome].inc();
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    #[test]
+    fn batch_outcomes_include_error_and_cancellation_without_scalar_samples() {
+        let registry = Registry::new();
+        let metrics = Arc::new(MonitoredStorageMetrics::new(&registry, MetricLevel::Info));
+        let table = TableId::new(918273);
+        let label = table.to_string();
+        for outcome in [Some(true), Some(false), None] {
+            let mut batch = MonitoredBatchStats::new(&metrics, table, 7, 3);
+            assert_eq!(
+                metrics
+                    .get_batch_in_flight
+                    .with_guarded_label_values(&[&label])
+                    .get(),
+                1
+            );
+            if let Some(ok) = outcome {
+                batch.finish(&if ok { Ok(()) } else { Err(()) });
+            }
+            drop(batch);
+        }
+        for outcome in ["ok", "error", "cancelled"] {
+            assert_eq!(
+                metrics
+                    .get_batch_outcomes
+                    .with_guarded_label_values(&[&label, outcome])
+                    .get(),
+                1
+            );
+        }
+        assert_eq!(
+            metrics
+                .get_batch_in_flight
+                .with_guarded_label_values(&[&label])
+                .get(),
+            0
+        );
+        assert_eq!(
+            metrics
+                .get_batch_duration
+                .with_guarded_label_values(&[&label])
+                .get_sample_count(),
+            3
+        );
+        assert_eq!(
+            metrics
+                .get_batch_keys
+                .with_guarded_label_values(&[&label])
+                .get_sample_sum(),
+            21.0
+        );
+        assert_eq!(
+            metrics
+                .get_batch_concurrency
+                .with_guarded_label_values(&[&label])
+                .get_sample_sum(),
+            9.0
+        );
+        assert_eq!(
+            metrics
+                .get_duration
+                .with_guarded_label_values(&[&label])
+                .get_sample_count(),
+            0
+        );
     }
 }

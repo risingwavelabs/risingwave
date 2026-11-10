@@ -1,0 +1,18 @@
+{
+  "workload": "hash_agg",
+  "group_rows": 1,
+  "vnode_count": 256,
+  "downstream": true,
+  "disable_sanity_check": true,
+  "keys": 8192,
+  "rows_per_key": 256,
+  "value_bytes": 0,
+  "probe_chunk_size": 256,
+  "probe_order": "shuffled",
+  "probe_pattern": "delete_only",
+  "warm_every_nth_block": null,
+  "repeats": 1,
+  "schedulers": [
+    true
+  ]
+}

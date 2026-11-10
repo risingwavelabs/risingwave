@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::array::{Op, VectorRef};
@@ -264,7 +264,41 @@ pub trait StateStoreReadLog: StaticSendSync {
 pub trait KeyValueFn<'a, O> =
     for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
+pub trait BatchKeyValueFn<'a, O> =
+    for<'kv> Fn(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + Sync + 'a;
+
 pub trait StateStoreGet: StaticSendSync {
+    /// Immutable startup controls shared by callers and the backend's rolling batch reader.
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        Default::default()
+    }
+
+    /// Read independent keys, retaining input order (including duplicates and missing keys).
+    /// Backends may share immutable read preparation; key visibility remains the scalar contract.
+    fn on_key_values<'a, O: Send + 'a>(
+        &'a self,
+        requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        project: impl BatchKeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<Option<O>>> {
+        async move {
+            let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+            let mut reads = futures::stream::iter(requests.into_iter().enumerate().map(
+                |(index, (key, options))| {
+                    let project = &project;
+                    async move {
+                        let row = self.on_key_value(key, options, project).await?;
+                        Ok::<_, crate::error::StorageError>((index, row))
+                    }
+                },
+            ))
+            .buffer_unordered(self.read_batch_config().concurrency.get());
+            while let Some((index, row)) = reads.try_next().await? {
+                output[index] = row;
+            }
+            Ok(output)
+        }
+    }
+
     fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
@@ -459,34 +493,50 @@ pub trait StateStoreReadVector: StaticSendSync {
     ) -> impl StorageFuture<'a, Vec<O>>;
 }
 
-/// Controls block-stream prefetch for range scans. Prefetching may increase the memory footprint
-/// of the CN process because the prefetched blocks cannot be evicted.
+/// How a forward range scan reads ahead. Point gets never inherit this setting.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrefetchMode {
+    #[default]
+    Disabled,
+    /// Buffer a contiguous range GET in the iterator, retaining its decoded blocks.
+    Range,
+    /// Request a small window through the block cache, leaving I/O merging to the scheduler.
+    Blockwise,
+}
+
+/// Controls prefetch for range scans. Range prefetch retains blocks outside the evictable cache;
+/// blockwise prefetch leaves speculative blocks owned by the cache.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// Enables prefetch for range-scan iterators. Point gets do not inherit this setting.
-    pub prefetch: bool,
+    pub mode: PrefetchMode,
     /// Caller and tracing classification for large queries. Leaf SST iterators do not consume it.
     pub for_large_query: bool,
 }
 
 impl PrefetchOptions {
     pub fn prefetch_for_large_range_scan() -> Self {
-        Self {
-            prefetch: true,
-            for_large_query: true,
-        }
+        Self::new(true, true)
     }
 
     pub fn prefetch_for_small_range_scan() -> Self {
+        Self::new(true, false)
+    }
+
+    pub fn prefetch_for_prefix_scan() -> Self {
+        // The storage instance applies its startup enable switch before constructing SST iterators.
         Self {
-            prefetch: true,
+            mode: PrefetchMode::Blockwise,
             for_large_query: false,
         }
     }
 
     pub fn new(prefetch: bool, for_large_query: bool) -> Self {
         Self {
-            prefetch,
+            mode: if prefetch {
+                PrefetchMode::Range
+            } else {
+                PrefetchMode::Disabled
+            },
             for_large_query,
         }
     }
@@ -494,17 +544,16 @@ impl PrefetchOptions {
 
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
-        Self {
-            prefetch: value.prefetch,
-            for_large_query: value.for_large_query,
-        }
+        Self::new(value.prefetch, value.for_large_query)
     }
 }
 
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            prefetch: value.prefetch,
+            // Preserve the existing trace encoding. Replay blockwise scans on demand instead
+            // of accidentally routing them through the unrelated contiguous range reader.
+            prefetch: value.mode == PrefetchMode::Range,
             for_large_query: value.for_large_query,
         }
     }

@@ -60,6 +60,178 @@ impl Drop for SyncPointActionGuard {
     }
 }
 
+// Hold the first key while more than a full concurrency window completes. Serial windows
+// and candidate-round barriers both deadlock here; input-order output must still be preserved.
+#[tokio::test]
+#[serial]
+async fn test_multi_get_refills_while_first_key_is_pending() {
+    use std::collections::HashSet;
+    use std::sync::atomic::AtomicUsize;
+
+    use futures::FutureExt;
+    use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH};
+    use risingwave_storage::storage_value::StorageValue;
+    use tokio::sync::{Notify, Semaphore};
+
+    use crate::test_utils::{
+        TestIngestBatch, gen_key_from_str, prepare_hummock_test_env_with_store,
+    };
+
+    const PAUSE: &str = "HUMMOCK::MULTI_GET::BEFORE_SST";
+    let config = risingwave_common::config::storage::ReadBatchConfig {
+        enabled: true,
+        concurrency: 3.try_into().unwrap(),
+        meta_reuse: true,
+        meta_max_entries: 2.try_into().unwrap(),
+        meta_max_bytes: 65536.try_into().unwrap(),
+    };
+    let concurrency = config.concurrency.get();
+    let count = 2 * concurrency + 3;
+    let sst_store =
+        risingwave_storage::hummock::iterator::test_utils::mock_sstable_store_with_read_batch(
+            config,
+        )
+        .await;
+    let mut options = risingwave_storage::hummock::test_utils::default_opts_for_test();
+    options.read_batch = config;
+    let env = prepare_hummock_test_env_with_store(sst_store, options).await;
+    env.register_table_id(Default::default()).await;
+    let store = env.storage;
+    let meta_client = env.meta_client;
+    let epoch1 = INVALID_EPOCH.next_epoch();
+    let table_id = Default::default();
+    store.start_epoch(epoch1, HashSet::from([table_id]));
+    let mut writer = store.new_local(NewLocalOptions::for_test(table_id)).await;
+    writer.init_for_test(epoch1).await.unwrap();
+    let names: Vec<_> = (0..count).map(|i| format!("key-{i:03}")).collect();
+    writer
+        .ingest_batch(
+            names
+                .iter()
+                .map(|key| {
+                    (
+                        gen_key_from_str(VirtualNode::ZERO, key),
+                        StorageValue::new_put(Bytes::copy_from_slice(key.as_bytes())),
+                    )
+                })
+                .collect(),
+        )
+        .await
+        .unwrap();
+    let epoch2 = epoch1.next_epoch();
+    store.start_epoch(epoch2, HashSet::from([table_id]));
+    writer.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    let synced = store
+        .seal_and_sync_epoch(epoch1, HashSet::from([table_id]))
+        .await
+        .unwrap();
+    // The flush may produce multiple non-overlapping SSTs. Every requested key exists
+    // in this epoch; the final hook count below checks one candidate visit per key.
+    meta_client.commit_epoch(epoch1, synced).await.unwrap();
+    store
+        .try_wait_epoch(
+            risingwave_hummock_sdk::HummockReadEpoch::Committed(epoch1),
+            TryWaitEpochOptions::for_test(table_id),
+        )
+        .await
+        .unwrap();
+    let risingwave_storage::store_impl::StateStoreImpl::HummockStateStore(wrapped) =
+        risingwave_storage::store_impl::StateStoreImpl::hummock(
+            store.clone(),
+            Arc::new(risingwave_storage::monitor::MonitoredStorageMetrics::unused()),
+        )
+    else {
+        unreachable!()
+    };
+    let mut reader = wrapped.new_local(NewLocalOptions::for_test(table_id)).await;
+    assert_eq!(reader.read_batch_config().concurrency.get(), concurrency);
+    assert!(reader.read_batch_config().enabled && reader.read_batch_config().meta_reuse);
+    reader.init_for_test(epoch2).await.unwrap();
+
+    let started = Arc::new(AtomicUsize::new(0));
+    let filled = Arc::new(Notify::new());
+    let refilled = Arc::new(Notify::new());
+    let release_first = Arc::new(Notify::new());
+    let release_others = Arc::new(Semaphore::new(0));
+    sync_point::reset();
+    sync_point::hook(PAUSE, {
+        let started = started.clone();
+        let filled = filled.clone();
+        let refilled = refilled.clone();
+        let release_first = release_first.clone();
+        let release_others = release_others.clone();
+        move || {
+            let position = started.fetch_add(1, Ordering::SeqCst);
+            let filled = filled.clone();
+            let refilled = refilled.clone();
+            let release_first = release_first.clone();
+            let release_others = release_others.clone();
+            async move {
+                if position + 1 == concurrency {
+                    filled.notify_one();
+                }
+                if position + 1 == 2 * concurrency {
+                    refilled.notify_one();
+                }
+                if position == 0 {
+                    release_first.notified().await;
+                } else {
+                    release_others.acquire().await.unwrap().forget();
+                }
+            }
+        }
+    });
+    let _cleanup = SyncPointActionGuard(PAUSE);
+    // Observe backend admissions, not the projection callback: debug dynamic dispatch
+    // materializes the complete batch before invoking the caller's projection.
+
+    let mut batch = Box::pin(
+        reader.on_key_values(
+            names
+                .iter()
+                .map(|name| {
+                    (
+                        gen_key_from_str(VirtualNode::ZERO, name),
+                        risingwave_storage::store::ReadOptions::default(),
+                    )
+                })
+                .collect(),
+            |_, value| Ok(Bytes::copy_from_slice(value)),
+        ),
+    );
+    tokio::select! {
+        result = &mut batch => panic!("batch completed before releasing requests: {result:?}"),
+        result = tokio::time::timeout(Duration::from_secs(10), filled.notified()) => {
+            result.expect("initial concurrency window did not start");
+            assert_eq!(started.load(Ordering::SeqCst), concurrency);
+        }
+    }
+    assert!(batch.as_mut().now_or_never().is_none());
+    assert_eq!(started.load(Ordering::SeqCst), concurrency);
+    release_others.add_permits(count - 1);
+    tokio::select! {
+        result = &mut batch => panic!("first key was not released: {result:?}"),
+        result = tokio::time::timeout(Duration::from_secs(10), refilled.notified()) => {
+            result.expect("a slow key must not block replacement keys");
+        }
+    }
+    assert!(started.load(Ordering::SeqCst) >= 2 * concurrency);
+    release_first.notify_one();
+    let rows = tokio::time::timeout(Duration::from_secs(10), batch)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rows,
+        names
+            .iter()
+            .map(|name| Some(Bytes::copy_from_slice(name.as_bytes())))
+            .collect::<Vec<_>>()
+    );
+    // Without this check, repeated candidate visits by one key could falsely signal refill.
+    assert_eq!(started.load(Ordering::SeqCst), count);
+}
+
 #[tokio::test]
 async fn test_get_from_sstable_info_success_settles_nested_stats_once() {
     let sstable_store = mock_sstable_store().await;
@@ -80,6 +252,7 @@ async fn test_get_from_sstable_info_success_settles_nested_stats_once() {
     let iter = get_from_sstable_info(
         sstable_store,
         &sstable_info,
+        None,
         full_key.to_ref(),
         &read_options,
         None,
@@ -121,6 +294,7 @@ async fn test_get_from_sstable_info_cancellation_settles_nested_stats() {
     let mut get = Box::pin(get_from_sstable_info(
         sstable_store,
         &sstable_info,
+        None,
         full_key.to_ref(),
         &read_options,
         None,

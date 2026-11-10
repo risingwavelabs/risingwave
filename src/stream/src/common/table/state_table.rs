@@ -42,6 +42,7 @@ use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -1199,6 +1200,11 @@ where
         &self.data_types
     }
 
+    /// Whether this storage instance enables native batches in adapted streaming operators.
+    pub fn native_point_batch_enabled(&self) -> bool {
+        self.row_store.state_store.read_batch_config().enabled
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
@@ -1315,6 +1321,54 @@ where
         }
     }
 
+    /// Read independent primary keys with aligned results, sharing native storage preparation.
+    pub async fn get_rows(&self, keys: &[impl Row]) -> StreamExecutorResult<Vec<Option<OwnedRow>>> {
+        let requests = keys
+            .iter()
+            .map(|key| self.serialize_pk_and_get_prefix_hint(key))
+            .collect();
+        let rows = self
+            .row_store
+            .get_many(
+                requests,
+                |row| row.clone(),
+                |value| {
+                    self.row_store
+                        .row_serde
+                        .deserialize(value)
+                        .map(OwnedRow::new)
+                        .map_err(Into::into)
+                },
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                row.map(|row| {
+                    if IS_REPLICATED {
+                        row.project(&self.output_indices).into_owned_row()
+                    } else {
+                        row
+                    }
+                })
+            })
+            .collect())
+    }
+
+    pub async fn exists_many(&self, keys: &[OwnedRow]) -> StreamExecutorResult<Vec<bool>> {
+        let requests = keys
+            .iter()
+            .map(|key| self.serialize_pk_and_get_prefix_hint(key))
+            .collect();
+        Ok(self
+            .row_store
+            .get_many(requests, |_| (), |_| Ok(()))
+            .await?
+            .into_iter()
+            .map(|row| row.is_some())
+            .collect())
+    }
+
     /// Get a raw encoded row from state table.
     pub async fn exists(&self, pk: impl Row) -> StreamExecutorResult<bool> {
         let (serialized_pk, prefix_hint) = self.serialize_pk_and_get_prefix_hint(&pk);
@@ -1344,6 +1398,72 @@ where
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    async fn get_many<O: Send>(
+        &self,
+        requests: Vec<(TableKey<Bytes>, Option<Bytes>)>,
+        from_cached: impl Fn(&OwnedRow) -> O + Send + Sync,
+        decode: impl Fn(&[u8]) -> risingwave_storage::error::StorageResult<O> + Send + Sync,
+    ) -> StreamExecutorResult<Vec<Option<O>>> {
+        let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+        let mut pending = Vec::new();
+        let mut positions = Vec::new();
+        for (index, (key, prefix_hint)) in requests.into_iter().enumerate() {
+            if let Some(metrics) = &self.metrics {
+                metrics.get_count.inc();
+            }
+            if let Some(rows) = &self.all_rows {
+                let (vnode, key) = key.split_vnode_bytes();
+                output[index] = rows
+                    .get(&vnode)
+                    .expect("covered vnode")
+                    .get(&key)
+                    .map(&from_cached);
+                continue;
+            }
+            if self.below_pending_watermark(&key) {
+                continue;
+            }
+            let should_prune = if let Some(stats) = &self.vnode_stats
+                && let (vnode, key) = key.split_vnode_bytes()
+                && let Some(stats) = stats.get(&vnode)
+                && stats.can_prune(&key)
+            {
+                if let Some(metrics) = &self.metrics {
+                    metrics.get_vnode_pruned_count.inc();
+                }
+                true
+            } else {
+                false
+            };
+            if should_prune && self.enable_state_table_vnode_stats_pruning {
+                continue;
+            }
+            positions.push((index, should_prune));
+            pending.push((
+                key,
+                ReadOptions {
+                    prefix_hint,
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
+                    ..Default::default()
+                },
+            ));
+        }
+        if pending.is_empty() {
+            return Ok(output);
+        }
+        let rows = self
+            .state_store
+            .on_key_values(pending, |_, value| decode(value))
+            .await?;
+        for ((index, should_prune), row) in positions.into_iter().zip_eq_fast(rows) {
+            if should_prune && row.is_some() {
+                tracing::warn!(table_id = %self.table_id, "vnode stats pruning dry run fails for batch get. This will not affect correctness.");
+            }
+            output[index] = row;
+        }
+        Ok(output)
+    }
+
     async fn get(
         &self,
         key_bytes: TableKey<Bytes>,

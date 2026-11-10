@@ -1,0 +1,17 @@
+# Startup controls shared with the production CN configuration parser.
+[storage.blockwise_prefetch]
+enabled = true
+max_blocks = 3
+max_bytes = 262144
+
+[storage.read_batch]
+enabled = true
+concurrency = 10
+meta_reuse = true
+meta_max_entries = 16
+meta_max_bytes = 1048576
+
+[storage.object_store.read_scheduler]
+max_batch_requests = 16
+max_admitted_requests = 32
+max_read_bytes = 262144

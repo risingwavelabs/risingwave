@@ -159,7 +159,7 @@ impl ObjectStore for OpendalObjectStore {
         if let Some(len) = range.len()
             && len != data.len()
         {
-            return Err(ObjectError::internal(format!(
+            return Err(ObjectError::read_length_mismatch(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 len,
                 data.len(),

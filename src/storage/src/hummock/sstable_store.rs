@@ -42,6 +42,7 @@ use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
+use tracing::Instrument;
 
 use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
@@ -234,6 +235,8 @@ pub struct SstableStoreConfig {
 
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
+    pub blockwise_prefetch: risingwave_common::config::storage::BlockwisePrefetchConfig,
+    pub read_batch: risingwave_common::config::storage::ReadBatchConfig,
     pub recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub use_new_object_prefix_strategy: bool,
@@ -262,6 +265,9 @@ pub struct SstableStore {
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
+    pub(crate) blockwise_prefetch: risingwave_common::config::storage::BlockwisePrefetchConfig,
+    pub(crate) read_batch: risingwave_common::config::storage::ReadBatchConfig,
+    pub(crate) read_metrics: Arc<HummockStateStoreMetrics>,
     /// Whether the object store is divided into prefixes depends on two factors:
     ///   1. The specific object store type.
     ///   2. Whether the existing cluster is a new cluster.
@@ -280,6 +286,7 @@ pub struct SstableStore {
 
 impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
+        tracing::info!(blockwise_prefetch = ?config.blockwise_prefetch, read_batch = ?config.read_batch, "storage read controls");
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
 
@@ -296,6 +303,9 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
+            blockwise_prefetch: config.blockwise_prefetch,
+            read_batch: config.read_batch,
+            read_metrics: config.state_store_metrics,
             use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
             skip_bloom_filter_in_serde: config.skip_bloom_filter_in_serde,
         }
@@ -310,6 +320,7 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         use_new_object_prefix_strategy: bool,
+        read_metrics: Arc<HummockStateStoreMetrics>,
     ) -> HummockResult<Self> {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
@@ -343,6 +354,9 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
+            blockwise_prefetch: Default::default(),
+            read_batch: Default::default(),
+            read_metrics,
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             use_new_object_prefix_strategy,
             skip_bloom_filter_in_serde: false,
@@ -548,7 +562,12 @@ impl SstableStore {
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         // future: fetch block if hybrid cache miss
-        let fetch_block = async move {
+        let span = tracing::trace_span!(target: "state_store_read_batch", "block_read",
+            object_id = %object_id, block = block_index, start = range.start, end = range.end);
+        let fetch_block = || {
+            let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
+            async move {
+            outer_fetch.inc();
             let block_data = match store
                 .read(&data_path, range.clone())
                 .instrument_await("get_block_response".verbose())
@@ -567,14 +586,22 @@ impl SstableStore {
             };
             let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
             Ok(block)
+        }.instrument(span)
         };
 
         match policy {
             CachePolicy::Fill(hint) => {
                 let properties = HybridCacheProperties::default().with_hint(hint);
                 let fetch = self.block_cache.get_or_fetch(&idx, || {
-                    fetch_block.map(|res| res.map(|block| (block, properties)))
+                    fetch_block().map(|res| res.map(|block| (block, properties)))
                 });
+                if fetch.need_await() {
+                    self.read_metrics.block_cache_pending.inc();
+                } else {
+                    self.read_metrics.block_cache_memory_hit.inc();
+                }
+                tracing::trace!(target: "state_store_read_batch", object_id = %object_id,
+                    block = block_index, memory_hit = !fetch.need_await(), "block cache request registered");
                 Ok(BlockResponse::Fetch(fetch))
             }
             CachePolicy::NotFill => {
@@ -588,13 +615,13 @@ impl SstableStore {
                         entry,
                     ))),
                     _ => {
-                        let block = fetch_block.await?;
+                        let block = fetch_block().await?;
                         Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                     }
                 }
             }
             CachePolicy::Disable => {
-                let block = fetch_block.await?;
+                let block = fetch_block().await?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
@@ -1008,7 +1035,7 @@ mod tests {
             sstable,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
+                prefetch: crate::store::PrefetchMode::Range,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -1028,7 +1055,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_prefetch_failure_falls_back_and_releases_tracker() {
-        for truncate in [true, false] {
+        use crate::store::PrefetchMode;
+
+        for (truncate, mode) in [
+            (true, PrefetchMode::Range),
+            (false, PrefetchMode::Range),
+            (true, PrefetchMode::Blockwise),
+            (false, PrefetchMode::Blockwise),
+        ] {
             let sstable_store = mock_sstable_store().await;
             let (sstable, info) =
                 gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
@@ -1054,8 +1088,12 @@ mod tests {
                 sstable.clone(),
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions {
-                    prefetch: true,
-                    cache_policy: CachePolicy::Disable,
+                    prefetch: mode,
+                    cache_policy: if mode == PrefetchMode::Blockwise {
+                        CachePolicy::default()
+                    } else {
+                        CachePolicy::Disable
+                    },
                     ..Default::default()
                 }),
                 &info,
@@ -1065,7 +1103,10 @@ mod tests {
             assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
             let mut stats = StoreLocalStatistic::default();
             iter.collect_local_statistic(&mut stats);
-            assert_eq!(stats.cache_data_prefetch_count, 1);
+            assert_eq!(
+                stats.cache_data_prefetch_count,
+                u64::from(mode == PrefetchMode::Range)
+            );
             assert_eq!(stats.cache_data_block_total, 1);
             // If the single-block read also fails, the error must still reach the caller.
             let second_key = risingwave_hummock_sdk::key::FullKey::decode(
@@ -1094,7 +1135,7 @@ mod tests {
             sstable.clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
+                prefetch: crate::store::PrefetchMode::Range,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),

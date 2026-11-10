@@ -78,6 +78,13 @@ use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type CommittedVersion = PinnedVersion;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PointGetSstSource {
+    Staging,
+    Overlapping,
+    Nonoverlapping,
+}
+
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
@@ -594,6 +601,10 @@ pub struct HummockVersionReader {
 /// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
 /// `streaming_query`
 impl HummockVersionReader {
+    pub(super) fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.sstable_store.read_batch
+    }
+
     pub fn new(
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -630,6 +641,186 @@ impl HummockVersionReader {
             }
         }
         false
+    }
+
+    /// Candidate order is shared with batch point reads. Preparing candidates does not read
+    /// metadata or data; only the next candidate of an unresolved key may start I/O.
+    /// Consumers check the nonoverlapping candidate's right bound so that its async test hook
+    /// remains in the async read operation rather than this synchronous traversal.
+    fn point_get_candidates<'a>(
+        table_id: TableId,
+        key: &'a TableKey<Bytes>,
+        version: &'a ReadVersionTuple,
+    ) -> impl Iterator<Item = (&'a SstableInfo, PointGetSstSource)> + 'a {
+        std::iter::from_coroutine(
+            #[coroutine]
+            move || {
+                let (_, uncommitted, committed) = version;
+                let key_range = key.clone()..=key.clone();
+                for sst in uncommitted {
+                    if filter_single_sst(sst, table_id, &key_range) {
+                        yield (sst, PointGetSstSource::Staging);
+                    }
+                }
+                assert!(committed.is_valid());
+                let user_key = UserKey::new(table_id, key.to_ref());
+                for level in committed.levels(table_id) {
+                    if level.table_infos.is_empty() {
+                        continue;
+                    }
+                    match level.level_type {
+                        LevelType::Overlapping | LevelType::Unspecified => {
+                            for sst in &level.table_infos {
+                                if filter_single_sst(sst, table_id, &key_range) {
+                                    yield (sst, PointGetSstSource::Overlapping);
+                                }
+                            }
+                        }
+                        LevelType::Nonoverlapping => {
+                            let index = search_sst_idx(&level.table_infos, user_key);
+                            if index == 0 {
+                                continue;
+                            }
+                            let sst = &level.table_infos[index - 1];
+                            if sst.table_ids.binary_search(&table_id).is_err() {
+                                continue;
+                            }
+                            yield (sst, PointGetSstSource::Nonoverlapping);
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    // Keep native batch coordination out of scalar get's future. Each admitted key advances
+    // independently through the same candidates; only immutable SST metadata is shared.
+    pub(super) async fn get_with_metadata<'a, O>(
+        &'a self,
+        table_key: TableKey<Bytes>,
+        epoch: u64,
+        table_id: TableId,
+        table_option: TableOption,
+        read_options: ReadOptions,
+        read_version_tuple: ReadVersionTuple,
+        metadata: &crate::hummock::sst_meta_batch::SstMetaBatch,
+        on_key_value_fn: impl crate::store::KeyValueFn<'a, O>,
+    ) -> StorageResult<Option<O>> {
+        let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+
+        let min_epoch = gen_min_epoch(epoch, table_option.retention_seconds);
+        let mut stats_guard = GetLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
+        let local_stats = &mut stats_guard.local_stats;
+        local_stats.found_key = true;
+
+        // 1. read staging data
+        for imm in &imms {
+            // skip imm that only holding out-of-date data
+            if imm.epoch() < min_epoch {
+                continue;
+            }
+
+            local_stats.staging_imm_get_count += 1;
+
+            if let Some((data, data_epoch)) = get_from_batch(
+                imm,
+                TableKey(table_key.as_ref()),
+                epoch,
+                &read_options,
+                local_stats,
+            ) {
+                return Ok(if data_epoch.pure_epoch() < min_epoch {
+                    None
+                } else {
+                    data.into_user_value()
+                        .map(|v| {
+                            on_key_value_fn(
+                                FullKey::new_with_gap_epoch(
+                                    table_id,
+                                    table_key.to_ref(),
+                                    data_epoch,
+                                ),
+                                v.as_ref(),
+                            )
+                        })
+                        .transpose()?
+                });
+            }
+        }
+
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|hint| Sstable::hash_for_filter(hint, table_id.as_raw_id()));
+        // Preserve scalar seek visibility, including every spill at this epoch.
+        let full_key = FullKey::new_with_gap_epoch(
+            table_id,
+            table_key.clone(),
+            EpochWithGap::new(epoch, MAX_SPILL_TIMES),
+        );
+        let version = (imms, uncommitted_ssts, committed_version);
+        for (sst, source) in Self::point_get_candidates(table_id, &table_key, &version) {
+            if source == PointGetSstSource::Nonoverlapping
+                && sst
+                    .key_range
+                    .compare_right_with_user_key(full_key.user_key.as_ref())
+                    == Ordering::Less
+            {
+                sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
+                continue;
+            }
+            if source != PointGetSstSource::Staging
+                && Self::skip_get_by_vnode_user_key_range(
+                    sst,
+                    VirtualNode::from_index(full_key.user_key.get_vnode_id()),
+                    full_key.user_key.as_ref(),
+                    local_stats,
+                )
+            {
+                continue;
+            }
+            match source {
+                PointGetSstSource::Staging => local_stats.staging_sst_get_count += 1,
+                PointGetSstSource::Overlapping => local_stats.overlapping_get_count += 1,
+                PointGetSstSource::Nonoverlapping => local_stats.non_overlapping_get_count += 1,
+            }
+            sync_point!("HUMMOCK::MULTI_GET::BEFORE_SST");
+            let table = metadata
+                .sstable(&self.sstable_store, sst, local_stats)
+                .await?;
+            if let Some(iter) = get_from_sstable_info(
+                self.sstable_store.clone(),
+                sst,
+                Some(table),
+                full_key.to_ref(),
+                &read_options,
+                dist_key_hash,
+                local_stats,
+            )
+            .await?
+            {
+                let data_epoch = iter.key().epoch_with_gap;
+                return Ok(if data_epoch.pure_epoch() < min_epoch {
+                    None
+                } else {
+                    iter.value()
+                        .into_user_value()
+                        .map(|value| {
+                            on_key_value_fn(
+                                FullKey::new_with_gap_epoch(
+                                    table_id,
+                                    table_key.to_ref(),
+                                    data_epoch,
+                                ),
+                                value,
+                            )
+                        })
+                        .transpose()?
+                });
+            }
+        }
+        stats_guard.local_stats.found_key = false;
+        Ok(None)
     }
 
     pub async fn get<'a, O>(
@@ -684,29 +875,46 @@ impl HummockVersionReader {
             }
         }
 
-        // 2. order guarantee: imm -> sst
         let dist_key_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|dist_key| Sstable::hash_for_filter(dist_key.as_ref(), table_id.as_raw_id()));
-
-        // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
-        // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
+            .map(|hint| Sstable::hash_for_filter(hint, table_id.as_raw_id()));
+        // Seek includes every spill at this epoch, exactly as in the batch path.
         let full_key = FullKey::new_with_gap_epoch(
             table_id,
-            TableKey(table_key.clone()),
+            table_key.clone(),
             EpochWithGap::new(epoch, MAX_SPILL_TIMES),
         );
-        let single_table_key_range = table_key.clone()..=table_key.clone();
-
-        // prune uncommitted ssts with the keyrange
-        let pruned_uncommitted_ssts =
-            prune_overlapping_ssts(&uncommitted_ssts, table_id, &single_table_key_range);
-        for local_sst in pruned_uncommitted_ssts {
-            local_stats.staging_sst_get_count += 1;
+        let version = (imms, uncommitted_ssts, committed_version);
+        for (sst, source) in Self::point_get_candidates(table_id, &table_key, &version) {
+            if source == PointGetSstSource::Nonoverlapping
+                && sst
+                    .key_range
+                    .compare_right_with_user_key(full_key.user_key.as_ref())
+                    == Ordering::Less
+            {
+                sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
+                continue;
+            }
+            if source != PointGetSstSource::Staging
+                && Self::skip_get_by_vnode_user_key_range(
+                    sst,
+                    VirtualNode::from_index(full_key.user_key.get_vnode_id()),
+                    full_key.user_key.as_ref(),
+                    local_stats,
+                )
+            {
+                continue;
+            }
+            match source {
+                PointGetSstSource::Staging => local_stats.staging_sst_get_count += 1,
+                PointGetSstSource::Overlapping => local_stats.overlapping_get_count += 1,
+                PointGetSstSource::Nonoverlapping => local_stats.non_overlapping_get_count += 1,
+            }
             if let Some(iter) = get_from_sstable_info(
                 self.sstable_store.clone(),
-                local_sst,
+                sst,
+                None,
                 full_key.to_ref(),
                 &read_options,
                 dist_key_hash,
@@ -714,152 +922,24 @@ impl HummockVersionReader {
             )
             .await?
             {
-                debug_assert!(iter.is_valid());
                 let data_epoch = iter.key().epoch_with_gap;
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
                     iter.value()
                         .into_user_value()
-                        .map(|v| {
+                        .map(|value| {
                             on_key_value_fn(
                                 FullKey::new_with_gap_epoch(
                                     table_id,
                                     table_key.to_ref(),
                                     data_epoch,
                                 ),
-                                v,
+                                value,
                             )
                         })
                         .transpose()?
                 });
-            }
-        }
-        // 3. read from committed_version sst file
-        // Because SST meta records encoded key range,
-        // the filter key needs to be encoded as well.
-        assert!(committed_version.is_valid());
-        for level in committed_version.levels(table_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-
-            match level.level_type {
-                LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_overlapping_ssts(
-                        &level.table_infos,
-                        table_id,
-                        &single_table_key_range,
-                    );
-                    for sstable_info in sstable_infos {
-                        // filter vnode-key range that is definitely not containing the key
-                        if Self::skip_get_by_vnode_user_key_range(
-                            sstable_info,
-                            VirtualNode::from_index(full_key.user_key.get_vnode_id()),
-                            full_key.user_key.as_ref(),
-                            local_stats,
-                        ) {
-                            continue;
-                        }
-
-                        local_stats.overlapping_get_count += 1;
-                        if let Some(iter) = get_from_sstable_info(
-                            self.sstable_store.clone(),
-                            sstable_info,
-                            full_key.to_ref(),
-                            &read_options,
-                            dist_key_hash,
-                            local_stats,
-                        )
-                        .await?
-                        {
-                            debug_assert!(iter.is_valid());
-                            let data_epoch = iter.key().epoch_with_gap;
-                            return Ok(if data_epoch.pure_epoch() < min_epoch {
-                                None
-                            } else {
-                                iter.value()
-                                    .into_user_value()
-                                    .map(|v| {
-                                        on_key_value_fn(
-                                            FullKey::new_with_gap_epoch(
-                                                table_id,
-                                                table_key.to_ref(),
-                                                data_epoch,
-                                            ),
-                                            v,
-                                        )
-                                    })
-                                    .transpose()?
-                            });
-                        }
-                    }
-                }
-                LevelType::Nonoverlapping => {
-                    let mut table_info_idx =
-                        search_sst_idx(&level.table_infos, full_key.user_key.as_ref());
-                    if table_info_idx == 0 {
-                        continue;
-                    }
-                    table_info_idx = table_info_idx.saturating_sub(1);
-                    let sstable_info = &level.table_infos[table_info_idx];
-
-                    if sstable_info.table_ids.binary_search(&table_id).is_err() {
-                        continue;
-                    }
-
-                    // Filter SSTs that definitely cannot contain the key.
-                    let ord = sstable_info
-                        .key_range
-                        .compare_right_with_user_key(full_key.user_key.as_ref());
-                    // the case that the key falls into the gap between two ssts
-                    if ord == Ordering::Less {
-                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
-                        continue;
-                    }
-
-                    // Filter vnode-key range that is definitely not containing the key.
-                    if Self::skip_get_by_vnode_user_key_range(
-                        sstable_info,
-                        VirtualNode::from_index(full_key.user_key.get_vnode_id()),
-                        full_key.user_key.as_ref(),
-                        local_stats,
-                    ) {
-                        continue;
-                    }
-
-                    local_stats.non_overlapping_get_count += 1;
-                    if let Some(iter) = get_from_sstable_info(
-                        self.sstable_store.clone(),
-                        sstable_info,
-                        full_key.to_ref(),
-                        &read_options,
-                        dist_key_hash,
-                        local_stats,
-                    )
-                    .await?
-                    {
-                        debug_assert!(iter.is_valid());
-                        let data_epoch = iter.key().epoch_with_gap;
-                        return Ok(if data_epoch.pure_epoch() < min_epoch {
-                            None
-                        } else {
-                            iter.value()
-                                .into_user_value()
-                                .map(|v| {
-                                    on_key_value_fn(
-                                        FullKey::new_with_gap_epoch(
-                                            table_id,
-                                            table_key.to_ref(),
-                                            data_epoch,
-                                        ),
-                                        v,
-                                    )
-                                })
-                                .transpose()?
-                        });
-                    }
-                }
             }
         }
         stats_guard.local_stats.found_key = false;
@@ -1041,7 +1121,14 @@ impl HummockVersionReader {
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         sst_read_options.read_table_id = Some(table_id);
         sst_read_options.scan_end_user_key = Some(user_key_range.1.map(|key| key.cloned()));
-        sst_read_options.prefetch = read_options.prefetch_options.prefetch;
+        sst_read_options.prefetch = match read_options.prefetch_options.mode {
+            crate::store::PrefetchMode::Blockwise
+                if !self.sstable_store.blockwise_prefetch.enabled =>
+            {
+                crate::store::PrefetchMode::Disabled
+            }
+            mode => mode,
+        };
         let sst_read_options = Arc::new(sst_read_options);
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -1209,7 +1296,7 @@ impl HummockVersionReader {
             cache_policy: Default::default(),
             read_table_id: Some(options.table_id),
             scan_end_user_key: None,
-            prefetch: false,
+            prefetch: crate::store::PrefetchMode::Disabled,
         });
 
         async fn make_iter(

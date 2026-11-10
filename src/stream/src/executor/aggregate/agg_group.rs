@@ -270,11 +270,40 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<(Self, AggStateCacheStats)> {
-        let mut stats = AggStateCacheStats::default();
-
         let inter_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
+        Self::create_from_intermediate_state(
+            version,
+            group_key,
+            agg_calls,
+            agg_funcs,
+            storages,
+            inter_states,
+            stream_key,
+            row_count_index,
+            emit_on_window_close,
+            extreme_cache_size,
+            input_schema,
+        )
+        .await
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    pub async fn create_from_intermediate_state(
+        version: PbAggNodeVersion,
+        group_key: Option<GroupKey>,
+        agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
+        storages: &[AggStateStorage<S>],
+        inter_states: Option<OwnedRow>,
+        stream_key: StreamKeyRef<'_>,
+        row_count_index: usize,
+        emit_on_window_close: bool,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<(Self, AggStateCacheStats)> {
+        let mut stats = AggStateCacheStats::default();
         if let Some(inter_states) = &inter_states {
             assert_eq!(inter_states.len(), agg_calls.len());
         }

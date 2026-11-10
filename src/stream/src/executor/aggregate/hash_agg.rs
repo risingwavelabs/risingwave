@@ -265,13 +265,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         keys: impl IntoIterator<Item = &K>,
     ) -> StreamExecutorResult<()> {
         let group_key_types = &this.info.schema.data_types()[..this.group_key_indices.len()];
-        let futs = keys
+        let missing = keys
             .into_iter()
-            .filter_map(|key| {
+            .filter(|&key| {
                 vars.stats.total_lookup_count += 1;
                 if vars.dirty_groups.contains_key(key) {
                     // already dirty
-                    return None;
+                    return false;
                 }
                 match vars.agg_group_cache.get_mut(key) {
                     Some(mut agg_group) => {
@@ -283,36 +283,74 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         // move from cache to `dirty_groups`
                         vars.dirty_groups
                             .insert(key.clone(), agg_group.take().unwrap());
-                        None // no need to create
+                        false // no need to create
                     }
                     None => {
                         vars.stats.lookup_miss_count += 1;
-                        Some(async {
-                            // Create `AggGroup` for the current group if not exists. This will
-                            // restore agg states from the intermediate state table.
-                            let (agg_group, stats) = AggGroup::create(
-                                this.version,
-                                Some(GroupKey::new(
-                                    key.deserialize(group_key_types)?,
-                                    Some(this.group_key_table_pk_projection.clone()),
-                                )),
-                                &this.agg_calls,
-                                &this.agg_funcs,
-                                &this.storages,
-                                &this.intermediate_state_table,
-                                &this.input_stream_key,
-                                this.row_count_index,
-                                this.emit_on_window_close,
-                                this.extreme_cache_size,
-                                &this.input_schema,
-                            )
-                            .await?;
-                            Ok::<_, StreamExecutorError>((key.clone(), Box::new(agg_group), stats))
-                        })
+                        true
                     }
                 }
             })
-            .collect_vec(); // collect is necessary to avoid lifetime issue of `agg_group_cache`
+            .collect_vec();
+        let restored = if this.intermediate_state_table.native_point_batch_enabled() {
+            let group_keys = missing
+                .iter()
+                .map(|key| {
+                    Ok(GroupKey::new(
+                        key.deserialize(group_key_types)?,
+                        Some(this.group_key_table_pk_projection.clone()),
+                    ))
+                })
+                .collect::<StreamExecutorResult<Vec<_>>>()?;
+            let pks = group_keys
+                .iter()
+                .map(|key| key.table_pk().into_owned_row())
+                .collect_vec();
+            let rows = this.intermediate_state_table.get_rows(&pks).await?;
+            Some(group_keys.into_iter().zip_eq_fast(rows))
+        } else {
+            None
+        };
+        let mut restored = restored;
+        let futs = missing
+            .into_iter()
+            .map(|key| {
+                let restored = restored
+                    .as_mut()
+                    .map(|rows| rows.next().expect("aligned batch"));
+                async move {
+                    let (group_key, inter_states) = match restored {
+                        Some(pair) => pair,
+                        None => {
+                            let group_key = GroupKey::new(
+                                key.deserialize(group_key_types)?,
+                                Some(this.group_key_table_pk_projection.clone()),
+                            );
+                            let row = this
+                                .intermediate_state_table
+                                .get_row(group_key.table_pk())
+                                .await?;
+                            (group_key, row)
+                        }
+                    };
+                    let (agg_group, stats) = AggGroup::create_from_intermediate_state(
+                        this.version,
+                        Some(group_key),
+                        &this.agg_calls,
+                        &this.agg_funcs,
+                        &this.storages,
+                        inter_states,
+                        &this.input_stream_key,
+                        this.row_count_index,
+                        this.emit_on_window_close,
+                        this.extreme_cache_size,
+                        &this.input_schema,
+                    )
+                    .await?;
+                    Ok::<_, StreamExecutorError>((key.clone(), Box::new(agg_group), stats))
+                }
+            })
+            .collect_vec();
 
         vars.stats.chunk_total_lookup_count += 1;
         if !futs.is_empty() {

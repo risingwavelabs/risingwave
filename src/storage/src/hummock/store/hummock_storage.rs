@@ -719,6 +719,10 @@ pub struct HummockStorageReadSnapshot {
 }
 
 impl StateStoreGet for HummockStorageReadSnapshot {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.hummock_version_reader.read_batch_config()
+    }
+
     fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

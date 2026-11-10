@@ -103,6 +103,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
             path: read_plan.data_dir,
             prefetch_buffer_capacity: 1 << 10,
             max_prefetch_block_number: 16,
+            blockwise_prefetch: Default::default(),
+            read_batch: Default::default(),
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,

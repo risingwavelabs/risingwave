@@ -974,6 +974,51 @@ pub mod tests {
     }
 
     #[test]
+    fn test_read_optimization_controls_reject_zero_limits() {
+        for (section, fields) in [
+            (
+                "storage.blockwise_prefetch",
+                vec!["max_blocks", "max_bytes"],
+            ),
+            (
+                "storage.read_batch",
+                vec!["concurrency", "meta_max_entries", "meta_max_bytes"],
+            ),
+            (
+                "storage.object_store.read_scheduler",
+                vec![
+                    "max_batch_requests",
+                    "max_admitted_requests",
+                    "max_read_bytes",
+                ],
+            ),
+            ("batch", vec!["point_get_concurrency"]),
+        ] {
+            for field in fields {
+                assert!(
+                    toml::from_str::<RwConfig>(&format!("[{section}]\n{field} = 0")).is_err(),
+                    "{section}.{field}"
+                );
+            }
+        }
+        for section in [
+            "storage.blockwise_prefetch",
+            "storage.read_batch",
+            "storage.object_store.read_scheduler",
+        ] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!("[{section}]\nmisspelled_limit = 1")).is_err(),
+                "{section}"
+            );
+        }
+        let defaults = RwConfig::default();
+        assert!(!defaults.storage.blockwise_prefetch.enabled);
+        assert!(!defaults.storage.read_batch.enabled);
+        assert!(!defaults.storage.read_batch.meta_reuse);
+        assert!(!defaults.storage.object_store.enable_hummock_read_coalescing);
+    }
+
+    #[test]
     fn test_storage_max_prefetch_block_number_must_be_positive() {
         let config = toml::from_str::<RwConfig>(
             r#"
