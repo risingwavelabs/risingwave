@@ -145,20 +145,25 @@ async fn create_arrangement<S: StateStore>(table_id: TableId, store: S) -> Execu
 /// | -  | 6     | 1    | 3       |
 /// | b  |       |      | 3 -> 4  |
 fn create_source() -> Executor {
+    create_source_with_chunks(
+        StreamChunk::from_pretty(
+            " I I
+            + 6 1",
+        ),
+        StreamChunk::from_pretty(
+            " I I
+            - 6 1",
+        ),
+    )
+}
+
+/// Create a test source with the same schema as [`create_source`], which yields `chunk1` in
+/// epoch 2 and `chunk2` in epoch 3.
+fn create_source_with_chunks(chunk1: StreamChunk, chunk2: StreamChunk) -> Executor {
     let columns = [
         ColumnDesc::named("join_column", 1.into(), DataType::Int64),
         ColumnDesc::named("rowid_column", 2.into(), DataType::Int64),
     ];
-
-    // Prepare source chunks.
-    let chunk1 = StreamChunk::from_pretty(
-        " I I
-        + 6 1",
-    );
-    let chunk2 = StreamChunk::from_pretty(
-        " I I
-        - 6 1",
-    );
 
     // Prepare stream executors.
     let schema = Schema::new(
@@ -183,7 +188,12 @@ async fn next_msg(buffer: &mut Vec<Message>, executor: &mut BoxedMessageStream) 
 }
 
 fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
-    assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
+    // The non-alternate `Debug` of `StreamChunk` only prints the cardinality, so compare the
+    // pretty-printed ops and rows instead.
+    assert_eq!(
+        chunk1.to_pretty().to_string(),
+        chunk2.to_pretty().to_string()
+    );
 }
 
 fn create_storage_table_desc(table_id: TableId) -> risingwave_pb::plan_common::StorageTableDesc {
@@ -361,6 +371,74 @@ async fn test_lookup_last_epoch() {
         " I I    I I
         - 6 1 2333 6
         - 6 1 2334 6",
+    );
+    check_chunk_eq(chunk2, &expected_chunk2);
+}
+
+/// An update pair on the stream side that matches several arrangement rows must not be emitted as
+/// `U-` x N followed by `U+` x N, since downstream (e.g. the hash dispatcher) requires each `U-` to
+/// be directly followed by its `U+`. It is emitted as plain deletes and inserts instead.
+#[tokio::test]
+async fn test_lookup_update_matches_multiple_rows() {
+    let table_id = TableId::new(1);
+    let store = prepare_hummock_store(table_id).await;
+    let arrangement = create_arrangement(table_id, store.clone()).await;
+    let stream = create_source_with_chunks(
+        StreamChunk::from_pretty(
+            " I I
+            + 6 1",
+        ),
+        StreamChunk::from_pretty(
+            "  I I
+            U- 6 1
+            U+ 6 2",
+        ),
+    );
+    let info = ExecutorInfo::for_test(
+        Schema::new(vec![
+            Field::with_name(DataType::Int64, "join_column"),
+            Field::with_name(DataType::Int64, "rowid_column"),
+            Field::with_name(DataType::Int64, "rowid_column"),
+            Field::with_name(DataType::Int64, "join_column"),
+        ]),
+        vec![1, 2],
+        "LookupExecutor".to_owned(),
+        0,
+    );
+    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::for_test(0),
+        info,
+        arrangement,
+        stream,
+        arrangement_col_descs: arrangement_col_descs(),
+        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
+        use_current_epoch: true,
+        stream_join_key_indices: vec![0],
+        arrange_join_key_indices: vec![1],
+        column_mapping: vec![2, 3, 0, 1],
+        state_table: create_replicated_state_table(store, table_id).await,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
+        chunk_size: 1024,
+    }));
+    let mut lookup_executor = lookup_executor.execute();
+
+    let mut msgs = vec![];
+    for _ in 0..5 {
+        next_msg(&mut msgs, &mut lookup_executor).await;
+    }
+
+    assert_matches!(msgs[0], Message::Barrier(_));
+    assert_matches!(msgs[2], Message::Barrier(_));
+    assert_matches!(msgs[4], Message::Barrier(_));
+
+    // In epoch 3, join key 6 matches rows 2334 and 2335 of the arrangement.
+    let chunk2 = msgs[3].as_chunk().unwrap();
+    let expected_chunk2 = StreamChunk::from_pretty(
+        "    I I I I
+        - 2334 6 6 1
+        - 2335 6 6 1
+        + 2334 6 6 2
+        + 2335 6 6 2",
     );
     check_chunk_eq(chunk2, &expected_chunk2);
 }
