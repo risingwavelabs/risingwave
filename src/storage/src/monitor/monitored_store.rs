@@ -339,6 +339,10 @@ impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStor
 }
 
 impl<S: StateStoreWriteFullText> StateStoreWriteFullText for MonitoredTableStateStore<S> {
+    fn set_maintenance_enabled(&mut self, enabled: bool) {
+        self.inner.set_maintenance_enabled(enabled);
+    }
+
     fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()> {
         // TODO: monitor
         self.inner.insert_document(key, tokens)

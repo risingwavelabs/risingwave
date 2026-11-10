@@ -55,7 +55,15 @@ impl ExecutorBuilder for FullTextIndexWriteExecutorBuilder {
                 analyzer.version()
             )
         }
-        let executor = FullTextIndexWriteExecutor::new(input, store, table.id, analyzer).await?;
+        let executor = FullTextIndexWriteExecutor::new(
+            input,
+            store,
+            table.id,
+            analyzer,
+            params.actor_context,
+            params.vnode_bitmap,
+        )
+        .await?;
         Ok(Executor::new(params.info, Box::new(executor)))
     }
 }

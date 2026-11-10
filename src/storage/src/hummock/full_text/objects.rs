@@ -14,10 +14,11 @@
 
 //! Object-store access for full-text index segments, delete files and deletion vectors.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::future::try_join_all;
+use futures::{StreamExt, TryStreamExt, stream};
 use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_hummock_sdk::full_text_index::{
     FullTextDeleteFileInfo, FullTextDeletionVectorInfo, FullTextIndex, FullTextSegmentInfo,
@@ -102,11 +103,15 @@ pub async fn search(
     if limit == Some(0) {
         return Ok(vec![]);
     }
-    let delete_files = try_join_all(index.pending_delete_files.iter().map(|info| async move {
-        let file = read_delete_file(sstable_store, info).await?;
-        Ok::<_, HummockError>((info, file))
-    }))
-    .await?;
+    const READ_CONCURRENCY: usize = 8;
+    let delete_files: Vec<_> = stream::iter(&index.pending_delete_files)
+        .map(|info| async move {
+            let file = read_delete_file(sstable_store, info).await?;
+            Ok::<_, HummockError>((info, file))
+        })
+        .buffered(READ_CONCURRENCY)
+        .try_collect()
+        .await?;
     let tokens = Arc::new(tokens);
     let futures = index
         .segments
@@ -142,15 +147,18 @@ pub async fn search(
                 .await
             }
         });
-    // A key has at most one alive document across all segments, so taking at most `limit` keys
-    // from each segment is enough.
-    let mut keys: Vec<Bytes> = try_join_all(futures).await?.into_iter().flatten().collect();
-    keys.sort_unstable();
-    keys.dedup();
-    if let Some(limit) = limit {
-        keys.truncate(limit);
+    // An unordered LIMIT can stop before opening later segments. Do not prefetch them: a
+    // whole bundle may be large, and dropping spawn_blocking does not cancel running work.
+    let mut results =
+        stream::iter(futures).buffered(if limit.is_some() { 1 } else { READ_CONCURRENCY });
+    let mut keys = BTreeSet::new();
+    while let Some(batch) = results.try_next().await? {
+        keys.extend(batch);
+        if limit.is_some_and(|limit| keys.len() >= limit) {
+            break;
+        }
     }
-    Ok(keys)
+    Ok(keys.into_iter().take(limit.unwrap_or(usize::MAX)).collect())
 }
 
 /// A decoded delete file. Its keys are sorted and de-duplicated.

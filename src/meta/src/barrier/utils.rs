@@ -211,8 +211,9 @@ impl ObjectIndexAdds {
         }
         for (table_id, adds) in resp.full_text_index_adds.drain() {
             self.full_text
-                .try_insert(table_id, adds.adds.into_iter().map(Into::into).collect())
-                .expect("non-duplicate");
+                .entry(table_id)
+                .or_default()
+                .extend(adds.adds.into_iter().map(Into::into));
         }
     }
 
@@ -524,6 +525,35 @@ mod tests {
     use risingwave_pb::stream_service::barrier_complete_response::PbTableChangeLogProgress;
 
     use super::{BarrierItemCollector, collect_resp_info};
+
+    #[test]
+    fn full_text_adds_are_aggregated_across_workers() {
+        use risingwave_pb::hummock::PbFullTextIndexAdd;
+        use risingwave_pb::hummock::full_text_index_delta::PbFullTextIndexAdds;
+
+        let table_id = TableId::new(234);
+        let responses = (0..3)
+            .map(|worker| BarrierCompleteResponse {
+                full_text_index_adds: [(
+                    table_id,
+                    PbFullTextIndexAdds {
+                        adds: vec![PbFullTextIndexAdd {
+                            consumed_delete_files: vec![(worker + 1).into()],
+                            ..Default::default()
+                        }],
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            })
+            .collect();
+        let (_, _, _, _, adds, _, _) = collect_resp_info(responses);
+        assert_eq!(adds.full_text[&table_id].len(), 3);
+        for (worker, add) in adds.full_text[&table_id].iter().enumerate() {
+            assert_eq!(add.consumed_delete_files, vec![worker as u64 + 1]);
+        }
+    }
 
     #[test]
     fn table_change_log_progress_requires_complete_vnode_coverage() {

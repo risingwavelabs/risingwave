@@ -665,7 +665,7 @@ fn gen_create_full_text_index_plan(
     let out_names = std::iter::once(doc_name).chain(key_names).collect_vec();
     let root = PlanRoot::new_with_logical_plan(
         logical_project,
-        RequiredDist::PhysicalDist(Distribution::Single),
+        RequiredDist::hash_shard(&(1..=key_exprs.len()).collect_vec()),
         Order::any(),
         out_fields,
         out_names,

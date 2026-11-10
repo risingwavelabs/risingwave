@@ -153,6 +153,10 @@ impl StateStoreWriteVector for PanicStateStore {
 }
 
 impl StateStoreWriteFullText for PanicStateStore {
+    fn set_maintenance_enabled(&mut self, _enabled: bool) {
+        panic!()
+    }
+
     fn insert_document(&mut self, _key: Bytes, _tokens: &[String]) -> StorageResult<()> {
         panic!()
     }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Singleton writer of a full-text index.
+//! One key-partitioned writer of a full-text index.
 //!
 //! Documents written since the last flush are buffered in one in-memory segment, which may span
 //! several epochs and is sealed and uploaded at the next flush. Deletes of documents still in the
@@ -77,8 +77,12 @@ pub(crate) struct FullTextIndexWriter {
     table_id: TableId,
     sstable_store: SstableStoreRef,
     object_id_manager: ObjectIndexFileIdManagerRef,
-    /// The committed state plus all adds produced by this writer.
+    /// The committed manifest, including the files produced by every writer.
     state: FullTextIndex,
+    committed_epoch: u64,
+    maintenance_enabled: bool,
+    /// A new owner must observe the previous owner's checkpoint before starting maintenance.
+    maintenance_after_epoch: u64,
     current_epoch: u64,
     /// The first epoch whose writes are not flushed yet. Every flushed document has a smaller
     /// epoch, and every buffered one an equal or larger epoch.
@@ -113,6 +117,9 @@ impl FullTextIndexWriter {
             sstable_store,
             object_id_manager,
             state: index.clone(),
+            committed_epoch: 0,
+            maintenance_enabled: true,
+            maintenance_after_epoch: init_epoch,
             current_epoch: init_epoch,
             buffer_start_epoch: init_epoch,
             builder: None,
@@ -124,6 +131,26 @@ impl FullTextIndexWriter {
             finished_maintenance: None,
             last_maintenance_resolved_deletes: false,
         }
+    }
+
+    pub(crate) fn set_maintenance_enabled(&mut self, enabled: bool) {
+        if enabled == self.maintenance_enabled {
+            return;
+        }
+        self.maintenance_enabled = enabled;
+        if enabled {
+            self.maintenance_after_epoch = self.current_epoch;
+        } else {
+            if let Some(handle) = self.maintenance.take() {
+                handle.abort();
+            }
+            self.finished_maintenance = None;
+        }
+    }
+
+    fn refresh_committed(&mut self, version: &PinnedVersion) {
+        self.committed_epoch = version.table_committed_epoch(self.table_id).unwrap();
+        self.state = version.full_text_indexes[&self.table_id].clone();
     }
 
     pub(crate) fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> HummockResult<()> {
@@ -200,6 +227,7 @@ impl FullTextIndexWriter {
 
     pub(crate) fn seal_current_epoch(&mut self, next_epoch: u64) -> Option<FullTextIndexAdd> {
         assert!(next_epoch > self.current_epoch);
+        let sealed_epoch = self.current_epoch;
         self.current_epoch = next_epoch;
         if self.builder.is_none() && self.deleted_keys.is_empty() {
             self.buffer_start_epoch = next_epoch;
@@ -211,13 +239,16 @@ impl FullTextIndexWriter {
             ..Default::default()
         };
         if let Some(result) = self.take_finished_maintenance() {
+            // Do not process the same committed inputs again while their replacement is
+            // awaiting commit. In particular, a delete file may only be consumed after all
+            // writers' older segments are visible in the committed manifest.
+            self.maintenance_after_epoch = sealed_epoch;
             add.removed_segments = result.removed_segments;
             // Merged segments are added before the segments flushed in this epoch.
             add.added_segments.splice(0..0, result.added_segments);
             add.deletion_vector_updates = result.deletion_vector_updates;
             add.consumed_delete_files = result.consumed_delete_files;
         }
-        self.state.apply_add(&add);
         self.maybe_start_maintenance();
         if add.is_empty() { None } else { Some(add) }
     }
@@ -251,7 +282,11 @@ impl FullTextIndexWriter {
     }
 
     fn maybe_start_maintenance(&mut self) {
-        if self.maintenance.is_some() || self.finished_maintenance.is_some() {
+        if !self.maintenance_enabled
+            || self.committed_epoch < self.maintenance_after_epoch
+            || self.maintenance.is_some()
+            || self.finished_maintenance.is_some()
+        {
             return;
         }
         let sstable_store = self.sstable_store.clone();
@@ -303,7 +338,12 @@ impl ObjectIndexWriterImpl for FullTextIndexWriter {
         ))
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: HummockEpoch) -> Option<ObjectIndexAdd> {
+    fn seal_current_epoch(
+        &mut self,
+        next_epoch: HummockEpoch,
+        version: &PinnedVersion,
+    ) -> Option<ObjectIndexAdd> {
+        self.refresh_committed(version);
         FullTextIndexWriter::seal_current_epoch(self, next_epoch).map(ObjectIndexAdd::FullText)
     }
 

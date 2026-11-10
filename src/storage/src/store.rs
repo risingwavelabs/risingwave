@@ -448,6 +448,9 @@ pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
 }
 
 pub trait StateStoreWriteFullText: StateStoreWriteEpochControl + StaticSendSync {
+    /// Only the writer owning vnode zero may maintain the shared index manifest.
+    fn set_maintenance_enabled(&mut self, enabled: bool);
+
     /// Indexes a document. `key` is the encoded stream key of the row and `tokens` are the
     /// analyzed tokens of the document.
     fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()>;

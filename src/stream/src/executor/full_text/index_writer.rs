@@ -16,6 +16,7 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::fulltext::{Analyzer, tokenize_document};
 use risingwave_common::row::{Row, RowExt};
@@ -29,8 +30,8 @@ use risingwave_storage::store::{
 
 use crate::executor::prelude::try_stream;
 use crate::executor::{
-    BoxedMessageStream, Execute, Executor, Message, StreamExecutorError, StreamExecutorResult,
-    expect_first_barrier,
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
+    StreamExecutorResult, expect_first_barrier,
 };
 
 /// Writes a full-text index. The first input column is the indexed document, and the remaining
@@ -40,6 +41,8 @@ pub struct FullTextIndexWriteExecutor<S: StateStore> {
     writer: S::FullTextWriter,
     analyzer: Analyzer,
     key_serde: OrderedRowSerde,
+    actor_context: ActorContextRef,
+    maintenance_enabled: bool,
 }
 
 impl<S: StateStore> Execute for FullTextIndexWriteExecutor<S> {
@@ -54,6 +57,8 @@ impl<S: StateStore> FullTextIndexWriteExecutor<S> {
         store: S,
         table_id: TableId,
         analyzer: Analyzer,
+        actor_context: ActorContextRef,
+        vnode_bitmap: Bitmap,
     ) -> StreamExecutorResult<Self> {
         let key_types = input.schema().data_types()[1..].to_vec();
         let key_serde = OrderedRowSerde::new(
@@ -68,6 +73,8 @@ impl<S: StateStore> FullTextIndexWriteExecutor<S> {
             writer,
             analyzer,
             key_serde,
+            actor_context,
+            maintenance_enabled: vnode_bitmap.is_set(0),
         })
     }
 
@@ -80,11 +87,14 @@ impl<S: StateStore> FullTextIndexWriteExecutor<S> {
         let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
         self.writer.init(InitOptions { epoch: first_epoch }).await?;
+        self.writer
+            .set_maintenance_enabled(self.maintenance_enabled);
 
         let mut tokens = vec![];
         while let Some(msg) = input.try_next().await? {
             match msg {
                 Message::Barrier(barrier) => {
+                    let new_vnodes = barrier.as_update_vnode_bitmap(self.actor_context.id);
                     // Only checkpoint epochs become visible to batch reads, so documents are
                     // buffered across the epochs in between to avoid producing tiny segments.
                     if barrier.kind.is_checkpoint() {
@@ -98,6 +108,9 @@ impl<S: StateStore> FullTextIndexWriteExecutor<S> {
                         },
                     );
                     yield Message::Barrier(barrier);
+                    if let Some(vnodes) = new_vnodes {
+                        self.writer.set_maintenance_enabled(vnodes.is_set(0));
+                    }
                 }
                 Message::Chunk(chunk) => {
                     for (op, row) in chunk.rows() {

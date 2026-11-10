@@ -133,6 +133,43 @@ fn test_search_filtered() {
     assert_eq!(merged.search_filtered(&x, None, Some(3)).unwrap().len(), 3);
 }
 #[test]
+fn test_limit_stops_after_live_distinct_keys() {
+    use std::cell::Cell;
+
+    let built = build(&[
+        ("a", 1, &["x"]),
+        ("a", 2, &["x"]),
+        ("a", 3, &["x"]),
+        ("b", 3, &["x"]),
+        ("c", 3, &["x"]),
+        ("d", 3, &["x"]),
+        ("e", 3, &["x"]),
+        ("f", 3, &["x"]),
+    ]);
+    let segment = open(&built);
+    let checked = Cell::new(0);
+    let is_deleted = |key: &[u8], epoch: u64| {
+        checked.set(checked.get() + 1);
+        key == b"a" && epoch < 3
+    };
+    assert_eq!(
+        segment
+            .search_filtered(&tokens(&["x"]), Some(&is_deleted), Some(2))
+            .unwrap(),
+        keys(&["a", "b"])
+    );
+    assert_eq!(checked.get(), 4, "do not check the remaining matches");
+    checked.set(0);
+    assert!(
+        segment
+            .search_filtered(&tokens(&["x"]), Some(&is_deleted), Some(0))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(checked.get(), 0);
+}
+
+#[test]
 fn test_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<OpenedSegment>();

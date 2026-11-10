@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
@@ -161,6 +162,9 @@ impl OpenedSegment {
                 "full-text search requires at least one token",
             ));
         }
+        if limit == Some(0) {
+            return Ok(vec![]);
+        }
         let schema = full_text_schema();
         let inverted_index = self
             .reader
@@ -193,6 +197,7 @@ impl OpenedSegment {
 
         let (lead, others) = postings.split_first_mut().expect("tokens are non-empty");
         let mut matched: Vec<DocId> = Vec::new();
+        let mut early_keys = BTreeSet::new();
         let mut candidate = lead.doc();
         'outer: while candidate != TERMINATED {
             for other in others.iter_mut() {
@@ -210,17 +215,33 @@ impl OpenedSegment {
             }
             if !self.reader.is_deleted(candidate) {
                 matched.push(candidate);
+                if let Some(limit) = limit
+                    && matched.len() >= limit.min(64)
+                {
+                    let keys = match is_deleted {
+                        None => self.keys_of_docs(&matched)?,
+                        Some(is_deleted) => self.keys_of_docs_filtered(&matched, is_deleted)?,
+                    };
+                    early_keys.extend(keys);
+                    matched.clear();
+                    if early_keys.len() >= limit {
+                        break;
+                    }
+                }
             }
             candidate = lead.advance();
         }
-        let mut keys = match is_deleted {
+        let keys = match is_deleted {
             None => self.keys_of_docs(&matched)?,
             Some(is_deleted) => self.keys_of_docs_filtered(&matched, is_deleted)?,
         };
-        if let Some(limit) = limit {
-            keys.truncate(limit);
+        match limit {
+            Some(limit) => {
+                early_keys.extend(keys);
+                Ok(early_keys.into_iter().take(limit).collect())
+            }
+            None => Ok(keys),
         }
-        Ok(keys)
     }
 
     /// Returns the sorted, de-duplicated keys of the given docs that are not deleted by

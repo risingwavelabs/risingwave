@@ -37,6 +37,9 @@ pub(super) fn validate_table_type_for_alter(
         (TableType::Table, StatementType::ALTER_TABLE)
         | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
         | (TableType::Index, StatementType::ALTER_INDEX) => Ok(()),
+        (TableType::FullTextIndex, StatementType::ALTER_INDEX) if alter_target == "parallelism" => {
+            Ok(())
+        }
         _ => {
             bail_invalid_input_syntax!(
                 "cannot alter {alter_target} of {} {} by {}",

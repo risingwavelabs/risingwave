@@ -46,6 +46,10 @@ impl StateStoreWriteEpochControl for HummockFullTextWriter {
 }
 
 impl StateStoreWriteFullText for HummockFullTextWriter {
+    fn set_maintenance_enabled(&mut self, enabled: bool) {
+        self.0.writer_impl().set_maintenance_enabled(enabled);
+    }
+
     fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()> {
         Ok(self.0.writer_impl().insert_document(key, tokens)?)
     }

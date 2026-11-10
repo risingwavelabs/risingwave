@@ -1317,6 +1317,8 @@ impl<R: RangeKv> StateStoreWriteVector for RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreWriteFullText for RangeKvLocalStateStore<R> {
+    fn set_maintenance_enabled(&mut self, _enabled: bool) {}
+
     fn insert_document(&mut self, _key: Bytes, _tokens: &[String]) -> StorageResult<()> {
         Err(full_text_unsupported().into())
     }

@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::StreamPlanRef as PlanRef;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
-use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist};
 
 /// Info of an object index, i.e. an index whose data is stored in its own objects instead of SSTs.
 pub(super) enum ObjectIndexTableInfo {
@@ -39,8 +39,7 @@ pub(super) enum ObjectIndexTableInfo {
     FullText(PbFullTextIndexInfo),
 }
 
-/// Derives the catalog of the index table written by an object index writer. The writer runs
-/// as a singleton and does not keep the rows in a state table.
+/// Derives the catalog of an object index. Rows are kept in index objects, not a state table.
 #[expect(clippy::too_many_arguments)]
 pub(super) fn derive_object_index_table_catalog(
     rewritten_input: PlanRef,
@@ -63,14 +62,27 @@ pub(super) fn derive_object_index_table_catalog(
     };
 
     let value_indices = (0..columns.len()).collect_vec();
-    assert_eq!(input.distribution(), &Distribution::Single);
-    let distribution_key = vec![];
+    let distribution_key = input.distribution().dist_column_indices().to_vec();
+    let vnode_count = if distribution_key.is_empty() {
+        VnodeCount::Singleton
+    } else {
+        VnodeCount::Placeholder
+    };
     let append_only = input.append_only();
     // TODO(rc): In `TableCatalog` we still use `FixedBitSet` for watermark columns, ignoring the watermark group information.
     // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
     let watermark_columns = input.watermark_columns().indices().collect();
 
     let (table_pk, stream_key) = derive_pk(input, user_distributed_by, user_order_by, &columns);
+    let dist_key_in_pk = distribution_key
+        .iter()
+        .map(|idx| {
+            table_pk
+                .iter()
+                .position(|order| order.column_index == *idx)
+                .unwrap()
+        })
+        .collect();
     // assert: `stream_key` is a subset of `table_pk`
 
     // Index writes go through the object index writer APIs instead of StateTable
@@ -102,7 +114,7 @@ pub(super) fn derive_object_index_table_catalog(
         read_prefix_len_hint,
         version: None,
         watermark_columns,
-        dist_key_in_pk: vec![],
+        dist_key_in_pk,
         cardinality,
         created_at_epoch: None,
         initialized_at_epoch: None,
@@ -113,7 +125,7 @@ pub(super) fn derive_object_index_table_catalog(
         created_at_cluster_version: None,
         retention_seconds: retention_seconds.map(|i| i.into()),
         cdc_table_id: None,
-        vnode_count: VnodeCount::Singleton, // will be filled in by the meta service later
+        vnode_count, // will be filled in by the meta service later
         webhook_info: None,
         job_id: None,
         engine: Engine::Hummock,

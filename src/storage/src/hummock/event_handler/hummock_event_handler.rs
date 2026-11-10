@@ -973,20 +973,25 @@ impl HummockEventHandler {
             }
             HummockEvent::RegisterObjectIndexWriter {
                 table_id,
+                writer_id,
                 init_epoch,
             } => self
                 .uploader
-                .register_object_index_writer(table_id, init_epoch),
+                .register_object_index_writer(table_id, writer_id, init_epoch),
             HummockEvent::ObjectIndexWriterSealEpoch {
                 table_id,
+                writer_id,
                 next_epoch,
                 add,
             } => {
                 self.uploader
-                    .object_index_writer_seal_epoch(table_id, next_epoch, add);
+                    .object_index_writer_seal_epoch(table_id, writer_id, next_epoch, add);
             }
-            HummockEvent::DropObjectIndexWriter { table_id } => {
-                self.uploader.drop_object_index_writer(table_id);
+            HummockEvent::DropObjectIndexWriter {
+                table_id,
+                writer_id,
+            } => {
+                self.uploader.drop_object_index_writer(table_id, writer_id);
             }
         }
     }

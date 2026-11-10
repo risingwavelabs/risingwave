@@ -1408,12 +1408,18 @@ mod dyn_state_store {
     }
 
     pub trait DynStateStoreWriteFullText: DynStateStoreWriteEpochControl + StaticSendSync {
+        fn set_maintenance_enabled(&mut self, enabled: bool);
+
         fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()>;
 
         fn delete_document(&mut self, key: Bytes) -> StorageResult<()>;
     }
 
     impl<S: StateStoreWriteFullText> DynStateStoreWriteFullText for S {
+        fn set_maintenance_enabled(&mut self, enabled: bool) {
+            StateStoreWriteFullText::set_maintenance_enabled(self, enabled)
+        }
+
         fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()> {
             StateStoreWriteFullText::insert_document(self, key, tokens)
         }
@@ -1426,6 +1432,10 @@ mod dyn_state_store {
     pub type BoxDynStateStoreWriteFullText = StateStorePointer<Box<dyn DynStateStoreWriteFullText>>;
 
     impl StateStoreWriteFullText for BoxDynStateStoreWriteFullText {
+        fn set_maintenance_enabled(&mut self, enabled: bool) {
+            self.0.set_maintenance_enabled(enabled);
+        }
+
         fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()> {
             self.0.insert_document(key, tokens)
         }

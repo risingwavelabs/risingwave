@@ -67,6 +67,7 @@ fn expected(docs: &BTreeMap<Bytes, BTreeSet<String>>, query: &BTreeSet<String>) 
 struct FullTextTestEnv {
     env: HummockTestEnv,
     writer: <HummockStorage as StateStore>::FullTextWriter,
+    other_writers: Vec<<HummockStorage as StateStore>::FullTextWriter>,
     /// The epoch being written.
     epoch: u64,
     table_ids: HashSet<TableId>,
@@ -75,6 +76,11 @@ struct FullTextTestEnv {
 
 impl FullTextTestEnv {
     async fn new() -> Self {
+        Self::new_with_writers(1).await
+    }
+
+    async fn new_with_writers(writer_count: usize) -> Self {
+        assert!(writer_count > 0);
         let base_epoch = test_epoch(233);
         let table_ids = HashSet::from_iter([TEST_TABLE_ID]);
         let env = prepare_hummock_test_env().await;
@@ -98,12 +104,38 @@ impl FullTextTestEnv {
         let epoch = base_epoch.next_epoch();
         env.storage.start_epoch(epoch, table_ids.clone());
         writer.init_for_test(epoch).await.unwrap();
+        let mut other_writers = Vec::new();
+        for _ in 1..writer_count {
+            let mut writer = env
+                .storage
+                .new_full_text_writer(NewFullTextWriterOptions {
+                    table_id: TEST_TABLE_ID,
+                })
+                .await;
+            writer.init_for_test(epoch).await.unwrap();
+            writer.set_maintenance_enabled(false);
+            other_writers.push(writer);
+        }
         Self {
             env,
             writer,
+            other_writers,
             epoch,
             table_ids,
             model: Model::default(),
+        }
+    }
+
+    fn writer_for_key(
+        &mut self,
+        key: &Bytes,
+    ) -> &mut <HummockStorage as StateStore>::FullTextWriter {
+        let shard =
+            key.iter().map(|byte| *byte as usize).sum::<usize>() % (self.other_writers.len() + 1);
+        if shard == 0 {
+            &mut self.writer
+        } else {
+            &mut self.other_writers[shard - 1]
         }
     }
 
@@ -113,7 +145,7 @@ impl FullTextTestEnv {
             self.model.docs.insert(key.clone(), doc.clone()).is_none(),
             "a key must be deleted before it is inserted again"
         );
-        self.writer
+        self.writer_for_key(&key)
             .insert_document(key, &doc.into_iter().collect_vec())
             .unwrap();
     }
@@ -123,7 +155,7 @@ impl FullTextTestEnv {
             self.model.docs.remove(&key).is_some(),
             "deleted key must be alive"
         );
-        self.writer.delete_document(key).unwrap();
+        self.writer_for_key(&key).delete_document(key).unwrap();
     }
 
     fn update(&mut self, key: Bytes, text: &str) {
@@ -140,6 +172,9 @@ impl FullTextTestEnv {
             .start_epoch(next_epoch, self.table_ids.clone());
         self.writer
             .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+        for writer in &mut self.other_writers {
+            writer.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+        }
         self.epoch = next_epoch;
     }
 
@@ -155,6 +190,11 @@ impl FullTextTestEnv {
         self.writer.flush().await.unwrap();
         self.writer
             .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+        // Complete the other writers in reverse order, including those without new documents.
+        for writer in self.other_writers.iter_mut().rev() {
+            writer.flush().await.unwrap();
+            writer.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+        }
         let res = self
             .env
             .storage
@@ -277,6 +317,82 @@ impl FullTextTestEnv {
             assert_eq!(metadata.total_size as u64, file_size, "{object_id:?}");
         }
     }
+}
+
+#[tokio::test]
+async fn test_full_text_multiple_writers_and_maintenance_handoff() {
+    let mut env = Box::pin(FullTextTestEnv::new_with_writers(4)).await;
+    let queries = [tokens("common"), tokens("common fresh"), tokens("missing")];
+    for epoch in 0..12 {
+        for id in 0..32 {
+            if epoch > 0 {
+                env.delete(key(id));
+            }
+            env.insert(
+                key(id),
+                if epoch % 2 == 0 {
+                    "common old"
+                } else {
+                    "common fresh"
+                },
+            );
+        }
+        // Exercise a buffer spanning multiple epochs on all writers.
+        env.seal_epoch();
+        env.delete(key(7));
+        env.insert(key(7), "common fresh");
+        let committed = env.commit_epoch().await;
+        env.check(committed, &queries).await;
+    }
+    let epoch_before_handoff = env.epoch;
+    env.writer.set_maintenance_enabled(false);
+    env.other_writers[0].set_maintenance_enabled(true);
+    for id in 0..16 {
+        env.delete(key(id));
+    }
+    let committed = env.commit_epoch().await;
+    env.check(committed, &queries).await;
+    env.commit_until("multi-writer deletes after ownership handoff", |index| {
+        index.pending_delete_files.is_empty() && index.segments.len() < 8
+    })
+    .await;
+    assert_eq!(
+        env.search_text(epoch_before_handoff.prev_epoch(), "common")
+            .await
+            .len(),
+        32
+    );
+    let committed = env.commit_epoch().await;
+    env.check(committed, &queries).await;
+
+    // Reconstruct all writers from the committed manifest, with fresh instance identities.
+    env.other_writers[0].set_maintenance_enabled(false);
+    let mut writer = env
+        .env
+        .storage
+        .new_full_text_writer(NewFullTextWriterOptions {
+            table_id: TEST_TABLE_ID,
+        })
+        .await;
+    writer.init_for_test(env.epoch).await.unwrap();
+    env.writer = writer;
+    env.other_writers.clear();
+    for _ in 0..3 {
+        let mut writer = env
+            .env
+            .storage
+            .new_full_text_writer(NewFullTextWriterOptions {
+                table_id: TEST_TABLE_ID,
+            })
+            .await;
+        writer.init_for_test(env.epoch).await.unwrap();
+        writer.set_maintenance_enabled(false);
+        env.other_writers.push(writer);
+    }
+    env.insert(key(1), "common recovered");
+    env.update(key(31), "common fresh");
+    let committed = env.commit_epoch().await;
+    env.check(committed, &queries).await;
 }
 
 fn segment_ids(index: &FullTextIndex) -> HashSet<HummockObjectId> {

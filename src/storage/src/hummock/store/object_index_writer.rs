@@ -22,6 +22,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
@@ -46,6 +47,8 @@ pub trait ObjectIndexFileIdManager: Send + Sync {
 }
 
 pub type ObjectIndexFileIdManagerRef = Arc<dyn ObjectIndexFileIdManager>;
+
+static NEXT_WRITER_ID: AtomicU64 = AtomicU64::new(0);
 
 #[async_trait::async_trait]
 impl ObjectIndexFileIdManager for ObjectIdManager {
@@ -73,7 +76,11 @@ pub(crate) trait ObjectIndexWriterImpl: Sized + Send + Sync + 'static {
     ) -> impl Future<Output = HummockResult<Self>> + Send + 'a;
 
     /// Seals the current epoch and returns the changes to commit with it, if any.
-    fn seal_current_epoch(&mut self, next_epoch: HummockEpoch) -> Option<ObjectIndexAdd>;
+    fn seal_current_epoch(
+        &mut self,
+        next_epoch: HummockEpoch,
+        version: &PinnedVersion,
+    ) -> Option<ObjectIndexAdd>;
 
     fn flush(&mut self) -> impl Future<Output = HummockResult<usize>> + Send + '_;
 
@@ -83,6 +90,7 @@ pub(crate) trait ObjectIndexWriterImpl: Sized + Send + Sync + 'static {
 /// Registers the writer to the uploader on creation and deregisters it on drop.
 struct ObjectIndexWriterInitGuard {
     table_id: TableId,
+    writer_id: u64,
     hummock_event_sender: HummockEventSender,
 }
 
@@ -92,9 +100,11 @@ impl ObjectIndexWriterInitGuard {
         init_epoch: HummockEpoch,
         hummock_event_sender: HummockEventSender,
     ) -> HummockResult<Self> {
+        let writer_id = NEXT_WRITER_ID.fetch_add(1, Ordering::Relaxed);
         hummock_event_sender
             .send(HummockEvent::RegisterObjectIndexWriter {
                 table_id,
+                writer_id,
                 init_epoch,
             })
             .map_err(|_| {
@@ -102,6 +112,7 @@ impl ObjectIndexWriterInitGuard {
             })?;
         Ok(Self {
             table_id,
+            writer_id,
             hummock_event_sender,
         })
     }
@@ -113,6 +124,7 @@ impl Drop for ObjectIndexWriterInitGuard {
             .hummock_event_sender
             .send(HummockEvent::DropObjectIndexWriter {
                 table_id: self.table_id,
+                writer_id: self.writer_id,
             });
     }
 }
@@ -183,8 +195,11 @@ impl<W: ObjectIndexWriterImpl> HummockObjectIndexWriter<W> {
             .hummock_event_sender
             .send(HummockEvent::ObjectIndexWriterSealEpoch {
                 table_id: self.ctx.table_id,
+                writer_id: state._guard.writer_id,
                 next_epoch,
-                add: state.writer_impl.seal_current_epoch(next_epoch),
+                add: state
+                    .writer_impl
+                    .seal_current_epoch(next_epoch, &self.version_update_notifier_tx.borrow()),
             });
     }
 

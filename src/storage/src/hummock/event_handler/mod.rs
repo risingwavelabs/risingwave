@@ -119,17 +119,20 @@ pub enum HummockEvent {
 
     RegisterObjectIndexWriter {
         table_id: TableId,
+        writer_id: u64,
         init_epoch: HummockEpoch,
     },
 
     ObjectIndexWriterSealEpoch {
         table_id: TableId,
+        writer_id: u64,
         next_epoch: HummockEpoch,
         add: Option<ObjectIndexAdd>,
     },
 
     DropObjectIndexWriter {
         table_id: TableId,
+        writer_id: u64,
     },
 
     GetMinUncommittedObjectId {

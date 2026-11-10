@@ -153,7 +153,11 @@ impl ObjectIndexWriterImpl for VectorWriterImpl {
         .await
     }
 
-    fn seal_current_epoch(&mut self, _next_epoch: HummockEpoch) -> Option<ObjectIndexAdd> {
+    fn seal_current_epoch(
+        &mut self,
+        _next_epoch: HummockEpoch,
+        _version: &PinnedVersion,
+    ) -> Option<ObjectIndexAdd> {
         VectorWriterImpl::seal_current_epoch(self).map(ObjectIndexAdd::Vector)
     }
 

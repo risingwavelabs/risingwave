@@ -12,7 +12,7 @@
     explain create index logs_message_fts on logs using fulltext (message) with (analyzer = 'simple');
   explain_output: |
     StreamFullTextIndexWrite { document_column: message, key_columns: [id], analyzer: simple }
-    └─StreamExchange { dist: Single }
+    └─StreamExchange { dist: HashShard(logs.id) }
       └─StreamProject { exprs: [logs.message, logs.id] }
         └─StreamTableScan { table: logs, columns: [id, message] }
 - id: explain_create_index_on_jsonb_expression
@@ -21,7 +21,7 @@
     explain create index logs_error_fts on logs using fulltext ((metadata -> 'error' ->> 'message'));
   explain_output: |
     StreamFullTextIndexWrite { document_column: jsonb_access_str, key_columns: [id], analyzer: simple }
-    └─StreamExchange { dist: Single }
+    └─StreamExchange { dist: HashShard(logs.id) }
       └─StreamProject { exprs: [JsonbAccessStr(JsonbAccess(logs.metadata, 'error':Varchar), 'message':Varchar) as $expr1, logs.id] }
         └─StreamTableScan { table: logs, columns: [id, metadata] }
 - id: explain_create_index_on_table_without_pk
@@ -30,7 +30,7 @@
     explain create index t_doc_fts on t using fulltext (doc);
   explain_output: |
     StreamFullTextIndexWrite { document_column: doc, key_columns: [_row_id], analyzer: simple }
-    └─StreamExchange { dist: Single }
+    └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamTableScan { table: t, columns: [doc, _row_id] }
 - id: explain_create_index_on_pk_column
   sql: |
@@ -38,7 +38,7 @@
     explain create index t_doc_fts on t using fulltext (doc);
   explain_output: |
     StreamFullTextIndexWrite { document_column: doc1, key_columns: [doc], analyzer: simple }
-    └─StreamExchange { dist: Single }
+    └─StreamExchange { dist: HashShard(t.doc) }
       └─StreamProject { exprs: [t.doc, t.doc] }
         └─StreamTableScan { table: t, columns: [doc] }
 - id: explain_create_index_on_mv
@@ -48,7 +48,7 @@
     explain create index mv_docs_fts on mv using fulltext (docs);
   explain_output: |
     StreamFullTextIndexWrite { document_column: docs, key_columns: [k], analyzer: simple }
-    └─StreamExchange { dist: Single }
+    └─StreamExchange { dist: HashShard(mv.k) }
       └─StreamProject { exprs: [mv.docs, mv.k] }
         └─StreamTableScan { table: mv, columns: [k, docs] }
 - id: create_index_wrong_type

@@ -1,4 +1,7 @@
 statement ok
+set streaming_parallelism = 4;
+
+statement ok
 create table ft_docs (id int primary key, body varchar, meta jsonb);
 
 statement ok
@@ -15,6 +18,15 @@ create index ft_title on ft_docs using fulltext ((meta->>'title')) with (analyze
 
 statement ok
 create index ft_meta on ft_docs using fulltext (meta);
+
+# Verify actual stream writer parallelism, not just distributed batch execution.
+query I
+select min(f.parallelism) from rw_catalog.rw_fragments f
+join rw_catalog.rw_indexes i on f.table_id = i.id
+where i.name in ('ft_body', 'ft_title', 'ft_meta')
+and 'FULL_TEXT_INDEX_WRITE' = any(f.flags);
+----
+4
 
 statement error
 create index ft_bad_type on ft_docs using fulltext (id);
@@ -121,6 +133,38 @@ query I rowsort
 select id from ft_docs where keyword_match(body, 'panic');
 ----
 
+# NULL transitions must remove the old document and index the replacement.
+statement ok
+insert into ft_docs values (5, 'nullable timeout', '{"title":"Nullable title"}');
+
+statement ok
+flush;
+
+statement ok
+update ft_docs set body = null, "meta" = null where id = 5;
+
+statement ok
+flush;
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'nullable') or keyword_match(meta, 'nullable');
+----
+0
+
+statement ok
+update ft_docs set body = 'nullable restored', "meta" = '{"title":"Restored title"}' where id = 5;
+
+statement ok
+flush;
+
+query I
+select id from ft_docs where keyword_match(body, 'restored') and keyword_match(meta->>'title', 'restored') limit 1;
+----
+5
+
+statement ok
+delete from ft_docs where id = 5;
+
 # Many small epochs to exercise segment merging and delete resolution.
 statement ok
 insert into ft_docs select g, 'bulk row number ' || g::varchar || case when g % 10 = 0 then ' tenth' else '' end, null::jsonb from generate_series(100, 199) g;
@@ -203,6 +247,12 @@ select count(*) from (select id from ft_docs where keyword_match(body, 'bulk') l
 ----
 7
 
+# A selective residual predicate must not lose rows to early LIMIT.
+query I
+select count(*) from (select id from ft_docs where keyword_match(body, 'bulk') and id >= 390 limit 7);
+----
+7
+
 query I
 select count(*) from (select id from ft_docs where keyword_match(body, 'bulk tenth') limit 100);
 ----
@@ -213,6 +263,58 @@ query I
 select count(*) from ft_docs where keyword_match(body || '', 'bulk tenth');
 ----
 26
+
+# Rescale actual stream writers, then update keys that may have changed owners.
+statement ok
+alter index ft_body set parallelism = 2;
+
+query I
+select f.parallelism from rw_catalog.rw_fragments f
+join rw_catalog.rw_indexes i on f.table_id = i.id
+where i.name = 'ft_body' and 'FULL_TEXT_INDEX_WRITE' = any(f.flags);
+----
+2
+
+statement ok
+update ft_docs set body = body || ' rescaled' where id between 390 and 399;
+
+statement ok
+delete from ft_docs where id = 404;
+
+statement ok
+flush;
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'bulk rescaled');
+----
+10
+
+query I
+select count(*) from ft_docs where keyword_match(body || '', 'bulk rescaled');
+----
+10
+
+statement ok
+alter index ft_body set parallelism = 4;
+
+statement ok
+update ft_docs set body = 'bulk restored' where id = 390;
+
+statement ok
+insert into ft_docs values (404, 'bulk tenth restored', null);
+
+statement ok
+flush;
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'restored');
+----
+2
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'rescaled');
+----
+9
 
 # Index on a materialized view.
 statement ok
@@ -243,3 +345,6 @@ drop index ft_meta;
 
 statement ok
 drop table ft_docs;
+
+statement ok
+set streaming_parallelism = default;

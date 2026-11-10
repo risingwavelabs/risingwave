@@ -34,7 +34,7 @@ use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanNodeMeta, PlanTreeNodeUnary, Stream, StreamNode,
     StreamPlanRef as PlanRef, reorganize_elements_id,
 };
-use crate::optimizer::property::{Cardinality, Distribution, RequiredDist, StreamKind};
+use crate::optimizer::property::{Cardinality, StreamKind};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Writes the rows of the primary table into a full-text index.
@@ -90,7 +90,8 @@ impl StreamFullTextIndexWrite {
         retention_seconds: Option<NonZeroU32>,
         full_text_index_info: PbFullTextIndexInfo,
     ) -> crate::error::Result<Self> {
-        let input = RequiredDist::PhysicalDist(Distribution::Single)
+        let input = user_distributed_by
+            .clone()
             .streaming_enforce_if_not_satisfies(input)?;
         // the hidden column name might refer some expr id
         let input = reorganize_elements_id(input);
