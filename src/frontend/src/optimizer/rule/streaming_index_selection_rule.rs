@@ -19,8 +19,6 @@
 //! - Handles IN predicates by expanding into a `LogicalUnion` of `LogicalScan`s,
 //!   each with a branch-local equality predicate for correct post-backfill routing
 
-use std::ops::Bound;
-
 use super::index_selection_rule::TableScanIoEstimator;
 use super::prelude::PlanRef;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
@@ -100,42 +98,21 @@ impl StreamingIndexSelectionRule {
     /// Expands an IN predicate into a `LogicalUnion` of `LogicalScan`s.
     ///
     /// Each branch gets a single-value predicate (e.g., `a = 1` or `a IS NULL`) plus residual
-    /// conditions. Only applies when all scan ranges are non-trivial.
+    /// conditions.
     fn try_expand_in(logical_scan: &LogicalScan) -> Option<PlanRef> {
-        let (scan_ranges, residual) = logical_scan
+        let (pk_values, residual) = logical_scan
             .predicate()
-            .clone()
-            .split_to_scan_ranges(
-                logical_scan.table(),
-                logical_scan
-                    .base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .max_split_range_gap() as u64,
-            )
-            .ok()?;
-
-        if scan_ranges.len() <= 1
-            || !scan_ranges.iter().all(|r| {
-                !r.is_full_table_scan()
-                    && matches!(r.range.0, Bound::Unbounded)
-                    && matches!(r.range.1, Bound::Unbounded)
-            })
-        {
-            return None;
-        }
+            .split_to_pk_values(logical_scan.table(), &logical_scan.base.ctx())?;
 
         let pk = &logical_scan.table().pk;
         let table_cols = &logical_scan.table().columns;
 
-        let branches: Vec<PlanRef> = scan_ranges
+        let branches: Vec<PlanRef> = pk_values
             .into_iter()
-            .map(|range| -> Option<PlanRef> {
-                // Build a branch predicate from this scan range's eq_conds.
+            .map(|values| -> Option<PlanRef> {
+                // Build a branch predicate from these values.
                 // InputRef indices are in table-column space.
-                let mut conjunctions: Vec<ExprImpl> = range
-                    .eq_conds
+                let mut conjunctions: Vec<ExprImpl> = values
                     .iter()
                     .enumerate()
                     .map(|(i, datum)| {

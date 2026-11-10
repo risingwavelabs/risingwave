@@ -30,15 +30,15 @@ use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::key_set::KeySet;
 use risingwave_hummock_sdk::HummockVersionId;
 
 use super::SessionImpl;
 use crate::catalog::TableId;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::HandlerArgs;
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{RwBatchQueryPlanResult, gen_batch_plan_fragmenter_with_snapshot};
@@ -48,10 +48,10 @@ use crate::handler::util::{
 };
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::PlanRoot;
-use crate::optimizer::plan_node::{BatchFilter, BatchLogSeqScan, BatchSeqScan, generic};
+use crate::optimizer::plan_node::{BatchLogSeqScan, BatchSeqScan, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot, SchedulerError};
-use crate::utils::{Condition, row_cmp_scan_range};
+use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
 pub enum CursorDataChunkStream {
@@ -969,63 +969,28 @@ impl SubscriptionCursor {
                 }
             })
             .collect::<Vec<_>>();
-        let pks = table_catalog.pk();
-        let pks = pks
-            .iter()
-            .map(|f| {
-                let pk = table_catalog.columns.get(f.column_index).unwrap();
-                (pk.data_type(), f.column_index)
-            })
-            .collect_vec();
-        let (scan, predicate) = if let Some(seek_pk_rows) = seek_pk_rows {
-            let mut pk_rows = vec![];
-            let mut values = vec![];
-            for (seek_pk, (data_type, column_index)) in
-                seek_pk_rows.take().into_iter().zip_eq_fast(pks.into_iter())
-            {
-                if let Some(seek_pk) = seek_pk {
-                    pk_rows.push(InputRef {
-                        index: column_index,
-                        data_type: data_type.clone(),
-                    });
-                    let value_string = String::from_utf8(seek_pk.clone().into()).unwrap();
-                    let value_data = ScalarImpl::from_text(&value_string, data_type).unwrap();
-                    values.push((Some(value_data), data_type.clone()));
-                }
-            }
-            if pk_rows.is_empty() {
-                (None, None)
-            } else {
-                let (right_data, right_types): (Vec<_>, Vec<_>) = values.into_iter().unzip();
-                let right_data = ScalarImpl::Struct(StructValue::new(right_data));
-                let right_type = DataType::Struct(StructType::row_expr_type(right_types));
-                let left = FunctionCall::new_unchecked(
-                    ExprType::Row,
-                    pk_rows.into_iter().map(|pk| pk.into()).collect(),
-                    right_type.clone(),
-                );
-                let seek_range =
-                    row_cmp_scan_range(&table_catalog, left.inputs(), right_data.as_struct(), true);
-                let right = Literal::new(Some(right_data), right_type);
-                // Rows after the seek position in pk order, so a struct comparison, where NULL is
-                // the largest field value, and not a row constructor comparison.
-                let predicate = Condition {
-                    conjunctions: vec![
-                        FunctionCall::new(ExprType::GreaterThan, vec![left.into(), right.into()])?
-                            .into(),
-                    ],
-                };
-                match seek_range {
-                    Some((scan, true)) => (Some(scan), None),
-                    Some((scan, false)) => (Some(scan), Some(predicate)),
-                    None => (None, Some(predicate)),
-                }
-            }
-        } else {
-            (None, None)
-        };
+        let scan = seek_pk_rows.and_then(|seek_pk_rows| {
+            let seek_key = seek_pk_rows
+                .take()
+                .into_iter()
+                .zip_eq_fast(table_catalog.pk())
+                .map(|(seek_pk, column_order)| {
+                    let data_type = table_catalog.columns[column_order.column_index].data_type();
+                    seek_pk.map(|seek_pk| {
+                        let value_string = String::from_utf8(seek_pk.into()).unwrap();
+                        ScalarImpl::from_text(&value_string, data_type).unwrap()
+                    })
+                })
+                .collect_vec();
+            let order = table_catalog
+                .pk()
+                .iter()
+                .map(|column_order| column_order.order_type)
+                .collect_vec();
+            KeySet::after_key(seek_key, &order).covering_scan_range(&order)
+        });
 
-        let (seq_scan, out_fields, out_names) = if let Some(epoch_range) = epoch_range {
+        let (plan, out_fields, out_names) = if let Some(epoch_range) = epoch_range {
             let core = generic::LogScan::new(
                 table_catalog.name.clone(),
                 output_col_idx,
@@ -1058,14 +1023,6 @@ impl SubscriptionCursor {
             let out_fields = table_scan.core().out_fields();
             let out_names = table_scan.core().column_names();
             (table_scan.into(), out_fields, out_names)
-        };
-
-        let plan = if let Some(predicate) = predicate
-            && !predicate.always_true()
-        {
-            BatchFilter::new(generic::Filter::new(predicate, seq_scan)).into()
-        } else {
-            seq_scan
         };
 
         // order by pk, so don't need to sort

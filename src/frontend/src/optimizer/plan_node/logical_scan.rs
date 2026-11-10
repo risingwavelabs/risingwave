@@ -524,10 +524,10 @@ impl LogicalScan {
             required_order
                 .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
         } else {
-            let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
-                self.table(),
-                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
-            )?;
+            let (scan_ranges, predicate) = self
+                .predicate()
+                .clone()
+                .split_to_scan_ranges(self.table(), &self.base.ctx());
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
 
@@ -641,18 +641,16 @@ impl ToStream for LogicalScan {
             )
         } else {
             if ctx.backfill_type().is_snapshot_backfill() {
-                let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
-                    self.table(),
-                    self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
-                )?;
-
-                if scan_ranges.len() == 1 && !scan_ranges[0].is_full_table_scan() {
-                    // Single scan range — direct pushdown.
+                // A backfill reads one range. The filter stays anyway, for later changes.
+                let scan_range = self
+                    .predicate()
+                    .covering_scan_range(self.table(), &self.base.ctx());
+                if let Some(scan_range) = scan_range {
                     let (core, predicate, project_expr) = self.predicate_pull_up();
                     let scan = StreamTableScan::new_with_scan_range(
                         core,
                         ctx.backfill_type(),
-                        Some(scan_ranges.into_iter().next().unwrap()),
+                        Some(scan_range),
                     );
                     LogicalFilter::check_stream_predicate(&predicate)?;
 

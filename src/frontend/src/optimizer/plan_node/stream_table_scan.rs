@@ -20,14 +20,13 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
-use super::utils::{Distill, childless_record};
+use super::utils::{Distill, childless_record, scan_ranges_as_strs};
 use super::{
     BackfillType, ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef,
     generic,
@@ -293,47 +292,18 @@ impl Distill for StreamTableScan {
         vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
         if let Some(scan_range) = &self.pk_scan_range {
-            let mut parts = Vec::new();
-            let pk_cols = self.core.primary_key();
-            // Display eq_conds
-            for (pk, datum) in pk_cols
+            let order_names = self
+                .core
+                .primary_key()
                 .iter()
-                .take(scan_range.eq_conds.len())
-                .zip_eq_fast(scan_range.eq_conds.iter())
-            {
-                let field = &self.core.table_catalog.columns()[pk.column_index];
-                parts.push(format!("{} = {:?}", field.name(), datum));
-            }
-            // Display range bounds on the next column
-            let range_col_idx = scan_range.eq_conds.len();
-            if range_col_idx < pk_cols.len() {
-                use std::ops::Bound;
-                let field = &self.core.table_catalog.columns()[pk_cols[range_col_idx].column_index];
-                let fmt_bound_val = |v: &Vec<risingwave_common::types::Datum>| -> String {
-                    v.first().map_or("NULL".to_owned(), |d| format!("{:?}", d))
-                };
-                match &scan_range.range.0 {
-                    Bound::Included(v) => {
-                        parts.push(format!("{} >= {}", field.name(), fmt_bound_val(v)))
-                    }
-                    Bound::Excluded(v) => {
-                        parts.push(format!("{} > {}", field.name(), fmt_bound_val(v)))
-                    }
-                    Bound::Unbounded => {}
-                }
-                match &scan_range.range.1 {
-                    Bound::Included(v) => {
-                        parts.push(format!("{} <= {}", field.name(), fmt_bound_val(v)))
-                    }
-                    Bound::Excluded(v) => {
-                        parts.push(format!("{} < {}", field.name(), fmt_bound_val(v)))
-                    }
-                    Bound::Unbounded => {}
-                }
-            }
-            if !parts.is_empty() {
-                vec.push(("pk_scan_range", Pretty::from(parts.join(" AND "))));
-            }
+                .map(|pk| {
+                    self.core.table_catalog.columns()[pk.column_index]
+                        .name()
+                        .to_owned()
+                })
+                .collect_vec();
+            let range = scan_ranges_as_strs(order_names, &vec![scan_range.clone()]).join("");
+            vec.push(("pk_scan_range", Pretty::from(range)));
         }
 
         if verbose {
