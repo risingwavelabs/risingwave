@@ -45,7 +45,7 @@ use crate::binder::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
-use crate::handler::cdc::derive_with_options_for_cdc_table;
+use crate::handler::cdc::derive_connect_properties_for_cdc_table;
 use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
@@ -57,6 +57,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
+use crate::scheduler::ReadSnapshot;
 use crate::utils::{ColIndexMapping, Condition};
 
 const ERROR_WINDOW_SIZE_ARG: &str =
@@ -333,11 +334,15 @@ impl Planner {
         // Pin Hummock before loading the latest Iceberg snapshot. If a sink commit races with
         // planning, this ordering guarantees that the Iceberg snapshot plus the filtered log
         // store still represents a coherent prefix of the table.
-        let read_pending_log_store =
-            matches!(self.plan_for(), PlanFor::BatchDql) && is_append_only && as_of.is_none();
-        if read_pending_log_store {
-            drop(self.ctx().session_ctx().pinned_snapshot());
-        }
+        // Unpinned reads can resolve after the sink has committed and truncated the log store,
+        // leaving a gap after the Iceberg snapshot. Use Iceberg alone for those reads.
+        let read_pending_log_store = matches!(self.plan_for(), PlanFor::BatchDql)
+            && is_append_only
+            && as_of.is_none()
+            && matches!(
+                self.ctx().session_ctx().pinned_snapshot(),
+                ReadSnapshot::FrontendPinned { .. }
+            );
 
         let mut logical_iceberg_intermediate_scan = self.plan_iceberg_intermediate_scan(
             &logical_source,
@@ -1055,10 +1060,10 @@ fn resolve_current_cdc_table_desc(
     mut desc: CdcTableDesc,
     upstream_properties: &WithOptionsSecResolved,
 ) -> Result<CdcTableDesc> {
-    let (current_properties, normalized_external_table_name) =
-        derive_with_options_for_cdc_table(upstream_properties, desc.external_table_name)?;
+    let (current_properties, external_table_name) =
+        derive_connect_properties_for_cdc_table(upstream_properties, desc.external_table_name)?;
     let (connect_properties, secret_refs) = current_properties.into_parts();
-    desc.external_table_name = normalized_external_table_name;
+    desc.external_table_name = external_table_name;
     desc.connect_properties = connect_properties;
     desc.secret_refs = secret_refs;
     Ok(desc)

@@ -361,31 +361,39 @@ def clean_field(s: str) -> str:
 
 def compute_test_ranges(text: str):
     """Return a list of (start_offset, end_offset) ranges that are inside
-    a #[cfg(test)] attribute's item (mod or fn), so we can skip them."""
+    a #[cfg(test)] item or an explicitly named test helper, so we can skip them."""
     ranges = []
+
+    def add_item_range(start, search_from):
+        # Find the item's opening brace and its matching closing brace.
+        brace = text.find("{", search_from)
+        if brace < 0:
+            return len(text)
+        depth = 1
+        end = brace + 1
+        while end < len(text) and depth > 0:
+            c = text[end]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            end += 1
+        ranges.append((start, end))
+        return end
+
     i = 0
     while True:
         idx = text.find("#[cfg(test)]", i)
         if idx < 0:
             break
-        # Advance to start of next item — find next '{' (for mod) or start of fn block.
-        j = idx + len("#[cfg(test)]")
-        # Find the item's opening brace.
-        brace = text.find("{", j)
-        if brace < 0:
-            break
-        # Find matching closing brace.
-        depth = 1
-        k = brace + 1
-        while k < len(text) and depth > 0:
-            c = text[k]
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-            k += 1
-        ranges.append((idx, k))
-        i = k
+        i = add_item_range(idx, idx + len("#[cfg(test)]"))
+
+    # Some test constructors must remain available to tests in dependent crates, where
+    # the dependency itself is not built with cfg(test). Exclude these conventionally
+    # named helpers from the production metrics inventory as well.
+    for match in re.finditer(r"(?m)^\s*pub fn test_[A-Za-z0-9_]*(?:<[^>{}]*>)?\s*\(", text):
+        add_item_range(match.start(), match.end())
+
     return ranges
 
 

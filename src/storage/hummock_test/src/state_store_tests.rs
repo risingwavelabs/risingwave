@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKeyRange, prefixed_range_with_vn
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
 use risingwave_meta::hummock::CommitEpochInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_pb::hummock::PbSstableFilterType;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
@@ -1503,6 +1504,18 @@ async fn test_iter_log() {
             assert!(!res.old_value_ssts.is_empty());
         }
         assert!(!res.uncommitted_ssts.is_empty());
+        for sst in &res.old_value_ssts {
+            assert_eq!(
+                sst.sst_info.filter_type,
+                PbSstableFilterType::SstableFilterNone
+            );
+        }
+        for sst in &res.uncommitted_ssts {
+            assert_eq!(
+                sst.sst_info.filter_type,
+                PbSstableFilterType::SstableFilterXor16
+            );
+        }
         meta_client
             .commit_epoch_with_change_log(
                 *epoch,

@@ -152,7 +152,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
     use risingwave_common::types::{ScalarImpl, StructType, ToOwnedDatum};
-    use risingwave_pb::connector_service::{SourceType, cdc_message};
+    use risingwave_pb::connector_service::cdc_message;
     use risingwave_pb::plan_common::additional_column::ColumnType;
 
     use super::*;
@@ -341,7 +341,6 @@ mod tests {
                     "wrong.documents".to_owned(),
                     0,
                     cdc_message::CdcMessageType::Data,
-                    SourceType::Mongodb,
                 ));
                 parser
                     .parse_inner(

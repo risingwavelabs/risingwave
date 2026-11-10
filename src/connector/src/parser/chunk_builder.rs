@@ -23,14 +23,13 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
-use risingwave_pb::connector_service::SourceType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use smallvec::SmallVec;
 use thiserror_ext::AsReport;
 
 use super::MessageMeta;
 use crate::parser::utils::{
-    extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
+    extract_header_inner_from_meta, extract_headers_from_meta,
     extract_pulsar_message_id_data_from_meta, extract_subject_from_meta,
     extract_timestamp_from_meta,
 };
@@ -336,41 +335,10 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
 
                 (
-                    _, // for cdc tables
-                    &Some(ref col @ AdditionalColumnType::DatabaseName(_))
-                    | &Some(ref col @ AdditionalColumnType::TableName(_)),
-                ) => {
-                    // MongoDB's source envelope carries the database name on every
-                    // change, including deletes. Do not infer connector type from
-                    // which INCLUDE columns the user selected.
-                    let is_mongodb_cdc = matches!(
-                        self.row_meta.as_ref().map(|meta| meta.source_meta),
-                        Some(SourceMeta::DebeziumCdc(cdc_meta))
-                            if cdc_meta.source_type == SourceType::Mongodb
-                    );
-
-                    if matches!(col, AdditionalColumnType::DatabaseName(_)) && is_mongodb_cdc {
-                        // MongoDB CDC database_name should be parsed from payload.source.db
-                        parse_field(desc)
-                    } else {
-                        match self.row_meta {
-                            Some(row_meta) => {
-                                if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.source_meta {
-                                    Ok(A::output_for(extract_cdc_meta_column(
-                                        cdc_meta,
-                                        col,
-                                        desc.name.as_str(),
-                                    )?))
-                                } else {
-                                    Err(AccessError::Uncategorized {
-                                        message: "CDC metadata not found in the message".to_owned(),
-                                    })
-                                }
-                            }
-                            None => parse_field(desc), // parse from payload
-                        }
-                    }
-                }
+                    _,
+                    &Some(AdditionalColumnType::DatabaseName(_))
+                    | &Some(AdditionalColumnType::TableName(_)),
+                ) => parse_field(desc),
                 (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
                     Some(row_meta) => Ok(A::output_for(extract_timestamp_from_meta(
                         row_meta.source_meta,

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{RecursiveRwLock, RwLock};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::WorkerSlotMapping;
@@ -44,8 +44,8 @@ pub struct FrontendObserverNode {
     version: CatalogVersion,
     catalog_updated_tx: Sender<CatalogVersion>,
     // When both locks are needed, always acquire `catalog` before `user_info_manager`.
-    catalog: Arc<RwLock<Catalog>>,
-    user_info_manager: Arc<RwLock<UserInfoManager>>,
+    catalog: Arc<RecursiveRwLock<Catalog>>,
+    user_info_manager: Arc<RecursiveRwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
     session_params: Arc<RwLock<SessionConfig>>,
@@ -222,9 +222,9 @@ impl ObserverState for FrontendObserverNode {
 impl FrontendObserverNode {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
-        catalog: Arc<RwLock<Catalog>>,
+        catalog: Arc<RecursiveRwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
-        user_info_manager: Arc<RwLock<UserInfoManager>>,
+        user_info_manager: Arc<RecursiveRwLock<UserInfoManager>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
         session_params: Arc<RwLock<SessionConfig>>,

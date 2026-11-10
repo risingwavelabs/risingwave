@@ -63,3 +63,57 @@ drop materialized view mv1;
 
 statement ok
 drop table t1;
+
+statement ok
+create table row_filter_short_pk (a int primary key, b int);
+
+statement ok
+insert into row_filter_short_pk values (0, 9), (1, 4), (2, 0);
+
+query II
+select * from row_filter_short_pk where (a, b) > (1, 3) order by a;
+----
+1 4
+2 0
+
+query II
+select * from row_filter_short_pk where (a, b) < (1, 5) order by a;
+----
+0 9
+1 4
+
+statement ok
+drop table row_filter_short_pk;
+
+statement ok
+create table row_filter_null_field(a int, b int, c int, primary key(a, b));
+
+statement ok
+insert into row_filter_null_field values (1, 3, 1), (1, null, 2), (2, 0, 3), (null, 1, 4);
+
+query II
+select a, b from row_filter_null_field where (a, b) > (null::int, 1);
+----
+
+query II
+select a, b from row_filter_null_field where (a, b) > (1, null::int);
+----
+2 0
+
+statement ok
+drop table row_filter_null_field;
+
+statement ok
+create table row_filter_null_field_short_pk(a int primary key, b int, c int);
+
+statement ok
+insert into row_filter_null_field_short_pk values (null, null, 1), (1, 4, 3);
+
+# The two IS NULL arms overlap, so the row must be returned once.
+query III
+select * from row_filter_null_field_short_pk where a is null or (a, b) > (null::int, 0) or (a is null and c > 0);
+----
+NULL NULL 1
+
+statement ok
+drop table row_filter_null_field_short_pk;
