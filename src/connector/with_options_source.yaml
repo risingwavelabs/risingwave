@@ -898,7 +898,7 @@ MqttProperties:
 
       `clean_start = true` makes the broker discard any existing session for the client id when
       connecting. `clean_start = false` resumes the session the broker still holds for the same
-      client id, if any, including its subscriptions and the QoS 1 and 2 messages queued for it.
+      client id, if any, including its subscriptions and any messages queued for it.
 
       This flag only applies when connecting. How long the broker keeps a session after a
       disconnect is controlled by `session_expiry_interval`. If that is not set, the session ends
