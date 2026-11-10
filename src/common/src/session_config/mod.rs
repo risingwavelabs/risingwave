@@ -817,23 +817,39 @@ impl SessionConfig {
             }
         }
 
-        if let Some(v) = self.ai_decide_request_timeout_ms.as_ref() {
-            table.upsert("streaming.ai_decide.request_timeout_ms", v)?;
-        }
-        if let Some(v) = self.ai_decide_max_retry_delay_ms.as_ref() {
-            table.upsert("streaming.ai_decide.max_retry_delay_ms", v)?;
-        }
-        if let Some(v) = self.ai_decide_retry_delay_ms.as_ref() {
-            table.upsert("streaming.ai_decide.retry_delay_ms", v)?;
-        }
-        if let Some(v) = self.ai_decide_max_retry_after_ms.as_ref() {
-            table.upsert("streaming.ai_decide.max_retry_after_ms", v)?;
-        }
-        if let Some(v) = self.ai_decide_max_response_bytes.as_ref() {
-            table.upsert("streaming.ai_decide.max_response_bytes", v)?;
-        }
-        if let Some(v) = self.ai_decide_max_concurrency.as_ref() {
-            table.upsert("streaming.ai_decide.max_concurrency", v)?;
+        for (key, value) in [
+            (
+                "streaming.ai_decide.request_timeout_ms",
+                self.ai_decide_request_timeout_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_decide.max_retry_delay_ms",
+                self.ai_decide_max_retry_delay_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_decide.retry_delay_ms",
+                self.ai_decide_retry_delay_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_decide.max_retry_after_ms",
+                self.ai_decide_max_retry_after_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_decide.max_response_bytes",
+                self.ai_decide_max_response_bytes.as_ref(),
+            ),
+            (
+                "streaming.ai_decide.max_concurrency",
+                self.ai_decide_max_concurrency.as_ref(),
+            ),
+        ] {
+            if let Some(value) = value {
+                table.upsert(key, value).with_context(|| {
+                    format!(
+                        "failed to build initial streaming configuration override: {key}={value}"
+                    )
+                })?;
+            }
         }
 
         let res = toml::to_string(&table)?;
