@@ -177,11 +177,13 @@ the ordinary asynchronous projection path. Existing restrictions on volatile
 expressions in other SQL positions still apply; put the call in a SELECT
 projection. Leave `streaming_unsafe_allow_unmaterialized_impure_expr` disabled.
 
-Each expression instance reuses an HTTP client and evaluates all eligible rows in
-a chunk concurrently. There is no AI_DECIDE-specific per-chunk or shared request
-limit. Each visible row with non-NULL arguments makes one logical request, with
-its retries performed sequentially. Overlapping chunks and multiple actors can
-therefore increase the total number of concurrent HTTP requests. Fixed questions
+Each expression instance reuses an HTTP client. By default all eligible rows may
+run concurrently. `ai_decide_max_concurrency` optionally limits logical requests
+across all overlapping chunks of one expression instance; `0` keeps the default
+unlimited behavior. Each visible row with non-NULL arguments makes one logical
+request, retaining its permit through sequential retries and backoff. Cancelling
+local evaluation releases permits. Separate expressions and actors have separate
+limits, so this is not a job-wide or endpoint-wide quota. Fixed questions
 and the inferred result type are cached per expression. Other constant arguments
 keep their scalar representation instead of being expanded into per-row arrays.
 Each eligible request still serializes its own state and questions.
@@ -211,9 +213,10 @@ These settings do not apply to batch execution. `StreamMaterializedExprs` contin
 to evaluate chunks sequentially without these Project limits, while AI_DECIDE
 evaluates eligible rows within each chunk concurrently. The row budget is not an
 exact HTTP-request limit: a budget of eight still admits a whole 1,024-row chunk,
-which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row.
+which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row
+when the separate AI_DECIDE request limit is disabled.
 
-Each attempt has a 30-second timeout. Transport errors, HTTP 429, and HTTP 5xx
+By default, each attempt has a 30-second timeout. Transport errors, HTTP 429, and HTTP 5xx
 responses retry up to three attempts total, using 100 ms then 200 ms delays.
 This includes failures while reading response bytes, such as a truncated 200
 response; a complete response with invalid JSON or typed answers does not retry.
@@ -233,6 +236,53 @@ On evaluation failure, other local futures for that chunk are dropped. Requests
 already received by the service may continue running; dropping local futures does
 not guarantee remote cancellation.
 
+## Execution settings
+
+These settings preserve the five-argument SQL function. They can be set as session
+variables for batch queries and new streaming jobs. For streaming job creation,
+the same names are accepted in `WITH`, with precedence over the session value;
+this does not change the session. Unset streaming values inherit the compute-node
+`[streaming.ai_decide]` configuration. Unset batch values use the defaults below.
+
+| Session / WITH option | Default | Valid values |
+|---|---:|---|
+| `ai_decide_request_timeout_ms` | 30000 | Positive, per HTTP attempt |
+| `ai_decide_max_attempts` | 3 | Positive, includes the initial attempt |
+| `ai_decide_retry_delay_ms` | 100 | Initial exponential delay; 0 disables it |
+| `ai_decide_max_retry_after_ms` | 5000 | Cap on numeric Retry-After; 0 disables that delay |
+| `ai_decide_max_response_bytes` | 16777216 | Positive, before JSON decoding |
+| `ai_decide_max_concurrency` | 0 | Per expression instance; 0 means unlimited |
+
+All values are unsigned 32-bit integers. Exponential delay saturates at the
+maximum representable millisecond value instead of overflowing.
+
+```sql
+SET ai_decide_max_concurrency = 16;
+CREATE MATERIALIZED VIEW decisions WITH (
+    ai_decide_max_concurrency = 8,
+    ai_decide_request_timeout_ms = 10000
+) AS SELECT id, ai_decide(state, endpoint, model, ai_questions(ai_prob_question('accept', 'Accept?')), api_key) AS result
+FROM inputs;
+```
+
+The job captures the explicit session and WITH settings in its
+streaming config override, which survives recovery and rescheduling. Existing
+jobs can be changed with the usual configuration mechanism:
+
+```sql
+ALTER MATERIALIZED VIEW decisions SET CONFIG (
+    streaming.ai_decide.max_concurrency = 4
+);
+RECOVER;
+```
+
+`SET/RESET CONFIG` takes effect after recovery; it does not resize a running
+expression's semaphore. RESET removes that job override and restores inheritance
+from the compute-node configuration. The same request cap applies to batch,
+ordinary streaming Project and MaterializedExprs. It does not change chunk output
+ordering, saved retractions, or barrier ordering. Error classification and bounded
+retry behavior remain as described above.
+
 ## Tuning
 
 Tune against successful row throughput, HTTP attempt rate, latency distributions,
@@ -241,7 +291,7 @@ parallelism can increase service queueing or rejection rather than throughput;
 coordinate shared endpoint quotas outside individual expressions.
 AI_DECIDE-specific metrics and dashboards are deferred.
 Result buffering remains bounded by the input chunks being evaluated, and each
-response is limited to 16 MiB. There is no separate aggregate byte budget.
+response is limited to 16 MiB by default. There is no separate aggregate byte budget.
 
 ## Regression coverage
 

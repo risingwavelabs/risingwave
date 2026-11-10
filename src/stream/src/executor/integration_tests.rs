@@ -47,6 +47,7 @@ async fn test_merger_sum_aggr() {
     let expr_context = ExprContext {
         time_zone: String::from("UTC"),
         strict_mode: false,
+        ai_decide: None,
     };
 
     let barrier_test_env = LocalBarrierTestEnv::for_test().await;

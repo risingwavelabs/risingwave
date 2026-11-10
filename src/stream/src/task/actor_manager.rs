@@ -396,7 +396,11 @@ impl StreamActorManager {
             config: actor_context.config.clone(),
         };
 
-        create_executor(executor_params, node, store).await
+        risingwave_expr::expr_context::AI_DECIDE_CONFIG::scope(
+            actor_context.config.ai_decide.clone(),
+            create_executor(executor_params, node, store),
+        )
+        .await
     }
 
     fn wrap_executor(
@@ -491,7 +495,8 @@ impl StreamActorManager {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
-        let expr_context = actor.expr_context.clone().unwrap();
+        let mut expr_context = actor.expr_context.clone().unwrap();
+        expr_context.ai_decide = Some((&actor_config.ai_decide).into());
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -545,7 +550,8 @@ impl StreamActorManager {
         sync: Box<SyncLogStoreNode>,
         state_store: S,
     ) -> StreamResult<Actor<SyncLogStoreDispatchExecutor<S>>> {
-        let expr_context = actor.expr_context.clone().unwrap();
+        let mut expr_context = actor.expr_context.clone().unwrap();
+        expr_context.ai_decide = Some((&actor_config.ai_decide).into());
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,

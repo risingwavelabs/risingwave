@@ -135,6 +135,7 @@ impl LocalQueryExecution {
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let strict_mode = self.session.config().batch_expr_strict_mode();
+        let ai_decide_config = self.session.config().ai_decide_config();
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
 
@@ -169,6 +170,7 @@ impl LocalQueryExecution {
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
         let exec = async move { STRICT_MODE::scope(strict_mode, exec).await }.boxed();
+        let exec = async move { AI_DECIDE_CONFIG::scope(ai_decide_config, exec).await }.boxed();
         let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {

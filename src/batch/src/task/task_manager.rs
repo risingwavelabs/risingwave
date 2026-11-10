@@ -171,6 +171,7 @@ impl BatchManager {
             ExprContext {
                 time_zone: "UTC".to_owned(),
                 strict_mode: false,
+                ai_decide: None,
             },
         )
         .await

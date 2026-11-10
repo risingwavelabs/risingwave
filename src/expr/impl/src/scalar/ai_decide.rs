@@ -18,6 +18,7 @@ use futures::TryStreamExt;
 use futures::stream::FuturesUnordered;
 use reqwest::{Client, StatusCode};
 use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::config::AiDecideConfig;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
     DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapValue, Scalar, ScalarImpl,
@@ -29,12 +30,7 @@ use risingwave_expr::expr::{
 use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_ATTEMPTS: usize = 3;
-const RETRY_DELAY: Duration = Duration::from_millis(100);
-const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
-const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+use tokio::sync::Semaphore;
 
 /// One state is one request. An array in `state` is context, not an HTTP batch.
 #[derive(Serialize)]
@@ -50,6 +46,8 @@ struct AiDecide {
     return_type: DataType,
     schema: QuestionSchema,
     client: Client,
+    config: AiDecideConfig,
+    request_permits: Option<Semaphore>,
 }
 
 impl std::fmt::Debug for AiDecide {
@@ -84,8 +82,23 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
             reason: "return type does not match fixed questions".into(),
         });
     }
+    let config = risingwave_expr::expr_context::ai_decide_config();
+    config
+        .validate()
+        .map_err(|reason| ExprError::InvalidParam {
+            name: "ai_decide config",
+            reason: reason.into(),
+        })?;
+    if config.max_concurrency as usize > Semaphore::MAX_PERMITS {
+        return Err(ExprError::InvalidParam {
+            name: "ai_decide_max_concurrency",
+            reason: "exceeds semaphore capacity".into(),
+        });
+    }
+    let request_permits =
+        (config.max_concurrency != 0).then(|| Semaphore::new(config.max_concurrency as usize));
     let client = Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(Duration::from_millis(config.request_timeout_ms.into()))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| request_error("could not initialize HTTP client"))?;
@@ -96,6 +109,8 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
         return_type,
         schema,
         client,
+        config,
+        request_permits,
     }
     .boxed())
 }
@@ -234,8 +249,9 @@ impl AiDecide {
             })
             .build()
             .map_err(|_| request_error("could not build HTTP request"))?;
-        for attempt in 0..MAX_ATTEMPTS {
-            let mut delay = RETRY_DELAY * (1 << attempt);
+        let mut retry_delay_ms = self.config.retry_delay_ms;
+        for attempt in 0..self.config.max_attempts {
+            let mut delay = Duration::from_millis(retry_delay_ms.into());
             let result = match self
                 .client
                 .execute(request.try_clone().expect("JSON body is cloneable"))
@@ -246,17 +262,26 @@ impl AiDecide {
                     if status.is_success() {
                         if response
                             .content_length()
-                            .is_some_and(|len| len > MAX_RESPONSE_BYTES as u64)
+                            .is_some_and(|len| len > u64::from(self.config.max_response_bytes))
                         {
-                            return Err(request_error("response exceeds 16 MiB"));
+                            return Err(request_error(format!(
+                                "response exceeds {} bytes",
+                                self.config.max_response_bytes
+                            )));
                         }
                         let mut bytes = Vec::new();
                         let mut read_error = None;
                         loop {
                             match response.chunk().await {
                                 Ok(Some(chunk)) => {
-                                    if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-                                        return Err(request_error("response exceeds 16 MiB"));
+                                    if chunk.len()
+                                        > (self.config.max_response_bytes as usize)
+                                            .saturating_sub(bytes.len())
+                                    {
+                                        return Err(request_error(format!(
+                                            "response exceeds {} bytes",
+                                            self.config.max_response_bytes
+                                        )));
                                     }
                                     bytes.extend_from_slice(&chunk);
                                 }
@@ -282,7 +307,7 @@ impl AiDecide {
                         }
                     } else {
                         if !(status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error())
-                            || attempt + 1 == MAX_ATTEMPTS
+                            || attempt + 1 == self.config.max_attempts
                         {
                             return Err(request_error(format!("HTTP {status}")));
                         }
@@ -292,7 +317,8 @@ impl AiDecide {
                             .and_then(|value| value.to_str().ok())
                             .and_then(|value| value.parse::<u64>().ok())
                         {
-                            delay = Duration::from_secs(seconds).min(MAX_RETRY_AFTER);
+                            delay = Duration::from_secs(seconds)
+                                .min(Duration::from_millis(self.config.max_retry_after_ms.into()));
                         }
                         // The response is dropped before sleeping; do not retain its body.
                         Ok(())
@@ -306,7 +332,7 @@ impl AiDecide {
                     || err.is_connect()
                     || err.is_body()
                     || err.is_request();
-                if !transient || attempt + 1 == MAX_ATTEMPTS {
+                if !transient || attempt + 1 == self.config.max_attempts {
                     return Err(request_error(if err.is_timeout() {
                         "HTTP request timed out"
                     } else {
@@ -315,6 +341,7 @@ impl AiDecide {
                 }
             }
             tokio::time::sleep(delay).await;
+            retry_delay_ms = retry_delay_ms.saturating_mul(2);
         }
         unreachable!("last attempt always returns")
     }
@@ -322,6 +349,17 @@ impl AiDecide {
     async fn evaluate(&self, args: [DatumRef<'_>; 4]) -> Result<Option<StructValue>> {
         let [Some(state), Some(url), Some(model), Some(api_key)] = args else {
             return Ok(None);
+        };
+        // Share permits across concurrent eval/eval_row calls on this expression instance.
+        // Retain the permit through retries and backoff; cancellation releases it by drop.
+        let _permit = match &self.request_permits {
+            Some(permits) => Some(
+                permits
+                    .acquire()
+                    .await
+                    .expect("request semaphore is never closed"),
+            ),
+            None => None,
         };
         self.request(
             state.into_jsonb(),
@@ -364,7 +402,8 @@ impl AsyncExpression for AiDecide {
                 }
             })
             .collect::<FuturesUnordered<_>>();
-        // Evaluate all rows concurrently and observe failures without waiting for earlier rows.
+        // Schedule all rows; request permits bound HTTP work when configured. Observe failures
+        // without waiting for earlier rows.
         // Return one ordered array only after the whole chunk finishes.
         let mut ordered_results = vec![None; input.capacity()];
         while let Some((index, result)) = results.try_next().await? {
@@ -406,9 +445,13 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::sync::{Barrier, Semaphore};
+    use tokio::sync::Barrier;
 
     use super::*;
+
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+    const MAX_ATTEMPTS: usize = 3;
+    const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
     struct Server {
         url: String,
@@ -447,6 +490,8 @@ mod tests {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
+            config: AiDecideConfig::default(),
+            request_permits: None,
         }
     }
 
@@ -734,7 +779,11 @@ mod tests {
             let error = call(&expression(REQUEST_TIMEOUT), &server.url)
                 .await
                 .unwrap_err();
-            assert!(error.to_string().contains("response exceeds 16 MiB"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("response exceeds 16777216 bytes")
+            );
             assert_eq!(attempts.load(Ordering::SeqCst), 1);
         }
     }
@@ -827,6 +876,110 @@ mod tests {
         let empty = expr.eval(&chunk(&server.url, 0)).await.unwrap();
         assert_eq!(empty.len(), 0);
         assert_eq!(requests.load(Ordering::SeqCst), 36);
+    }
+
+    #[tokio::test]
+    async fn configured_limit_is_shared_across_chunks_and_released_on_cancellation() {
+        let gate = Arc::new(Semaphore::new(0));
+        let (started, mut requests) = tokio::sync::mpsc::unbounded_channel();
+        let handler_gate = gate.clone();
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move || {
+                let gate = handler_gate.clone();
+                let started = started.clone();
+                async move {
+                    started.send(()).unwrap();
+                    gate.acquire().await.unwrap().forget();
+                    Json(json!({"answers": {"q": {"type": "noul", "noul": 0.5}}}))
+                }
+            }),
+        ))
+        .await;
+        let config = AiDecideConfig {
+            max_concurrency: 2,
+            ..Default::default()
+        };
+        let expr = risingwave_expr::expr_context::AI_DECIDE_CONFIG::scope(config, async {
+            let mut children: Vec<_> = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+            children.insert(
+                3,
+                LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed(),
+            );
+            Arc::new(build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap())
+        })
+        .await;
+        let input = chunk(&server.url, 6);
+        let cancelled = {
+            let expr = expr.clone();
+            let input = input.clone();
+            tokio::spawn(async move { tokio::join!(expr.eval(&input), expr.eval(&input)) })
+        };
+        for _ in 0..2 {
+            tokio::time::timeout(Duration::from_secs(5), requests.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), requests.recv())
+                .await
+                .is_err(),
+            "two concurrent chunks must share the same two permits"
+        );
+        cancelled.abort();
+        assert!(cancelled.await.unwrap_err().is_cancelled());
+        let resumed = tokio::spawn(async move { expr.eval(&input).await });
+        for _ in 0..2 {
+            tokio::time::timeout(Duration::from_secs(5), requests.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        // Cancellation releases local permits; the server may still be processing old requests.
+        gate.add_permits(20);
+        let output = tokio::time::timeout(Duration::from_secs(5), resumed)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(score_at(&output, 0), Some(0.5));
+        assert_eq!(score_at(&output, 1), None);
+        assert_eq!(score_at(&output, 2), None);
+        assert_eq!(score_at(&output, 5), Some(0.5));
+    }
+
+    #[tokio::test]
+    async fn configured_attempts_and_response_limit_are_enforced() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let seen = attempts.clone();
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move || {
+                seen.fetch_add(1, Ordering::SeqCst);
+                async { (StatusCode::TOO_MANY_REQUESTS, [("retry-after", "100")]) }
+            }),
+        ))
+        .await;
+        let mut expr = expression(REQUEST_TIMEOUT);
+        expr.config.max_attempts = 2;
+        expr.config.retry_delay_ms = 0;
+        expr.config.max_retry_after_ms = 0;
+        let result = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
+            .await
+            .unwrap();
+        assert!(result.unwrap_err().to_string().contains("429"));
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        for response in [
+            b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n123456789".to_vec(),
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n9\r\n123456789\r\n0\r\n\r\n".to_vec(),
+        ] {
+            let attempts = Arc::new(AtomicUsize::new(0));
+            let server = raw_server(vec![response], attempts.clone()).await;
+            expr.config.max_response_bytes = 8;
+            assert!(call(&expr, &server.url).await.unwrap_err().to_string().contains("exceeds 8 bytes"));
+            assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[tokio::test]
