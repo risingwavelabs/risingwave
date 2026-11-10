@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::{Equivalent, HashMap, HashSet};
 use iceberg::delete_vector::DeleteVector;
 use iceberg::io::{FileIO, FileMetadata};
 use iceberg::spec::{DataContentType, DataFile, ManifestContentType, SnapshotRef};
@@ -281,7 +281,7 @@ impl CompactionResolverExecutor {
         file_io: &'a FileIO,
         data_file_locator: Option<&'a PkIndexDataFileLocator>,
         output_data_file_paths: &'a [String],
-        delete_diff_pk_set: Arc<HashSet<OwnedRow>>,
+        delete_diff_pk_set: Arc<HashSet<CompactionPk>>,
         conflicts: &'a mut HashMap<String, DeleteVector>,
     ) {
         let splits: Vec<OutputScanSplit> = futures::stream::iter(
@@ -445,7 +445,7 @@ async fn collect_delete_diff_pks(
     snapshot_n: &SnapshotRef,
     input_data_file_paths: &[String],
     pk_indices: &[usize],
-) -> Result<HashSet<OwnedRow>, SinkError> {
+) -> Result<HashSet<CompactionPk>, SinkError> {
     let file_io = table.file_io();
     let input_paths: HashSet<&str> = input_data_file_paths.iter().map(String::as_str).collect();
     let (deletes_r, deletes_n) = futures::future::try_join(
@@ -490,7 +490,7 @@ async fn collect_delete_diff_pks(
     .buffer_unordered(DELETE_DIFF_CONCURRENCY)
     .try_collect()
     .await?;
-    Ok(pks.into_iter().flatten().collect())
+    Ok(pks.into_iter().flatten().map(CompactionPk).collect())
 }
 
 /// Returns `(input path, delete file at R, delete file at N)` for every input data file whose live
@@ -785,7 +785,7 @@ async fn scan_output_split(
     split: OutputScanSplit,
     pk_indices: Arc<[usize]>,
     chunk_size: usize,
-    delete_diff_pk_set: Arc<HashSet<OwnedRow>>,
+    delete_diff_pk_set: Arc<HashSet<CompactionPk>>,
     chunk_tx: OutputChunkSender,
 ) -> Option<DeleteVector> {
     match scan_output_split_inner(
@@ -812,7 +812,7 @@ async fn scan_output_split_inner(
     split: OutputScanSplit,
     pk_indices: &[usize],
     chunk_size: usize,
-    delete_diff_pk_set: &HashSet<OwnedRow>,
+    delete_diff_pk_set: &HashSet<CompactionPk>,
     chunk_tx: &OutputChunkSender,
 ) -> Result<Option<DeleteVector>, SinkError> {
     let path = &*split.path;
@@ -858,6 +858,22 @@ async fn scan_output_split_inner(
     Ok((!conflicts.is_empty()).then_some(conflicts))
 }
 
+/// An owned compaction key hashed like `RowRef` for allocation-free borrowed lookups.
+#[derive(Clone, PartialEq, Eq)]
+struct CompactionPk(OwnedRow);
+
+impl std::hash::Hash for CompactionPk {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash_datums_into(state);
+    }
+}
+
+impl Equivalent<CompactionPk> for RowRef<'_> {
+    fn equivalent(&self, key: &CompactionPk) -> bool {
+        Row::eq(self, &key.0)
+    }
+}
+
 /// Builds the survivor chunk `[pk_columns.., data_file, position]` of a batch of output rows whose
 /// first row is at `first_position` in `path`. Rows whose pk was deleted during the compaction
 /// window are recorded in `conflicts` instead. Returns `None` if no row survives.
@@ -870,7 +886,7 @@ fn survivor_chunk(
     path: &str,
     file_uuid: Option<Uuid>,
     first_position: i64,
-    delete_diff_pk_set: &HashSet<OwnedRow>,
+    delete_diff_pk_set: &HashSet<CompactionPk>,
     conflicts: &mut DeleteVector,
 ) -> Option<DataChunk> {
     let row_count = pk_chunk.capacity();
@@ -880,8 +896,7 @@ fn survivor_chunk(
     } else {
         (0..row_count)
             .map(|row_idx| {
-                let conflict =
-                    delete_diff_pk_set.contains(&pk_chunk.row_at(row_idx).0.to_owned_row());
+                let conflict = delete_diff_pk_set.contains(&pk_chunk.row_at(row_idx).0);
                 if conflict {
                     conflicts.insert((first_position + row_idx as i64) as u64);
                 }
@@ -1027,7 +1042,7 @@ mod tests {
              2
              3",
         );
-        let pk = |id: i64| OwnedRow::new(vec![Some(ScalarImpl::Int64(id))]);
+        let pk = |id: i64| CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int64(id))]));
         let mut conflicts = DeleteVector::default();
 
         let chunk = survivor_chunk(
@@ -1095,6 +1110,114 @@ mod tests {
         );
         assert!(Arc::ptr_eq(chunk.column_at(1), &path_column));
         assert!(Arc::ptr_eq(chunk.column_at(2), &position_column));
+    }
+
+    #[test]
+    fn test_survivor_chunk_matches_composite_keys_and_nulls() {
+        let pk_chunk = DataChunk::from_pretty(
+            "i T
+             1 alpha
+             1 alphabet
+             2 alpha
+             1 .
+             2 .
+             1 alpha",
+        );
+        let deleted = HashSet::from([
+            CompactionPk(OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some("alpha".into()),
+            ])),
+            CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int32(1)), None])),
+        ]);
+        let mut conflicts = DeleteVector::default();
+        let chunk = survivor_chunk(pk_chunk, "f", None, 10, &deleted, &mut conflicts).unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                "i T T I
+                 1 alphabet f 11
+                 2 alpha f 12
+                 2 . f 14",
+            )
+        );
+        assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![10, 13, 15]);
+    }
+
+    #[test]
+    fn test_compaction_pk_matches_row_ref_hash_and_equality() {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+
+        let mut values = Vec::new();
+        let columns = [
+            (DataType::Boolean, "true"),
+            (DataType::Int16, "-7"),
+            (DataType::Int32, "123"),
+            (DataType::Int64, "4294967297"),
+            (DataType::Float32, "NaN"),
+            (DataType::Float64, "-0"),
+            (DataType::Decimal, "1234.50"),
+            (DataType::Varchar, "borrowed primary key"),
+            (DataType::Bytea, r"\x00aabbff"),
+            (DataType::Jsonb, r#"{"key": [1, null, true]}"#),
+            (DataType::Interval, "2 days 03:04:05"),
+            (DataType::Serial, "123"),
+            (DataType::list(DataType::Int16), "{-3,7,NULL}"),
+            (
+                DataType::Struct(StructType::new(vec![
+                    ("id", DataType::Int16),
+                    ("name", DataType::Varchar),
+                ])),
+                "(7,hello)",
+            ),
+            (
+                DataType::Map(MapType::from_kv(DataType::Int16, DataType::Int16)),
+                "{1:2,3:NULL}",
+            ),
+        ]
+        .into_iter()
+        .map(|(data_type, text)| {
+            let value = ScalarImpl::from_text_for_test(text, &data_type).unwrap();
+            let mut builder = ArrayBuilderImpl::with_type(2, data_type);
+            builder.append(Some(value.clone()));
+            builder.append(None::<ScalarImpl>);
+            values.push(Some(value));
+            Arc::new(builder.finish())
+        })
+        .collect();
+        let original = CompactionPk(OwnedRow::new(values));
+        let nulls = CompactionPk(OwnedRow::new(vec![None; original.0.len()]));
+        let chunk = DataChunk::new(columns, 2);
+        let borrowed = chunk.row_at(0).0;
+        let borrowed_nulls = chunk.row_at(1).0;
+        let hash_builder = BuildHasherDefault::<DefaultHasher>::default();
+        for (borrowed, owned) in [(&borrowed, &original), (&borrowed_nulls, &nulls)] {
+            assert_eq!(
+                hash_builder.hash_one(borrowed),
+                hash_builder.hash_one(owned)
+            );
+            let keys = HashSet::<CompactionPk>::from([owned.clone()]);
+            assert!(keys.contains(borrowed));
+        }
+        assert!(!borrowed.equivalent(&nulls));
+        assert!(!borrowed_nulls.equivalent(&original));
+        assert!(!borrowed.equivalent(&CompactionPk(OwnedRow::empty())));
+
+        let keys: HashSet<_> = [original.clone(), original.clone(), nulls.clone(), nulls]
+            .into_iter()
+            .collect();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&borrowed));
+        assert!(keys.contains(&borrowed_nulls));
+
+        let empty_chunk = DataChunk::new(vec![], 1);
+        let empty = empty_chunk.row_at(0).0;
+        assert_eq!(
+            hash_builder.hash_one(empty),
+            hash_builder.hash_one(CompactionPk(OwnedRow::empty()))
+        );
+        assert!(HashSet::<CompactionPk>::from([CompactionPk(OwnedRow::empty())]).contains(&empty));
+        assert!(!empty.equivalent(&original));
     }
 
     #[tokio::test]
@@ -1270,8 +1393,8 @@ mod tests {
         // Conflicts in both later row groups must use file-relative positions, even when
         // splits finish out of order and each row group spans multiple batches.
         let deleted = Arc::new(HashSet::from([
-            OwnedRow::new(vec![Some(ScalarImpl::Int32(4))]),
-            OwnedRow::new(vec![Some(ScalarImpl::Int32(5))]),
+            CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int32(4))])),
+            CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int32(5))])),
         ]));
         let (tx, mut rx) = mpsc::channel(OUTPUT_SCAN_CHANNEL_CAPACITY);
         let mut conflicts = DeleteVector::default();
