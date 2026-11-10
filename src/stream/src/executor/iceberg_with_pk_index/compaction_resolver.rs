@@ -28,8 +28,9 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::SinkError;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergPositionDeleteCommitResult, PositionDeleteFileNameGenerators,
-    read_position_deletes_from_file, serialize_data_files_default_spec, write_position_delete_file,
+    IcebergConfig, IcebergPositionDeleteCommitResult, PkIndexDataFileLocator,
+    PositionDeleteFileNameGenerators, read_position_deletes_from_file,
+    serialize_data_files_default_spec, write_position_delete_file,
 };
 use risingwave_connector::source::iceberg::ParquetFileReader;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -57,10 +58,11 @@ use crate::task::LocalBarrierManager;
 ///
 /// # Output chunk contract
 ///
-/// Schema: `[pk_columns.., file_path: Varchar, position: Int64]`. Every emitted row is
-/// a SURVIVOR: `Writer` upserts `pk -> (file_path, position)` in the index (index-only; the data
-/// already lives in the compaction output file). Conflicts (rows killed during the window) are NOT
-/// emitted here.
+/// Schema: `[pk_columns.., data_file, position: Int64]`, where `data_file` is the output file
+/// path (Varchar) in the legacy layout, or its uuid (Bytea) otherwise, matching the writer's PK
+/// index. Every emitted row is a SURVIVOR: `Writer` upserts `pk -> (data_file, position)` in the
+/// index (index-only; the data already lives in the compaction output file). Conflicts (rows
+/// killed during the window) are NOT emitted here.
 pub struct CompactionResolverExecutor {
     ctx: ActorContextRef,
     sink_id: SinkId,
@@ -152,10 +154,14 @@ impl CompactionResolverExecutor {
         }
     }
 
-    /// Data types of the survivor output chunk: `[pk_columns.., file_path, position]`.
+    /// Data types of the survivor output chunk: `[pk_columns.., data_file, position]`.
     fn output_data_types(&self) -> Vec<DataType> {
         let mut types = self.pk_data_types.clone();
-        types.push(DataType::Varchar);
+        types.push(if self.iceberg_config.pk_index_stores_file_uuid() {
+            DataType::Bytea
+        } else {
+            DataType::Varchar
+        });
         types.push(DataType::Int64);
         types
     }
@@ -220,10 +226,16 @@ impl CompactionResolverExecutor {
         }
 
         // Scan every output data file once per actor.
+        let data_file_locator = if self.iceberg_config.pk_index_stores_file_uuid() {
+            Some(PkIndexDataFileLocator::new(table.metadata())?)
+        } else {
+            None
+        };
         let mut conflicts: HashMap<String, DeleteVector> = HashMap::new();
         #[for_await]
         for chunk in self.scan_output_file(
             file_io,
+            data_file_locator.as_ref(),
             &task_input.output_data_file_paths,
             &delete_diff_pk_set,
             &mut conflicts,
@@ -239,16 +251,25 @@ impl CompactionResolverExecutor {
     async fn scan_output_file<'a>(
         &'a self,
         file_io: &'a FileIO,
+        data_file_locator: Option<&'a PkIndexDataFileLocator>,
         output_data_file_paths: &'a [String],
         delete_diff_pk_set: &'a HashSet<OwnedRow>,
         conflicts: &'a mut HashMap<String, DeleteVector>,
     ) {
         let mut buffer = DataChunkBuilder::new(self.output_data_types(), self.chunk_size);
         for file in output_data_file_paths {
+            let file_uuid = data_file_locator
+                .map(|locator| locator.file_uuid(file))
+                .transpose()?;
+            let data_file = match &file_uuid {
+                None => ScalarRefImpl::Utf8(file),
+                Some(uuid) => ScalarRefImpl::Bytea(uuid.as_bytes()),
+            };
             #[for_await]
             for chunk in scan_output_file_inner(
                 file_io,
                 file,
+                data_file,
                 &self.pk_indices,
                 delete_diff_pk_set,
                 &mut buffer,
@@ -448,6 +469,7 @@ async fn scan_input_pks_at_positions(
 async fn scan_output_file_inner<'a>(
     file_io: &'a FileIO,
     path: &'a str,
+    data_file: ScalarRefImpl<'a>,
     pk_indices: &'a [usize],
     delete_diff_pk_set: &'a HashSet<OwnedRow>,
     buffer: &'a mut DataChunkBuilder,
@@ -483,10 +505,9 @@ async fn scan_output_file_inner<'a>(
                     .entry_ref(path)
                     .or_default()
                     .insert(row_position as u64);
-            } else if let Some(full_chunk) = buffer.append_one_row(pk.chain([
-                Some(ScalarRefImpl::Utf8(path)),
-                Some(ScalarRefImpl::Int64(row_position)),
-            ])) {
+            } else if let Some(full_chunk) = buffer.append_one_row(
+                pk.chain([Some(data_file), Some(ScalarRefImpl::Int64(row_position))]),
+            ) {
                 yield full_chunk;
             }
         }

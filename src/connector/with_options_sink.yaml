@@ -965,6 +965,22 @@ IcebergConfig:
     required: false
     default: Default::default
     iceberg_engine: true
+  - name: legacy_pk_index_file_path
+    field_type: bool
+    comments: |-
+      Whether the PK index of a pk-index sink stores full data file paths. Default is true.
+      When false, the sink writes every data file as `{data_location}/{uuid}.parquet` and the
+      PK index only stores the 16-byte uuid, from which the path is rebuilt. New pk-index sinks
+      are created with false; sinks created before this option existed keep the legacy layout.
+      It must not change after the sink is created.
+
+      While it is false, the table's data location must never change: neither the
+      `write.data.path` or `write.folder-storage.path` table property nor the table location.
+      RisingWave never changes them, but it cannot stop other engines from doing so. After such
+      a change, uuids already in the PK index rebuild paths that do not exist, and the position
+      deletes written for those rows silently have no effect.
+    required: false
+    default: 'true'
 KafkaConfig:
   fields:
   - name: topic
