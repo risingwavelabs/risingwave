@@ -408,6 +408,7 @@ debug = "line-tables-only"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
 # TODO: re-enable this after it's more stable. It causes many ICE in current version. https://github.com/rust-lang/rust/issues/143342
+# The ICE is in the incremental dep graph, so the CI profiles below, which are not incremental, enable it.
 # rustflags = ["-Z", "threads=8"]
 
 [profile.release]
@@ -439,11 +440,15 @@ debug = "line-tables-only"
 split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
+# parallel frontend, see `profile.dev`
+rustflags = ["-Zthreads=8"]
 
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
 debug = "line-tables-only"
+# parallel frontend, see `profile.dev`
+rustflags = ["-Zthreads=8"]
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
@@ -458,6 +463,8 @@ inherits = "dev"
 incremental = false
 debug = "line-tables-only"
 opt-level = 2
+# parallel frontend, see `profile.dev`
+rustflags = ["-Zthreads=8"]
 
 [patch.crates-io]
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
