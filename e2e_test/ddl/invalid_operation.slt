@@ -360,6 +360,16 @@ create table sink(v int);
 statement error view.*exists
 create table v(v int);
 
+# The source of a table can't be moved on its own
+statement error Use `ALTER TABLE`
+alter source msrc set schema other_schema;
+
+statement error Use `ALTER TABLE`
+alter source msrc swap with src;
+
+statement error Use `ALTER TABLE`
+alter source src swap with msrc;
+
 # 8. create with unsupport format
 statement error connector datagen does not support format Debezium
 create table err_t1 (v int) with (
