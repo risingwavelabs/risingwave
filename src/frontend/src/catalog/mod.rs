@@ -123,6 +123,9 @@ pub enum CatalogErrorInner {
         name: String,
         under_creation: bool, // only used for StreamingJob type and Subscription for now
     },
+
+    #[error("{0}")]
+    WrongObjectType(String),
 }
 
 impl CatalogError {
@@ -140,6 +143,9 @@ impl CatalogError {
             }
             CatalogErrorInner::Duplicated { .. } => {
                 request.provide_value(PostgresErrorCode::DuplicateObject);
+            }
+            CatalogErrorInner::WrongObjectType(_) => {
+                request.provide_value(PostgresErrorCode::WrongObjectType);
             }
         };
     }
@@ -192,6 +198,69 @@ impl CatalogError {
 impl From<CatalogError> for RwError {
     fn from(e: CatalogError) -> Self {
         ErrorCode::CatalogError(Box::new(e)).into()
+    }
+}
+
+/// What a relation name refers to. All kinds share one namespace within a schema.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationKind {
+    Table,
+    MaterializedView,
+    Index,
+    Internal,
+    Source,
+    Sink,
+    View,
+    Subscription,
+    SystemCatalog,
+}
+
+impl RelationKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Table => "table",
+            Self::MaterializedView => "materialized view",
+            Self::Index => "index",
+            Self::Internal => "internal table",
+            Self::Source => "source",
+            Self::Sink => "sink",
+            Self::View => "view",
+            Self::Subscription => "subscription",
+            Self::SystemCatalog => "system catalog",
+        }
+    }
+
+    /// The error for a `DROP` statement of another kind that names this relation.
+    pub fn bad_drop_error(self) -> CatalogError {
+        let msg = match self {
+            Self::Internal => "Internal tables cannot be dropped.".to_owned(),
+            Self::SystemCatalog => "System catalogs cannot be dropped.".to_owned(),
+            Self::Index => "Use `DROP INDEX` to drop an index.".to_owned(),
+            kind => format!(
+                "Use `DROP {}` to drop a {}.",
+                kind.name().to_uppercase(),
+                kind.name()
+            ),
+        };
+        CatalogErrorInner::WrongObjectType(msg).into()
+    }
+
+    /// The error for `INSERT`, `UPDATE` or `DELETE` on this relation.
+    pub fn cannot_change_error(self, relation_name: &str) -> CatalogError {
+        CatalogErrorInner::WrongObjectType(format!(
+            "cannot change {} \"{relation_name}\"",
+            self.name()
+        ))
+        .into()
+    }
+
+    /// The error for querying this relation.
+    pub fn cannot_query_error(self, relation_name: &str) -> CatalogError {
+        CatalogErrorInner::WrongObjectType(format!(
+            "cannot query {} \"{relation_name}\"",
+            self.name()
+        ))
+        .into()
     }
 }
 

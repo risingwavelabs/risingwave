@@ -30,6 +30,7 @@ use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
@@ -84,7 +85,6 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{HummockManager, commit_multi_var};
-use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,8 +345,10 @@ impl HummockManager {
             .await
     }
 
+    /// Selects tasks and records the worker that will receive each nontrivial task.
     pub async fn get_compact_tasks_impl(
         &self,
+        context_id: HummockContextId,
         compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut dyn CompactionSelector,
@@ -374,6 +376,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -562,7 +565,7 @@ impl HummockManager {
                             compact_task.task_id,
                             CompactTaskAssignment {
                                 compact_task: compact_task.clone(),
-                                context_id: META_NODE_ID, // deprecated
+                                context_id,
                             },
                         );
 
@@ -685,31 +688,44 @@ impl HummockManager {
         Ok((pick_tasks, unschedule_groups))
     }
 
-    /// Cancels a compaction task no matter it's assigned or unassigned.
+    /// Cancels a compaction task in meta. Manual cancellation also notifies its assigned compactor
+    /// on a best-effort basis after committing the removal.
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
         let ret = self
-            .cancel_compact_task_impl(vec![task_id], task_status)
+            .cancel_compact_tasks(vec![task_id], task_status)
             .await?;
         Ok(ret[0])
     }
 
     pub async fn cancel_compact_tasks(
         &self,
-        tasks: Vec<u64>,
-        task_status: TaskStatus,
-    ) -> Result<Vec<bool>> {
-        self.cancel_compact_task_impl(tasks, task_status).await
-    }
-
-    async fn cancel_compact_task_impl(
-        &self,
         task_ids: Vec<u64>,
         task_status: TaskStatus,
     ) -> Result<Vec<bool>> {
         assert!(CANCEL_STATUS_SET.contains(&task_status));
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("cancel_compact_tasks")
+            .await;
+        // Capture ownership under the same lock used to remove the assignments.
+        let assignments_to_notify = (task_status == TaskStatus::ManualCanceled).then(|| {
+            task_ids
+                .iter()
+                .map(|task_id| {
+                    compaction_guard
+                        .compact_task_assignment
+                        .get(task_id)
+                        .map(|assignment| (assignment.context_id, *task_id))
+                })
+                .collect_vec()
+        });
+        let versioning_guard = self
+            .versioning
+            .write_with_process_name("cancel_compact_tasks")
+            .await;
         let tasks = task_ids
             .into_iter()
             .map(|task_id| ReportTask {
@@ -720,7 +736,27 @@ impl HummockManager {
                 object_timestamps: HashMap::default(),
             })
             .collect_vec();
-        let rets = self.report_compact_tasks(tasks).await?;
+        let rets = self
+            .report_compact_tasks_impl(tasks, compaction_guard, versioning_guard)
+            .await?;
+        // Notify only after the cancellation is durable. Heartbeats retry notification if the
+        // compactor is disconnected or still reports the canceled task after reconnecting.
+        if let Some(assignments) = assignments_to_notify {
+            for (assignment, reported) in assignments.into_iter().zip_eq_fast(&rets) {
+                if *reported
+                    && let Some((context_id, task_id)) = assignment
+                    && let Some(compactor) = self.compactor_manager.get_compactor(context_id)
+                    && let Err(error) = compactor.cancel_task(task_id)
+                {
+                    tracing::warn!(
+                        error = %error.as_report(),
+                        %context_id,
+                        task_id,
+                        "Failed to notify compactor of task cancellation; retrying on heartbeat",
+                    );
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.check_state_consistency().await;
@@ -730,6 +766,7 @@ impl HummockManager {
 
     async fn get_compact_tasks(
         &self,
+        context_id: HummockContextId,
         mut compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut dyn CompactionSelector,
@@ -739,7 +776,7 @@ impl HummockManager {
         )));
         compaction_groups.shuffle(&mut thread_rng());
         let (mut tasks, groups) = self
-            .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
+            .get_compact_tasks_impl(context_id, compaction_groups, max_select_count, selector)
             .await?;
         tasks.retain(|task| {
             if task.task_status == TaskStatus::Success {
@@ -754,6 +791,7 @@ impl HummockManager {
 
     pub async fn get_compact_task(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         selector: &mut dyn CompactionSelector,
     ) -> Result<Option<CompactTask>> {
@@ -762,7 +800,7 @@ impl HummockManager {
         )));
 
         let (normal_tasks, _) = self
-            .get_compact_tasks_impl(vec![compaction_group_id], 1, selector)
+            .get_compact_tasks_impl(context_id, vec![compaction_group_id], 1, selector)
             .await?;
         for task in normal_tasks {
             if task.task_status != TaskStatus::Success {
@@ -775,23 +813,29 @@ impl HummockManager {
 
     pub async fn manual_get_compact_task(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
         let (task, _) = self
-            .manual_get_compact_task_with_info(compaction_group_id, manual_compaction_option)
+            .manual_get_compact_task_with_info(
+                context_id,
+                compaction_group_id,
+                manual_compaction_option,
+            )
             .await?;
         Ok(task)
     }
 
     pub async fn manual_get_compact_task_with_info(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<(Option<CompactTask>, bool)> {
         let mut selector = ManualCompactionSelector::new(manual_compaction_option);
         let task = self
-            .get_compact_task(compaction_group_id, &mut selector)
+            .get_compact_task(context_id, compaction_group_id, &mut selector)
             .await?;
         if let Some(err) = selector.validation_error() {
             return Err(Error::InvalidManualCompactionOption(err.to_owned()));
@@ -833,13 +877,9 @@ impl HummockManager {
             .await
     }
 
-    /// Finishes or cancels a compaction task, according to `task_status`.
+    /// Finishes or cancels compaction tasks according to each report's `task_status`.
     ///
-    /// If `context_id` is not None, its validity will be checked when writing meta store.
-    /// Its ownership of the task is checked as well.
-    ///
-    /// Return Ok(false) indicates either the task is not found,
-    /// or the task is not owned by `context_id` when `context_id` is not None.
+    /// Returns one boolean per report, with `false` indicating that the task was not found.
     pub async fn report_compact_tasks_impl(
         &self,
         report_tasks: Vec<ReportTask>,
@@ -869,6 +909,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -1102,7 +1143,11 @@ impl HummockManager {
 
         // 2. Get manual compaction task.
         let compact_task = self
-            .manual_get_compact_task_with_info(compaction_group, manual_compaction_option)
+            .manual_get_compact_task_with_info(
+                compactor.context_id(),
+                compaction_group,
+                manual_compaction_option,
+            )
             .await;
         let (compact_task, blocked_by_pending) = match compact_task {
             Ok((compact_task, blocked_by_pending)) => (compact_task, blocked_by_pending),

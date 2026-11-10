@@ -177,6 +177,9 @@ for_all_wrapped_id_fields! (
         BatchQueryCommittedEpoch {
             hummock_version_id: HummockVersionId,
         }
+        BatchQueryLatestCommittedEpoch {
+            hummock_version_id: HummockVersionId,
+        }
         WorkerNode {
             id: WorkerId,
         }
@@ -1284,6 +1287,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
+        .type_attribute(
+            "stream_plan.EowcOverWindowNodeVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
         .type_attribute(
             "plan_common.ColumnDescVersion",
             "#[derive(prost_helpers::Version)]",

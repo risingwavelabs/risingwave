@@ -30,12 +30,12 @@ use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
     DorisService, DummyService, ElasticSearchService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, KafkaService, LakekeeperService, MetaNodeService,
-    MinioService, MoatService, MongoDbService, MongoDbSetupTask, MotoService, MqttService,
-    MySqlService, NatsService, OpenSearchService, OracleService, PostgresService,
+    FrontendService, GrafanaService, KafkaService, LakekeeperService, MariaDbService,
+    MetaNodeService, MinioService, MoatService, MongoDbService, MongoDbSetupTask, MotoService,
+    MqttService, MySqlService, NatsService, OpenSearchService, OracleService, PostgresService,
     PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
-    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
-    TempoService, generate_risedev_env, preflight_check,
+    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, StarrocksService, Task,
+    TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -329,6 +329,16 @@ fn task_main(
                         c.address, c.http_port, c.address, c.query_port
                     ));
                 }
+                ServiceConfig::Starrocks(c) => {
+                    let mut service = StarrocksService::new(c.clone())?;
+                    service.execute(&mut ctx)?;
+                    let mut task = risedev::StarrocksReadyCheckTask::new(c.clone());
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!(
+                        "starrocks http://{}:{}, query {}",
+                        c.address, c.http_port, c.query_port
+                    ));
+                }
                 ServiceConfig::MySql(c) => {
                     MySqlService::new(c.clone()).execute(&mut ctx)?;
                     let mut task = risedev::DbReadyCheckTask::new(
@@ -341,6 +351,22 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("mysql {}:{}", c.address, c.port));
+                }
+                ServiceConfig::MariaDb(c) => {
+                    MariaDbService::new(c.clone()).execute(&mut ctx)?;
+                    let connect_options = MySqlConnectOptions::new()
+                        .host(&c.address)
+                        .port(c.port)
+                        .username(&c.user);
+                    let connect_options = if c.password.is_empty() {
+                        connect_options
+                    } else {
+                        connect_options.password(&c.password)
+                    };
+                    let mut task = risedev::DbReadyCheckTask::new(connect_options);
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("mariadb {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Postgres(c) => {
                     PostgresService::new(c.clone()).execute(&mut ctx)?;

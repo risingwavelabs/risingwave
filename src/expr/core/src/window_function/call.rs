@@ -211,6 +211,37 @@ impl FrameBounds {
             Self::Session(_) => true,
         }
     }
+
+    /// Whether the window of a row may be closed by the watermark of the order key in ascending
+    /// order, rather than only by later rows. A frame ending before the current row is closed once
+    /// the row arrives, and a frame without an end is never closed.
+    pub fn may_close_by_watermark(&self) -> bool {
+        match self {
+            Self::Rows(_) => false,
+            Self::Range(RangeFrameBounds {
+                order_data_type,
+                end,
+                ..
+            }) => match end {
+                Preceding(offset) => match order_data_type {
+                    // Subtraction is exact only for these types. A float or decimal frame end may
+                    // round back to the current row, or stay at an infinity, e.g., `2^54 - 1.0` in
+                    // `float8`.
+                    DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Timestamp
+                    | DataType::Timestamptz
+                    | DataType::Interval => offset.is_zero(),
+                    _ => true,
+                },
+                CurrentRow | Following(_) => true,
+                UnboundedFollowing => false,
+                UnboundedPreceding => unreachable!("frame end never be UNBOUNDED PRECEDING"),
+            },
+            Self::Session(_) => true,
+        }
+    }
 }
 
 /// Whether a watermark on the first `ORDER BY` column can be forwarded through a general (i.e.
@@ -351,7 +382,7 @@ impl FrameExclusion {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::types::{Decimal, Interval, ScalarImpl};
 
     use super::*;
     use crate::window_function::{RangeFrameBound, RangeFrameOffset, SessionFrameGap};
@@ -387,6 +418,53 @@ mod tests {
             }),
             exclusion: FrameExclusion::default(),
         }
+    }
+
+    #[test]
+    fn test_may_close_by_watermark() {
+        let asc = OrderType::ascending();
+        let may_close = |frame: Frame| frame.bounds.may_close_by_watermark();
+
+        assert!(!may_close(rows_frame(Preceding(1), Preceding(1))));
+        assert!(!may_close(rows_frame(CurrentRow, Following(1))));
+        assert!(may_close(range_frame(UnboundedPreceding, CurrentRow, asc)));
+        assert!(may_close(range_frame(CurrentRow, Following(10), asc)));
+        assert!(may_close(range_frame(Preceding(10), Preceding(0), asc)));
+        assert!(!may_close(range_frame(Preceding(10), Preceding(5), asc)));
+        assert!(!may_close(range_frame(CurrentRow, UnboundedFollowing, asc)));
+        assert!(may_close(session_frame(asc)));
+
+        // A positive offset ends the frame before the current row only for exact subtraction.
+        let preceding = |order_data_type: DataType, offset_data_type, offset: ScalarImpl| Frame {
+            bounds: FrameBounds::Range(RangeFrameBounds {
+                order_data_type,
+                order_type: asc,
+                offset_data_type,
+                start: Preceding(RangeFrameOffset::new(offset.clone())),
+                end: Preceding(RangeFrameOffset::new(offset)),
+            }),
+            exclusion: FrameExclusion::default(),
+        };
+        assert!(may_close(preceding(
+            DataType::Float64,
+            DataType::Float64,
+            1.0f64.into()
+        )));
+        assert!(may_close(preceding(
+            DataType::Float32,
+            DataType::Float32,
+            1.0f32.into()
+        )));
+        assert!(may_close(preceding(
+            DataType::Decimal,
+            DataType::Decimal,
+            Decimal::from(1).into()
+        )));
+        assert!(!may_close(preceding(
+            DataType::Timestamp,
+            DataType::Interval,
+            Interval::from_month_day_usec(1, 0, 0).into()
+        )));
     }
 
     #[test]

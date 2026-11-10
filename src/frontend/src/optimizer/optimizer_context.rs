@@ -23,6 +23,7 @@ use risingwave_common::id::SourceId;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
+use crate::error::Result;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::Share;
@@ -149,17 +150,17 @@ pub type OptimizerContextRef = Rc<OptimizerContext>;
 impl OptimizerContext {
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`], with empty
     /// [`ExplainOptions`].
-    pub fn from_handler_args(handler_args: HandlerArgs) -> Self {
+    pub fn from_handler_args(handler_args: HandlerArgs) -> Result<Self> {
         Self::new(handler_args, ExplainOptions::default())
     }
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
-    pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
+    pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Result<Self> {
         let session_timezone = RefCell::new(SessionTimezone::new(
             handler_args.session.config().timezone(),
         ));
-        let overwrite_options = OverwriteOptions::new(&mut handler_args);
-        Self {
+        let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
+        Ok(Self {
             session_ctx: handler_args.session,
             sql: handler_args.sql,
             normalized_sql: handler_args.normalized_sql,
@@ -183,7 +184,7 @@ impl OptimizerContext {
             stream_share_table: RefCell::new(ShareTable::default()),
 
             _phantom: Default::default(),
-        }
+        })
     }
 
     #[cfg(test)]

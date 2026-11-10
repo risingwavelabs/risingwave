@@ -51,9 +51,9 @@ pub enum ExternalCdcTableType {
     Unspecified,
     Mock,
     Mysql,
+    Mariadb,
     Postgres,
     SqlServer,
-    Citus,
     Mongodb,
 }
 
@@ -62,8 +62,8 @@ impl ExternalCdcTableType {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
             "mysql-cdc" => Self::Mysql,
+            "mariadb-cdc" => Self::Mariadb,
             "postgres-cdc" => Self::Postgres,
-            "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
             "mongodb-cdc" => Self::Mongodb,
             _ => Self::Unspecified,
@@ -72,11 +72,11 @@ impl ExternalCdcTableType {
 
     pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
         match self {
-            Self::Mysql => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
+            Self::Mysql | Self::Mariadb => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
-            Self::Unspecified | Self::Citus | Self::Mongodb => {
+            Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
             }
         }
@@ -91,7 +91,7 @@ impl ExternalCdcTableType {
         table_id: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
-            Self::Mysql => Ok(ExternalTableReaderImpl::Mysql(
+            Self::Mysql | Self::Mariadb => Ok(ExternalTableReaderImpl::Mysql(
                 MysqlExternalTableReader::new(config, schema, pk_indices).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
@@ -107,9 +107,8 @@ impl ExternalCdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
-            // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
-            Self::Unspecified | Self::Citus | Self::Mongodb => {
+            Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
             }
         }
@@ -121,9 +120,8 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
         match cdc_table_type {
             ExternalCdcTableType::Postgres => Self::Postgres,
             ExternalCdcTableType::Mysql => Self::Mysql,
+            ExternalCdcTableType::Mariadb => Self::Mariadb,
             ExternalCdcTableType::SqlServer => Self::SqlServer,
-
-            ExternalCdcTableType::Citus => Self::Citus,
             ExternalCdcTableType::Mongodb => Self::Mongodb,
             ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
         }
@@ -135,9 +133,9 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
             PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Mariadb => Self::Mariadb,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
-            PbCdcTableType::Citus => Self::Citus,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -160,11 +158,11 @@ impl SchemaTableName {
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            ExternalCdcTableType::Mysql => properties
+            ExternalCdcTableType::Mysql | ExternalCdcTableType::Mariadb => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
+            ExternalCdcTableType::Postgres => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
             ExternalCdcTableType::SqlServer => {
@@ -304,13 +302,14 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
-    /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
-    /// Choices include `disabled`, `preferred`, and `required`.
+    /// `ssl.mode` specifies the SSL/TLS encryption level for secure CDC connections.
+    /// Choices include `disabled`, `preferred`, `required`, `verify-ca`, and `verify-full`.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
     pub ssl_mode: SslMode,
 
+    /// Optional path to a trusted root CA certificate for verified SSL modes.
     #[serde(rename = "ssl.root.cert")]
     #[serde(alias = "debezium.database.sslrootcert")]
     pub ssl_root_cert: Option<String>,
@@ -514,7 +513,7 @@ impl ExternalTableImpl {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let cdc_source_type = CdcSourceType::from(config.connector.as_str());
         match cdc_source_type {
-            CdcSourceType::Mysql => Ok(ExternalTableImpl::Mysql(
+            CdcSourceType::Mysql | CdcSourceType::Mariadb => Ok(ExternalTableImpl::Mysql(
                 MysqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => {
@@ -533,10 +532,7 @@ impl ExternalTableImpl {
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),
-            CdcSourceType::Citus
-            | CdcSourceType::Mongodb
-            | CdcSourceType::Oracle
-            | CdcSourceType::Unspecified => {
+            CdcSourceType::Mongodb | CdcSourceType::Oracle | CdcSourceType::Unspecified => {
                 Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into())
             }
         }
@@ -590,11 +586,10 @@ impl ExternalTableImpl {
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match CdcSourceType::from(config.connector.as_str()) {
-            CdcSourceType::Mysql => {
+            CdcSourceType::Mysql | CdcSourceType::Mariadb => {
                 MysqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
             }
             CdcSourceType::Postgres
-            | CdcSourceType::Citus
             | CdcSourceType::Mongodb
             | CdcSourceType::SqlServer
             | CdcSourceType::Oracle

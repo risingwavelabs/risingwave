@@ -175,6 +175,25 @@ Run the Doris sink test in the same way:
 ./risedev k
 ```
 
+Run the ClickHouse sink test in the same way:
+
+```sh
+./risedev d local-clickhouse-sink-test
+./risedev slt './e2e_test/sink/clickhouse_sink.slt'
+./risedev k
+```
+
+To run the StarRocks sink test locally, use the Docker-backed StarRocks profile:
+
+```sh
+./risedev d local-starrocks-sink-test
+./risedev slt './e2e_test/sink/starrocks_sink.slt'
+./risedev k
+```
+
+When running this test against user-managed StarRocks, configure the endpoint and admin credentials, and set
+`database-is-disposable: true`. The test drops the configured database and its test users during setup and cleanup.
+
 ### Tips for writing `system` commands
 
 Refer to

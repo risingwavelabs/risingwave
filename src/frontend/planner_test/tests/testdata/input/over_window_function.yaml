@@ -755,7 +755,16 @@
   expected_outputs:
     - logical_plan
     - eowc_stream_plan
+    - eowc_stream_dist_plan
     - batch_plan
+# A float frame end may round back to the current row, so the frame may be closed by watermark.
+- sql: |
+    create table t (i int, bi bigint, f float, watermark for f as f - 1) append only;
+    select
+        count(*) over (partition by bi order by f range between 1 preceding and 1 preceding) as cnt
+    from t;
+  expected_outputs:
+    - eowc_stream_dist_plan
 - sql: |
     create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
     select
