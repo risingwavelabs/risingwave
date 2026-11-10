@@ -156,6 +156,15 @@ impl Binder {
         Ok(match constraint {
             JoinConstraint::None => (ExprImpl::literal_bool(true), None),
             c @ JoinConstraint::Natural | c @ JoinConstraint::Using(_) => {
+                if matches!(join_type, JoinType::AsofInner | JoinType::AsofLeftOuter) {
+                    // An ASOF join needs an inequality condition, which only `ON` can express.
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ASOF JOIN requires an inequality condition in ON, \
+                         and does not support NATURAL or USING"
+                            .to_owned(),
+                    )
+                    .into());
+                }
                 // First, we identify columns with the same name.
                 let old_context = self.context.clone();
                 let l_len = old_context.columns.len();
