@@ -696,6 +696,24 @@ pub mod tests {
     }
 
     #[test]
+    fn test_opendal_chunked_streaming_read_config() {
+        let config: ObjectStoreConfig = toml::from_str("").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 1);
+
+        let config: ObjectStoreConfig = toml::from_str(
+            "opendal_streaming_read_chunk_size = 1024\nopendal_streaming_read_chunk_concurrency = 4",
+        )
+        .unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 1024);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 4);
+
+        let config: ObjectStoreConfig =
+            toml::from_str("opendal_streaming_read_chunk_size = 0").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+    }
+
+    #[test]
     fn test_http_client_rotation_config() {
         for (input, expected) in [
             ("", None),
