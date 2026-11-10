@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
@@ -34,6 +35,7 @@ use risingwave_hummock_sdk::{
     HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
     full_key_can_concat,
 };
+use risingwave_object_store::object::ObjectStoreImpl;
 use risingwave_pb::hummock::LevelType;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use thiserror_ext::AsReport;
@@ -309,6 +311,27 @@ pub fn partition_overlapping_sstable_infos(
     groups.into_iter().map(|group| group.ssts).collect_vec()
 }
 
+/// Estimate transport and buffered payload memory for one compaction input stream.
+/// The allowance saturates at `u64::MAX` on overflow.
+fn estimate_input_stream_buffer_size(store: &ObjectStoreImpl, config: &ObjectStoreConfig) -> u64 {
+    let recv_buffer_size = config.s3.recv_buffer_size.unwrap_or(6 * 1024 * 1024) as u64;
+    if !matches!(store, ObjectStoreImpl::Opendal(_))
+        || config.opendal_streaming_read_chunk_size == 0
+    {
+        return recv_buffer_size;
+    }
+
+    let concurrent = config.opendal_streaming_read_chunk_concurrency.max(1) as u64;
+    // The bounded range-request queue retains at most `concurrent` chunk payloads.
+    // Allow two more chunks for our bytes adapter's copy and the previously yielded
+    // buffer retained by BlockDataStream during that copy.
+    let chunk_buffers = (config.opendal_streaming_read_chunk_size as u64)
+        .saturating_mul(concurrent.saturating_add(2));
+    recv_buffer_size
+        .saturating_mul(concurrent)
+        .saturating_add(chunk_buffers)
+}
+
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact_with_agent(
@@ -403,17 +426,17 @@ async fn compact_with_agent_inner(
 
     let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
 
+    let input_buffer_size = estimate_input_stream_buffer_size(
+        context.sstable_store.store().as_ref(),
+        &context.storage_opts.object_store_config,
+    );
     let task_memory_capacity_with_parallelism = estimate_memory_for_compact_task(
         &compact_task,
         (context.storage_opts.block_size_kb as u64) * (1 << 10),
-        context
-            .storage_opts
-            .object_store_config
-            .s3
-            .recv_buffer_size
-            .unwrap_or(6 * 1024 * 1024) as u64,
+        input_buffer_size,
         capacity as u64,
-    ) * compact_task.splits.len() as u64;
+    )
+    .saturating_mul(parallelism as u64);
 
     tracing::info!(
         "Ready to handle task: {} compact_task_statistics {:?} compression_algorithm {:?}  parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}, {}",
@@ -428,9 +451,14 @@ async fn compact_with_agent_inner(
 
     // If the task does not have enough memory, it should cancel the task and let the meta
     // reschedule it, so that it does not occupy the compactor's resources.
-    let memory_detector = context
-        .memory_limiter
-        .try_require_memory(task_memory_capacity_with_parallelism);
+    // Avoid overflowing the limiter's current usage when the estimate has saturated.
+    let memory_detector = if task_memory_capacity_with_parallelism == u64::MAX {
+        None
+    } else {
+        context
+            .memory_limiter
+            .try_require_memory(task_memory_capacity_with_parallelism)
+    };
     if memory_detector.is_none() {
         tracing::warn!(
             "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
@@ -958,14 +986,105 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_hummock_sdk::can_concat;
+    use std::sync::Arc;
 
-    use crate::hummock::compactor::compactor_runner::partition_overlapping_sstable_infos;
+    use risingwave_common::config::ObjectStoreConfig;
+    use risingwave_hummock_sdk::can_concat;
+    use risingwave_hummock_sdk::compact::estimate_memory_for_compact_task;
+    use risingwave_hummock_sdk::compact_task::CompactTask;
+    use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+    use risingwave_object_store::object::{
+        InMemObjectStore, ObjectStore, ObjectStoreImpl, OpendalObjectStore,
+    };
+    use risingwave_pb::hummock::{LevelType, PbSstableInfo};
+
+    use crate::hummock::compactor::compactor_runner::{
+        estimate_input_stream_buffer_size, partition_overlapping_sstable_infos,
+    };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
     };
     use crate::hummock::value::HummockValue;
+
+    #[test]
+    fn test_estimate_input_stream_buffer_size() {
+        const MIB: u64 = 1024 * 1024;
+        let metrics = Arc::new(ObjectStoreMetrics::unused());
+        let config = Arc::new(ObjectStoreConfig::default());
+        let opendal = ObjectStoreImpl::Opendal(
+            OpendalObjectStore::test_new_memory_engine()
+                .unwrap()
+                .monitored(metrics.clone(), config.clone()),
+        );
+        let in_mem =
+            ObjectStoreImpl::InMem(InMemObjectStore::default().monitored(metrics, config.clone()));
+        assert_eq!(
+            estimate_input_stream_buffer_size(&opendal, &config),
+            2 * MIB
+        );
+
+        let mut config = ObjectStoreConfig::default();
+        config.s3.recv_buffer_size = None;
+        assert_eq!(
+            estimate_input_stream_buffer_size(&opendal, &config),
+            6 * MIB
+        );
+        config.s3.recv_buffer_size = Some(MIB as usize);
+        for (chunk_size, concurrent, expected) in [
+            (0, 4, MIB),
+            (0, usize::MAX, MIB),
+            (16 * MIB, 0, 49 * MIB),
+            (16 * MIB, 1, 49 * MIB),
+            (16 * MIB, 4, 100 * MIB),
+        ] {
+            config.opendal_streaming_read_chunk_size = chunk_size as usize;
+            config.opendal_streaming_read_chunk_concurrency = concurrent;
+            assert_eq!(
+                estimate_input_stream_buffer_size(&opendal, &config),
+                expected
+            );
+            assert_eq!(estimate_input_stream_buffer_size(&in_mem, &config), MIB);
+        }
+
+        config.opendal_streaming_read_chunk_size = usize::MAX;
+        assert_eq!(
+            estimate_input_stream_buffer_size(&opendal, &config),
+            u64::MAX
+        );
+        config.opendal_streaming_read_chunk_size = 1;
+        config.opendal_streaming_read_chunk_concurrency = usize::MAX;
+        assert_eq!(
+            estimate_input_stream_buffer_size(&opendal, &config),
+            u64::MAX
+        );
+        assert_eq!(estimate_input_stream_buffer_size(&in_mem, &config), MIB);
+    }
+
+    #[test]
+    fn test_chunk_buffer_allowance_saturates_task_estimate() {
+        let sst = PbSstableInfo {
+            file_size: 1000,
+            meta_offset: 900,
+            table_ids: vec![1.into()],
+            ..Default::default()
+        };
+        let task = CompactTask {
+            input_ssts: vec![InputLevel {
+                level_type: LevelType::Overlapping,
+                table_infos: vec![sst.clone().into(), sst.into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for buffer_size in [u64::MAX, u64::MAX / 2] {
+            assert_eq!(
+                estimate_memory_for_compact_task(&task, 128, buffer_size, 1000),
+                u64::MAX
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_partition_overlapping_level() {
