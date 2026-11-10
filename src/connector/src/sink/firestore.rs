@@ -327,6 +327,9 @@ impl Sink for FirestoreSink {
     const SINK_NAME: &'static str = FIRESTORE_SINK;
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::FirestoreSink
+            .check_available()
+            .map_err(|e| anyhow!(e))?;
         self.config
             .validate_schema(&self.schema, &self.pk_indices)?;
         let client = self.config.build_client().await?;

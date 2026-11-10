@@ -1,5 +1,9 @@
 # Firestore sink validation
 
+Creating a Firestore sink requires a valid RisingWave license that enables the
+`FirestoreSink` feature. This applies to all decimal modes and is separate from
+the Google Firestore Enterprise edition requirement for Decimal128.
+
 The normal connector tests run an in-process gRPC server using the real Firestore
 SDK. No Google project, credentials, Python packages, or external service is needed:
 
