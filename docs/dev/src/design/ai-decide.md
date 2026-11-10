@@ -234,7 +234,9 @@ recovery while a service is unavailable.
 
 Like `openai_embedding`, request construction is outside the retry loop. Invalid
 URLs or headers are ordinary expression errors, following the existing strict or
-NonStrict behavior. Ordinary SQL calculation errors also keep their original
+NonStrict behavior. In NonStrict mode, only the invalid rows become NULL; valid
+rows in the same chunk retain their answers. Strict batch evaluation reports the
+error. Ordinary SQL calculation errors also keep their original
 semantics; there is no special external-error class in the expression framework.
 
 Retries and recovery may repeat requests that were not checkpointed. Exactly-once

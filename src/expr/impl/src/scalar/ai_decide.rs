@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use futures::TryStreamExt;
+use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use reqwest::Client;
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -377,30 +377,38 @@ impl AsyncExpression for AiDecide {
                 let values = &values;
                 async move {
                     if !input.visibility().is_set(index) {
-                        return Ok((index, None));
+                        return (index, Ok(None));
                     }
                     let value = self
                         .evaluate(std::array::from_fn(|i| match &values[i] {
                             ValueImpl::Array(array) => array.value_at(index),
                             ValueImpl::Scalar { value, .. } => value.to_datum_ref(),
                         }))
-                        .await?;
-                    Ok::<_, ExprError>((index, value))
+                        .await;
+                    (index, value)
                 }
             })
             .collect::<FuturesUnordered<_>>();
-        // Schedule all rows; request permits bound HTTP work when configured. Observe failures
-        // without waiting for earlier rows.
-        // Return one ordered array only after the whole chunk finishes.
+        // Preserve successful rows when another row cannot construct its request.
+        // NonStrict uses the partial array in Multiple; strict wrappers still report an error.
         let mut ordered_results = vec![None; input.capacity()];
-        while let Some((index, result)) = results.try_next().await? {
-            ordered_results[index] = result;
+        let mut errors = Vec::new();
+        while let Some((index, result)) = results.next().await {
+            match result {
+                Ok(value) => ordered_results[index] = value,
+                Err(error) => errors.push(error),
+            }
         }
         let mut builder = self.return_type().create_array_builder(input.capacity());
         for result in ordered_results {
             builder.append(result.map(ScalarImpl::Struct));
         }
-        Ok(builder.finish().into_ref())
+        let array = builder.finish().into_ref();
+        if errors.is_empty() {
+            Ok(array)
+        } else {
+            Err(ExprError::Multiple(array, errors.into()))
+        }
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
@@ -427,7 +435,8 @@ mod tests {
     use axum::{Json, Router};
     use risingwave_common::array::{Array, ArrayBuilder, JsonbArrayBuilder, Utf8Array};
     use risingwave_expr::expr::{
-        InputRefExpression, LiteralExpression, SyncExpressionBoxExt, build_func,
+        InputRefExpression, LiteralExpression, LogReport, NonStrictExpression,
+        SyncExpressionBoxExt, build_func,
     };
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
@@ -737,6 +746,64 @@ mod tests {
                 .map(|i| i != 2)
                 .collect::<risingwave_common::bitmap::Bitmap>(),
         )
+    }
+
+    #[tokio::test]
+    async fn request_construction_errors_preserve_other_rows() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move |Json(body): Json<Value>| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let index = body["state"]["index"].as_u64().unwrap();
+                    Json(json!({"answers":{"q":{"type":"noul","noul":index as f64 / 10.0}}}))
+                }
+            }),
+        ))
+        .await;
+        let (mut columns, visibility) = chunk(&server.url, 8).into_parts();
+        columns[1] = Utf8Array::from_iter([
+            Some(server.url.as_str()),
+            Some("invalid"), // NULL state: no request or error.
+            Some("invalid"), // Invisible row: no request or error.
+            Some("invalid"),
+            Some(server.url.as_str()),
+            Some("ftp://example.com"),
+            Some(server.url.as_str()),
+            Some(server.url.as_str()),
+        ])
+        .into_ref();
+        columns[4] = Utf8Array::from_iter(
+            (0..8).map(|i| Some(if i == 6 { "secret\nkey" } else { "test-key" })),
+        )
+        .into_ref();
+        let input = DataChunk::new(columns, visibility);
+        let mut expr = expression(REQUEST_TIMEOUT);
+        // Exercise good rows both before and after failures while sharing one permit.
+        expr.request_permits = Some(Semaphore::new(1));
+        let Err(ExprError::Multiple(partial, errors)) = expr.eval(&input).await else {
+            panic!("row errors must carry the successful results");
+        };
+        let errors: Vec<_> = errors.into_iter().collect();
+        assert_eq!(errors.len(), 3);
+        assert!(
+            errors
+                .iter()
+                .all(|error| !error.to_string().contains("secret"))
+        );
+        let expr = NonStrictExpression::new_topmost(expr.boxed(), LogReport);
+        let output = expr.eval_infallible(&input).await;
+        for array in [&partial, &output] {
+            for i in 0..8 {
+                assert_eq!(
+                    score_at(array, i),
+                    [0, 4, 7].contains(&i).then_some(i as f64 / 10.0)
+                );
+            }
+        }
+        assert_eq!(requests.load(Ordering::SeqCst), 6);
     }
 
     #[tokio::test]

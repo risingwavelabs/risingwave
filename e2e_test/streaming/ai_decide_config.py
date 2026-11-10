@@ -164,6 +164,65 @@ def exercise(server):
         cleanup()
 
 
+def exercise_row_errors(server):
+    url = f"http://127.0.0.1:{server.server_port}"
+    endpoint = f"CASE WHEN id = 2 THEN 'invalid' ELSE '{url}' END"
+    api_key = "CASE WHEN id = 3 THEN E'bad\\nkey' ELSE 'test-key' END"
+
+    def call(endpoint, api_key):
+        return (f"ai_decide(to_jsonb(id), {endpoint}, 'test-model', "
+                f"ai_questions(ai_prob_question('q', 'Synthetic question?')), {api_key})")
+
+    expected = ["1|0.5", "2|-1", "3|-1", "4|0.5"]
+    for mode in ["local", "distributed"]:
+        prefix = f"SET batch_parallelism = 1; SET query_mode = {mode}; "
+        for limit in [0, 1]:
+            server.reset()
+            assert sql(prefix + "SET batch_expr_strict_mode = false; " +
+                       f"SET ai_decide_max_concurrency = {limit}; " +
+                       f"SELECT id, coalesce(({call(endpoint, api_key)}).q, -1) " +
+                       "FROM generate_series(1, 4) AS t(id) ORDER BY id") == expected
+            assert server.calls == 2, (mode, limit, server.calls)
+        for condition, message in [("id <> 3", "invalid model_url"),
+                                   ("id <> 2", "could not build HTTP request")]:
+            server.reset()
+            expect_error(prefix + "SET batch_expr_strict_mode = true; " +
+                         f"SELECT ({call(endpoint, api_key)}).q " +
+                         f"FROM generate_series(1, 4) AS t(id) WHERE {condition}", message)
+
+    for append_only in [False, True]:
+        cleanup()
+        server.reset()
+        sql("SET streaming_parallelism = 1; "
+            "CREATE TABLE ai_config_input (id INT, endpoint VARCHAR, api_key VARCHAR)" +
+            (" APPEND ONLY" if append_only else ""))
+        sql("SET streaming_parallelism = 1; "
+            "CREATE MATERIALIZED VIEW ai_config_result WITH (ai_decide_max_concurrency = 1) AS " +
+            f"SELECT id, {call('endpoint', 'api_key')} AS result FROM ai_config_input")
+        sql(f"INSERT INTO ai_config_input SELECT id, {endpoint}, {api_key} "
+            "FROM generate_series(1, 4) AS t(id); FLUSH")
+        query = "SELECT id, coalesce((result).q, -1) FROM ai_config_result ORDER BY id"
+        assert sql(query) == expected
+        assert server.calls == 2, (append_only, server.calls)
+        before = server.calls
+        sql("RECOVER")
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                if sql(query) == expected:
+                    break
+            except AssertionError:
+                pass
+            assert time.monotonic() < deadline, "recovery did not preserve per-row results"
+            time.sleep(0.2)
+        assert server.calls == before, "recovery must reuse the checkpointed results"
+        if not append_only:
+            sql("DELETE FROM ai_config_input; FLUSH")
+            assert sql("SELECT count(*) FROM ai_config_result") == ["0"]
+            assert server.calls == before, "deletion must retract the stored good and NULL results"
+        cleanup()
+
+
 def main():
     server = Server()
     worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -172,6 +231,7 @@ def main():
         cleanup()
         try:
             exercise(server)
+            exercise_row_errors(server)
         finally:
             cleanup()
     finally:
