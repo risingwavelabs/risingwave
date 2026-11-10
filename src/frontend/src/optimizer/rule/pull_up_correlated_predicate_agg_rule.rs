@@ -153,14 +153,20 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         let new_bottom_proj: PlanRef = LogicalProject::new(filter, bottom_proj_exprs).into();
 
         // We can apply this rule only if:
-        // 1. The `group by + proj` returns null for empty input
-        // 2. OR the top filter is null for empty input
+        // - For `LeftSemi`/`LeftAnti`, the apply's `on` condition is null for empty input,
+        //   since semi and anti joins don't pad a missing row with NULLs.
+        // - For other join types:
+        //   1. The `group by + proj` returns null for empty input
+        //   2. OR the top filter is null for empty input
         let top_filter_rejects_null = {
-            // When group input is empty, if the agg is not `count`, it would return null.
+            // When group input is empty, if the agg is not `count` or `approx_count_distinct`, it would return null.
             let null_agg_pos = agg_calls
                 .iter()
                 .positions(|agg_call| {
-                    !matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Count))
+                    !matches!(
+                        agg_call.agg_type,
+                        AggType::Builtin(PbAggKind::Count | PbAggKind::ApproxCountDistinct)
+                    )
                 })
                 .collect_vec();
 
