@@ -28,14 +28,16 @@ class Server(ThreadingHTTPServer):
         self.lock = threading.Lock()
         self.active = self.peak = self.calls = 0
         self.status, self.delay = 200, 0
+        self.body, self.failures = None, None
 
-    def reset(self, status=200, delay=0):
+    def reset(self, status=200, delay=0, body=None, failures=None):
         deadline = time.monotonic() + 10
         while True:
             with self.lock:
                 if not self.active:
                     self.peak = self.calls = 0
                     self.status, self.delay = status, delay
+                    self.body, self.failures = body, failures
                     return
             assert time.monotonic() < deadline, "mock requests did not drain"
             time.sleep(0.01)
@@ -48,10 +50,13 @@ class Handler(BaseHTTPRequestHandler):
             self.server.calls += 1
             self.server.active += 1
             self.server.peak = max(self.server.peak, self.server.active)
-            status, delay = self.server.status, self.server.delay
+            if self.server.failures is None or self.server.calls <= self.server.failures:
+                status, delay, body = self.server.status, self.server.delay, self.server.body
+            else:
+                status, delay, body = 200, 0, None
         try:
             time.sleep(delay)
-            response = b'{"answers":{"q":{"type":"noul","noul":0.5}}}'
+            response = body if body is not None else b'{"answers":{"q":{"type":"noul","noul":0.5}}}'
             self.send_response(status)
             self.send_header("Content-Length", str(len(response)))
             self.send_header("Retry-After", "100")
@@ -91,25 +96,30 @@ def exercise(server):
         server.reset(delay=0.04)
         assert sql(f"SET batch_parallelism = 1; SET query_mode = {mode}; SET ai_decide_max_concurrency = 2; {query}") == ["6"]
         assert server.calls == 12 and server.peak == 2, (mode, server.calls, server.peak)
-        server.reset(status=429)
-        expect_error(f"SET batch_parallelism = 1; SET query_mode = {mode}; SET ai_decide_max_attempts = 2; "
-                     f"SET ai_decide_retry_delay_ms = 0; SET ai_decide_max_retry_after_ms = 0; "
-                     f"SELECT {call(empty_state)}", "HTTP 429")
-        assert server.calls == 2, (mode, server.calls)
-        server.reset()
-        expect_error(f"SET batch_parallelism = 1; SET query_mode = {mode}; SET ai_decide_max_response_bytes = 1; "
-                     f"SELECT {call(empty_state)}", "exceeds 1 bytes")
-        assert server.calls == 1
-        server.reset(delay=0.15)
-        expect_error(f"SET batch_parallelism = 1; SET query_mode = {mode}; SET ai_decide_request_timeout_ms = 25; "
-                     f"SET ai_decide_max_attempts = 1; SELECT {call(empty_state)}", "timed out")
-        assert server.calls == 1
+        prefix = (f"SET batch_parallelism = 1; SET query_mode = {mode}; "
+                  "SET ai_decide_retry_delay_ms = 1; SET ai_decide_max_retry_delay_ms = 2; "
+                  "SET ai_decide_max_retry_after_ms = 0; ")
+        server.reset(status=401)
+        expect_error(prefix + "SET statement_timeout = '1s'; SET ai_decide_max_retry_after_ms = 20; " +
+                     f"SELECT coalesce(({call(empty_state)}).q, -1)", "Query cancelled")
+        assert server.calls > 3, "persistent errors must keep retrying until cancellation"
+        server.reset(status=401, failures=4)
+        assert sql(prefix + f"SELECT ({call(empty_state)}).q") == ["0.5"]
+        assert server.calls == 5, (mode, server.calls)
+        server.reset(body=b" " * 129, failures=4)
+        assert sql(prefix + "SET ai_decide_max_response_bytes = 128; " +
+                   f"SELECT ({call(empty_state)}).q") == ["0.5"]
+        assert server.calls == 5
+        server.reset(delay=0.15, failures=4)
+        assert sql(prefix + "SET ai_decide_request_timeout_ms = 25; " +
+                   f"SELECT ({call(empty_state)}).q") == ["0.5"]
+        assert server.calls == 5
     server.reset()
-    for key in ["request_timeout_ms", "max_attempts", "max_response_bytes"]:
+    for key in ["request_timeout_ms", "max_response_bytes"]:
         expect_error(f"SET ai_decide_{key} = 0", "must be greater than zero")
         expect_error(f"CREATE MATERIALIZED VIEW ai_config_result WITH (ai_decide_{key} = 0) AS SELECT 1 AS value", "must be greater than zero")
 
-    expected = {"request_timeout_ms": 1000, "max_attempts": 2, "retry_delay_ms": 1,
+    expected = {"request_timeout_ms": 1000, "max_retry_delay_ms": 2, "retry_delay_ms": 1,
                 "max_retry_after_ms": 2, "max_response_bytes": 4096, "max_concurrency": 1}
     options = ", ".join(f"ai_decide_{key} = {value}" for key, value in expected.items())
     for append_only in [False, True]:
@@ -125,11 +135,11 @@ def exercise(server):
         assert sql("SELECT key, value FROM rw_streaming_job_config WHERE name = 'ai_config_result' "
                    "AND key LIKE 'streaming.ai_decide.%' ORDER BY key") == sorted(
                        f"streaming.ai_decide.{key}|{value}" for key, value in expected.items())
-        server.reset(delay=0.04)
+        server.reset(status=401, delay=0.04, failures=4)
         sql("INSERT INTO ai_config_input SELECT i, to_jsonb(i) FROM generate_series(1, 8) AS t(i); FLUSH")
         assert sql("SELECT count(*), sum((result).q) FROM ai_config_result") == ["8|4"]
-        assert server.calls == 8 and server.peak == 1, (append_only, server.calls, server.peak)
-        expect_error("ALTER MATERIALIZED VIEW ai_config_result SET CONFIG (streaming.ai_decide.max_attempts = 0)",
+        assert server.calls == 12 and server.peak == 1, (append_only, server.calls, server.peak)
+        expect_error("ALTER MATERIALIZED VIEW ai_config_result SET CONFIG (streaming.ai_decide.request_timeout_ms = 0)",
                      "greater than zero")
         sql("ALTER MATERIALIZED VIEW ai_config_result SET CONFIG (streaming.ai_decide.max_concurrency = 2)")
         sql("RECOVER")

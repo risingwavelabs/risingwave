@@ -172,7 +172,7 @@ impl<S: StateStore> Inner<S> {
                     let mut eval_result_arrs = Vec::with_capacity(self.exprs.len());
                     for expr in &self.exprs {
                         // for deletions, the evaluation result is NULL
-                        eval_result_arrs.push(expr.eval(&eval_chunk).await?);
+                        eval_result_arrs.push(expr.eval_infallible(&eval_chunk).await);
                     }
 
                     let mut eval_result_builders = eval_result_arrs
@@ -277,10 +277,10 @@ mod tests {
     };
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::Result;
     use risingwave_expr::expr::{
         AsyncExpression, AsyncExpressionBoxExt, ExpressionInfo, LogReport,
     };
-    use risingwave_expr::{ExprError, Result};
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::json;
     use tokio::sync::Semaphore;
@@ -349,8 +349,8 @@ mod tests {
                 if let Some(gate) = &self.gate {
                     let _permit = gate.acquire().await.unwrap();
                 }
-                if self.fail.load(Ordering::SeqCst) {
-                    return Err(ExprError::External("mock service unavailable".into()));
+                while self.fail.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 }
                 builder.append(Some(self.result(version)));
             }
@@ -489,17 +489,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_failure_is_not_emitted_as_null_or_checkpointed() {
+    async fn retrying_expression_waits_before_emitting_results_or_checkpoints() {
         for materialized in [false, true] {
             let expr = RemoteExpression::default();
             expr.fail.store(true, Ordering::SeqCst);
-            let (mut tx, mut stream) = executor(MemoryStateStore::new(), expr, materialized).await;
+            let (mut tx, mut stream) =
+                executor(MemoryStateStore::new(), expr.clone(), materialized).await;
             tx.push_barrier(test_epoch(1), false);
             stream.expect_barrier().await;
             tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
             tx.push_barrier(test_epoch(2), false);
-            let err = stream.next().await.unwrap().unwrap_err();
-            assert!(err.to_string().contains("mock service unavailable"));
+            stream.next_unwrap_pending();
+            expr.fail.store(false, Ordering::SeqCst);
+            let chunk = stream.expect_chunk().await;
+            let column = if materialized { 2 } else { 0 };
+            assert_eq!(chunk.columns()[column].datum_at(0), Some(expr.result(1)));
+            stream.expect_barrier().await;
         }
     }
 }

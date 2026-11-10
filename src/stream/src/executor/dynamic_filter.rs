@@ -97,13 +97,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut last_res = false;
 
         let filter_results = if let Some(cond) = filter_condition {
-            Some(cond.eval(chunk).await?)
+            Some(cond.eval_infallible(chunk).await)
         } else {
             None
         };
 
         let below_watermark = if let Some(cond) = below_watermark_condition {
-            Some(cond.eval(chunk).await?)
+            Some(cond.eval_infallible(chunk).await)
         } else {
             None
         };

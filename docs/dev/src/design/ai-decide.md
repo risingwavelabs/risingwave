@@ -97,9 +97,9 @@ matching `type`. Required fields cannot be absent or null. Choices must name a
 declared label. Confidence and probabilities must be numeric values in [0, 1];
 probability distributions must contain exactly the declared labels or level
 indices. Probabilities are preserved as returned, including service-side rounding,
-without renormalization or a sum-to-one check. Invalid responses fail the
-query, including through non-strict streaming expressions. They do not silently
-become NULL, zero, or an empty label. Additional response metadata is ignored.
+without renormalization or a sum-to-one check. Invalid responses are retried until
+a valid answer arrives; they do not silently become NULL, zero, or an empty label.
+Additional response metadata is ignored.
 
 ## Connection configuration
 
@@ -216,25 +216,33 @@ exact HTTP-request limit: a budget of eight still admits a whole 1,024-row chunk
 which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row
 when the separate AI_DECIDE request limit is disabled.
 
-By default, each attempt has a 30-second timeout. Transport errors, HTTP 429, and HTTP 5xx
-responses retry up to three attempts total, using 100 ms then 200 ms delays.
-This includes failures while reading response bytes, such as a truncated 200
-response; a complete response with invalid JSON or typed answers does not retry.
-A numeric `Retry-After` header overrides the delay, capped at five seconds.
-Other HTTP failures, redirects, invalid success JSON, and responses larger than
-16 MiB fail immediately. A failed request propagates an execution error even
-through non-strict streaming expressions or `coalesce`; it is not saved as a NULL
-judgment. Ordinary SQL calculation errors retain their existing non-strict behavior.
+Each HTTP attempt has a 30-second timeout by default. AI_DECIDE retries all remote
+failures indefinitely: transport errors, timeouts, all non-success HTTP statuses
+(including 401 and redirects), truncated bodies, oversized responses, invalid JSON,
+and invalid typed answers. It reuses the serialized request and waits until a valid
+answer arrives or evaluation is cancelled. Redirects are not followed.
+
+Exponential backoff starts at 100 ms and is capped at 10 seconds by default. A
+numeric `Retry-After` on a non-success response overrides the delay, capped at five
+seconds. Retry errors are logged with suppression and without credentials or
+request/response payloads. A retrying row retains its concurrency permit through
+backoff. Successful rows in the same chunk may finish, but the chunk and subsequent
+barriers cannot pass until every eligible row has a result. Permanent service
+errors therefore block progress until resolved; they are not emitted as expression
+errors to trigger recovery. Other causes, such as barrier timeout, can still cause
+recovery while a service is unavailable.
+
+Like `openai_embedding`, request construction is outside the retry loop. Invalid
+URLs or headers are ordinary expression errors, following the existing strict or
+NonStrict behavior. Ordinary SQL calculation errors also keep their original
+semantics; there is no special external-error class in the expression framework.
 
 Retries and recovery may repeat requests that were not checkpointed. Exactly-once
 HTTP invocation is not guaranteed, and repeated inference can incur additional
-cost or return a different answer. After local retries are exhausted, streaming
-recovery may attempt the same input again. Persistent service or configuration
-errors therefore prevent progress until resolved.
-
-On evaluation failure, other local futures for that chunk are dropped. Requests
-already received by the service may continue running; dropping local futures does
-not guarantee remote cancellation.
+cost or return a different answer. Cancelling evaluation drops local futures and
+releases permits, including while sleeping in backoff. Requests already received
+by the service may continue running; local cancellation does not guarantee remote
+cancellation.
 
 ## Execution settings
 
@@ -247,14 +255,14 @@ this does not change the session. Unset streaming values inherit the compute-nod
 | Session / WITH option | Default | Valid values |
 |---|---:|---|
 | `ai_decide_request_timeout_ms` | 30000 | Positive, per HTTP attempt |
-| `ai_decide_max_attempts` | 3 | Positive, includes the initial attempt |
+| `ai_decide_max_retry_delay_ms` | 10000 | Exponential delay cap; 0 disables it |
 | `ai_decide_retry_delay_ms` | 100 | Initial exponential delay; 0 disables it |
 | `ai_decide_max_retry_after_ms` | 5000 | Cap on numeric Retry-After; 0 disables that delay |
 | `ai_decide_max_response_bytes` | 16777216 | Positive, before JSON decoding |
 | `ai_decide_max_concurrency` | 0 | Per expression instance; 0 means unlimited |
 
-All values are unsigned 32-bit integers. Exponential delay saturates at the
-maximum representable millisecond value instead of overflowing.
+All values are unsigned 32-bit integers. The initial delay is also clamped to the
+exponential cap, and doubling cannot overflow. There is no attempt-count setting.
 
 ```sql
 SET ai_decide_max_concurrency = 16;
@@ -280,8 +288,7 @@ RECOVER;
 expression's semaphore. RESET removes that job override and restores inheritance
 from the compute-node configuration. The same request cap applies to batch,
 ordinary streaming Project and MaterializedExprs. It does not change chunk output
-ordering, saved retractions, or barrier ordering. Error classification and bounded
-retry behavior remain as described above.
+ordering, saved retractions, or barrier ordering. Retry behavior is described above.
 
 ## Tuning
 
@@ -299,9 +306,9 @@ response is limited to 16 MiB by default. There is no separate aggregate byte bu
 - Mock HTTP tests: request shape, response decoding and contract failures,
   retries/timeouts and truncated bodies, known/chunked response size limits,
   credential redaction, scalar arguments, NULL and invisible rows, empty chunks, concurrent requests
-  across chunks, ordered results despite a blocked first row, and prompt errors
-  from later rows.
-- Project tests: saved results across updates, deletes and recovery; fatal errors
+  across chunks, ordered results despite a blocked first row, and cancellation
+  during persistent failure.
+- Project tests: saved results across updates, deletes and recovery; retrying evaluations
   and barrier/watermark ordering.
 - Planner fixture `ai_decide`: fixed definitions, constructors, typed field
   access, early validation, volatility, result storage and GROUP BY/OVER placement.

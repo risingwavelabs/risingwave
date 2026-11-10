@@ -1166,7 +1166,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         true,
                         Either::Left,
                     )
-                    .await?
+                    .await
                     {
                         yield chunk;
                     }
@@ -1203,7 +1203,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         false,
                         Either::Right,
                     )
-                    .await?
+                    .await
                     {
                         yield chunk;
                     }
@@ -1285,7 +1285,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         append_only_matched_row: &mut Option<JoinRow<RO>>,
         matched_rows_to_clean: &mut Vec<JoinRow<RO>>,
         map_output: impl Fn(R) -> RO,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
+    ) -> Option<StreamChunk> {
         let mut need_state_clean = false;
         let mut chunk_opt = None;
         // TODO(kwannoel): Instead of evaluating this every loop,
@@ -1298,7 +1298,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             side_match_start_pos,
             cond,
         )
-        .await?;
+        .await;
 
         if join_condition_satisfied {
             *total_matches += 1;
@@ -1370,7 +1370,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             matched_rows_to_clean.push(matched_row.map(map_output));
         }
 
-        Ok(chunk_opt)
+        chunk_opt
     }
 
     // TODO(yuhao-su): We should find a better way to eval the expression
@@ -1384,8 +1384,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         matched_row: impl Row,
         side_match_start_pos: usize,
         join_condition: &Option<NonStrictExpression>,
-    ) -> StreamExecutorResult<bool> {
-        Ok(if let Some(join_condition) = join_condition {
+    ) -> bool {
+        if let Some(join_condition) = join_condition {
             let new_row = Self::row_concat(
                 row,
                 side_update_start_pos,
@@ -1393,13 +1393,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 side_match_start_pos,
             );
             join_condition
-                .eval_row(&new_row)
-                .await?
+                .eval_row_infallible(&new_row)
+                .await
                 .map(|s| *s.as_bool())
                 .unwrap_or(false)
         } else {
             true
-        })
+        }
     }
 }
 

@@ -1337,21 +1337,15 @@ impl Watermark {
         self,
         expr: &NonStrictExpression,
         new_col_idx: usize,
-    ) -> StreamExecutorResult<Option<Self>> {
+    ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
         let row = {
             let mut row = vec![None; col_idx + 1];
             row[col_idx] = Some(val);
             OwnedRow::new(row)
         };
-        let Some(val) = expr.eval_row(&row).await? else {
-            return Ok(None);
-        };
-        Ok(Some(Self::new(
-            new_col_idx,
-            expr.inner().return_type(),
-            val,
-        )))
+        let val = expr.eval_row_infallible(&row).await?;
+        Some(Self::new(new_col_idx, expr.inner().return_type(), val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the

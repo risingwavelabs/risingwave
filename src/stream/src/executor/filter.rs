@@ -181,7 +181,7 @@ impl<const UPSERT: bool> FilterExecutorInner<UPSERT> {
                 Message::Chunk(chunk) => {
                     let chunk = chunk.compact_vis();
 
-                    let pred_output = self.expr.eval(chunk.data_chunk()).await?;
+                    let pred_output = self.expr.eval_infallible(chunk.data_chunk()).await;
 
                     match Self::filter(chunk, pred_output)? {
                         Some(new_chunk) => yield Message::Chunk(new_chunk),

@@ -9,9 +9,23 @@ SELECT CASE WHEN false THEN (ai_decide('{}'::jsonb, 'invalid', 'test-model', ai_
 ----
 0
 
-# JSON null is a real input, unlike SQL NULL. An outer expression must not hide failures.
+# JSON null is a real input. Request-construction errors follow ordinary strictness.
+statement ok
+SET batch_expr_strict_mode = true;
+
 statement error ai_decide: invalid model_url
 SELECT coalesce((ai_decide('null'::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key')).q, 0);
+
+statement ok
+SET batch_expr_strict_mode = false;
+
+query R
+SELECT coalesce((ai_decide('null'::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key')).q, -1);
+----
+-1
+
+statement ok
+SET batch_expr_strict_mode TO DEFAULT;
 
 # The fixture uses a real local HTTP server and psql, which cannot run under madsim.
 skipif madsim

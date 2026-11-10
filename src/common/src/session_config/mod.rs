@@ -430,9 +430,9 @@ pub struct SessionConfig {
     #[parameter(default = None, check_hook = check_ai_decide_positive)]
     ai_decide_request_timeout_ms: OptionConfig<u32>,
 
-    /// `AI_DECIDE`: Maximum HTTP attempts per logical request, including the first. Must be positive. Unset inherits execution defaults.
-    #[parameter(default = None, check_hook = check_ai_decide_positive)]
-    ai_decide_max_attempts: OptionConfig<u32>,
+    /// `AI_DECIDE`: Maximum exponential retry delay in milliseconds. Zero disables the delay. Unset inherits execution defaults.
+    #[parameter(default = None)]
+    ai_decide_max_retry_delay_ms: OptionConfig<u32>,
 
     /// `AI_DECIDE`: Initial exponential retry delay in milliseconds. Zero disables the delay. Unset inherits execution defaults.
     #[parameter(default = None)]
@@ -736,11 +736,11 @@ impl SessionConfig {
                 .as_ref()
                 .copied()
                 .unwrap_or(defaults.request_timeout_ms),
-            max_attempts: self
-                .ai_decide_max_attempts
+            max_retry_delay_ms: self
+                .ai_decide_max_retry_delay_ms
                 .as_ref()
                 .copied()
-                .unwrap_or(defaults.max_attempts),
+                .unwrap_or(defaults.max_retry_delay_ms),
             retry_delay_ms: self
                 .ai_decide_retry_delay_ms
                 .as_ref()
@@ -820,8 +820,8 @@ impl SessionConfig {
         if let Some(v) = self.ai_decide_request_timeout_ms.as_ref() {
             table.upsert("streaming.ai_decide.request_timeout_ms", v)?;
         }
-        if let Some(v) = self.ai_decide_max_attempts.as_ref() {
-            table.upsert("streaming.ai_decide.max_attempts", v)?;
+        if let Some(v) = self.ai_decide_max_retry_delay_ms.as_ref() {
+            table.upsert("streaming.ai_decide.max_retry_delay_ms", v)?;
         }
         if let Some(v) = self.ai_decide_retry_delay_ms.as_ref() {
             table.upsert("streaming.ai_decide.retry_delay_ms", v)?;
@@ -877,7 +877,7 @@ mod test {
         assert_eq!(session.to_initial_streaming_config_override().unwrap(), "");
         for (key, value) in [
             ("request_timeout_ms", 500),
-            ("max_attempts", 2),
+            ("max_retry_delay_ms", 2),
             ("retry_delay_ms", 0),
             ("max_retry_after_ms", 0),
             ("max_response_bytes", 4096),
@@ -901,7 +901,7 @@ mod test {
             )),
             effective.ai_decide
         );
-        for key in ["request_timeout_ms", "max_attempts", "max_response_bytes"] {
+        for key in ["request_timeout_ms", "max_response_bytes"] {
             assert!(
                 session
                     .set(&format!("ai_decide_{key}"), "0".to_owned(), &mut ())

@@ -197,7 +197,7 @@ impl<S: StateStore, SD: ValueRowSerde, const T: JoinTypePrimitive>
                             let chunk = chunk?;
                             let new_chunk = if let Some(ref cond) = self.condition {
                                 let (data_chunk, ops) = chunk.into_parts();
-                                let passed_bitmap = cond.eval(&data_chunk).await?;
+                                let passed_bitmap = cond.eval_infallible(&data_chunk).await;
                                 let passed_bitmap =
                                     Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
                                 let (columns, vis) = data_chunk.into_parts();
@@ -223,7 +223,7 @@ impl<S: StateStore, SD: ValueRowSerde, const T: JoinTypePrimitive>
                         for chunk in st1 {
                             let chunk = chunk?;
                             let (data_chunk, ops) = chunk.into_parts();
-                            let passed_bitmap = cond.eval(&data_chunk).await?;
+                            let passed_bitmap = cond.eval_infallible(&data_chunk).await;
                             let passed_bitmap =
                                 Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
                             let (columns, vis) = data_chunk.into_parts();

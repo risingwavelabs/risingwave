@@ -58,8 +58,7 @@ pub fn build_non_strict_from_prost(
 
 /// Build a strict or non-strict expression according to expr context.
 ///
-/// When strict mode is off, ordinary SQL errors leave a null value as result.
-/// Fatal external-operation failures still propagate.
+/// When strict mode is off, the expression will not fail but leave a null value as result.
 ///
 /// Unlike [`build_non_strict_from_prost`], the returning value here can be either non-strict or
 /// strict. Thus, the caller is supposed to handle potential errors under strict mode.

@@ -28,9 +28,9 @@ pub struct AiDecideConfig {
         deserialize_with = "positive_u32"
     )]
     pub request_timeout_ms: u32,
-    /// Maximum HTTP attempts per logical request, including the first. Must be positive.
-    #[serde(default = "default_max_attempts", deserialize_with = "positive_u32")]
-    pub max_attempts: u32,
+    /// Maximum exponential retry delay in milliseconds. Zero disables the delay.
+    #[serde(default = "default_max_retry_delay_ms")]
+    pub max_retry_delay_ms: u32,
     /// Initial exponential retry delay in milliseconds. Zero disables the delay.
     #[serde(default = "default_retry_delay_ms")]
     pub retry_delay_ms: u32,
@@ -51,8 +51,8 @@ pub struct AiDecideConfig {
 fn default_request_timeout_ms() -> u32 {
     30_000
 }
-fn default_max_attempts() -> u32 {
-    3
+fn default_max_retry_delay_ms() -> u32 {
+    10_000
 }
 fn default_retry_delay_ms() -> u32 {
     100
@@ -78,7 +78,7 @@ fn positive_u32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Er
 impl AiDecideConfig {
     pub const SESSION_OPTIONS: [&'static str; 6] = [
         "ai_decide_request_timeout_ms",
-        "ai_decide_max_attempts",
+        "ai_decide_max_retry_delay_ms",
         "ai_decide_retry_delay_ms",
         "ai_decide_max_retry_after_ms",
         "ai_decide_max_response_bytes",
@@ -89,9 +89,6 @@ impl AiDecideConfig {
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.request_timeout_ms == 0 {
             return Err("ai_decide_request_timeout_ms must be positive");
-        }
-        if self.max_attempts == 0 {
-            return Err("ai_decide_max_attempts must be positive");
         }
         if self.max_response_bytes == 0 {
             return Err("ai_decide_max_response_bytes must be positive");
@@ -104,7 +101,7 @@ impl From<&AiDecideConfig> for PbAiDecideConfig {
     fn from(value: &AiDecideConfig) -> Self {
         Self {
             request_timeout_ms: value.request_timeout_ms,
-            max_attempts: value.max_attempts,
+            max_retry_delay_ms: value.max_retry_delay_ms,
             retry_delay_ms: value.retry_delay_ms,
             max_retry_after_ms: value.max_retry_after_ms,
             max_response_bytes: value.max_response_bytes,
@@ -117,7 +114,7 @@ impl From<PbAiDecideConfig> for AiDecideConfig {
     fn from(value: PbAiDecideConfig) -> Self {
         Self {
             request_timeout_ms: value.request_timeout_ms,
-            max_attempts: value.max_attempts,
+            max_retry_delay_ms: value.max_retry_delay_ms,
             retry_delay_ms: value.retry_delay_ms,
             max_retry_after_ms: value.max_retry_after_ms,
             max_response_bytes: value.max_response_bytes,

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use futures::TryStreamExt;
 use futures::stream::FuturesUnordered;
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::config::AiDecideConfig;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
     DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapValue, Scalar, ScalarImpl,
@@ -117,11 +119,11 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
 
 fn request_error(message: impl std::fmt::Display) -> ExprError {
     // Do not attach the request, response body, URL, or function arguments to errors.
-    ExprError::External(format!("ai_decide: {message}"))
+    ExprError::Custom(format!("ai_decide: {message}"))
 }
 
-/// Decode strictly before the result can be persisted. Contract errors must survive
-/// non-strict streaming wrappers, just like transport errors.
+/// Decode strictly before the result can be persisted. Invalid responses are retried
+/// inside the request loop, without reaching non-strict expression wrappers.
 fn decode_response(response: JsonbVal, schema: &QuestionSchema) -> Result<StructValue> {
     let response = response.take();
     let answers = response
@@ -228,7 +230,7 @@ impl AiDecide {
         url: &str,
         model: &str,
         api_key: &str,
-    ) -> Result<JsonbVal> {
+    ) -> Result<StructValue> {
         let url = reqwest::Url::parse(url).map_err(|_| request_error("invalid model_url"))?;
         if !matches!(url.scheme(), "http" | "https")
             || !url.username().is_empty()
@@ -249,101 +251,87 @@ impl AiDecide {
             })
             .build()
             .map_err(|_| request_error("could not build HTTP request"))?;
-        let mut retry_delay_ms = self.config.retry_delay_ms;
-        for attempt in 0..self.config.max_attempts {
-            let mut delay = Duration::from_millis(retry_delay_ms.into());
-            let result = match self
-                .client
-                .execute(request.try_clone().expect("JSON body is cloneable"))
-                .await
-            {
-                Ok(mut response) => {
-                    let status = response.status();
-                    if status.is_success() {
-                        if response
-                            .content_length()
-                            .is_some_and(|len| len > u64::from(self.config.max_response_bytes))
-                        {
-                            return Err(request_error(format!(
-                                "response exceeds {} bytes",
-                                self.config.max_response_bytes
-                            )));
-                        }
-                        let mut bytes = Vec::new();
-                        let mut read_error = None;
-                        loop {
-                            match response.chunk().await {
-                                Ok(Some(chunk)) => {
-                                    if chunk.len()
-                                        > (self.config.max_response_bytes as usize)
-                                            .saturating_sub(bytes.len())
-                                    {
-                                        return Err(request_error(format!(
-                                            "response exceeds {} bytes",
-                                            self.config.max_response_bytes
-                                        )));
-                                    }
-                                    bytes.extend_from_slice(&chunk);
-                                }
-                                Ok(None) => break,
-                                Err(err) => {
-                                    read_error = Some(err);
-                                    break;
-                                }
-                            }
-                        }
-                        if let Some(err) = read_error {
-                            // Errors while reading HTTP bytes are retryable, including
-                            // reqwest Decode errors for truncated response bodies. JSON
-                            // and answer validation below remain non-retryable.
-                            Err((err, true))
+        let mut backoff_ms = self
+            .config
+            .retry_delay_ms
+            .min(self.config.max_retry_delay_ms);
+        loop {
+            let mut delay = Duration::from_millis(backoff_ms.into());
+            // Drop the response and its bytes before sleeping. Retry the same serialized
+            // request for every remote failure, including invalid success responses.
+            let result = async {
+                let mut response = self
+                    .client
+                    .execute(request.try_clone().expect("JSON body is cloneable"))
+                    .await
+                    .map_err(|err| {
+                        request_error(if err.is_timeout() {
+                            "HTTP request timed out"
                         } else {
-                            // Decode the full JSON envelope before validating typed answers.
-                            return jsonbb::Value::from_text(&bytes)
-                                .map(JsonbVal::from)
-                                .map_err(|_| {
-                                    request_error("successful response is not valid JSON")
-                                });
-                        }
-                    } else {
-                        if !(status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error())
-                            || attempt + 1 == self.config.max_attempts
-                        {
-                            return Err(request_error(format!("HTTP {status}")));
-                        }
-                        if let Some(seconds) = response
-                            .headers()
-                            .get(reqwest::header::RETRY_AFTER)
-                            .and_then(|value| value.to_str().ok())
-                            .and_then(|value| value.parse::<u64>().ok())
-                        {
-                            delay = Duration::from_secs(seconds)
-                                .min(Duration::from_millis(self.config.max_retry_after_ms.into()));
-                        }
-                        // The response is dropped before sleeping; do not retain its body.
-                        Ok(())
+                            "HTTP transport failed"
+                        })
+                    })?;
+                let status = response.status();
+                if !status.is_success() {
+                    if let Some(seconds) = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok())
+                    {
+                        delay = Duration::from_secs(seconds)
+                            .min(Duration::from_millis(self.config.max_retry_after_ms.into()));
+                    }
+                    return Err(request_error(format!("HTTP {status}")));
+                }
+                let too_large = || {
+                    request_error(format!(
+                        "response exceeds {} bytes",
+                        self.config.max_response_bytes
+                    ))
+                };
+                if response
+                    .content_length()
+                    .is_some_and(|len| len > u64::from(self.config.max_response_bytes))
+                {
+                    return Err(too_large());
+                }
+                let mut bytes = Vec::new();
+                while let Some(chunk) = response
+                    .chunk()
+                    .await
+                    .map_err(|_| request_error("HTTP response body read failed"))?
+                {
+                    if chunk.len()
+                        > (self.config.max_response_bytes as usize).saturating_sub(bytes.len())
+                    {
+                        return Err(too_large());
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                let json = jsonbb::Value::from_text(&bytes)
+                    .map(JsonbVal::from)
+                    .map_err(|_| request_error("successful response is not valid JSON"))?;
+                decode_response(json, &self.schema)
+            }
+            .await;
+            match result {
+                Ok(value) => return Ok(value),
+                Err(error) => {
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                        LazyLock::new(LogSuppressor::default);
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                        // Only sanitized errors: never log credentials, URL or payloads.
+                        tracing::error!(error = %error, ?delay, suppressed_count, "AI_DECIDE request failed, retrying");
                     }
                 }
-                Err(err) => Err((err, false)),
-            };
-            if let Err((err, reading_body)) = result {
-                let transient = reading_body
-                    || err.is_timeout()
-                    || err.is_connect()
-                    || err.is_body()
-                    || err.is_request();
-                if !transient || attempt + 1 == self.config.max_attempts {
-                    return Err(request_error(if err.is_timeout() {
-                        "HTTP request timed out"
-                    } else {
-                        "HTTP transport failed"
-                    }));
-                }
             }
+            // Sleep remains cancellable, including when a configured zero delay yields.
             tokio::time::sleep(delay).await;
-            retry_delay_ms = retry_delay_ms.saturating_mul(2);
+            backoff_ms = backoff_ms
+                .saturating_mul(2)
+                .min(self.config.max_retry_delay_ms);
         }
-        unreachable!("last attempt always returns")
     }
 
     async fn evaluate(&self, args: [DatumRef<'_>; 4]) -> Result<Option<StructValue>> {
@@ -368,7 +356,6 @@ impl AiDecide {
             api_key.into_utf8(),
         )
         .await
-        .and_then(|response| decode_response(response, &self.schema))
         .map(Some)
     }
 }
@@ -432,9 +419,9 @@ impl AsyncExpression for AiDecide {
 #[cfg(all(test, not(madsim)))]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    use axum::http::HeaderMap;
+    use axum::http::{HeaderMap, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::post;
     use axum::{Json, Router};
@@ -450,8 +437,6 @@ mod tests {
     use super::*;
 
     const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-    const MAX_ATTEMPTS: usize = 3;
-    const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
     struct Server {
         url: String,
@@ -575,12 +560,12 @@ mod tests {
             let mut malformed = response.clone();
             *malformed.pointer_mut(pointer).unwrap() = value;
             let error = decode_response(JsonbVal::from(malformed), &schema).unwrap_err();
-            assert!(matches!(error, ExprError::External(_)), "{pointer}");
+            assert!(matches!(error, ExprError::Custom(_)), "{pointer}");
             assert!(!error.to_string().contains("test-only-key"));
         }
     }
 
-    async fn call(expr: &AiDecide, url: &str) -> Result<JsonbVal> {
+    async fn call(expr: &AiDecide, url: &str) -> Result<StructValue> {
         expr.request(
             JsonbVal::from(json!({"messages": ["收到退款了"]})).as_scalar_ref(),
             url,
@@ -625,67 +610,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn retries_transient_statuses_and_stops_after_limit() {
-        for (statuses, expected, calls) in [
-            (vec![429, 503, 200], true, 3),
-            (vec![500, 500, 500, 200], false, 3),
-            (vec![401, 200], false, 1),
-            (vec![400, 200], false, 1),
-        ] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let seen = attempts.clone();
-            let statuses = Arc::new(statuses);
-            let server = server(Router::new().route(
-                "/evaluate",
-                post(move || {
-                    let index = seen.fetch_add(1, Ordering::SeqCst);
-                    let status = statuses[index];
-                    async move {
-                        (
-                            StatusCode::from_u16(status).unwrap(),
-                            [("retry-after", "0")],
-                            Json(json!({"ok": true})),
-                        )
-                    }
-                }),
-            ))
-            .await;
-            let expr = expression(REQUEST_TIMEOUT);
-            let result = call(&expr, &server.url).await;
-            assert_eq!(result.is_ok(), expected);
-            assert_eq!(attempts.load(Ordering::SeqCst), calls);
-        }
-    }
-
-    #[tokio::test]
-    async fn malformed_json_and_redirects_are_not_retried() {
-        for status in [StatusCode::OK, StatusCode::TEMPORARY_REDIRECT] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let seen = attempts.clone();
-            let server = server(Router::new().route(
-                "/evaluate",
-                post(move || {
-                    seen.fetch_add(1, Ordering::SeqCst);
-                    async move {
-                        (
-                            status,
-                            [("location", "/evaluate")],
-                            "test-only-key is not JSON",
-                        )
-                            .into_response()
-                    }
-                }),
-            ))
-            .await;
-            let err = call(&expression(REQUEST_TIMEOUT), &server.url)
-                .await
-                .unwrap_err();
-            assert!(!format!("{err:?}").contains("test-only-key"));
-            assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        }
-    }
-
     // Raw HTTP permits deliberately truncated and chunked responses that an HTTP
     // framework would repair or reject before sending.
     async fn raw_server(responses: Vec<Vec<u8>>, attempts: Arc<AtomicUsize>) -> Server {
@@ -728,86 +652,70 @@ mod tests {
         Server { url, task }
     }
 
-    #[tokio::test]
-    async fn truncated_response_bodies_are_retried_with_a_limit() {
-        let truncated =
-            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"answers\":"
-                .to_vec();
-        let body = r#"{"answers":{"q":{"type":"noul","noul":0.5}}}"#;
-        let complete = format!(
+    fn complete_response(body: &str) -> Vec<u8> {
+        format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
-        .into_bytes();
-        for (responses, expected_calls, succeeds) in [
-            (vec![truncated.clone(), complete], 2, true),
-            (vec![truncated], MAX_ATTEMPTS, false),
-        ] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let server = raw_server(responses, attempts.clone()).await;
-            let result = call(&expression(REQUEST_TIMEOUT), &server.url).await;
-            if succeeds {
-                let typed = decode_response(result.unwrap(), &test_schema()).unwrap();
-                assert_eq!(typed.fields()[0], Some(ScalarImpl::Float64(0.5.into())));
-            } else {
-                assert!(
-                    result
-                        .unwrap_err()
-                        .to_string()
-                        .contains("HTTP transport failed")
-                );
-            }
-            assert_eq!(attempts.load(Ordering::SeqCst), expected_calls);
-        }
+        .into_bytes()
     }
 
     #[tokio::test]
-    async fn oversized_responses_are_not_retried() {
-        let size = MAX_RESPONSE_BYTES + 1;
-        let known =
-            format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n")
-                .into_bytes();
-        let mut chunked = format!(
-            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{size:x}\r\n"
-        )
-        .into_bytes();
-        chunked.resize(chunked.len() + size, b' ');
-        chunked.extend_from_slice(b"\r\n0\r\n\r\n");
-        for response in [known, chunked] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let server = raw_server(vec![response], attempts.clone()).await;
-            let error = call(&expression(REQUEST_TIMEOUT), &server.url)
-                .await
-                .unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("response exceeds 16777216 bytes")
-            );
-            assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        }
+    async fn retries_all_remote_errors_until_a_valid_answer() {
+        let good = r#"{"answers":{"q":{"type":"noul","noul":0.5}}}"#;
+        let mut responses: Vec<_> = [429, 503, 401, 400, 307].into_iter().map(|status| {
+            format!("HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nRetry-After: 100\r\nLocation: /wrong\r\nConnection: close\r\n\r\n").into_bytes()
+        }).collect();
+        responses.extend([
+            complete_response("test-only-key is not JSON"),
+            complete_response(r#"{"answers":{"q":{"type":"noul","noul":2}}}"#),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"answers\":".to_vec(),
+            complete_response(&" ".repeat(129)),
+            format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n81\r\n{}\r\n0\r\n\r\n", " ".repeat(129)).into_bytes(),
+            complete_response(good),
+        ]);
+        let expected = responses.len();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server = raw_server(responses, attempts.clone()).await;
+        let mut expr = expression(REQUEST_TIMEOUT);
+        expr.config.max_response_bytes = 128;
+        // Both Retry-After and exponential backoff must honor their configured caps.
+        expr.config.max_retry_after_ms = 1;
+        expr.config.retry_delay_ms = 10_000;
+        expr.config.max_retry_delay_ms = 2;
+        let value = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.fields()[0], Some(ScalarImpl::Float64(0.5.into())));
+        assert_eq!(attempts.load(Ordering::SeqCst), expected);
     }
 
     #[tokio::test]
-    async fn retries_timeouts() {
+    async fn retries_timeouts_until_success() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let seen = attempts.clone();
         let server = server(Router::new().route(
             "/evaluate",
             post(move || {
-                seen.fetch_add(1, Ordering::SeqCst);
-                async {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    Json(json!({}))
+                let attempt = seen.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if attempt < 4 {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                    Json(json!({"answers":{"q":{"type":"noul","noul":0.5}}}))
                 }
             }),
         ))
         .await;
-        let err = call(&expression(Duration::from_millis(100)), &server.url)
+        let mut expr = expression(Duration::from_millis(50));
+        expr.config.retry_delay_ms = 1;
+        let value = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
             .await
-            .unwrap_err();
-        assert!(err.to_string().contains("timed out"));
-        assert_eq!(attempts.load(Ordering::SeqCst), MAX_ATTEMPTS);
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.fields()[0], Some(ScalarImpl::Float64(0.5.into())));
+        assert_eq!(attempts.load(Ordering::SeqCst), 5);
     }
 
     fn chunk(url: &str, count: usize) -> DataChunk {
@@ -950,36 +858,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn configured_attempts_and_response_limit_are_enforced() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let seen = attempts.clone();
+    async fn persistent_failure_keeps_permit_until_cancelled() {
+        let healthy = Arc::new(AtomicBool::new(false));
+        let service_healthy = healthy.clone();
+        let (started, mut attempts) = tokio::sync::mpsc::unbounded_channel();
         let server = server(Router::new().route(
             "/evaluate",
             post(move || {
-                seen.fetch_add(1, Ordering::SeqCst);
-                async { (StatusCode::TOO_MANY_REQUESTS, [("retry-after", "100")]) }
+                let healthy = service_healthy.load(Ordering::SeqCst);
+                started.send(()).unwrap();
+                async move {
+                    if healthy {
+                        Json(json!({"answers":{"q":{"type":"noul","noul":0.5}}})).into_response()
+                    } else {
+                        StatusCode::UNAUTHORIZED.into_response()
+                    }
+                }
             }),
         ))
         .await;
         let mut expr = expression(REQUEST_TIMEOUT);
-        expr.config.max_attempts = 2;
-        expr.config.retry_delay_ms = 0;
-        expr.config.max_retry_after_ms = 0;
-        let result = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
-            .await
-            .unwrap();
-        assert!(result.unwrap_err().to_string().contains("429"));
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-        for response in [
-            b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n123456789".to_vec(),
-            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n9\r\n123456789\r\n0\r\n\r\n".to_vec(),
-        ] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let server = raw_server(vec![response], attempts.clone()).await;
-            expr.config.max_response_bytes = 8;
-            assert!(call(&expr, &server.url).await.unwrap_err().to_string().contains("exceeds 8 bytes"));
-            assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        expr.config.retry_delay_ms = 10;
+        expr.request_permits = Some(Semaphore::new(1));
+        let expr = Arc::new(expr);
+        let input = chunk(&server.url, 1);
+        let task = {
+            let expr = expr.clone();
+            let input = input.clone();
+            tokio::spawn(async move { expr.eval(&input).await })
+        };
+        for _ in 0..6 {
+            tokio::time::timeout(Duration::from_secs(5), attempts.recv())
+                .await
+                .unwrap()
+                .unwrap();
         }
+        assert!(
+            !task.is_finished(),
+            "permanent HTTP failures must stay inside the retry loop"
+        );
+        assert_eq!(
+            expr.request_permits.as_ref().unwrap().available_permits(),
+            0
+        );
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(
+            expr.request_permits.as_ref().unwrap().available_permits(),
+            1
+        );
+        healthy.store(true, Ordering::SeqCst);
+        let result = tokio::time::timeout(Duration::from_secs(5), expr.eval(&input))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(score_at(&result, 0), Some(0.5));
     }
 
     #[tokio::test]
@@ -1043,40 +976,5 @@ mod tests {
                 (![1, 2].contains(&i)).then_some(i as f64 / 100.0)
             );
         }
-    }
-
-    #[tokio::test]
-    async fn failure_does_not_wait_for_blocked_rows() {
-        let started = Arc::new(Semaphore::new(0));
-        let server = server(Router::new().route(
-            "/evaluate",
-            post(move |Json(body): Json<Value>| {
-                let started = started.clone();
-                async move {
-                    match body["state"]["index"].as_u64().unwrap() {
-                        0 => {
-                            started.add_permits(1);
-                            futures::future::pending().await
-                        }
-                        49 => {
-                            started.acquire().await.unwrap().forget();
-                            (StatusCode::UNAUTHORIZED, Json(json!({})))
-                        }
-                        _ => (
-                            StatusCode::OK,
-                            Json(json!({"answers":{"q":{"type":"noul","noul":0.5}}})),
-                        ),
-                    }
-                }
-            }),
-        ))
-        .await;
-        let expr = expression(REQUEST_TIMEOUT);
-        let input = chunk(&server.url, 50);
-        let error = tokio::time::timeout(Duration::from_secs(5), expr.eval(&input))
-            .await
-            .expect("later failures must not wait for the blocked first row")
-            .unwrap_err();
-        assert!(error.to_string().contains("401"));
     }
 }

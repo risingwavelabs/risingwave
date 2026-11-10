@@ -56,7 +56,9 @@ class EvaluationHandler(BaseHTTPRequestHandler):
             "size": {"type": "score", "score": float(level), "confidence": 1.0,
                      "probabilities": {str(i): float(i == level) for i in range(3)}}
         }, "unknown_metadata": True}
-        if isinstance(state, dict) and state.get("malformed"):
+        malformed_calls = sum(isinstance(call["state"], dict) and call["state"].get("malformed", False)
+                              for call in self.server.calls)
+        if isinstance(state, dict) and state.get("malformed") and malformed_calls <= 4:
             response["answers"]["team"]["choice"] = "undeclared"
         response = json.dumps(response).encode()
         self.send_response(200)
@@ -128,16 +130,13 @@ def exercise(server):
     assert sql(f"SELECT (result).signal, (result).team.choice, (result).team.confidence, (result).size.score FROM (SELECT {analyze(batch_state)} AS result) e") == ["0.1|billing|0.6|1"]
     assert server.count() == before + 1, "batch field projection duplicated inference"
 
-    # A successful HTTP status with an invalid typed answer is still a fatal error.
+    # Invalid typed answers stay inside AI_DECIDE, even under an outer coalesce.
     before = server.count()
     malformed_state = "'{\"malformed\":true}'::jsonb"
-    try:
-        sql(f"SELECT coalesce(({analyze(malformed_state)}).signal, 0)")
-    except AssertionError as error:
-        assert "choice must be a declared option" in str(error), error
-    else:
-        raise AssertionError("malformed answer was swallowed")
-    assert server.count() == before + 1, "response contract failure must not retry"
+    assert sql(f"SET batch_expr_strict_mode = false; SET ai_decide_retry_delay_ms = 1; "
+               "SET ai_decide_max_retry_delay_ms = 2; "
+               f"SELECT coalesce(({analyze(malformed_state)}).signal, -1)") == ["0"]
+    assert server.count() == before + 5, "retry the contract failure until a valid answer"
 
     for append_only in [False, True]:
         sql("CREATE TABLE ai_fields_input (id INT, payload JSONB, enabled BOOLEAN)" + (" APPEND ONLY" if append_only else ""))

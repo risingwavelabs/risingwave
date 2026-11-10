@@ -289,7 +289,7 @@ impl<S: StateStore> NowExecutor<S> {
                             }
                         }
 
-                        let next = add_interval_expr.eval_row(&last_row).await?;
+                        let next = add_interval_expr.eval_row_infallible(&last_row).await;
                         if DefaultOrdered(next.to_datum_ref())
                             > DefaultOrdered(curr_timestamp_datum.to_datum_ref())
                         {

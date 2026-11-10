@@ -191,7 +191,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                         continue;
                     }
 
-                    let watermark_array = watermark_expr.eval(chunk.data_chunk()).await?;
+                    let watermark_array = watermark_expr.eval_infallible(chunk.data_chunk()).await;
 
                     // Build the expression to calculate watermark filter.
                     let watermark_filter_expr = current_watermark
@@ -227,7 +227,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                     }
 
                     if let Some(expr) = watermark_filter_expr {
-                        let pred_output = expr.eval(chunk.data_chunk()).await?;
+                        let pred_output = expr.eval_infallible(chunk.data_chunk()).await;
 
                         if let Some(output_chunk) =
                             FilterExecutorInner::<UPSERT>::filter(chunk, pred_output)?

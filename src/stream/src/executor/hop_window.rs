@@ -129,12 +129,16 @@ impl HopWindowExecutor {
 
                     for i in 0..units {
                         let window_start_col = if out_window_start_col_idx.is_some() {
-                            Some(self.window_start_exprs[i].eval(&data_chunk).await?)
+                            Some(
+                                self.window_start_exprs[i]
+                                    .eval_infallible(&data_chunk)
+                                    .await,
+                            )
                         } else {
                             None
                         };
                         let window_end_col = if out_window_end_col_idx.is_some() {
-                            Some(self.window_end_exprs[i].eval(&data_chunk).await?)
+                            Some(self.window_end_exprs[i].eval_infallible(&data_chunk).await)
                         } else {
                             None
                         };
@@ -196,7 +200,7 @@ impl HopWindowExecutor {
                             let w = w
                                 .clone()
                                 .transform_with_expr(start_expr, out_start_idx)
-                                .await?;
+                                .await;
                             if let Some(w) = w {
                                 yield Message::Watermark(w);
                             }
@@ -204,7 +208,7 @@ impl HopWindowExecutor {
                         if let (Some(out_end_idx), Some(end_expr)) =
                             (out_window_end_col_idx, self.window_end_exprs.first())
                         {
-                            let w = w.transform_with_expr(end_expr, out_end_idx).await?;
+                            let w = w.transform_with_expr(end_expr, out_end_idx).await;
                             if let Some(w) = w {
                                 yield Message::Watermark(w);
                             }
