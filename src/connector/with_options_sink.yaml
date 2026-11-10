@@ -1005,11 +1005,6 @@ KafkaConfig:
     comments: Client's Kerberos principal name under SASL/GSSAPI.
     required: false
     allow_alter_on_fly: true
-  - name: properties.sasl.kerberos.kinit.cmd
-    field_type: String
-    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
-    required: false
-    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin
     field_type: String
     comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
@@ -2090,6 +2085,39 @@ StarrocksConfig:
     comments: |-
       The maximum size in bytes for each `StarRocks` stream load request payload.
       Defaults to unlimited.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.max_transaction_size_bytes
+    field_type: u64
+    comments: |-
+      The maximum cumulative serialized payload bytes per writer/transaction.
+      Defaults to unlimited. Before the next row would exceed this limit, commit
+      the current transaction, even before `commit_checkpoint_interval` elapses.
+      A single oversized row is rejected. Early commits can increase data versions;
+      recovery can replay committed data under the sink's at-least-once contract.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.ignore_json_size
+    field_type: bool
+    comments: |-
+      Skip the `StarRocks` JSON size check. Defaults to false. This may increase
+      backend memory usage and does not disable `starrocks.max_batch_size_bytes`.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: starrocks.load_mem_limit
+    field_type: u64
+    comments: |-
+      The `StarRocks` load job memory limit in bytes. When omitted, use the server default.
+      This is not a limit on all HTTP receive buffers or total backend memory usage.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.transaction_timeout_seconds
+    field_type: u32
+    comments: |-
+      The server-side transaction timeout in seconds, from begin to prepared.
+      A positive 32-bit signed integer, subject to the server's configured timeout range.
+      When omitted, use the server default. Independent of the client HTTP timeout.
     required: false
     allow_alter_on_fly: true
   - name: r#type

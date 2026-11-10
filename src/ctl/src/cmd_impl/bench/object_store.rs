@@ -381,7 +381,7 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         }),
         Ok(None) => serde_json::Value::Null,
         Err(error) => {
-            json!({"schema_version": 1, "path": args.trace_output, "complete": false, "error": format!("{error:#}")})
+            json!({"schema_version": 1, "path": args.trace_output, "complete": false, "error": error.as_report().to_string()})
         }
     };
     let report = result?;

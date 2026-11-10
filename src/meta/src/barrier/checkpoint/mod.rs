@@ -21,6 +21,7 @@ pub(super) use control::{
     CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl,
     DatabaseCheckpointControlMetrics,
 };
+pub use independent_job::snapshot_backfill_max_pending_barrier_num;
 pub(crate) use independent_job::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
     CreatingStreamingJobControl, IcebergV3JobCheckpointControl, IcebergV3RenderResult,

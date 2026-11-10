@@ -17,6 +17,16 @@ drop table if exists sqlstate_slt_no_such;
 statement error (42704)
 drop table sqlstate_slt_no_such;
 
+# Wrong object type -> 42809.
+statement ok
+create table sqlstate_slt_wrong_type(v int);
+
+statement error (42809)
+drop view sqlstate_slt_wrong_type;
+
+statement ok
+drop table sqlstate_slt_wrong_type;
+
 # Invalid catalog name (database) -> 3D000.
 statement error (3D000)
 set database to sqlstate_missing_db;

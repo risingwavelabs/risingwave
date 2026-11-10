@@ -166,7 +166,7 @@ pub async fn do_handle_explain(
             // traces for better debugging experience.
             _ => {
                 let context: OptimizerContextRef =
-                    OptimizerContext::new(handler_args, explain_options).into();
+                    OptimizerContext::new(handler_args, explain_options)?.into();
                 let context_clone = context.clone();
 
                 let res = match stmt {

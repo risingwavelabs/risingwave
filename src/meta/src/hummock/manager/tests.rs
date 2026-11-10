@@ -619,6 +619,7 @@ async fn test_hummock_compaction_task() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault,
                 &mut *default_compaction_selector(),
             )
@@ -656,7 +657,11 @@ async fn test_hummock_compaction_task() {
     let compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), table_id).await;
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -673,7 +678,11 @@ async fn test_hummock_compaction_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1225,7 +1234,11 @@ async fn test_print_compact_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1361,6 +1374,7 @@ async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
     assert_eq!(sub_levels.len(), 3);
     let middle_task = hummock_manager
         .manual_get_compact_task(
+            worker_id,
             compaction_group_id,
             ManualCompactionOption {
                 level: 0,
@@ -1391,7 +1405,7 @@ async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
     ];
     for option in &options {
         let task = hummock_manager
-            .manual_get_compact_task(compaction_group_id, option.clone())
+            .manual_get_compact_task(worker_id, compaction_group_id, option.clone())
             .await
             .unwrap();
         assert!(
@@ -1420,7 +1434,7 @@ async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
     for option in options {
         let to_l0 = !option.sst_ids.is_empty();
         let task = hummock_manager
-            .manual_get_compact_task(compaction_group_id, option)
+            .manual_get_compact_task(worker_id, compaction_group_id, option)
             .await
             .unwrap()
             .unwrap();
@@ -1597,6 +1611,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut *default_compaction_selector(),
             )
@@ -1632,6 +1647,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1670,6 +1686,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1732,6 +1749,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut *default_compaction_selector(),
             )
@@ -1767,6 +1785,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1979,6 +1998,7 @@ async fn test_version_stats() {
 
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault,
             &mut *default_compaction_selector(),
         )
@@ -2281,7 +2301,11 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
     // task picking records compact task metrics for the split group.
     hummock_manager.create_version_checkpoint(0).await.unwrap();
     let compact_task = hummock_manager
-        .get_compact_task(right_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            right_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap();
     assert!(compact_task.is_some());
@@ -2463,7 +2487,11 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault;
     let task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -2501,6 +2529,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
 
     let task2 = hummock_manager
         .get_compact_task(
+            worker_id,
             left_compaction_group_id,
             &mut *default_compaction_selector(),
         )
@@ -2557,7 +2586,7 @@ async fn get_manual_compact_task(
     };
 
     hummock_manager_ref
-        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+        .manual_get_compact_task(1.into(), compaction_group_id, manual_compcation_option)
         .await
         .unwrap()
         .unwrap()
@@ -2619,7 +2648,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     };
     // 2. get compact task
     let compact_task = hummock_manager
-        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+        .manual_get_compact_task(worker_id, compaction_group_id, manual_compcation_option)
         .await
         .unwrap()
         .unwrap();
@@ -3046,7 +3075,7 @@ async fn test_partition_level() {
 
         global_sst_id += 1;
         if let Some(task) = hummock_manager
-            .get_compact_task(new_compaction_group_id, selector.as_mut())
+            .get_compact_task(worker_id, new_compaction_group_id, selector.as_mut())
             .await
             .unwrap()
         {
@@ -3326,7 +3355,11 @@ async fn test_merge_compaction_group_task_expired() {
 
     // for task pending
     let _task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -3369,6 +3402,7 @@ async fn test_merge_compaction_group_task_expired() {
 
     let task2 = hummock_manager
         .get_compact_task(
+            worker_id,
             right_compaction_group_id,
             &mut *default_compaction_selector(),
         )
@@ -3556,7 +3590,11 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
 
     let recovered_manager = build_hummock_manager_for_test_env(env).await;
     let compact_task = recovered_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            1.into(),
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .expect("dirty old-version SST should be picked for compaction");
@@ -3966,7 +4004,7 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
         .unwrap();
 
     let task = hummock_manager
-        .get_compact_task(cg_64, &mut *default_compaction_selector())
+        .get_compact_task(worker_id, cg_64, &mut *default_compaction_selector())
         .await
         .unwrap()
         .expect("should produce a compaction task");

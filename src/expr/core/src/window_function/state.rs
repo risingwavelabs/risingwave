@@ -31,11 +31,62 @@ pub struct StateKey {
     pub pk: DefaultOrdered<OwnedRow>,
 }
 
+/// The watermark of the order key that closes a window, i.e., no future row can fall into it.
+/// A watermark `w` promises that no row with order value `< w` arrives afterwards.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
+pub struct WatermarkBound {
+    /// The order value, memcmp-encoded in the same way as [`StateKey::order_key`].
+    pub value: MemcmpEncoded,
+    /// Whether the watermark must be greater than `value`, rather than greater than or equal to.
+    pub exclusive: bool,
+}
+
+impl WatermarkBound {
+    pub fn is_satisfied_by(&self, watermark: &MemcmpEncoded) -> bool {
+        if self.exclusive {
+            watermark > &self.value
+        } else {
+            watermark >= &self.value
+        }
+    }
+}
+
+/// Whether the current window is closed, i.e., no future row can fall into it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    /// The window is closed once the watermark of the order key satisfies the bound.
+    OnWatermark(WatermarkBound),
+    /// Only future rows can close the window.
+    WaitForInput,
+}
+
+impl Readiness {
+    /// The readiness of windows that must all be closed.
+    pub fn and(self, other: Self) -> Self {
+        use Readiness::*;
+        match (self, other) {
+            (WaitForInput, _) | (_, WaitForInput) => WaitForInput,
+            (Ready, r) | (r, Ready) => r,
+            // At the same value, the exclusive bound is the stricter one.
+            (OnWatermark(a), OnWatermark(b)) => OnWatermark(std::cmp::max(a, b)),
+        }
+    }
+
+    pub fn is_ready(&self, watermark: Option<&MemcmpEncoded>) -> bool {
+        match self {
+            Readiness::Ready => true,
+            Readiness::OnWatermark(bound) => watermark.is_some_and(|w| bound.is_satisfied_by(w)),
+            Readiness::WaitForInput => false,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct StatePos<'a> {
     /// Only 2 cases in which the `key` is `None`:
     /// 1. The state is empty.
-    /// 2. It's a pure preceding window, and all ready outputs are consumed.
+    /// 2. All rows in the state are output, and some are retained for the windows of future rows.
     pub key: Option<&'a StateKey>,
     pub is_ready: bool,
 }
@@ -109,6 +160,20 @@ pub trait WindowState: EstimateSize {
 
     /// Get the current window frame position.
     fn curr_window(&self) -> StatePos<'_>;
+
+    /// Get the readiness of the current window, given that the rows are appended in the order of
+    /// the order key, so no future row is less than the last one. Unlike [`StatePos::is_ready`],
+    /// which is conservative and must not change for the recovery of existing jobs, this is exact.
+    fn readiness(&self) -> Readiness {
+        if self.curr_window().is_ready {
+            Readiness::Ready
+        } else {
+            Readiness::WaitForInput
+        }
+    }
+
+    /// Whether no row is retained in the state.
+    fn is_empty(&self) -> bool;
 
     /// Slide the window frame forward and collect the output and evict hint. Similar to `Iterator::next`.
     fn slide(&mut self) -> Result<(Datum, StateEvictHint)>;
@@ -191,5 +256,34 @@ mod tests {
         // Three-way: CannotEvict(K) + CanEvict({K}) -> CannotEvict(K)
         let merged = merged.merge(StateEvictHint::CanEvict(BTreeSet::from([key.clone()])));
         assert!(matches!(&merged, StateEvictHint::CannotEvict(k) if k == &key));
+    }
+
+    #[test]
+    fn test_readiness_and() {
+        use Readiness::*;
+        let encode = |value: i64| MemcmpEncoded::from(value.to_be_bytes().to_vec());
+        let bound = |value: i64, exclusive: bool| WatermarkBound {
+            value: encode(value),
+            exclusive,
+        };
+
+        assert_eq!(
+            Ready.and(OnWatermark(bound(1, false))),
+            OnWatermark(bound(1, false))
+        );
+        assert_eq!(OnWatermark(bound(1, false)).and(WaitForInput), WaitForInput);
+        assert_eq!(
+            OnWatermark(bound(2, false)).and(OnWatermark(bound(1, true))),
+            OnWatermark(bound(2, false))
+        );
+        assert_eq!(
+            OnWatermark(bound(1, false)).and(OnWatermark(bound(1, true))),
+            OnWatermark(bound(1, true))
+        );
+
+        assert!(bound(1, false).is_satisfied_by(&encode(1)));
+        assert!(!bound(1, true).is_satisfied_by(&encode(1)));
+        assert!(bound(1, true).is_satisfied_by(&encode(2)));
+        assert!(!OnWatermark(bound(1, false)).is_ready(None));
     }
 }

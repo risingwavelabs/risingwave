@@ -95,7 +95,7 @@ use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
     reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_table::{
@@ -1221,7 +1221,7 @@ pub async fn handle_create_source(
         return handle_create_cdc_table_source(handler_args, stmt).await;
     }
 
-    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -1422,7 +1422,7 @@ async fn handle_create_cdc_table_source(
         .into());
     }
 
-    let (cdc_with_options, external_table_name) = derive_with_options_for_cdc_table(
+    let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
         &upstream_source.with_properties,
         cdc_table_info.external_table_name.clone(),
     )?;
@@ -1556,7 +1556,7 @@ pub(super) fn generate_stream_graph_for_source(
     handler_args: HandlerArgs,
     source_catalog: SourceCatalog,
 ) -> Result<PbStreamFragmentGraph> {
-    let context = OptimizerContext::from_handler_args(handler_args);
+    let context = OptimizerContext::from_handler_args(handler_args)?;
     let source_node = LogicalSource::with_catalog(
         Rc::new(source_catalog),
         SourceNodeKind::CreateSharedSource,

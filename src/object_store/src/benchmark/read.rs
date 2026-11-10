@@ -77,7 +77,7 @@ async fn short_gets(
     }
 }
 
-/// Consume whole SDK stream chunks without an AsyncRead adapter or background draining task.
+/// Consume whole SDK stream chunks without an `AsyncRead` adapter or background draining task.
 pub(super) async fn read_object(
     store: Arc<ObjectStoreImpl>,
     key: String,
