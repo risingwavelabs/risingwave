@@ -103,7 +103,7 @@ use super::{
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
 };
-use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
+use crate::hummock::compactor::compaction_utils::CompactionPlan;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -1183,10 +1183,8 @@ pub fn start_compactor(
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
                                 let compact_task = CompactTask::from(compact_task);
-                                let parallelism =
-                                    calculate_task_parallelism(&compact_task, &context);
-
-                                assert_ne!(parallelism, 0, "splits cannot be empty");
+                                let plan = CompactionPlan::new(&compact_task, &context);
+                                let parallelism = plan.parallelism;
 
                                 if (max_task_parallelism
                                     - running_task_parallelism.load(Ordering::SeqCst))
@@ -1233,6 +1231,7 @@ pub fn start_compactor(
                                         rx,
                                         object_id_manager.clone(),
                                         compaction_catalog_manager_ref.clone(),
+                                        plan,
                                     )
                                     .await;
 
@@ -1407,6 +1406,7 @@ pub fn start_shared_compactor(
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
                                     let compact_task = CompactTask::from(&compact_task);
+                                    let plan = CompactionPlan::new(&compact_task, &context);
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -1421,6 +1421,7 @@ pub fn start_shared_compactor(
                                         rx,
                                         shared_compactor_object_id_manager,
                                         compaction_catalog_manager_ref.clone(),
+                                        plan,
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);

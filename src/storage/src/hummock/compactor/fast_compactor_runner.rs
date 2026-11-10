@@ -33,9 +33,7 @@ use risingwave_pb::hummock::PbSstableFilterLayout;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::block_stream::SstableBlockStream;
-use crate::hummock::compactor::compaction_utils::{
-    blocked_xor_filter_key_count_threshold, estimate_output_key_count_for_task,
-};
+use crate::hummock::compactor::compaction_utils::{VersionGcAction, fast_output_options};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionFilter, CompactionStatistics, Compactor, CompactorContext, MultiCompactionFilter,
@@ -304,16 +302,27 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         task_progress: Arc<TaskProgress>,
         compaction_filter: C,
     ) -> Self {
-        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
-        options.compression_algorithm = task.compression_algorithm.into();
-        options.capacity = task.target_file_size as usize;
-        let estimated_output_key_count =
-            estimate_output_key_count_for_task(&task, options.capacity);
-        options.estimated_output_key_count = Some(estimated_output_key_count);
-        options.filter_hash_prealloc_key_count_cap =
-            blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
-        // Disable vnode key-range hints for fast compaction path by default.
-        options.max_vnode_key_range_bytes = None;
+        let options = fast_output_options(&task, &context);
+        Self::with_output(
+            context,
+            task,
+            compaction_catalog_agent_ref,
+            object_id_getter,
+            task_progress,
+            compaction_filter,
+            options,
+        )
+    }
+
+    pub(super) fn with_output(
+        context: CompactorContext,
+        task: CompactTask,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+        object_id_getter: Arc<dyn GetObjectId>,
+        task_progress: Arc<TaskProgress>,
+        compaction_filter: C,
+        options: SstableBuilderOptions,
+    ) -> Self {
         let get_id_time = Arc::new(AtomicU64::new(0));
 
         let key_range = KeyRange::inf();
@@ -711,23 +720,19 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             self.compaction_statistics.iter_total_key_counts += 1;
             self.may_report_process_key(1);
 
-            let mut drop = false;
             let value = HummockValue::from_slice(iter.value()).unwrap();
-            let is_first_or_new_user_key = is_new_user_key || self.last_key.is_empty();
-            if is_first_or_new_user_key {
+            let is_first_observed_version = is_new_user_key || self.last_key.is_empty();
+            if is_first_observed_version {
                 self.last_key.set(iter.key());
                 self.last_key_is_delete = false;
             }
 
-            // See note in `compactor_runner.rs`.
-            if !self.task_config.retain_multiple_version
-                && self.task_config.gc_delete_keys
-                && value.is_delete()
-            {
-                drop = true;
+            let gc_action = self
+                .task_config
+                .version_gc_action(value, is_first_observed_version);
+            let mut drop = gc_action != VersionGcAction::Keep;
+            if gc_action == VersionGcAction::DropTombstone {
                 self.last_key_is_delete = true;
-            } else if !self.task_config.retain_multiple_version && !is_first_or_new_user_key {
-                drop = true;
             }
 
             if !drop && self.compaction_filter.should_delete(iter.key()) {
@@ -847,7 +852,7 @@ mod tests {
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
-    use crate::hummock::compactor::compaction_utils::optimize_by_copy_block;
+    use crate::hummock::compactor::compaction_utils::CompactionPlan;
     use crate::hummock::compactor::task_progress::TaskProgress;
     use crate::hummock::compactor::{CompactorContext, MultiCompactionFilter};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -946,7 +951,7 @@ mod tests {
         };
 
         assert_eq!(task.input_ssts[0].read_sstable_infos().count(), 1);
-        assert!(optimize_by_copy_block(&task, &context));
+        assert!(CompactionPlan::new(&task, &context).copy_blocks);
 
         let runner = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
             context,
