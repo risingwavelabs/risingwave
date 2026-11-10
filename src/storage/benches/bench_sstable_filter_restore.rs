@@ -35,7 +35,7 @@ fn bench_sstable_filter_restore(c: &mut Criterion) {
         .unwrap();
     let mut group = c.benchmark_group("sstable_filter_restore");
     let mut measure = |name: &str, meta: SstableMeta| {
-        let restored = XorFilterReader::new(&meta.bloom_filter, &meta.block_metas);
+        let restored = XorFilterReader::new(&meta.bloom_filter, meta.block_metas.len());
         assert!(!restored.is_empty());
         assert_eq!(restored.encode_to_bytes(), meta.bloom_filter);
         eprintln!(
@@ -53,7 +53,7 @@ fn bench_sstable_filter_restore(c: &mut Criterion) {
                 |()| {
                     XorFilterReader::new(
                         black_box(&meta.bloom_filter),
-                        black_box(&meta.block_metas),
+                        black_box(meta.block_metas.len()),
                     )
                 },
                 BatchSize::PerIteration,

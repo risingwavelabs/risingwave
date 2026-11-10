@@ -77,11 +77,11 @@ pub fn put_length_prefixed_slice(mut buf: impl BufMut, slice: &[u8]) {
     buf.put_slice(slice);
 }
 
-pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
+pub fn get_length_prefixed_slice<'a>(buf: &mut &'a [u8]) -> &'a [u8] {
     let len = buf.get_u32_le() as usize;
-    let v = buf[..len].to_vec();
-    buf.advance(len);
-    v
+    let (value, rest) = buf.split_at(len);
+    *buf = rest;
+    value
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

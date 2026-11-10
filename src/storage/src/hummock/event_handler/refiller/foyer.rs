@@ -14,9 +14,10 @@
 
 //! Executes Foyer refill tasks from snapshots captured before spawning.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::hash::Hash;
-use std::ops::{Bound, Range};
+use std::ops::Range;
 use std::time::Instant;
 
 use ::foyer::RangeBoundsExt;
@@ -25,9 +26,9 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::key::{FullKey, vnode_range};
-use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
+use risingwave_hummock_sdk::key::FullKey;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
@@ -94,48 +95,24 @@ impl TableCacheRefillContext {
 }
 
 fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
-    let block_meta = &sstable.meta.block_metas[block_index];
-    let block_smallest_key = FullKey::decode(&block_meta.smallest_key);
-    let table_key_end = match sstable.meta.block_metas.get(block_index + 1) {
-        // A table switch always starts a new block. The next table's smallest key has an
-        // unrelated vnode, so use the current table's terminal range instead.
-        Some(next_block_meta) if next_block_meta.table_id() != block_meta.table_id() => {
-            Bound::Unbounded
-        }
-        // Full-key versions of the same table key may span adjacent blocks. After projecting
-        // away the epoch, the boundary vnode therefore remains part of the current block.
-        Some(next_block_meta) => Bound::Included(
-            FullKey::decode(&next_block_meta.smallest_key)
-                .user_key
-                .table_key,
-        ),
-        // `SstableMeta::largest_key` is the actual last key, unlike the next block's smallest
-        // key above. Keep it inclusive, especially for singleton tables whose key contains only
-        // the vnode prefix.
-        None => Bound::Included(
-            FullKey::decode(&sstable.meta.largest_key)
-                .user_key
-                .table_key,
-        ),
+    let meta = &sstable.meta;
+    let max_end = VirtualNode::MAX_REPRESENTABLE.to_index() + 1;
+    // Shortened block separators may omit part of the vnode prefix. Fail open.
+    let Some(start) = meta.block_smallest_vnode(block_index) else {
+        return (0, max_end);
     };
-
-    let table_key_range = (
-        Bound::Included(block_smallest_key.user_key.table_key),
-        table_key_end,
-    );
-    // Block-meta separators may shorten the table key below the vnode prefix. They are valid
-    // full-key search boundaries but cannot identify a vnode, so fail open instead of panicking
-    // or dropping a block that may belong to this worker.
-    if match &table_key_range.0 {
-        Bound::Included(key) | Bound::Excluded(key) => key.as_ref().len() < VirtualNode::SIZE,
-        Bound::Unbounded => false,
-    } || match &table_key_range.1 {
-        Bound::Included(key) | Bound::Excluded(key) => key.as_ref().len() < VirtualNode::SIZE,
-        Bound::Unbounded => false,
-    } {
-        return (0, VirtualNode::MAX_REPRESENTABLE.to_index() + 1);
-    }
-    vnode_range(&table_key_range)
+    let end = match meta.block_metas.get(block_index + 1) {
+        Some(next) if next.table_id() != meta.block_metas[block_index].table_id() => {
+            return (start.to_index(), max_end);
+        }
+        Some(_) => meta.block_smallest_vnode(block_index + 1),
+        None => {
+            let key = FullKey::decode(&meta.largest_key).user_key.table_key;
+            (key.as_ref().len() >= VirtualNode::SIZE).then(|| key.vnode_part())
+        }
+    };
+    // Versions of one table key can span adjacent blocks, so include the end vnode.
+    end.map_or((0, max_end), |end| (start.to_index(), end.to_index() + 1))
 }
 
 struct DataCacheRefillTaskGenerator<'a> {
@@ -294,38 +271,31 @@ impl DataCacheRefillTaskGenerator<'_> {
             }
         };
 
-        // assert units in asc order
+        let mut key_buffer = Vec::new();
         if cfg!(debug_assertions) {
-            originals.iter().tuple_windows().for_each(|(a, b)| {
-                debug_assert_ne!(
-                    KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
-                    std::cmp::Ordering::Greater
-                )
-            });
+            for (a, b) in originals.iter().tuple_windows() {
+                let lower =
+                    FullKey::decode(b.sst.meta.block_smallest_key(b.blks.start, &mut key_buffer));
+                debug_assert!(!a.compare_upper_bound(lower).is_gt());
+            }
         }
 
         let mut filtered: HashSet<SstableUnit> = HashSet::default();
         let recent_filter = self.context.sstable_store.recent_filter();
         for psst in parent_ssts {
             for pblk in 0..psst.block_count() {
-                let pleft = &psst.meta.block_metas[pblk].smallest_key;
-                let pright = if pblk + 1 == psst.block_count() {
-                    // `largest_key` can be included or excluded, both are treated as included here
+                let lower = FullKey::decode(psst.meta.block_smallest_key(pblk, &mut key_buffer));
+                let uleft =
+                    originals.partition_point(|task| task.compare_upper_bound(lower).is_lt());
+
+                let upper = FullKey::decode(if pblk + 1 == psst.block_count() {
                     &psst.meta.largest_key
                 } else {
-                    &psst.meta.block_metas[pblk + 1].smallest_key
-                };
-
-                // partition point: unit.right < pblk.left
-                let uleft = originals.partition_point(|task| {
-                    KeyComparator::compare_encoded_full_key(task.largest_key(), pleft)
-                        == std::cmp::Ordering::Less
+                    psst.meta.block_smallest_key(pblk + 1, &mut key_buffer)
                 });
-                // partition point: unit.left <= pblk.right
-                let uright = originals.partition_point(|task| {
-                    KeyComparator::compare_encoded_full_key(task.smallest_key(), pright)
-                        != std::cmp::Ordering::Greater
-                });
+                // Treat the parent block's upper bound as inclusive for inheritance.
+                let uright =
+                    originals.partition_point(|task| !task.compare_lower_bound(upper).is_gt());
 
                 // overlapping: uleft..uright
                 for task in originals.iter().take(uright).skip(uleft) {
@@ -370,15 +340,15 @@ impl DataCacheRefillTask {
         }
     }
 
-    fn smallest_key(&self) -> &[u8] {
-        &self.sst.meta.block_metas[self.blks.start].smallest_key
+    fn compare_lower_bound(&self, key: FullKey<&[u8]>) -> Ordering {
+        self.sst.meta.compare_block_key(self.blks.start, key)
     }
 
-    fn largest_key(&self) -> &[u8] {
+    fn compare_upper_bound(&self, key: FullKey<&[u8]>) -> Ordering {
         if self.blks.end == self.sst.block_count() {
-            &self.sst.meta.largest_key
+            FullKey::decode(&self.sst.meta.largest_key).cmp(&key)
         } else {
-            &self.sst.meta.block_metas[self.blks.end].smallest_key
+            self.sst.meta.compare_block_key(self.blks.end, key)
         }
     }
 }

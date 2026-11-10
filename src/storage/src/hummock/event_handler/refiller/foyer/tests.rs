@@ -1173,7 +1173,7 @@ async fn test_block_vnode_range_fails_open_for_shortened_meta_keys() {
     .await;
     assert_eq!(sst.block_count(), 2);
     assert!(
-        FullKey::decode(&sst.meta.block_metas[1].smallest_key)
+        FullKey::decode(&sst.meta.block_meta(1).smallest_key)
             .user_key
             .table_key
             .as_ref()

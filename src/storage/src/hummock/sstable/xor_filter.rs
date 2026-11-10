@@ -18,6 +18,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor16};
@@ -25,7 +26,7 @@ use xorf::{Filter, Xor8, Xor16};
 use super::{
     DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions, Sstable,
 };
-use crate::hummock::{BlockMeta, MemoryLimiter};
+use crate::hummock::{CachedSstableMeta, MemoryLimiter};
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
@@ -454,36 +455,47 @@ where
 {
     pub fn may_exist(
         &self,
-        block_metas: &[BlockMeta],
+        meta: &CachedSstableMeta,
         user_key_range: &UserKeyRangeRef<'_>,
         h: u64,
     ) -> bool {
-        debug_assert_eq!(self.filters.len(), block_metas.len());
+        debug_assert_eq!(self.filters.len(), meta.block_metas.len());
         let mut block_idx = match user_key_range.0 {
             Bound::Unbounded => 0,
-            Bound::Included(left) | Bound::Excluded(left) => block_metas
-                .partition_point(|block_meta| {
-                    let ord = FullKey::decode(&block_meta.smallest_key)
-                        .user_key
-                        .cmp(&left);
-                    ord == Ordering::Less || ord == Ordering::Equal
-                })
+            Bound::Included(left) | Bound::Excluded(left) => meta
+                .partition_point(
+                    0..meta.block_metas.len(),
+                    Bound::Included(FullKey {
+                        user_key: left,
+                        epoch_with_gap: EpochWithGap::new_min_epoch(),
+                    }),
+                )
                 .saturating_sub(1),
         };
 
+        // FullKey sorts epochs in descending order. MIN includes every version of the
+        // right user key; MAX excludes every version when the right bound is exclusive.
         while block_idx < self.filters.len() {
             let read_bound = match user_key_range.1 {
                 Bound::Unbounded => false,
                 Bound::Included(right) => {
-                    let ord = FullKey::decode(&block_metas[block_idx].smallest_key)
-                        .user_key
-                        .cmp(&right);
+                    let ord = meta.compare_block_key(
+                        block_idx,
+                        FullKey {
+                            user_key: right,
+                            epoch_with_gap: EpochWithGap::new_min_epoch(),
+                        },
+                    );
                     ord == Ordering::Greater
                 }
                 Bound::Excluded(right) => {
-                    let ord = FullKey::decode(&block_metas[block_idx].smallest_key)
-                        .user_key
-                        .cmp(&right);
+                    let ord = meta.compare_block_key(
+                        block_idx,
+                        FullKey {
+                            user_key: right,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
+                        },
+                    );
                     ord != Ordering::Less
                 }
             };
@@ -520,7 +532,7 @@ pub struct XorFilterReader {
 
 impl XorFilterReader {
     /// Creates an xor filter from a byte slice
-    pub fn new(data: &[u8], metas: &[BlockMeta]) -> Self {
+    pub fn new(data: &[u8], block_count: usize) -> Self {
         if data.len() <= 1 {
             return Self {
                 filter: XorFilter::Xor16(Xor16 {
@@ -533,9 +545,9 @@ impl XorFilterReader {
 
         let kind = *data.last().unwrap();
         let filter = if kind == FOOTER_BLOCKED_XOR16 {
-            XorFilter::BlockXor16(Self::to_block_xor16(data, metas))
+            XorFilter::BlockXor16(Self::to_block_xor16(data, block_count))
         } else if kind == FOOTER_BLOCKED_XOR8 {
-            XorFilter::BlockXor8(Self::to_block_xor8(data, metas))
+            XorFilter::BlockXor8(Self::to_block_xor8(data, block_count))
         } else if kind == FOOTER_XOR16 {
             XorFilter::Xor16(Self::to_xor16(data))
         } else {
@@ -586,11 +598,11 @@ impl XorFilterReader {
         }
     }
 
-    fn to_block_xor16(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor16Filter {
+    fn to_block_xor16(mut data: &[u8], expected_block_count: usize) -> BlockBasedXor16Filter {
         let l = data.len();
         let reader = &mut &data[(l - 5)..];
         let block_count = reader.get_u32_le() as usize;
-        assert_eq!(block_count, metas.len());
+        assert_eq!(block_count, expected_block_count);
         let reader = &mut data;
         let mut filters = Vec::with_capacity(block_count);
         for _ in 0..block_count {
@@ -602,11 +614,11 @@ impl XorFilterReader {
         BlockBasedXor16Filter { filters }
     }
 
-    fn to_block_xor8(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor8Filter {
+    fn to_block_xor8(mut data: &[u8], expected_block_count: usize) -> BlockBasedXor8Filter {
         let l = data.len();
         let reader = &mut &data[(l - 5)..];
         let block_count = reader.get_u32_le() as usize;
-        assert_eq!(block_count, metas.len());
+        assert_eq!(block_count, expected_block_count);
         let reader = &mut data;
         let mut filters = Vec::with_capacity(block_count);
         for _ in 0..block_count {
@@ -622,7 +634,7 @@ impl XorFilterReader {
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
     /// footprint of the decoded reader.
-    pub(super) fn serialized_len(&self) -> usize {
+    pub fn serialized_len(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
@@ -693,7 +705,7 @@ impl XorFilterReader {
     ///     the hash actually, a.k.a. we don't know the answer.
     pub fn may_match(
         &self,
-        block_metas: &[BlockMeta],
+        meta: &CachedSstableMeta,
         user_key_range: &UserKeyRangeRef<'_>,
         h: u64,
     ) -> bool {
@@ -703,8 +715,8 @@ impl XorFilterReader {
             match &self.filter {
                 XorFilter::Xor8(filter) => filter.contains(&h),
                 XorFilter::Xor16(filter) => filter.contains(&h),
-                XorFilter::BlockXor8(reader) => reader.may_exist(block_metas, user_key_range, h),
-                XorFilter::BlockXor16(reader) => reader.may_exist(block_metas, user_key_range, h),
+                XorFilter::BlockXor8(reader) => reader.may_exist(meta, user_key_range, h),
+                XorFilter::BlockXor16(reader) => reader.may_exist(meta, user_key_range, h),
             }
         }
     }
@@ -804,7 +816,9 @@ mod tests {
     use crate::hummock::sstable::{SstableBuilder, SstableBuilderOptions};
     use crate::hummock::test_utils::{TEST_KEYS_COUNT, test_user_key_of, test_value_of};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{BlockIterator, CachePolicy, SstableWriterOptions};
+    use crate::hummock::{
+        BlockIterator, BlockMeta, CachePolicy, SstableMeta, SstableWriterOptions,
+    };
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -988,7 +1002,7 @@ mod tests {
             xor8_builder.add_key(&test_user_key_of(i).encode(), 0);
         }
         let xor8_bytes = xor8_builder.finish(None).unwrap();
-        let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
+        let xor8_reader = XorFilterReader::new(&xor8_bytes, 0);
         let xor8_encoded = xor8_reader.encode_to_bytes();
         assert_eq!(xor8_reader.serialized_len(), xor8_encoded.len());
         assert_eq!(
@@ -1002,7 +1016,7 @@ mod tests {
             xor16_builder.add_key(&test_user_key_of(i).encode(), 0);
         }
         let xor16_bytes = xor16_builder.finish(None).unwrap();
-        let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
+        let xor16_reader = XorFilterReader::new(&xor16_bytes, 0);
         let xor16_encoded = xor16_reader.encode_to_bytes();
         assert_eq!(xor16_reader.serialized_len(), xor16_encoded.len());
         assert_eq!(
@@ -1043,7 +1057,7 @@ mod tests {
             blocked_xor8_builder.switch_block(None);
         }
         let blocked_xor8_bytes = blocked_xor8_builder.finish(None).unwrap();
-        let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, &block_metas);
+        let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, block_metas.len());
         let blocked_xor8_encoded = blocked_xor8_reader.encode_to_bytes();
         assert_eq!(
             blocked_xor8_reader.serialized_len(),
@@ -1064,7 +1078,7 @@ mod tests {
             blocked_xor16_builder.switch_block(None);
         }
         let blocked_xor16_bytes = blocked_xor16_builder.finish(None).unwrap();
-        let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, &block_metas);
+        let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, block_metas.len());
         let blocked_xor16_encoded = blocked_xor16_reader.encode_to_bytes();
         assert_eq!(
             blocked_xor16_reader.serialized_len(),
@@ -1074,5 +1088,38 @@ mod tests {
             blocked_xor16_bytes, blocked_xor16_encoded,
             "BlockedXor16 builder and reader should produce identical bytes"
         );
+
+        // Both cold-load formats construct filters from the compressed descriptor count.
+        for filter in [
+            &[][..],
+            &xor8_bytes,
+            &xor16_bytes,
+            &blocked_xor8_bytes,
+            &blocked_xor16_bytes,
+        ] {
+            let meta = SstableMeta {
+                block_metas: block_metas.clone(),
+                bloom_filter: filter.to_vec(),
+                version: super::super::VERSION,
+                ..Default::default()
+            };
+            let expected = Sstable::new(1.into(), meta.clone(), false);
+            let native =
+                Sstable::from_meta_bytes(1.into(), &meta.encode_to_bytes(), false).unwrap();
+            assert_eq!(native.meta, expected.meta);
+            assert_eq!(
+                native.filter_reader.encode_to_bytes(),
+                expected.filter_reader.encode_to_bytes()
+            );
+            let wire =
+                bincode::serialize(&super::super::SerdeSstable { id: 1.into(), meta }).unwrap();
+            use foyer::Code;
+            let restored = Box::<Sstable>::decode(&mut &wire[..]).unwrap();
+            assert_eq!(restored.meta, expected.meta);
+            assert_eq!(
+                restored.filter_reader.encode_to_bytes(),
+                expected.filter_reader.encode_to_bytes()
+            );
+        }
     }
 }

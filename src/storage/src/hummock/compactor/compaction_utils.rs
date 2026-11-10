@@ -264,15 +264,19 @@ pub async fn generate_splits(
                 .sstable_store
                 .sstable(sstable_info, &mut StoreLocalStatistic::default())
                 .await?;
-            indexes.extend(sstable.meta.block_metas.iter().map(|block| {
-                let data_size = block.len;
+            let mut key_buffer = Vec::new();
+            indexes.reserve(sstable.block_count());
+            for (index, block) in sstable.meta.block_metas.iter().enumerate() {
                 let full_key = FullKey {
-                    user_key: FullKey::decode(&block.smallest_key).user_key,
+                    user_key: FullKey::decode(
+                        sstable.meta.block_smallest_key(index, &mut key_buffer),
+                    )
+                    .user_key,
                     epoch_with_gap: EpochWithGap::new_max_epoch(),
                 }
                 .encode();
-                (data_size as u64, full_key)
-            }));
+                indexes.push((block.len as u64, full_key));
+            }
         }
         // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
