@@ -45,6 +45,16 @@ use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::gen_key_from_bytes;
 
+#[cfg(feature = "sync_point")]
+struct SyncPointActionGuard(sync_point::SyncPoint);
+
+#[cfg(feature = "sync_point")]
+impl Drop for SyncPointActionGuard {
+    fn drop(&mut self) {
+        sync_point::remove_action(self.0);
+    }
+}
+
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
