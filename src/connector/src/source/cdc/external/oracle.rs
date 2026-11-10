@@ -26,7 +26,7 @@ use jni::objects::GlobalRef;
 use jni::sys::jlong;
 use prost::Message;
 use risingwave_common::array::DataChunk;
-use risingwave_common::array::arrow::Arrow58FromArrow;
+use risingwave_common::array::arrow::from_arrow58_record_batch;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::global_jvm::Jvm;
@@ -460,8 +460,7 @@ fn decode_arrow_batch(arrow_ipc: &[u8], schema: &Schema) -> ConnectorResult<Data
         .next()
         .context("Oracle snapshot Arrow stream has no record batch")?
         .context("failed to read Oracle snapshot Arrow record batch")?;
-    let chunk = OracleArrowConvert
-        .from_record_batch(&batch)
+    let chunk = from_arrow58_record_batch(&batch)
         .context("failed to convert Oracle snapshot Arrow record batch")?;
     if chunk.data_types() != schema.data_types() {
         bail!(
@@ -472,10 +471,6 @@ fn decode_arrow_batch(arrow_ipc: &[u8], schema: &Schema) -> ConnectorResult<Data
     }
     Ok(chunk)
 }
-
-struct OracleArrowConvert;
-
-impl Arrow58FromArrow for OracleArrowConvert {}
 
 fn invoke_jni_discover(properties: &OracleConnectionProperties) -> anyhow::Result<TableSchema> {
     let jvm = Jvm::get_or_init()?;
