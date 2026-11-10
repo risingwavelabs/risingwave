@@ -39,6 +39,8 @@ mod iceberg;
 mod maybe_tls_connector;
 pub mod postgres;
 
+#[cfg(test)]
+pub(crate) use iceberg::mock_catalog;
 pub use iceberg::{IcebergCommon, IcebergTableIdentifier};
 pub use postgres::{
     PostgresExternalTable, SslMode, create_pg_client, create_pg_client_from_properties,
