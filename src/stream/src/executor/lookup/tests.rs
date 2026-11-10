@@ -189,10 +189,11 @@ async fn next_msg(buffer: &mut Vec<Message>, executor: &mut BoxedMessageStream) 
 
 fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     // The non-alternate `Debug` of `StreamChunk` only prints the cardinality, so compare the
-    // pretty-printed ops and rows instead.
+    // pretty-printed ops and rows instead. Rows matching the same join key come out of a hash set
+    // in the lookup cache, so their order is not deterministic; sort before comparing.
     assert_eq!(
-        chunk1.to_pretty().to_string(),
-        chunk2.to_pretty().to_string()
+        chunk1.clone().sort_rows().to_pretty().to_string(),
+        chunk2.clone().sort_rows().to_pretty().to_string()
     );
 }
 
