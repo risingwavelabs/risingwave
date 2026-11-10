@@ -408,8 +408,7 @@ debug = "line-tables-only"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
 # TODO: re-enable this after it's more stable. It causes many ICE in current version. https://github.com/rust-lang/rust/issues/143342
-# The ICE is in the incremental dep graph, so the CI profiles below, which are not incremental, enable it
-# for workspace crates. Dependencies keep their flags so that their sccache entries stay valid.
+# The ICE is in the incremental dep graph, so `ci-dev` below, which is not incremental, enables it.
 # rustflags = ["-Z", "threads=8"]
 
 [profile.release]
@@ -441,19 +440,18 @@ debug = "line-tables-only"
 split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
-# parallel frontend, see `profile.dev`
-rustflags = ["-Zthreads=8"]
-[profile.ci-release.package."*"] # external dependencies
-rustflags = []
 
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
 debug = "line-tables-only"
-# parallel frontend, see `profile.dev`
+# Parallel frontend for workspace crates, see `profile.dev`. Dependencies are excluded so that
+# their sccache entries stay valid, and `risingwave_stream` because its frontend is slower with it.
 rustflags = ["-Zthreads=8"]
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
+rustflags = []
+[profile.ci-dev.package."risingwave_stream"]
 rustflags = []
 [profile.ci-dev.package."tokio"]
 opt-level = 3
@@ -467,10 +465,6 @@ inherits = "dev"
 incremental = false
 debug = "line-tables-only"
 opt-level = 2
-# parallel frontend, see `profile.dev`
-rustflags = ["-Zthreads=8"]
-[profile.ci-sim.package."*"] # external dependencies
-rustflags = []
 
 [patch.crates-io]
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
