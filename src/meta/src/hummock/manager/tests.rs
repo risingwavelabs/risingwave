@@ -211,7 +211,7 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
         .collect()
 }
 
-async fn setup_compute_env_with_meta_opts(
+pub(super) async fn setup_compute_env_with_meta_opts(
     port: i32,
     opts: MetaOpts,
 ) -> (
