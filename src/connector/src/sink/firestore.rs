@@ -36,6 +36,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::log_store::DeliveryFutureManagerAddFuture;
@@ -465,7 +466,7 @@ impl FirestoreSinkWriter {
         let mut operations = BTreeMap::new();
 
         for (op, row) in chunk.rows() {
-            let operation = (|| {
+            let operation: Result<FirestoreOperation> = (|| {
                 let path = self.get_document_path(row)?;
                 Ok(match op {
                     Op::Insert | Op::UpdateInsert => {
@@ -481,7 +482,7 @@ impl FirestoreSinkWriter {
                     operations.insert(operation.document_path().to_owned(), operation);
                 }
                 Err(error) if self.config.skip_invalid_rows => {
-                    tracing::warn!(error = %error, "skipping invalid Firestore row");
+                    tracing::warn!(error = %error.as_report(), "skipping invalid Firestore row");
                 }
                 Err(error) => return Err(error),
             }
@@ -571,7 +572,7 @@ impl FirestoreSinkWriter {
                             check_batch_statuses(&response.into_inner().status, &[path], true)?
                         }
                         Err(error) if is_invalid_row_code(error.code() as i32) => {
-                            tracing::warn!(document = %path, error = %error, "skipping rejected Firestore row");
+                            tracing::warn!(document = %path, error = %error.as_report(), "skipping rejected Firestore row");
                         }
                         Err(error) => return Err(SinkError::Firestore(anyhow!(error))),
                     }
