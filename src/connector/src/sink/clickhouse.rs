@@ -47,11 +47,8 @@ use crate::sink::{
 };
 
 mod distributed;
+mod metadata;
 
-const QUERY_ENGINE: &str =
-    "select distinct ?fields from system.tables where database = ? and name = ?";
-const QUERY_COLUMN: &str =
-    "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 
 const ALLOW_EXPERIMENTAL_JSON_TYPE: &str = "allow_experimental_json_type";
@@ -93,7 +90,7 @@ impl EnforceSecret for ClickHouseCommon {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum ClickHouseEngine {
     MergeTree,
     ReplacingMergeTree(Option<String>),
@@ -840,7 +837,7 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 }
 
-#[derive(ClickHouseRow, Deserialize, Clone)]
+#[derive(ClickHouseRow, Deserialize, Clone, Debug, PartialEq, Eq)]
 struct SystemColumn {
     name: String,
     r#type: String,
@@ -889,48 +886,6 @@ struct ClickhouseQueryEngine {
     create_table_query: String,
 }
 
-/// Reads metadata from the connected node, which must also host any Distributed target's local table.
-async fn query_table_metadata(
-    client: &ClickHouseClient,
-    database: &str,
-    table: &str,
-) -> Result<(Vec<SystemColumn>, ClickhouseQueryEngine)> {
-    let with_table_context = |err: SinkError| {
-        SinkError::ClickHouse(format!(
-            "Cannot read ClickHouse table {database:?}.{table:?}: {}",
-            err.to_report_string()
-        ))
-    };
-    let engine = client
-        .query(QUERY_ENGINE)
-        .bind(database)
-        .bind(table)
-        .fetch_optional::<ClickhouseQueryEngine>()
-        .await
-        .map_err(SinkError::from)
-        .map_err(with_table_context)?
-        .ok_or_else(|| {
-            with_table_context(SinkError::ClickHouse(
-                "table not found on the connected node".to_owned(),
-            ))
-        })?;
-    let columns = client
-        .query(QUERY_COLUMN)
-        .bind(database)
-        .bind(table)
-        .bind("position")
-        .fetch_all::<SystemColumn>()
-        .await
-        .map_err(SinkError::from)
-        .map_err(with_table_context)?;
-    if columns.is_empty() {
-        return Err(with_table_context(SinkError::ClickHouse(
-            "no column metadata found".to_owned(),
-        )));
-    }
-    Ok((columns, engine))
-}
-
 /// Check all written columns against the Distributed table before removing
 /// generated sign/delete columns from the sink schema metadata.
 fn check_distributed_columns(
@@ -973,7 +928,8 @@ async fn query_column_engine_from_ck(
     schema: &Schema,
 ) -> Result<(Vec<SystemColumn>, ClickHouseEngine)> {
     let (columns, engine) =
-        query_table_metadata(&client, &config.common.database, &config.common.table).await?;
+        metadata::query_table_metadata(&client, &config.common.database, &config.common.table)
+            .await?;
 
     let (mut clickhouse_column, clickhouse_engine) = if engine.engine == "Distributed" {
         let distributed_context = |err: SinkError| {
@@ -1013,16 +969,10 @@ async fn query_column_engine_from_ck(
                 err.to_report_string()
             )))
         };
-        let (inner_columns, inner_engine) = query_table_metadata(&client, &database, &table)
-            .await
-            .map_err(distributed_context)?;
-        if inner_engine.engine == "Distributed" {
-            return Err(inner_context(SinkError::ClickHouse(
-                "Nested Distributed tables are not supported".to_owned(),
-            )));
-        }
-        let inner_engine =
-            ClickHouseEngine::from_query_engine(&inner_engine, config).map_err(inner_context)?;
+        let (inner_columns, inner_engine) =
+            metadata::query_cluster_metadata(&client, &cluster, &database, &table, config)
+                .await
+                .map_err(inner_context)?;
         check_distributed_columns(schema, &inner_engine, &columns, &inner_columns)
             .map_err(inner_context)?;
         (inner_columns, inner_engine)
