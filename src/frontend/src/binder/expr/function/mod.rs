@@ -1065,10 +1065,11 @@ impl Binder {
             FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(prefix, except)) => {
                 let (schema_name, table_name) =
                     Binder::resolve_schema_qualified_name(&self.db_name, prefix)?;
-                let except_indices = self.generate_except_indices(except.as_deref())?;
                 let (begin, end) = self
                     .context
                     .resolve_relation_range(&table_name, &schema_name)?;
+                let except_indices =
+                    self.generate_relation_except_indices(except.as_deref(), begin..end)?;
                 let (exprs, names) = Self::iter_bound_columns(
                     self.context.columns[begin..end]
                         .iter()

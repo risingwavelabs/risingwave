@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::ops::Range;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
@@ -361,10 +362,11 @@ impl Binder {
                 SelectItem::QualifiedWildcard(obj_name, except) => {
                     let (schema_name, table_name) =
                         Binder::resolve_schema_qualified_name(&self.db_name, obj_name)?;
-                    let except_indices = self.generate_except_indices(except.as_deref())?;
                     let (begin, end) = self
                         .context
                         .resolve_relation_range(&table_name, &schema_name)?;
+                    let except_indices =
+                        self.generate_relation_except_indices(except.as_deref(), begin..end)?;
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[begin..end]
                             .iter()
@@ -680,6 +682,34 @@ impl Binder {
                         )
                         .into());
                     }
+                }
+            }
+        }
+        Ok(except_indices)
+    }
+
+    /// The indices of the columns that an `EXCEPT` list excludes from the wildcard of a relation,
+    /// whose columns are `relation` in the context. The name of columns merged by `NATURAL` or
+    /// `USING` joins excludes the column of the relation among them, as the merged column may be a
+    /// column of another relation, or no column at all.
+    pub(super) fn generate_relation_except_indices(
+        &mut self,
+        except: Option<&[Expr]>,
+        relation: Range<usize>,
+    ) -> Result<HashSet<usize>> {
+        let (except_groups, except) = self.partition_except_column_groups(except)?;
+        let mut except_indices = self.generate_except_indices(Some(&except))?;
+        for group_id in except_groups {
+            let group = &self.context.column_group_context.groups[&group_id];
+            for index in group
+                .indices
+                .iter()
+                .filter(|index| relation.contains(index))
+            {
+                if !except_indices.insert(*index) {
+                    return Err(
+                        ErrorCode::BindError("Duplicate entry in except list".into()).into(),
+                    );
                 }
             }
         }

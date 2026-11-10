@@ -281,6 +281,45 @@ select * except (x) from (ung_i full join ung_b using (x)) join ung_m1 using (x)
 ----
 20 40
 
+# `EXCEPT` of a merged column excludes the column of the table from its
+# `table.*`, whichever side the merged column takes its value from.
+query I rowsort
+select ung_i.* except (x) from ung_i left join ung_b using (x);
+----
+10
+20
+
+query I rowsort
+select ung_i.* except (x) from ung_i join ung_b using (x);
+----
+20
+
+query I rowsort
+select ung_i.* except (x) from ung_i right join ung_b using (x);
+----
+20
+NULL
+
+query I rowsort
+select ung_b.* except (x) from ung_i full join ung_b using (x);
+----
+30
+40
+NULL
+
+query II rowsort
+select ung_i.* except (x), ung_b.* except (x) from ung_i join ung_b using (x);
+----
+20 40
+
+query T
+select jsonb_agg(ung_i.* except (x)) from ung_i join ung_b using (x);
+----
+[{"i": 20}]
+
+statement error Duplicate entry in except list
+select ung_i.* except (x, ung_i.x) from ung_i join ung_b using (x);
+
 statement ok
 drop table ung_i;
 
