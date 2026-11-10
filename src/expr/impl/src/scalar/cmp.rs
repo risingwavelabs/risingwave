@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 
 use constant_time_eq::constant_time_eq;
-use risingwave_common::array::{Array, BoolArray};
+use risingwave_common::array::{Array, BoolArray, StructRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::Row;
-use risingwave_common::types::{Scalar, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{DefaultOrd, Scalar, ScalarRef, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::{ExprError, Result, function};
 
 #[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
@@ -294,6 +296,42 @@ fn is_not_null<T>(v: Option<T>) -> bool {
     v.is_some()
 }
 
+/// Compares two row constructors field by field from the left, up to the first pair that is unequal
+/// or has a NULL. A NULL there makes the result unknown, and later fields are not examined, so
+/// `(1, 2, NULL) < (1, 3, 0)` is true.
+///
+/// Struct values compare differently: see [`general_lt`] and the others, where NULL is the largest
+/// field value.
+fn row_cmp(l: StructRef<'_>, r: StructRef<'_>) -> Option<Ordering> {
+    for (l, r) in l.iter_fields_ref().zip_eq_fast(r.iter_fields_ref()) {
+        match l?.default_cmp(&r?) {
+            Ordering::Equal => {}
+            ordering => return Some(ordering),
+        }
+    }
+    Some(Ordering::Equal)
+}
+
+#[function("row_less_than(struct, struct) -> boolean")]
+fn row_lt(l: StructRef<'_>, r: StructRef<'_>) -> Option<bool> {
+    row_cmp(l, r).map(Ordering::is_lt)
+}
+
+#[function("row_less_than_or_equal(struct, struct) -> boolean")]
+fn row_le(l: StructRef<'_>, r: StructRef<'_>) -> Option<bool> {
+    row_cmp(l, r).map(Ordering::is_le)
+}
+
+#[function("row_greater_than(struct, struct) -> boolean")]
+fn row_gt(l: StructRef<'_>, r: StructRef<'_>) -> Option<bool> {
+    row_cmp(l, r).map(Ordering::is_gt)
+}
+
+#[function("row_greater_than_or_equal(struct, struct) -> boolean")]
+fn row_ge(l: StructRef<'_>, r: StructRef<'_>) -> Option<bool> {
+    row_cmp(l, r).map(Ordering::is_ge)
+}
+
 #[function("greatest(...) -> boolean")]
 #[function("greatest(...) -> *int")]
 #[function("greatest(...) -> decimal")]
@@ -446,6 +484,64 @@ fn check_not_null<'a>(
         });
     }
     Ok(v)
+}
+
+#[cfg(test)]
+mod row_cmp_tests {
+    use risingwave_common::array::StructValue;
+    use risingwave_common::types::{Datum, ScalarImpl};
+
+    use super::*;
+
+    fn row(fields: &[Option<i32>]) -> StructValue {
+        StructValue::new(
+            fields
+                .iter()
+                .map(|f| f.map(ScalarImpl::Int32) as Datum)
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn test_row_cmp() {
+        let cases = [
+            (
+                &[Some(1), Some(2)][..],
+                &[Some(1), Some(3)][..],
+                Some(Ordering::Less),
+            ),
+            (
+                &[Some(1), Some(3)],
+                &[Some(1), Some(3)],
+                Some(Ordering::Equal),
+            ),
+            (
+                &[Some(2), Some(0)],
+                &[Some(1), Some(3)],
+                Some(Ordering::Greater),
+            ),
+            // The deciding pair has a NULL.
+            (&[Some(1), None], &[Some(1), Some(5)], None),
+            (&[None, Some(1)], &[Some(1), Some(5)], None),
+            (&[Some(1), Some(5)], &[None, Some(5)], None),
+            (&[None, Some(1)], &[None, Some(1)], None),
+            // An earlier pair decides, so the NULL is not examined.
+            (
+                &[Some(2), None],
+                &[Some(1), Some(5)],
+                Some(Ordering::Greater),
+            ),
+            (
+                &[Some(1), Some(2), None],
+                &[Some(1), Some(3), Some(0)],
+                Some(Ordering::Less),
+            ),
+        ];
+        for (l, r, expected) in cases {
+            let (l, r) = (row(l), row(r));
+            assert_eq!(row_cmp(l.as_scalar_ref(), r.as_scalar_ref()), expected);
+        }
+    }
 }
 
 #[cfg(test)]

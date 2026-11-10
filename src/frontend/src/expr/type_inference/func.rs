@@ -401,7 +401,11 @@ fn infer_type_for_special(
         | ExprType::GreaterThan
         | ExprType::GreaterThanOrEqual
         | ExprType::IsDistinctFrom
-        | ExprType::IsNotDistinctFrom => {
+        | ExprType::IsNotDistinctFrom
+        | ExprType::RowLessThan
+        | ExprType::RowLessThanOrEqual
+        | ExprType::RowGreaterThan
+        | ExprType::RowGreaterThanOrEqual => {
             ensure_arity!("cmp", | inputs | == 2);
             match (inputs[0].is_untyped(), inputs[1].is_untyped()) {
                 // `'a' = null` handled by general rules later
@@ -424,8 +428,16 @@ fn infer_type_for_special(
             let ok = match (inputs[0].return_type(), inputs[1].return_type()) {
                 // Cast each field of the struct to their corresponding field in the other struct.
                 (DataType::Struct(_), DataType::Struct(_)) => {
+                    // Fields are compared with the scalar operators.
+                    let field_func_type = match func_type {
+                        ExprType::RowLessThan => ExprType::LessThan,
+                        ExprType::RowLessThanOrEqual => ExprType::LessThanOrEqual,
+                        ExprType::RowGreaterThan => ExprType::GreaterThan,
+                        ExprType::RowGreaterThanOrEqual => ExprType::GreaterThanOrEqual,
+                        func_type => func_type,
+                    };
                     let (lcast, rcast, ret) = infer_struct_cast_target_type(
-                        func_type,
+                        field_func_type,
                         extract_expr_nested_type(&inputs[0])?,
                         extract_expr_nested_type(&inputs[1])?,
                     )?;
