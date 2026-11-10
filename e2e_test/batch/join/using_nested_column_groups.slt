@@ -162,6 +162,137 @@ select x + 1 from ung_m1 join (ung_m2 join ung_m3 using (x)) using (x);
 ----
 2147483648
 
+# The merged column has the common type of both sides, and the join type picks
+# the side that supplies its value: either side for INNER joins, preferring one
+# that needs no cast, the left side for LEFT joins, the right side for RIGHT
+# joins, and COALESCE over both for FULL joins.
+statement ok
+create table ung_i (x int, i int);
+
+statement ok
+create table ung_b (x bigint, b int);
+
+statement ok
+insert into ung_i values (1, 10), (2147483647, 20);
+
+statement ok
+insert into ung_b values (2, 30), (2147483647, 40);
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i join ung_b using (x);
+----
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b join ung_i using (x);
+----
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i left join ung_b using (x);
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b left join ung_i using (x);
+----
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i right join ung_b using (x);
+----
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b right join ung_i using (x);
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i full join ung_b using (x);
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b natural full join ung_i;
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+# The narrower side of a nested join is cast to the common type too.
+query IT
+select x + 1, pg_typeof(x) from ung_m2 join (ung_m1 join ung_m1 as m using (x)) using (x);
+----
+2147483648 bigint
+
+query IT
+select x + 1, pg_typeof(x) from ung_m2 left join (ung_m3 full join ung_m1 using (x)) using (x);
+----
+2147483648 bigint
+
+# The merged column of an INNER join takes the value of the side of the common
+# type, which differs from the other side here.
+statement ok
+create table ung_d (x double precision);
+
+statement ok
+create table ung_l (x bigint);
+
+statement ok
+insert into ung_d values (9007199254740992);
+
+statement ok
+insert into ung_l values (9007199254740993);
+
+query IT
+select x::bigint, pg_typeof(x) from ung_l join (ung_d join ung_d as d using (x)) using (x);
+----
+9007199254740992 double precision
+
+# `SELECT *` lists the merged columns first.
+query IIIT rowsort
+select *, pg_typeof(x) from ung_i left join (ung_b full join ung_m1 using (x)) using (x);
+----
+1 10 NULL bigint
+2147483647 20 40 bigint
+
+query III rowsort
+select * from ung_i natural join (ung_b natural full join ung_m1);
+----
+2147483647 20 40
+
+# `EXCEPT` of a merged column excludes it from `SELECT *`.
+query II rowsort
+select * except (x) from ung_i full join ung_b using (x);
+----
+10 NULL
+20 40
+NULL 30
+
+query II rowsort
+select * except (x) from (ung_i full join ung_b using (x)) join ung_m1 using (x);
+----
+20 40
+
+statement ok
+drop table ung_i;
+
+statement ok
+drop table ung_b;
+
+statement ok
+drop table ung_d;
+
+statement ok
+drop table ung_l;
+
 statement ok
 drop table ung_t1;
 

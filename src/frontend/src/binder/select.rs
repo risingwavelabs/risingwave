@@ -386,14 +386,18 @@ impl Binder {
                         .into());
                     }
 
+                    // `EXCEPT` of the name of columns merged by `NATURAL` or `USING` joins
+                    // excludes the merged column.
+                    let (except_groups, except) =
+                        self.partition_except_column_groups(except.as_deref())?;
+                    let except_indices = self.generate_except_indices(Some(&except))?;
+
                     // Bind the column groups
                     // In psql, the USING and NATURAL columns come before the rest of the
                     // columns in a SELECT * statement
-                    let (exprs, names) = self.iter_column_groups()?;
+                    let (exprs, names) = self.iter_column_groups(&except_groups);
                     select_list.extend(exprs);
                     aliases.extend(names);
-
-                    let except_indices = self.generate_except_indices(except.as_deref())?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -575,17 +579,19 @@ impl Binder {
             .unzip()
     }
 
-    pub fn iter_column_groups(&self) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let mut exprs = vec![];
-        let mut names = vec![];
-        // ensure that the outermost col group gets put first in the list
-        for group in self.context.column_group_context.groups.values().rev() {
-            exprs.push(self.context.bind_column_indices(&group.merged)?);
-            names.push(Some(
-                self.context.columns[group.merged[0]].field.name.clone(),
-            ));
-        }
-        Ok((exprs, names))
+    /// The merged columns of `NATURAL` and `USING` joins, except those of `except_groups`.
+    pub fn iter_column_groups(
+        &self,
+        except_groups: &HashSet<u32>,
+    ) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+        self.context
+            .column_group_context
+            .groups
+            .iter()
+            .rev() // ensure that the outermost col group gets put first in the list
+            .filter(|(group_id, _)| !except_groups.contains(group_id))
+            .map(|(_, group)| (group.merged.clone(), Some(group.column_name.clone())))
+            .unzip()
     }
 
     /// Bind `DISTINCT` clause in a [`Select`].
@@ -678,6 +684,33 @@ impl Binder {
             }
         }
         Ok(except_indices)
+    }
+
+    /// Splits the unqualified names of columns merged by `NATURAL` or `USING` joins out of an
+    /// `EXCEPT` list, returning their column group ids and the rest of the list.
+    fn partition_except_column_groups(
+        &self,
+        except: Option<&[Expr]>,
+    ) -> Result<(HashSet<u32>, Vec<Expr>)> {
+        let mut groups = HashSet::new();
+        let mut rest = vec![];
+        for expr in except.into_iter().flatten() {
+            let group_id = match expr {
+                Expr::Identifier(ident) => self.context.get_column_group_id(&ident.real_value()),
+                _ => None,
+            };
+            match group_id {
+                Some(group_id) => {
+                    if !groups.insert(group_id) {
+                        return Err(
+                            ErrorCode::BindError("Duplicate entry in except list".into()).into(),
+                        );
+                    }
+                }
+                None => rest.push(expr.clone()),
+            }
+        }
+        Ok((groups, rest))
     }
 }
 

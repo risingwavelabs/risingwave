@@ -24,7 +24,8 @@ use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
 use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, ScopeId};
+use crate::utils::ColIndexMapping;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
@@ -144,27 +145,29 @@ pub struct ColumnGroupContext {
 
 /// When binding a natural join or a join with USING, a `ColumnGroup` contains the columns with the
 /// same name.
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ColumnGroup {
     /// Indices of the columns in the group
     pub indices: HashSet<usize>,
-    /// The merged column that unqualified references to the column name resolve to: `COALESCE`
-    /// over these columns in order, or the column itself if there is only one. Each `USING` join
-    /// merges into the left column for INNER and LEFT joins, the right column for RIGHT joins,
-    /// and `COALESCE(left, right)` for FULL joins.
-    pub merged: Vec<usize>,
+    /// The name of the columns in the group.
+    pub column_name: String,
+    /// The merged column that unqualified references to the column name resolve to, over the
+    /// columns of the context. See `Binder::merge_using_columns` for how a join builds it.
+    pub merged: ExprImpl,
 }
 
 impl BindContext {
+    /// Resolves a column reference to the index of one column. An unqualified reference to a
+    /// column merged by `NATURAL` or `USING` joins resolves only if the merged column is one of the
+    /// columns.
     pub fn get_column_binding_index(
         &self,
         schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
     ) -> LiteResult<usize> {
-        match &self.get_column_binding_indices(schema_name, table_name, column_name)?[..] {
-            [] => unreachable!(),
-            [idx] => Ok(*idx),
+        match self.bind_column_ref(schema_name, table_name, column_name)? {
+            ExprImpl::InputRef(input_ref) => Ok(input_ref.index()),
             _ => Err(ErrorCode::InvalidReference(format!(
                 "column reference \"{}\" is ambiguous",
                 column_name
@@ -172,40 +175,27 @@ impl BindContext {
         }
     }
 
-    /// If return Vec has len > 1, it means we have an unqualified reference to a column merged by
-    /// `NATURAL` or `USING` joins. This will be handled in downstream as `COALESCE` over the
-    /// columns in order, see [`Self::bind_column_indices`].
-    pub fn get_column_binding_indices(
+    /// Binds a column reference to the column, or an unqualified reference to a column merged by
+    /// `NATURAL` or `USING` joins to the merged column.
+    pub fn bind_column_ref(
         &self,
         schema_name: &Option<String>,
         table_name: &Option<String>,
         column_name: &String,
-    ) -> LiteResult<Vec<usize>> {
+    ) -> LiteResult<ExprImpl> {
         match table_name {
-            Some(table_name) => Ok(vec![self.get_index_with_table_name(
+            Some(table_name) => Ok(self.bind_column_index(self.get_index_with_table_name(
                 column_name,
                 table_name,
                 schema_name,
-            )?]),
-            None => self.get_unqualified_indices(column_name),
+            )?)),
+            None => self.bind_unqualified_column(column_name),
         }
     }
 
-    /// Binds the indices returned by [`Self::get_column_binding_indices`] to the column, or to
-    /// `COALESCE` over the columns merged by `NATURAL` or `USING` joins.
-    pub fn bind_column_indices(&self, indices: &[usize]) -> Result<ExprImpl> {
-        let mut inputs: Vec<ExprImpl> = indices
-            .iter()
-            .map(|index| {
-                let column = &self.columns[*index];
-                InputRef::new(column.index, column.field.data_type.clone()).into()
-            })
-            .collect();
-        if inputs.len() == 1 {
-            Ok(inputs.pop().unwrap())
-        } else {
-            Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
-        }
+    fn bind_column_index(&self, index: usize) -> ExprImpl {
+        let column = &self.columns[index];
+        InputRef::new(column.index, column.field.data_type.clone()).into()
     }
 
     pub fn get_table_alias(
@@ -230,27 +220,38 @@ impl BindContext {
         Ok(None)
     }
 
-    pub fn get_unqualified_indices(&self, column_name: &String) -> LiteResult<Vec<usize>> {
+    /// Binds an unqualified reference to the column, or to the merged column if the name is of
+    /// columns merged by `NATURAL` or `USING` joins.
+    pub fn bind_unqualified_column(&self, column_name: &String) -> LiteResult<ExprImpl> {
         let columns = self
             .indices_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {column_name}")))?;
-        if columns.len() > 1 {
-            // If there is some group containing the columns and the ambiguous columns are all in
-            // the group
-            if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
-                let group = self.column_group_context.groups.get(group_id).unwrap();
-                if columns.iter().all(|idx| group.indices.contains(idx)) {
-                    return Ok(group.merged.clone());
-                }
-            }
-            Err(ErrorCode::InvalidReference(format!(
+        if let [index] = columns.as_slice() {
+            return Ok(self.bind_column_index(*index));
+        }
+        match self.get_column_group_id(column_name) {
+            Some(group_id) => Ok(self.column_group_context.groups[&group_id].merged.clone()),
+            None => Err(ErrorCode::InvalidReference(format!(
                 "column reference \"{}\" is ambiguous",
                 column_name
-            )))
-        } else {
-            Ok(columns.clone())
+            ))),
         }
+    }
+
+    /// The id of the column group that an unqualified reference to `column_name` resolves to, if
+    /// all the columns of the name are merged by `NATURAL` or `USING` joins.
+    pub fn get_column_group_id(&self, column_name: &str) -> Option<u32> {
+        let columns = self.indices_of.get(column_name)?;
+        if columns.len() < 2 {
+            return None;
+        }
+        let group_id = *self.column_group_context.mapping.get(&columns[0])?;
+        let group = &self.column_group_context.groups[&group_id];
+        columns
+            .iter()
+            .all(|idx| group.indices.contains(idx))
+            .then_some(group_id)
     }
 
     pub fn check_catalog_name(&self, exposed_relation_name: &str) -> Result<()> {
@@ -300,7 +301,7 @@ impl BindContext {
     }
 
     /// Identifies two columns as being in the same group, and sets the merged column of the group.
-    pub fn add_natural_columns(&mut self, left: usize, right: usize, merged: Vec<usize>) {
+    pub fn add_natural_columns(&mut self, left: usize, right: usize, merged: ExprImpl) {
         match (
             self.column_group_context.mapping.get(&left).copied(),
             self.column_group_context.mapping.get(&right).copied(),
@@ -311,6 +312,7 @@ impl BindContext {
 
                 let group = ColumnGroup {
                     indices: HashSet::from([left, right]),
+                    column_name: self.columns[left].field.name.clone(),
                     merged,
                 };
                 self.column_group_context.groups.insert(group_id, group);
@@ -460,6 +462,8 @@ impl BindContext {
         self.check_cte_relation_name_conflict(&other)?;
 
         let begin = self.columns.len();
+        // Shifts the merged columns of `other`'s column groups.
+        let mut shift = ColIndexMapping::with_shift_offset(other.columns.len(), begin as isize);
         self.columns.extend(other.columns.into_iter().map(|mut c| {
             c.index += begin;
             c
@@ -499,9 +503,7 @@ impl BindContext {
         }
         for (group_id, mut group) in groups {
             group.indices = group.indices.into_iter().map(|idx| idx + begin).collect();
-            for col in &mut group.merged {
-                *col += begin;
-            }
+            group.merged = shift.rewrite_expr(group.merged);
             self.column_group_context
                 .groups
                 .insert(offset + group_id, group);

@@ -18,7 +18,10 @@ use risingwave_sqlparser::ast::{Ident, JoinConstraint, JoinOperator, TableFactor
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Clause, Relation};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ExprType, FunctionCall, ScopeId};
+use crate::expr::{
+    Expr as _, ExprImpl, ExprRewriter, ExprType, FunctionCall, ScopeId, align_types,
+};
+use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -199,37 +202,35 @@ impl Binder {
                     {
                         continue;
                     }
-                    let merged_l = match old_context.get_unqualified_indices(&column.real_value()) {
+                    let column_name = column.real_value();
+                    let merged_l = match old_context.bind_unqualified_column(&column_name) {
                         Err(ErrorCode::ItemNotFound(_)) => continue,
                         Err(e) => return Err(e.into()),
-                        Ok(idxs) => idxs,
+                        Ok(expr) => expr,
                     };
-                    // Merging the contexts offsets the right columns by the left ones.
-                    let merged_r = self
-                        .context
-                        .get_unqualified_indices(&column.real_value())?
-                        .into_iter()
-                        .map(|i| i + l_len)
-                        .collect::<Vec<_>>();
-                    // The merged column is the left column for INNER and LEFT joins, the right
-                    // column for RIGHT joins, and `COALESCE(left, right)` for FULL joins.
-                    let merged = match join_type {
-                        JoinType::Inner | JoinType::LeftOuter => merged_l.clone(),
-                        JoinType::RightOuter => merged_r.clone(),
-                        JoinType::FullOuter => [merged_l.as_slice(), merged_r.as_slice()].concat(),
-                        _ => unreachable!(),
-                    };
-                    join_columns.push((merged_l, merged_r, merged));
+                    let merged_r = self.context.bind_unqualified_column(&column_name)?;
+                    // Any column of each side identifies its column group.
+                    let l = old_context.indices_of[&column_name][0];
+                    let r = self.context.indices_of[&column_name][0];
+                    join_columns.push((l, r, merged_l, merged_r));
                 }
+                let r_len = self.context.columns.len();
                 self.pop_and_merge_lateral_context()?;
 
+                // Merging the contexts offsets the right columns by the left ones.
+                let mut shift = ColIndexMapping::with_shift_offset(r_len, l_len as isize);
                 let mut conds = Vec::with_capacity(join_columns.len());
-                for (merged_l, merged_r, merged) in join_columns {
-                    let left = self.context.bind_column_indices(&merged_l)?;
-                    let right = self.context.bind_column_indices(&merged_r)?;
-                    conds.push(FunctionCall::new(ExprType::Equal, vec![left, right])?.into());
-                    self.context
-                        .add_natural_columns(merged_l[0], merged_r[0], merged);
+                for (l, r, merged_l, merged_r) in join_columns {
+                    let merged_r = shift.rewrite_expr(merged_r);
+                    conds.push(
+                        FunctionCall::new(
+                            ExprType::Equal,
+                            vec![merged_l.clone(), merged_r.clone()],
+                        )?
+                        .into(),
+                    );
+                    let merged = Self::merge_using_columns(join_type, merged_l, merged_r)?;
+                    self.context.add_natural_columns(l, r + l_len, merged);
                 }
                 let expr = ExprImpl::and(conds);
                 (expr, Some(relation))
@@ -243,6 +244,42 @@ impl Binder {
                 self.context.clause = clause;
                 (bound_expr, None)
             }
+        })
+    }
+
+    /// Merges the merged columns of the inputs of a `USING` join, as PostgreSQL does: the merged
+    /// column has the common type of both sides, and the join type picks the side that supplies
+    /// its value. That is either side for INNER joins, preferring one that needs no cast, the left
+    /// side for LEFT joins, the right side for RIGHT joins, and `COALESCE(left, right)` for FULL
+    /// joins.
+    fn merge_using_columns(
+        join_type: JoinType,
+        left: ExprImpl,
+        right: ExprImpl,
+    ) -> Result<ExprImpl> {
+        let mut aligned_left = left.clone();
+        let mut aligned_right = right.clone();
+        let common = align_types([&mut aligned_left, &mut aligned_right].into_iter())?;
+        Ok(match join_type {
+            JoinType::Inner if left.return_type() == common => left,
+            JoinType::Inner if right.return_type() == common => right,
+            JoinType::Inner | JoinType::LeftOuter => aligned_left,
+            JoinType::RightOuter => aligned_right,
+            JoinType::FullOuter => {
+                // Flatten the `COALESCE` of a nested FULL join, so that the plans of nested FULL
+                // joins over columns of the same type stay `COALESCE` over all the columns.
+                let inputs = [aligned_left, aligned_right]
+                    .into_iter()
+                    .flat_map(|input| match input {
+                        ExprImpl::FunctionCall(func) if func.func_type() == ExprType::Coalesce => {
+                            func.decompose().1
+                        }
+                        input => vec![input],
+                    })
+                    .collect();
+                FunctionCall::new(ExprType::Coalesce, inputs)?.into()
+            }
+            _ => unreachable!(),
         })
     }
 }

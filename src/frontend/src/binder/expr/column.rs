@@ -18,7 +18,7 @@ use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::{BindContext, Binder, Clause, LateralBindContext};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, Literal, ScopeId};
+use crate::expr::{ExprImpl, ExprRewriter, InputRefScopeRewriter, Literal, ScopeId};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -47,9 +47,9 @@ impl Binder {
 
         match self
             .context
-            .get_column_binding_indices(&schema_name, &table_name, &column_name)
+            .bind_column_ref(&schema_name, &table_name, &column_name)
         {
-            Ok(indices) => return self.context.bind_column_indices(&indices),
+            Ok(expr) => return Ok(expr),
             Err(e) => {
                 // If a column is referenced using three-level qualification and the table has an alias,
                 // prompt the user to use the table alias instead.
@@ -82,8 +82,8 @@ impl Binder {
                 if matches!(context.clause, Some(Clause::Insert)) {
                     continue;
                 }
-                match context.get_column_binding_indices(&schema_name, &table_name, &column_name) {
-                    Ok(indices) => {
+                match context.bind_column_ref(&schema_name, &table_name, &column_name) {
+                    Ok(expr) => {
                         // All `FROM` items of a query level share one namespace, even when the
                         // binder keeps the left inputs of a lateral factor in separate contexts.
                         if found.is_some() {
@@ -99,7 +99,7 @@ impl Binder {
                             }
                             .into());
                         }
-                        found = Some((context, indices));
+                        found = Some((context, expr));
                     }
                     Err(e @ ErrorCode::ItemNotFound(_)) => err = e,
                     // An ambiguous name must not fall through to an outer scope.
@@ -107,25 +107,9 @@ impl Binder {
                 }
             }
 
-            if let Some((context, indices)) = found {
-                let mut inputs = indices
-                    .iter()
-                    .map(|index| {
-                        let column = &context.columns[*index];
-                        CorrelatedInputRef::new(
-                            column.index,
-                            column.field.data_type.clone(),
-                            context.scope,
-                        )
-                        .into()
-                    })
-                    .collect::<Vec<ExprImpl>>();
-                return if inputs.len() == 1 {
-                    Ok(inputs.pop().unwrap())
-                } else {
-                    // An unqualified reference to a column merged by `NATURAL`/`USING` join.
-                    Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
-                };
+            if let Some((context, expr)) = found {
+                // The column, or the column merged by `NATURAL`/`USING` joins, owned by `context`.
+                return Ok(InputRefScopeRewriter::new(context.scope).rewrite_expr(expr));
             }
         }
 
