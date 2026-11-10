@@ -894,12 +894,17 @@ MqttProperties:
   - name: clean_start
     field_type: bool
     comments: |-
-      `clean_start = true` removes all the state from queues & instructs the broker
-      to clean all the client state when client disconnects.
+      Whether to start a new session when connecting (MQTT v5 Clean Start). Defaults to `false`.
 
-      When set `false`, broker will hold the client state and performs pending
-      operations on the client when reconnection with same `client_id`
-      happens. Local queue state is also held to retransmit packets after reconnection.
+      `clean_start = true` makes the broker discard any existing session for the client id when
+      connecting. `clean_start = false` resumes the session the broker still holds for the same
+      client id, if any, including its subscriptions and the QoS 1 and 2 messages queued for it.
+
+      This flag only applies when connecting. How long the broker keeps a session after a
+      disconnect is controlled by `session_expiry_interval`. If that is not set, the session ends
+      when the connection closes, so `clean_start = false` alone does not resume anything after a
+      reconnect. Conversely, `clean_start = true` with `session_expiry_interval = 60` still keeps
+      the new session for 60 seconds after a disconnect.
     required: false
     default: Default::default
   - name: keep_alive_secs
