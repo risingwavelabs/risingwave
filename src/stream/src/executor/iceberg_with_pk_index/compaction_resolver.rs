@@ -37,7 +37,11 @@ use risingwave_connector::sink::iceberg::{
     serialize_data_files_default_spec, write_position_delete_file,
 };
 use risingwave_connector::source::iceberg::ParquetFileReader;
+use risingwave_expr::expr::{
+    BoxedExpression, InputRefExpression, SyncExpressionBoxExt, build_func,
+};
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, ResolverTaskInput};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
@@ -330,14 +334,24 @@ impl CompactionResolverExecutor {
         drop(chunk_tx);
 
         let output_data_types = self.output_data_types();
+        let mut output_projection = None;
         while let Some(chunk) = chunk_rx
             .recv()
             .instrument_await("compaction_resolver_scan_output_files")
             .await
         {
             let chunk = chunk?;
-            debug_assert_eq!(chunk.data_types(), output_data_types);
-            yield chunk;
+            if output_projection.is_none() {
+                output_projection = Some(OutputTypeProjection::new(
+                    chunk.data_types(),
+                    &output_data_types,
+                )?);
+            }
+            yield output_projection
+                .as_ref()
+                .expect("initialized from the first output chunk")
+                .execute(chunk)
+                .await?;
         }
 
         for (path, task) in split_paths.iter().zip_eq_fast(tasks.0.iter_mut()) {
@@ -635,6 +649,74 @@ async fn scan_input_pks_at_positions(
 
 type OutputChunkSender = mpsc::Sender<Result<DataChunk, SinkError>>;
 
+/// Like the cast projection after an Iceberg engine-table scan, restores the writer's
+/// declared types using SQL casts. Build expressions once and reuse unchanged columns.
+/// Delete-diff comparisons remain in physical types on both sides.
+struct OutputTypeProjection {
+    input_types: Vec<DataType>,
+    casts: Vec<Option<BoxedExpression>>,
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "PK index rebuilds must fail on cast errors instead of substituting NULL keys"
+)]
+impl OutputTypeProjection {
+    fn new(input_types: Vec<DataType>, output_types: &[DataType]) -> Result<Self, SinkError> {
+        if input_types.len() != output_types.len() {
+            return Err(SinkError::Iceberg(anyhow!(
+                "compaction resolver output column count mismatch: expected {}, got {}",
+                output_types.len(),
+                input_types.len()
+            )));
+        }
+        let casts = input_types
+            .iter()
+            .zip_eq_fast(output_types)
+            .enumerate()
+            .map(|(index, (source, target))| {
+                if source == target {
+                    return Ok(None);
+                }
+                build_func(
+                    PbType::Cast,
+                    target.clone(),
+                    vec![InputRefExpression::new(source.clone(), index).boxed()],
+                )
+                .map(Some)
+                .with_context(|| {
+                    format!("build compaction resolver cast from {source} to {target}")
+                })
+                .map_err(SinkError::Iceberg)
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self { input_types, casts })
+    }
+
+    async fn execute(&self, chunk: DataChunk) -> Result<DataChunk, SinkError> {
+        if chunk.data_types() != self.input_types {
+            return Err(SinkError::Iceberg(anyhow!(
+                "compaction resolver output schema changed between chunks"
+            )));
+        }
+        if self.casts.iter().all(Option::is_none) {
+            return Ok(chunk);
+        }
+        let mut columns = Vec::with_capacity(self.casts.len());
+        for (cast, column) in self.casts.iter().zip_eq_fast(chunk.columns()) {
+            columns.push(match cast {
+                Some(cast) => cast
+                    .eval(&chunk)
+                    .await
+                    .context("restore compaction resolver output types")
+                    .map_err(SinkError::Iceberg)?,
+                None => column.clone(),
+            });
+        }
+        Ok(DataChunk::new(columns, chunk.into_parts_v2().1))
+    }
+}
+
 /// One row group of an output data file, scanned by its own task.
 struct OutputScanSplit {
     path: Arc<str>,
@@ -849,9 +931,13 @@ mod tests {
     use std::sync::Arc;
 
     use iceberg::spec::{DataFileBuilder, DataFileFormat, Struct};
+    use parquet::arrow::ArrowWriter;
     use parquet::basic::Type as PhysicalType;
+    use parquet::file::properties::WriterProperties;
     use parquet::schema::types::{SchemaDescriptor, Type};
-    use risingwave_common::array::DataChunkTestExt;
+    use risingwave_common::array::arrow::arrow_schema_58 as arrow_schema;
+    use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunkTestExt};
+    use risingwave_common::types::{MapType, StructType};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 
@@ -945,6 +1031,209 @@ mod tests {
         let mut conflicts = DeleteVector::default();
         assert!(survivor_chunk(pk_chunk, "f", 0, &all_deleted, &mut conflicts).is_none());
         assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_restores_smallint_keys() {
+        let chunk = DataChunk::from_pretty(
+            "i T I
+             -32768 f 10
+             32767 f 11",
+        );
+        let path_column = chunk.column_at(1).clone();
+        let position_column = chunk.column_at(2).clone();
+        let chunk = restore_output_types(
+            chunk,
+            &[DataType::Int16, DataType::Varchar, DataType::Int64],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            chunk.data_types(),
+            vec![DataType::Int16, DataType::Varchar, DataType::Int64]
+        );
+        assert_eq!(
+            chunk.column_at(0).as_int16().iter().collect::<Vec<_>>(),
+            vec![Some(i16::MIN), Some(i16::MAX)]
+        );
+        assert!(Arc::ptr_eq(chunk.column_at(1), &path_column));
+        assert!(Arc::ptr_eq(chunk.column_at(2), &position_column));
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_rejects_mismatches() {
+        for value in [-32769, 32768] {
+            let chunk = DataChunk::from_pretty(&format!("i\n{value}"));
+            assert!(
+                restore_output_types(chunk, &[DataType::Int16])
+                    .await
+                    .is_err()
+            );
+        }
+        let chunk = DataChunk::from_pretty("i\n1");
+        assert!(
+            restore_output_types(chunk.clone(), &[DataType::Bytea])
+                .await
+                .is_err()
+        );
+        assert!(restore_output_types(chunk.clone(), &[]).await.is_err());
+        assert_eq!(
+            restore_output_types(chunk.clone(), &[DataType::Int32])
+                .await
+                .unwrap(),
+            chunk
+        );
+        let projection =
+            OutputTypeProjection::new(vec![DataType::Int32], &[DataType::Int16]).unwrap();
+        assert!(
+            projection
+                .execute(DataChunk::from_pretty("T\nx"))
+                .await
+                .is_err()
+        );
+    }
+
+    async fn restore_output_types(
+        chunk: DataChunk,
+        output_types: &[DataType],
+    ) -> Result<DataChunk, SinkError> {
+        OutputTypeProjection::new(chunk.data_types(), output_types)?
+            .execute(chunk)
+            .await
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_round_trips_iceberg_type_mappings() {
+        for (data_type, text) in [
+            (DataType::Int16, "-7"),
+            (DataType::Jsonb, r#"{"key": [1, null, true]}"#),
+            (DataType::Interval, "2 days 03:04:05"),
+            (DataType::Serial, "123"),
+            (DataType::list(DataType::Int16), "{-3,7,NULL}"),
+            (
+                DataType::Struct(StructType::new(vec![
+                    ("id", DataType::Int16),
+                    ("name", DataType::Varchar),
+                ])),
+                "(7,hello)",
+            ),
+            (
+                DataType::Map(MapType::from_kv(DataType::Int16, DataType::Int16)),
+                "{1:2,3:NULL}",
+            ),
+        ] {
+            let value = ScalarImpl::from_text_for_test(text, &data_type).unwrap();
+            let mut builder = ArrayBuilderImpl::with_type(2, data_type.clone());
+            builder.append(Some(value));
+            builder.append(None::<ScalarImpl>);
+            let original = DataChunk::new(vec![Arc::new(builder.finish())], 2);
+            let schema = Arc::new(arrow_schema::Schema::new(vec![
+                IcebergArrowConvert
+                    .to_arrow_field("pk", &data_type)
+                    .unwrap(),
+            ]));
+            let batch = IcebergArrowConvert
+                .to_record_batch(schema, &original)
+                .unwrap();
+            let physical = IcebergArrowConvert.chunk_from_record_batch(&batch).unwrap();
+            assert_ne!(physical.data_types(), original.data_types(), "{data_type}");
+            assert_eq!(
+                restore_output_types(physical, std::slice::from_ref(&data_type))
+                    .await
+                    .unwrap(),
+                original,
+                "{data_type}"
+            );
+        }
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_output_scan_preserves_positions_across_row_groups() {
+        let pk_chunk = DataChunk::from_pretty(
+            "i
+             1
+             2
+             3
+             4
+             5
+             6",
+        );
+        let schema = Arc::new(arrow_schema::Schema::new(vec![
+            IcebergArrowConvert
+                .to_arrow_field("id", &DataType::Int32)
+                .unwrap(),
+        ]));
+        let batch = IcebergArrowConvert
+            .to_record_batch(schema.clone(), &pk_chunk)
+            .unwrap();
+        let mut bytes = Vec::new();
+        let props = WriterProperties::builder()
+            .set_max_row_group_row_count(Some(2))
+            .build();
+        let mut writer = ArrowWriter::try_new(&mut bytes, schema, Some(props)).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let file_io = FileIO::new_with_memory();
+        let path = "memory:/output.parquet";
+        file_io
+            .new_output(path)
+            .unwrap()
+            .write(bytes.into())
+            .await
+            .unwrap();
+        let splits = plan_output_file_splits(&file_io, path).await.unwrap();
+        assert_eq!(
+            splits
+                .iter()
+                .map(|s| s.first_row_position)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 4]
+        );
+
+        // Conflicts in both later row groups must use file-relative positions, even when
+        // splits finish out of order and each row group spans multiple batches.
+        let deleted = Arc::new(HashSet::from([
+            OwnedRow::new(vec![Some(ScalarImpl::Int32(4))]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int32(5))]),
+        ]));
+        let (tx, mut rx) = mpsc::channel(OUTPUT_SCAN_CHANNEL_CAPACITY);
+        let mut conflicts = DeleteVector::default();
+        for split in splits.into_iter().rev() {
+            if let Some(dv) = scan_output_split(
+                file_io.clone(),
+                split,
+                Arc::from([0]),
+                1,
+                deleted.clone(),
+                tx.clone(),
+            )
+            .await
+            {
+                conflicts |= dv;
+            }
+        }
+        drop(tx);
+        let mut survivors = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            let chunk = restore_output_types(
+                chunk.unwrap(),
+                &[DataType::Int16, DataType::Varchar, DataType::Int64],
+            )
+            .await
+            .unwrap();
+            for row in chunk.rows() {
+                survivors.push((
+                    row.datum_at(0).unwrap().into_int16(),
+                    row.datum_at(2).unwrap().into_int64(),
+                ));
+                assert_eq!(row.datum_at(1).unwrap().into_utf8(), path);
+            }
+        }
+        survivors.sort_unstable();
+        assert_eq!(survivors, vec![(1, 0), (2, 1), (3, 2), (6, 5)]);
+        assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![3, 4]);
     }
 
     fn compaction_barrier(

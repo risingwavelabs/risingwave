@@ -1,0 +1,145 @@
+statement ok
+DROP TABLE IF EXISTS t_compaction_special_types;
+
+statement ok
+DROP CONNECTION IF EXISTS compaction_special_types_conn;
+
+statement ok
+DROP SECRET IF EXISTS compaction_special_types_secret;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/iceberg_compaction_special_types/
+
+statement ok
+create secret compaction_special_types_secret with (backend = 'meta') as 'hummockadmin';
+
+statement ok
+create connection compaction_special_types_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_compaction_special_types',
+    s3.access.key = secret compaction_special_types_secret,
+    s3.secret.key = secret compaction_special_types_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.compaction_special_types_conn';
+
+statement ok
+set iceberg_query_storage_mode = 'iceberg';
+
+statement ok
+set streaming_parallelism = 1;
+
+# Iceberg stores smallint as int and jsonb/interval as strings. The resolver
+# must restore the composite key's declared types when rebuilding the index.
+# A tiny row-group byte limit and many wide rows make the compacted output
+# span multiple row groups.
+statement ok
+create table t_compaction_special_types(
+    id smallint,
+    key_json jsonb,
+    key_interval interval,
+    v int,
+    payload varchar,
+    primary key (id, key_json, key_interval)
+)
+with (
+    commit_checkpoint_interval = 1,
+    format_version = 2,
+    enable_pk_index = 'true',
+    enable_compaction = 'false',
+    enable_snapshot_expiration = 'false',
+    compaction.write_parquet_max_row_group_bytes = 1024
+) engine = iceberg;
+
+statement ok
+insert into t_compaction_special_types
+select id::smallint, to_jsonb(id), (id::varchar || ' days')::interval,
+       id, repeat(md5(id::varchar), 32)
+from generate_series(1, 4096) as s(id);
+
+statement ok
+flush;
+
+query I retry 30 backoff 1s
+select count(*) from t_compaction_special_types;
+----
+4096
+
+statement ok
+insert into t_compaction_special_types
+select id::smallint, to_jsonb(id), (id::varchar || ' days')::interval,
+       id, repeat(md5(id::varchar), 32)
+from generate_series(4097, 8192) as s(id);
+
+statement ok
+flush;
+
+query III retry 30 backoff 1s
+select count(*), sum(v), sum(length(payload)) from t_compaction_special_types;
+----
+8192 33558528 8388608
+
+query T retry 30 backoff 1s
+select count(*) > 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_compaction_special_types'
+  and content = 'Data';
+----
+t
+
+statement ok
+VACUUM FULL t_compaction_special_types;
+
+query I retry 30 backoff 1s
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_compaction_special_types'
+  and content = 'Data';
+----
+1
+
+# Updating every existing row guarantees that rows from later row groups are
+# targeted regardless of the compactor's row ordering. Wrong index positions
+# leave old rows behind or delete unrelated rows.
+statement ok
+update t_compaction_special_types set v = v + 10000;
+
+statement ok
+flush;
+
+query IIIII retry 30 backoff 1s
+select count(*), count(distinct id), min(v), max(v), sum(v)
+from t_compaction_special_types;
+----
+8192 8192 10001 18192 115478528
+
+query I retry 30 backoff 1s
+select count(*) from t_compaction_special_types where v <> id::int + 10000;
+----
+0
+
+statement ok
+delete from t_compaction_special_types where id > 4096;
+
+statement ok
+flush;
+
+query IIIII retry 30 backoff 1s
+select count(*), count(distinct id), min(v), max(v), sum(v)
+from t_compaction_special_types;
+----
+4096 4096 10001 14096 49350656
+
+statement ok
+DROP TABLE t_compaction_special_types;
+
+statement ok
+DROP CONNECTION compaction_special_types_conn;
+
+statement ok
+DROP SECRET compaction_special_types_secret;
