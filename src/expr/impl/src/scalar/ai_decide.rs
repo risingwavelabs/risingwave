@@ -19,7 +19,6 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use reqwest::Client;
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::config::AiDecideConfig;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
@@ -32,7 +31,11 @@ use risingwave_expr::expr::{
 use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
-use tokio::sync::Semaphore;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const RETRY_DELAY: Duration = Duration::from_millis(100);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(10);
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
+const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// One state is one request. An array in `state` is context, not an HTTP batch.
 #[derive(Serialize)]
@@ -48,8 +51,6 @@ struct AiDecide {
     return_type: DataType,
     schema: QuestionSchema,
     client: Client,
-    config: AiDecideConfig,
-    request_permits: Option<Semaphore>,
 }
 
 impl std::fmt::Debug for AiDecide {
@@ -84,23 +85,8 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
             reason: "return type does not match fixed questions".into(),
         });
     }
-    let config = risingwave_expr::scalar::ai_decide::config();
-    config
-        .validate()
-        .map_err(|reason| ExprError::InvalidParam {
-            name: "ai_decide config",
-            reason: reason.into(),
-        })?;
-    if config.max_concurrency as usize > Semaphore::MAX_PERMITS {
-        return Err(ExprError::InvalidParam {
-            name: "ai_decide_max_concurrency",
-            reason: "exceeds semaphore capacity".into(),
-        });
-    }
-    let request_permits =
-        (config.max_concurrency != 0).then(|| Semaphore::new(config.max_concurrency as usize));
     let client = Client::builder()
-        .timeout(Duration::from_millis(config.request_timeout_ms.into()))
+        .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| request_error("could not initialize HTTP client"))?;
@@ -111,8 +97,6 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
         return_type,
         schema,
         client,
-        config,
-        request_permits,
     }
     .boxed())
 }
@@ -251,12 +235,9 @@ impl AiDecide {
             })
             .build()
             .map_err(|_| request_error("could not build HTTP request"))?;
-        let mut backoff_ms = self
-            .config
-            .retry_delay_ms
-            .min(self.config.max_retry_delay_ms);
+        let mut backoff = RETRY_DELAY;
         loop {
-            let mut delay = Duration::from_millis(backoff_ms.into());
+            let mut delay = backoff;
             // Drop the response and its bytes before sleeping. Retry the same serialized
             // request for every remote failure, including invalid success responses.
             let result = async {
@@ -279,20 +260,15 @@ impl AiDecide {
                         .and_then(|value| value.to_str().ok())
                         .and_then(|value| value.parse::<u64>().ok())
                     {
-                        delay = Duration::from_secs(seconds)
-                            .min(Duration::from_millis(self.config.max_retry_after_ms.into()));
+                        delay = Duration::from_secs(seconds).min(MAX_RETRY_AFTER);
                     }
                     return Err(request_error(format!("HTTP {status}")));
                 }
-                let too_large = || {
-                    request_error(format!(
-                        "response exceeds {} bytes",
-                        self.config.max_response_bytes
-                    ))
-                };
+                let too_large =
+                    || request_error(format!("response exceeds {} bytes", MAX_RESPONSE_BYTES));
                 if response
                     .content_length()
-                    .is_some_and(|len| len > u64::from(self.config.max_response_bytes))
+                    .is_some_and(|len| len > MAX_RESPONSE_BYTES as u64)
                 {
                     return Err(too_large());
                 }
@@ -302,9 +278,7 @@ impl AiDecide {
                     .await
                     .map_err(|_| request_error("HTTP response body read failed"))?
                 {
-                    if chunk.len()
-                        > (self.config.max_response_bytes as usize).saturating_sub(bytes.len())
-                    {
+                    if chunk.len() > MAX_RESPONSE_BYTES.saturating_sub(bytes.len()) {
                         return Err(too_large());
                     }
                     bytes.extend_from_slice(&chunk);
@@ -326,28 +300,15 @@ impl AiDecide {
                     }
                 }
             }
-            // Sleep remains cancellable, including when a configured zero delay yields.
+            // Dropping evaluation also cancels the backoff sleep.
             tokio::time::sleep(delay).await;
-            backoff_ms = backoff_ms
-                .saturating_mul(2)
-                .min(self.config.max_retry_delay_ms);
+            backoff = backoff.saturating_mul(2).min(MAX_RETRY_DELAY);
         }
     }
 
     async fn evaluate(&self, args: [DatumRef<'_>; 4]) -> Result<Option<StructValue>> {
         let [Some(state), Some(url), Some(model), Some(api_key)] = args else {
             return Ok(None);
-        };
-        // Share permits across concurrent eval/eval_row calls on this expression instance.
-        // Retain the permit through retries and backoff; cancellation releases it by drop.
-        let _permit = match &self.request_permits {
-            Some(permits) => Some(
-                permits
-                    .acquire()
-                    .await
-                    .expect("request semaphore is never closed"),
-            ),
-            None => None,
         };
         self.request(
             state.into_jsonb(),
@@ -441,11 +402,9 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::sync::Barrier;
+    use tokio::sync::{Barrier, Semaphore};
 
     use super::*;
-
-    const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
     struct Server {
         url: String,
@@ -484,8 +443,6 @@ mod tests {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
-            config: AiDecideConfig::default(),
-            request_permits: None,
         }
     }
 
@@ -672,27 +629,25 @@ mod tests {
     #[tokio::test]
     async fn retries_all_remote_errors_until_a_valid_answer() {
         let good = r#"{"answers":{"q":{"type":"noul","noul":0.5}}}"#;
-        let mut responses: Vec<_> = [429, 503, 401, 400, 307].into_iter().map(|status| {
-            format!("HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nRetry-After: 100\r\nLocation: /wrong\r\nConnection: close\r\n\r\n").into_bytes()
-        }).collect();
-        responses.extend([
+        let oversized = " ".repeat(MAX_RESPONSE_BYTES + 1);
+        let mut responses = vec![
             complete_response("test-only-key is not JSON"),
             complete_response(r#"{"answers":{"q":{"type":"noul","noul":2}}}"#),
             b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"answers\":".to_vec(),
-            complete_response(&" ".repeat(129)),
-            format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n81\r\n{}\r\n0\r\n\r\n", " ".repeat(129)).into_bytes(),
-            complete_response(good),
-        ]);
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", MAX_RESPONSE_BYTES + 1).into_bytes(),
+            format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n", oversized.len(), oversized).into_bytes(),
+        ];
+        responses.extend([429, 503, 401, 400, 307].into_iter().map(|status| {
+            // Exercise the fixed Retry-After cap once; other statuses need no delay.
+            let retry_after = if status == 429 { 100 } else { 0 };
+            format!("HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nRetry-After: {retry_after}\r\nLocation: /wrong\r\nConnection: close\r\n\r\n").into_bytes()
+        }));
+        responses.push(complete_response(good));
         let expected = responses.len();
         let attempts = Arc::new(AtomicUsize::new(0));
         let server = raw_server(responses, attempts.clone()).await;
-        let mut expr = expression(REQUEST_TIMEOUT);
-        expr.config.max_response_bytes = 128;
-        // Both Retry-After and exponential backoff must honor their configured caps.
-        expr.config.max_retry_after_ms = 1;
-        expr.config.retry_delay_ms = 10_000;
-        expr.config.max_retry_delay_ms = 2;
-        let value = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
+        let expr = expression(REQUEST_TIMEOUT);
+        let value = tokio::time::timeout(Duration::from_secs(20), call(&expr, &server.url))
             .await
             .unwrap()
             .unwrap();
@@ -717,8 +672,7 @@ mod tests {
             }),
         ))
         .await;
-        let mut expr = expression(Duration::from_millis(50));
-        expr.config.retry_delay_ms = 1;
+        let expr = expression(Duration::from_millis(50));
         let value = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
             .await
             .unwrap()
@@ -780,9 +734,7 @@ mod tests {
         )
         .into_ref();
         let input = DataChunk::new(columns, visibility);
-        let mut expr = expression(REQUEST_TIMEOUT);
-        // Exercise good rows both before and after failures while sharing one permit.
-        expr.request_permits = Some(Semaphore::new(1));
+        let expr = expression(REQUEST_TIMEOUT);
         let Err(ExprError::Multiple(partial, errors)) = expr.eval(&input).await else {
             panic!("row errors must carry the successful results");
         };
@@ -853,130 +805,8 @@ mod tests {
         assert_eq!(requests.load(Ordering::SeqCst), 36);
     }
 
-    fn configured_node(config: Option<&AiDecideConfig>) -> risingwave_pb::expr::ExprNode {
-        use risingwave_common::util::value_encoding::DatumToProtoExt;
-        use risingwave_pb::expr::expr_node::RexNode;
-        use risingwave_pb::expr::{ExprNode, FunctionCall};
-
-        let children = (0..5)
-            .map(|i| ExprNode {
-                return_type: Some(if i == 0 || i == 3 {
-                    DataType::Jsonb.to_protobuf()
-                } else {
-                    DataType::Varchar.to_protobuf()
-                }),
-                rex_node: Some(if i == 3 {
-                    RexNode::Constant(Some(ScalarImpl::from(test_questions())).to_protobuf())
-                } else {
-                    RexNode::InputRef(i)
-                }),
-                ..Default::default()
-            })
-            .collect();
-        ExprNode {
-            function_type: ExprType::AiDecide as i32,
-            return_type: Some(test_schema().return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children,
-                ai_decide: config.map(Into::into),
-            })),
-        }
-    }
-
-    #[test]
-    fn node_config_and_streaming_override_apply_to_nested_calls() {
-        use risingwave_expr::expr::build_from_prost;
-        use risingwave_expr::scalar::ai_decide::with_config;
-        use risingwave_pb::expr::expr_node::RexNode;
-        use risingwave_pb::expr::{ExprNode, FunctionCall};
-
-        let invalid = AiDecideConfig {
-            request_timeout_ms: 0,
-            ..Default::default()
-        };
-        let node = ExprNode {
-            function_type: ExprType::Coalesce as i32,
-            return_type: Some(test_schema().return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![configured_node(None), configured_node(Some(&invalid))],
-                ..Default::default()
-            })),
-        };
-        // The first child's defaults must not leak to its sibling's explicit config.
-        assert!(build_from_prost(&configured_node(None)).is_ok());
-        assert!(build_from_prost(&node).is_err());
-        // Recovery rebuilds all nested calls with the current job/global config.
-        assert!(with_config(AiDecideConfig::default(), || build_from_prost(&node)).is_ok());
-        assert!(build_from_prost(&node).is_err());
-    }
-
     #[tokio::test]
-    async fn configured_limit_is_shared_across_chunks_and_released_on_cancellation() {
-        let gate = Arc::new(Semaphore::new(0));
-        let (started, mut requests) = tokio::sync::mpsc::unbounded_channel();
-        let handler_gate = gate.clone();
-        let server = server(Router::new().route(
-            "/evaluate",
-            post(move || {
-                let gate = handler_gate.clone();
-                let started = started.clone();
-                async move {
-                    started.send(()).unwrap();
-                    gate.acquire().await.unwrap().forget();
-                    Json(json!({"answers": {"q": {"type": "noul", "noul": 0.5}}}))
-                }
-            }),
-        ))
-        .await;
-        let config = AiDecideConfig {
-            max_concurrency: 2,
-            ..Default::default()
-        };
-        let expr = Arc::new(
-            risingwave_expr::expr::build_from_prost(&configured_node(Some(&config))).unwrap(),
-        );
-        let input = chunk(&server.url, 6);
-        let cancelled = {
-            let expr = expr.clone();
-            let input = input.clone();
-            tokio::spawn(async move { tokio::join!(expr.eval(&input), expr.eval(&input)) })
-        };
-        for _ in 0..2 {
-            tokio::time::timeout(Duration::from_secs(5), requests.recv())
-                .await
-                .unwrap()
-                .unwrap();
-        }
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), requests.recv())
-                .await
-                .is_err(),
-            "two concurrent chunks must share the same two permits"
-        );
-        cancelled.abort();
-        assert!(cancelled.await.unwrap_err().is_cancelled());
-        let resumed = tokio::spawn(async move { expr.eval(&input).await });
-        for _ in 0..2 {
-            tokio::time::timeout(Duration::from_secs(5), requests.recv())
-                .await
-                .unwrap()
-                .unwrap();
-        }
-        // Cancellation releases local permits; the server may still be processing old requests.
-        gate.add_permits(20);
-        let output = tokio::time::timeout(Duration::from_secs(5), resumed)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert_eq!(score_at(&output, 0), Some(0.5));
-        assert_eq!(score_at(&output, 1), None);
-        assert_eq!(score_at(&output, 2), None);
-        assert_eq!(score_at(&output, 5), Some(0.5));
-    }
-
-    #[tokio::test]
-    async fn persistent_failure_keeps_permit_until_cancelled() {
+    async fn persistent_failure_retries_until_cancelled() {
         let healthy = Arc::new(AtomicBool::new(false));
         let service_healthy = healthy.clone();
         let (started, mut attempts) = tokio::sync::mpsc::unbounded_channel();
@@ -995,10 +825,7 @@ mod tests {
             }),
         ))
         .await;
-        let mut expr = expression(REQUEST_TIMEOUT);
-        expr.config.retry_delay_ms = 10;
-        expr.request_permits = Some(Semaphore::new(1));
-        let expr = Arc::new(expr);
+        let expr = Arc::new(expression(REQUEST_TIMEOUT));
         let input = chunk(&server.url, 1);
         let task = {
             let expr = expr.clone();
@@ -1015,16 +842,8 @@ mod tests {
             !task.is_finished(),
             "permanent HTTP failures must stay inside the retry loop"
         );
-        assert_eq!(
-            expr.request_permits.as_ref().unwrap().available_permits(),
-            0
-        );
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
-        assert_eq!(
-            expr.request_permits.as_ref().unwrap().available_permits(),
-            1
-        );
         healthy.store(true, Ordering::SeqCst);
         let result = tokio::time::timeout(Duration::from_secs(5), expr.eval(&input))
             .await

@@ -19,12 +19,6 @@ postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
 postmaster per_database_isolation
 postmaster time_travel_retention_ms
-user ai_decide_max_concurrency
-user ai_decide_max_response_bytes
-user ai_decide_max_retry_after_ms
-user ai_decide_max_retry_delay_ms
-user ai_decide_request_timeout_ms
-user ai_decide_retry_delay_ms
 user application_name
 user auto_locality_backfill_min_size
 user backfill_rate_limit
@@ -122,7 +116,7 @@ SELECT * FROM pg_catalog.pg_settings where name='dummy';
 query TT
 SELECT min(name) name, context FROM pg_catalog.pg_settings GROUP BY context;
 ----
-ai_decide_max_concurrency	user
+application_name	user
 backup_storage_directory	postmaster
 block_size_kb	internal
 

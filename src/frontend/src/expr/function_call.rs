@@ -321,11 +321,7 @@ impl Expr for FunctionCall {
         Ok(ExprNode {
             function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children,
-                ai_decide: (self.func_type() == ExprType::AiDecide)
-                    .then(|| (&risingwave_expr::scalar::ai_decide::config()).into()),
-            })),
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
         })
     }
 }

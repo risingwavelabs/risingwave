@@ -225,15 +225,7 @@ impl BuildBoxed for FuncCallBuilder {
             .map(build_child)
             .try_collect()?;
 
-        if func_type == PbType::AiDecide {
-            use crate::scalar::ai_decide;
-            let config = ai_decide::config_override()
-                .or_else(|| func_call.ai_decide.map(Into::into))
-                .unwrap_or_default();
-            ai_decide::with_config(config, || build_func(func_type, ret_type, children))
-        } else {
-            build_func(func_type, ret_type, children)
-        }
+        build_func(func_type, ret_type, children)
     }
 }
 

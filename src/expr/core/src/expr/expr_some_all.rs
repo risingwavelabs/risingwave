@@ -258,7 +258,6 @@ impl SomeAllExpression<BoxedExpression> {
                 function_type: inner_expr_type as i32,
                 return_type: Some(inner_return_type.to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
-                    ai_decide: None,
                     children: vec![left_expr_input_ref, right_expr_input_ref],
                 })),
             };
@@ -267,7 +266,6 @@ impl SomeAllExpression<BoxedExpression> {
                     function_type: expr_type as i32,
                     return_type: Some(return_type.to_protobuf()),
                     rex_node: Some(RexNode::FuncCall(FunctionCall {
-                        ai_decide: None,
                         children: vec![root_expr_node],
                     })),
                 }

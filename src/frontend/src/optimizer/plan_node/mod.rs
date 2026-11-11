@@ -937,16 +937,6 @@ impl dyn StreamPlanNode {
 }
 
 impl dyn BatchPlanNode {
-    /// Capture session settings on `AI_DECIDE` nodes at plan serialization time.
-    pub fn to_batch_prost_body_with_config(
-        &self,
-    ) -> SchedulerResult<risingwave_pb::batch_plan::plan_node::NodeBody> {
-        risingwave_expr::scalar::ai_decide::with_config(
-            self.ctx().session_ctx().config().ai_decide_config(),
-            || self.try_to_batch_prost_body(),
-        )
-    }
-
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> SchedulerResult<PbBatchPlan> {
         self.to_batch_prost_identity(true)
@@ -960,7 +950,7 @@ impl dyn BatchPlanNode {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
 
-            let node_body = Some(self.to_batch_prost_body_with_config()?);
+            let node_body = Some(self.try_to_batch_prost_body()?);
             let children = self
                 .inputs()
                 .into_iter()

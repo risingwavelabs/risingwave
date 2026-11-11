@@ -1672,7 +1672,6 @@ mod tests {
             function_type: PbExprType::Equal as i32,
             return_type: Some(DataType::Boolean.to_protobuf()),
             rex_node: Some(RexNode::FuncCall(PbFunctionCall {
-                ai_decide: None,
                 children: vec![input_ref(0), input_ref(1)],
             })),
         }

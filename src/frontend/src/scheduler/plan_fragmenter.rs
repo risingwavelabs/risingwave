@@ -160,7 +160,7 @@ impl TryFrom<PlanRef> for ExecutionPlanNode {
         Ok(Self {
             plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
-            node: plan_node.to_batch_prost_body_with_config()?,
+            node: plan_node.try_to_batch_prost_body()?,
             children: vec![],
             schema: plan_node.schema().to_prost(),
             source_stage_id: None,

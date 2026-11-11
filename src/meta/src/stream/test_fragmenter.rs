@@ -242,7 +242,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // filter node
     let function_call = FunctionCall {
-        ai_decide: None,
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let filter_node = StreamNode {
@@ -323,7 +322,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // project node
     let function_call_1 = FunctionCall {
-        ai_decide: None,
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let project_node = StreamNode {

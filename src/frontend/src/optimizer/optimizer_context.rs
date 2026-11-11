@@ -159,11 +159,6 @@ impl OptimizerContext {
             handler_args.session.config().timezone(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
-        // Other DDL helpers also read OverwriteOptions; consume these only when the
-        // optimizer context captures the values for the streaming job.
-        for key in overwrite_options.ai_decide.keys() {
-            handler_args.with_options.remove(key);
-        }
         Self {
             session_ctx: handler_args.session,
             sql: handler_args.sql,

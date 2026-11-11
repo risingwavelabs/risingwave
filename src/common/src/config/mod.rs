@@ -17,8 +17,6 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-mod ai_decide;
-pub use ai_decide::AiDecideConfig;
 pub mod batch;
 pub use batch::BatchConfig;
 pub mod frontend;
