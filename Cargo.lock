@@ -16047,7 +16047,6 @@ dependencies = [
  "hashbrown 0.17.1",
  "hytra",
  "iceberg",
- "indexmap 2.14.0",
  "itertools 0.14.0",
  "jsonbb",
  "madsim-tokio",
