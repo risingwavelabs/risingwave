@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.google.protobuf.ByteString;
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
@@ -156,7 +155,7 @@ final class OracleExternalTable {
                         propertiesMap.get(DbzConnectorConfig.USER),
                         propertiesMap.get(DbzConnectorConfig.PASSWORD))) {
             initializeSession(connection, pdbName(propertiesMap));
-            var schemaName = propertiesMap.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
+            var schemaName = propertiesMap.get(DbzConnectorConfig.SCHEMA_NAME);
             var tableName = propertiesMap.get(DbzConnectorConfig.TABLE_NAME);
             var columns = discoverColumns(connection, schemaName, tableName);
             if (columns.isEmpty()) {
@@ -328,13 +327,12 @@ final class OracleExternalTable {
 
     private static String pdbName(Map<String, String> properties) throws SQLException {
         return OracleValidator.normalizeIdentifierInConfigOption(
-                DbzConnectorConfig.ORACLE_PDB_NAME,
-                properties.get(DbzConnectorConfig.ORACLE_PDB_NAME));
+                OracleDbzConnectorConfig.PDB_NAME,
+                properties.get(OracleDbzConnectorConfig.PDB_NAME));
     }
 
     private static String jdbcUrl(Map<String, String> properties) throws SQLException {
-        return ValidatorUtils.getJdbcUrl(
-                SourceTypeE.ORACLE,
+        return OracleCdcSource.getJdbcUrl(
                 properties.get(DbzConnectorConfig.HOST),
                 properties.get(DbzConnectorConfig.PORT),
                 OracleValidator.normalizeIdentifierInConfigOption(

@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -28,7 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-public class OracleValidator extends DatabaseValidator implements AutoCloseable {
+public class OracleValidator extends SourceValidator implements AutoCloseable {
     private static final Set<String> REQUIRED_PRIVILEGES =
             Set.of(
                     "CREATE SESSION",
@@ -62,19 +61,18 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         this.tableSchema = tableSchema;
         this.pdbName =
                 normalizeIdentifierInConfigOption(
-                        DbzConnectorConfig.ORACLE_PDB_NAME,
-                        userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
+                        OracleDbzConnectorConfig.PDB_NAME,
+                        userProps.get(OracleDbzConnectorConfig.PDB_NAME));
         this.heartbeatTable =
                 OracleHeartbeatTable.parse(
-                        userProps.get(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
+                        userProps.get(OracleDbzConnectorConfig.HEARTBEAT_TABLE_NAME));
         this.autoInitializeHeartbeatTable =
                 "true"
                         .equals(
                                 userProps.get(
                                         DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY));
         var jdbcUrl =
-                ValidatorUtils.getJdbcUrl(
-                        SourceTypeE.ORACLE,
+                OracleCdcSource.getJdbcUrl(
                         userProps.get(DbzConnectorConfig.HOST),
                         userProps.get(DbzConnectorConfig.PORT),
                         normalizeIdentifierInConfigOption(
@@ -85,7 +83,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                         jdbcUrl,
                         userProps.get(DbzConnectorConfig.USER),
                         userProps.get(DbzConnectorConfig.PASSWORD));
-        this.schemaName = userProps.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
+        this.schemaName = userProps.get(DbzConnectorConfig.SCHEMA_NAME);
         this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
         this.isCdcSourceJob = isCdcSourceJob;
     }

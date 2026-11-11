@@ -26,7 +26,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
 
-public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
+public class MySqlValidator extends SourceValidator implements AutoCloseable {
     private static final String REPLICATION_CLIENT = "REPLICATION CLIENT";
     private static final String BINLOG_MONITOR = "BINLOG MONITOR";
     private final Map<String, String> userProps;
@@ -68,10 +68,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var properties = new Properties();
         properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
         properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
-        String sslMode = userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED");
+        String sslMode = userProps.getOrDefault(MysqlDbzConnectorConfig.SSL_MODE, "DISABLED");
         if (isMariaDb) {
-            sslMode = DbzConnectorConfig.mariaDbSslMode(userProps);
-            var rootCert = DbzConnectorConfig.mariaDbSslRootCert(userProps);
+            sslMode = MariadbDbzConnectorConfig.sslMode(userProps);
+            var rootCert = MariadbDbzConnectorConfig.sslRootCert(userProps);
             if (rootCert != null) {
                 properties.setProperty("serverSslCert", rootCert);
             }

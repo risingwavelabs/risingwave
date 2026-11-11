@@ -1,0 +1,37 @@
+# `transactional` is set by RisingWave itself for the connectors that support transaction
+# metadata, and `auto.schema.change` is accepted only by the connectors that can apply the
+# resulting DDL events. Both checks run before the upstream database is contacted.
+
+statement error 'transactional' cannot be set
+create source mysql_transactional with (
+  connector = 'mysql-cdc',
+  transactional = 'true'
+) format plain encode json;
+
+statement error 'transactional' cannot be set
+create source postgres_transactional with (
+  connector = 'postgres-cdc',
+  transactional = 'false'
+) format plain encode json;
+
+statement error 'transactional' cannot be set
+create table mongodb_transactional (_id jsonb primary key, payload jsonb) with (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'mydb.orders',
+  transactional = 'true'
+) format debezium_mongo encode json;
+
+statement error auto schema change for connector sqlserver-cdc
+create source sqlserver_auto_schema_change with (
+  connector = 'sqlserver-cdc',
+  auto.schema.change = 'true'
+) format plain encode json;
+
+statement error auto schema change for connector mongodb-cdc
+create table mongodb_auto_schema_change (_id jsonb primary key, payload jsonb) with (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'mydb.orders',
+  auto.schema.change = 'true'
+) format debezium_mongo encode json;

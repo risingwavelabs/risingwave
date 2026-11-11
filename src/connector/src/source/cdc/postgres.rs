@@ -26,6 +26,7 @@ use crate::source::cdc::{
 // ------- Runtime flags -------
 
 impl CdcSourceRuntimeFlags for Postgres {
+    const CAN_AUTO_SCHEMA_CHANGE: bool = true;
     const CAN_BACKFILL: bool = true;
     const CAN_BACKFILL_IN_PARALLEL: bool = true;
     const CAN_USE_TRANSACTION_METADATA: bool = true;

@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.mongodb.ConnectionString;
-import com.risingwave.connector.api.source.SourceTypeE;
 import io.debezium.config.Configuration;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import io.debezium.connector.mongodb.connection.MongoDbConnection;
@@ -31,7 +30,7 @@ import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class MongoDbValidator extends DatabaseValidator implements AutoCloseable {
+public class MongoDbValidator extends SourceValidator implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbValidator.class);
     private static final int VALIDATION_TIMEOUT_SECONDS = 5;
     private static final String VALIDATION_TIMEOUT_MILLIS = "5000";
@@ -60,8 +59,7 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
         this.isShardedCluster = false;
 
         var connectorConfig =
-                new DbzConnectorConfig(
-                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
+                new MongodbCdcSource(sourceId, null, userProps, false, false).getConfig();
         var validationProperties = new Properties();
         validationProperties.putAll(connectorConfig.getResolvedDebeziumProps());
         validationProperties.setProperty(

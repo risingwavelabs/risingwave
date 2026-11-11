@@ -19,11 +19,10 @@ package com.risingwave.connector.source.core;
 import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
-import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
-import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
@@ -35,25 +34,21 @@ public class DbzCdcEngine implements Runnable {
     private final long id;
 
     /** If config is not valid will throw exceptions */
-    public DbzCdcEngine(
-            SourceTypeE connector,
-            long sourceId,
-            Properties config,
-            DebeziumEngine.CompletionCallback completionCallback) {
+    public DbzCdcEngine(CdcSource source, DebeziumEngine.CompletionCallback completionCallback) {
+        var config = source.getConfig().getResolvedDebeziumProps();
         var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
         var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
         var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
                 new DbzChangeEventConsumer(
-                        connector,
-                        sourceId,
+                        source,
                         heartbeatTopicPrefix,
                         transactionTopic,
                         topicPrefix,
                         new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it
-        this.id = sourceId;
+        this.id = source.getSourceId();
         this.changeEventConsumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)

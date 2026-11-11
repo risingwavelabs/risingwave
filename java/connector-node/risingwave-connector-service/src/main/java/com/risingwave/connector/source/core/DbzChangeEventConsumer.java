@@ -16,10 +16,11 @@
 
 package com.risingwave.connector.source.core;
 
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
+import com.risingwave.connector.source.common.CdcEventType;
+import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
@@ -42,20 +43,13 @@ import org.apache.kafka.connect.storage.ConverterType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-enum EventType {
-    HEARTBEAT,
-    TRANSACTION,
-    DATA,
-    SCHEMA_CHANGE,
-}
-
 public class DbzChangeEventConsumer
         implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
     static final Logger LOG = LoggerFactory.getLogger(DbzChangeEventConsumer.class);
 
     private final BlockingQueue<GetEventStreamResponse> outputChannel;
 
-    private final SourceTypeE connector;
+    private final CdcSource source;
     private final long sourceId;
     private final JsonConverter payloadConverter;
     private final JsonConverter keyConverter;
@@ -67,14 +61,13 @@ public class DbzChangeEventConsumer
             currentRecordCommitter;
 
     DbzChangeEventConsumer(
-            SourceTypeE connector,
-            long sourceId,
+            CdcSource source,
             String heartbeatTopicPrefix,
             String transactionTopic,
             String schemaChangeTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
-        this.connector = connector;
-        this.sourceId = sourceId;
+        this.source = source;
+        this.sourceId = source.getSourceId();
         this.outputChannel = queue;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
         this.transactionTopic = transactionTopic;
@@ -99,23 +92,15 @@ public class DbzChangeEventConsumer
         this.keyConverter = keyConverter;
     }
 
-    /**
-     * Postgres and Oracle connectors need to commit the offset to the upstream database, so that we
-     * need to wait for the epoch commit before committing the record offset.
-     */
-    private boolean noNeedCommitOffset() {
-        return connector != SourceTypeE.POSTGRES;
-    }
-
-    private EventType getEventType(SourceRecord record) {
+    private CdcEventType getEventType(SourceRecord record) {
         if (isHeartbeatEvent(record)) {
-            return EventType.HEARTBEAT;
+            return CdcEventType.HEARTBEAT;
         } else if (isTransactionMetaEvent(record)) {
-            return EventType.TRANSACTION;
+            return CdcEventType.TRANSACTION;
         } else if (isSchemaChangeEvent(record)) {
-            return EventType.SCHEMA_CHANGE;
+            return CdcEventType.SCHEMA_CHANGE;
         } else {
-            return EventType.DATA;
+            return CdcEventType.DATA;
         }
     }
 
@@ -145,12 +130,12 @@ public class DbzChangeEventConsumer
         currentRecordCommitter = committer;
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
-            EventType eventType = getEventType(record);
+            CdcEventType eventType = getEventType(record);
             DebeziumOffset offset =
                     new DebeziumOffset(
                             record.sourcePartition(),
-                            record.sourceOffset(),
-                            (eventType == EventType.HEARTBEAT));
+                            source.getEventSourceOffset(record, eventType),
+                            (eventType == CdcEventType.HEARTBEAT));
             // serialize the offset to a JSON, so that kernel doesn't need to
             // aware its layout
             String offsetStr = "";
@@ -282,7 +267,7 @@ public class DbzChangeEventConsumer
                 default:
                     break;
             }
-            if (noNeedCommitOffset()) {
+            if (!source.needsOffsetCommitOnCheckpoint()) {
                 committer.markProcessed(event);
             }
         }
@@ -294,7 +279,7 @@ public class DbzChangeEventConsumer
             var response = respBuilder.build();
             outputChannel.put(response);
         }
-        if (noNeedCommitOffset()) {
+        if (!source.needsOffsetCommitOnCheckpoint()) {
             committer.markBatchFinished();
         }
     }

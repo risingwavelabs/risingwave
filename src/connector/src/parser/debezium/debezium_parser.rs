@@ -21,13 +21,15 @@ use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{
-    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+    BigintUnsignedHandlingMode, NumericHandling, TimeHandling, TimestampHandling,
+    TimestamptzHandling,
 };
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
     ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
+use crate::source::cdc::CdcSourceType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -62,6 +64,7 @@ impl DebeziumProps {
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
+    numeric_handling: NumericHandling,
 ) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Avro(_) => {
@@ -79,6 +82,7 @@ async fn build_accessor_builder(
                     .timestamp_handling
                     .unwrap_or(TimestampHandling::GuessNumberUnit),
                 json_config.time_handling.unwrap_or(TimeHandling::Micro),
+                numeric_handling,
                 json_config
                     .bigint_unsigned_handling
                     .unwrap_or(BigintUnsignedHandlingMode::Long),
@@ -94,11 +98,17 @@ impl DebeziumParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
+        numeric_handling: NumericHandling,
     ) -> ConnectorResult<Self> {
-        let key_builder =
-            build_accessor_builder(props.encoding_config.clone(), EncodingType::Key).await?;
+        let key_builder = build_accessor_builder(
+            props.encoding_config.clone(),
+            EncodingType::Key,
+            numeric_handling.clone(),
+        )
+        .await?;
         let payload_builder =
-            build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
+            build_accessor_builder(props.encoding_config, EncodingType::Value, numeric_handling)
+                .await?;
         let debezium_props = if let ProtocolProperties::Debezium(props) = props.protocol_config {
             props
         } else {
@@ -130,7 +140,13 @@ impl DebeziumParser {
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        Self::new(props, rw_columns, SourceContext::dummy().into()).await
+        Self::new(
+            props,
+            rw_columns,
+            SourceContext::dummy().into(),
+            CdcSourceType::Unspecified.debezium_numeric_handling(),
+        )
+        .await
     }
 
     pub async fn parse_inner(
@@ -241,9 +257,14 @@ mod tests {
             connector_props: ConnectorProperties::PostgresCdc(Box::default()),
             ..SourceContext::dummy()
         };
-        let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
-            .await
-            .unwrap();
+        let mut parser = DebeziumParser::new(
+            props,
+            columns.clone(),
+            Arc::new(source_ctx),
+            CdcSourceType::Postgres.debezium_numeric_handling(),
+        )
+        .await
+        .unwrap();
         let mut dummy_builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
@@ -317,9 +338,14 @@ mod tests {
             connector_props: ConnectorProperties::PostgresCdc(Box::default()),
             ..SourceContext::dummy()
         };
-        let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
-            .await
-            .unwrap();
+        let mut parser = DebeziumParser::new(
+            props,
+            columns.clone(),
+            Arc::new(source_ctx),
+            CdcSourceType::Postgres.debezium_numeric_handling(),
+        )
+        .await
+        .unwrap();
         let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#;

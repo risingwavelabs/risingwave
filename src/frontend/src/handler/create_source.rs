@@ -812,7 +812,13 @@ pub fn bind_connector_props(
             with_properties.get_connector().unwrap(),
         ))));
     }
-    if is_create_source && create_cdc_source_job {
+    if with_properties.is_cdc_connector() {
+        if with_properties.contains_key(CDC_TRANSACTIONAL_KEY) {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave enables transaction metadata itself for the connectors that support it",
+                CDC_TRANSACTIONAL_KEY
+            ))));
+        }
         if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
             && value.parse::<bool>().map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
@@ -821,9 +827,28 @@ pub fn bind_connector_props(
                 ))
             })?
         {
+            if !dispatch_cdc_source_type!(
+                with_properties.cdc_source_type(),
+                T,
+                T::CAN_AUTO_SCHEMA_CHANGE,
+                false
+            ) {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "auto schema change for connector {}",
+                        with_properties.get_connector().unwrap()
+                    ),
+                    format!(
+                        "Remove the '{}' option or set it to false",
+                        AUTO_SCHEMA_CHANGE_KEY
+                    ),
+                )
+                .into());
+            }
             Feature::CdcAutoSchemaChange.check_available()?;
         }
-
+    }
+    if is_create_source && create_cdc_source_job {
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`

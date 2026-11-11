@@ -18,8 +18,7 @@ package com.risingwave.connector.source;
 
 import static org.junit.Assert.assertEquals;
 
-import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.MongodbCdcSource;
 import java.util.HashMap;
 import org.junit.Test;
 
@@ -34,7 +33,7 @@ public class DbzConnectorConfigMongoDbTlsTest {
         userProps.put("mongodb.url", connectionString);
         userProps.put("collection.name", "test.users");
 
-        var config = new DbzConnectorConfig(SourceTypeE.MONGODB, 1, null, userProps, false, false);
+        var config = new MongodbCdcSource(1, null, userProps, false, false).getConfig();
         var properties = config.getResolvedDebeziumProps();
 
         assertEquals(connectionString, properties.getProperty("mongodb.connection.string"));
