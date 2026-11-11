@@ -1,0 +1,154 @@
+# Every query of `queries.slt.part` must return the same result whether or not it is answered
+# from a materialized view.
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+create table t (a int, b int, c int, d varchar);
+
+statement ok
+create table u (k int primary key, v int);
+
+statement ok
+create table w (x int, y int);
+
+statement ok
+create table num (g decimal, x int);
+
+statement ok
+create table num2 (h decimal, y int);
+
+statement ok
+create table orders (id int primary key, cid int, amount int);
+
+statement ok
+create table customers (id int primary key, region varchar);
+
+statement ok
+create materialized view mv_filter as select a, b, d from t where a > 0;
+
+statement ok
+create materialized view mv_agg as
+select a, c, sum(b) as s, count(*) as n, count(b) as nb, min(b) as lo, max(b) as hi
+from t group by a, c;
+
+statement ok
+create materialized view mv_total as select count(*) as n, sum(b) as s from t where c > 0;
+
+statement ok
+create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+
+statement ok
+create materialized view mv_expr as select a, b + c as bc from t where a < 0;
+
+statement ok
+create materialized view mv_u as select k, v from u where v > 0;
+
+statement ok
+create materialized view mv_on_mv as select d, sum(b) as s from mv_filter group by d;
+
+statement ok
+create materialized view mv_num as select g, sum(x) as s, count(*) as n from num group by g;
+
+statement ok
+create materialized view mv_num_join as select num.g, num.x, num2.y from num join num2 on num.g = num2.h;
+
+statement ok
+create materialized view mv_left_join as
+select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+
+statement ok
+create materialized view mv_semi_join as
+select a, b from t where exists (select 1 from u where u.k = t.a);
+
+statement ok
+insert into t values
+  (1, 10, 100, 'x'), (1, 20, 100, 'y'), (1, null, 200, 'x'), (2, 5, 150, null),
+  (-1, 7, 100, 'z'), (-1, 8, -5, 'z'), (0, 1, 1, 'x'), (null, 3, 300, 'n'),
+  (3, 30, 50, 'y'), (3, 30, 50, 'y'), (12, 4, 100, 'x'), (15, 6, 0, 'q');
+
+statement ok
+insert into u values (1, 2), (2, 2), (3, null), (4, 9), (12, -1);
+
+statement ok
+insert into w values (10, 1), (30, 0), (30, 5), (5, 2), (null, 7);
+
+statement ok
+insert into num values (1.0, 1), (1.00, 2), (2.5, 3), (null, 4);
+
+statement ok
+insert into num2 values (1.000, 10), (2.50, 20), (3, 30);
+
+statement ok
+insert into orders values (1, 1, 50), (2, 1, 200), (3, 2, 300), (4, 9, 10), (5, null, 70);
+
+statement ok
+insert into customers values (1, 'east'), (2, 'west'), (3, 'north');
+
+statement ok
+set enable_mv_selection = false;
+
+include ./queries.slt.part
+
+statement ok
+set enable_mv_selection = true;
+
+include ./queries.slt.part
+
+statement ok
+set enable_mv_selection = false;
+
+statement ok
+drop materialized view mv_semi_join;
+
+statement ok
+drop materialized view mv_left_join;
+
+statement ok
+drop materialized view mv_num_join;
+
+statement ok
+drop materialized view mv_num;
+
+statement ok
+drop materialized view mv_on_mv;
+
+statement ok
+drop materialized view mv_u;
+
+statement ok
+drop materialized view mv_expr;
+
+statement ok
+drop materialized view mv_join;
+
+statement ok
+drop materialized view mv_total;
+
+statement ok
+drop materialized view mv_agg;
+
+statement ok
+drop materialized view mv_filter;
+
+statement ok
+drop table customers;
+
+statement ok
+drop table orders;
+
+statement ok
+drop table num2;
+
+statement ok
+drop table num;
+
+statement ok
+drop table w;
+
+statement ok
+drop table u;
+
+statement ok
+drop table t;

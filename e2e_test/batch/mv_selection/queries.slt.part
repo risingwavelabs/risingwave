@@ -1,0 +1,516 @@
+# Included twice by `mv_selection.slt`: with and without materialized view selection.
+
+# The same as a view, more predicates, a narrower range, fewer columns.
+query IIT rowsort
+select a, b, d from t where a > 0;
+----
+1	10	x
+1	20	y
+1	NULL	x
+12	4	x
+15	6	q
+2	5	NULL
+3	30	y
+3	30	y
+
+query II rowsort
+select a, b from t where a > 0 and b = 10;
+----
+1	10
+
+query IIT rowsort
+select a, b, d from t where a > 10 and a <= 20;
+----
+12	4	x
+15	6	q
+
+query I rowsort
+select b from t where a > 0;
+----
+10
+20
+30
+30
+4
+5
+6
+NULL
+
+query IT rowsort
+select a, d from t where (a in (1, 2, 3) or a between 10 and 20) and a <> 2 and d is not null;
+----
+1	x
+1	x
+1	y
+12	x
+15	q
+3	y
+3	y
+
+# A range that the view does not contain, and a column that it does not have.
+query IIT rowsort
+select a, b, d from t where a >= 0;
+----
+0	1	x
+1	10	x
+1	20	y
+1	NULL	x
+12	4	x
+15	6	q
+2	5	NULL
+3	30	y
+3	30	y
+
+query I rowsort
+select a from t where a > 0 and c = 100;
+----
+1
+1
+12
+
+# Aggregations over a view that keeps every row.
+query TII rowsort
+select d, sum(b), count(distinct a) from t where a > 0 group by d;
+----
+NULL	5	1
+q	6	1
+x	14	2
+y	80	2
+
+query II
+select count(*), min(b) from t where a > 0 and d = 'nothing';
+----
+0	NULL
+
+query I rowsort
+select distinct a from t where a > 0;
+----
+1
+12
+15
+2
+3
+
+# Aggregations over an aggregating view.
+query IIII rowsort
+select a, c, sum(b), count(*) from t group by a, c;
+----
+-1	-5	8	1
+-1	100	7	1
+0	1	1	1
+1	100	30	2
+1	200	NULL	1
+12	100	4	1
+15	0	6	1
+2	150	5	1
+3	50	60	2
+NULL	300	3	1
+
+query III rowsort
+select a, c, sum(b) from t where a = 1 group by a, c;
+----
+1	100	30
+1	200	NULL
+
+query III rowsort
+select a, sum(b), count(*) from t where c > 60 group by a;
+----
+-1	7	1
+1	30	3
+12	4	1
+2	5	1
+NULL	3	1
+
+query IRII rowsort
+select a, avg(b), min(b), max(b) from t group by a;
+----
+-1	7.50	7	8
+0	1	1	1
+1	15	10	20
+12	4	4	4
+15	6	6	6
+2	5	5	5
+3	30	30	30
+NULL	3	3	3
+
+query III rowsort
+select a, count(distinct c), max(c) from t group by a;
+----
+-1	2	100
+0	1	1
+1	2	200
+12	1	100
+15	1	0
+2	1	150
+3	1	50
+NULL	1	300
+
+query III rowsort
+select a, c, sum(b) + 1 from t group by a, c having count(*) > 1;
+----
+1	100	31
+3	50	61
+
+query II rowsort
+select a, sum(b) from t where b > 5 group by a;
+----
+-1	15
+1	30
+15	6
+3	60
+
+# Without `GROUP BY` there is always one row, also when no row matches.
+query II
+select sum(b), count(*) from t;
+----
+124	12
+
+query II
+select sum(b), count(*) from t where a = 1;
+----
+30	3
+
+query III
+select sum(b), count(*), count(b) from t where a = 99;
+----
+NULL	0	0
+
+query II
+select count(*), sum(b) from t where c > 0;
+----
+10	110
+
+statement count 0
+select count(*) from t where a = 99 group by a;
+
+# Joins.
+query III rowsort
+select t.a, t.b, u.v from u join t on u.k = t.a;
+----
+1	10	2
+1	20	2
+1	NULL	2
+12	4	-1
+2	5	2
+3	30	NULL
+3	30	NULL
+
+query II rowsort
+select t.b, u.v from t join u on t.a = u.k where u.v = 2;
+----
+10	2
+20	2
+5	2
+NULL	2
+
+query II rowsort
+select t.b, u.v from t join u on t.a = u.k where u.k = 1;
+----
+10	2
+20	2
+NULL	2
+
+query I rowsort
+select t.a from t join u on t.a = u.k and t.b = u.v + 3;
+----
+2
+
+query III rowsort
+select t.a, u.v, w.y from t join u on t.a = u.k join w on w.x = t.b where w.y > 0;
+----
+1	2	1
+2	2	2
+3	NULL	5
+3	NULL	5
+
+query II rowsort
+select u.v, sum(t.b) from t join u on t.a = u.k group by u.v;
+----
+-1	4
+2	35
+NULL	60
+
+query II rowsort
+select t.b, u.v from t join u on t.a = u.k where t.a > 0 and u.v > 0;
+----
+10	2
+20	2
+5	2
+NULL	2
+
+query II rowsort
+select x.b, y.d from t x join t y on x.a = y.a where x.a > 1;
+----
+30	y
+30	y
+30	y
+30	y
+4	x
+5	NULL
+6	q
+
+# Expressions.
+query II rowsort
+select a, c + b from t where a < 0;
+----
+-1	107
+-1	3
+
+query I rowsort
+select a from t where a < 0 and b + c > 100;
+----
+-1
+
+# A view over a view.
+query TI rowsort
+select d, sum(b) from t where a > 0 group by d;
+----
+NULL	5
+q	6
+x	14
+y	80
+
+# Blocks below other operators.
+query II rowsort
+select a, b from t where a > 2 union all (select a, b from t where a > 1 order by b, a limit 3);
+----
+12	4
+12	4
+15	6
+15	6
+2	5
+3	30
+3	30
+
+query II rowsort
+select k, v from u where k in (select a from t where a > 0 and b >= 10);
+----
+1	2
+3	NULL
+
+query II rowsort
+select a, (select count(*) from u where u.k = t.a and u.v > 0) from t where a > 0;
+----
+1	1
+1	1
+1	1
+12	0
+15	0
+2	1
+3	0
+3	0
+
+# Equal values of a decimal are not the same value: `1.0`, `1.00` and `1.000` differ in scale.
+query RI rowsort
+select g::varchar, x from num where g = 1;
+----
+1.0	1
+1.00	2
+
+query II rowsort
+select sum(x), count(*) from num where g = 1.00 group by g;
+----
+3	2
+
+query TII rowsort
+select num2.h::varchar, num.x, num2.y from num join num2 on num.g = num2.h;
+----
+1.000	1	10
+1.000	2	10
+2.50	3	20
+
+query TII rowsort
+select num.g::varchar, num.x, num2.y from num join num2 on num.g = num2.h where num2.h = 1;
+----
+1.0	1	10
+1.00	2	10
+
+# Outer and semi joins.
+query TII rowsort
+select c.region, count(*), sum(o.amount) from orders o left join customers c on o.cid = c.id group by c.region;
+----
+NULL	2	80
+east	2	250
+west	1	300
+
+query I rowsort
+select o.id from orders o left join customers c on o.cid = c.id where c.region is null;
+----
+4
+5
+
+query IT rowsort
+select o.id, c.region from orders o left join customers c on o.cid = c.id where o.amount > 60;
+----
+2	east
+3	west
+5	NULL
+
+query IT rowsort
+select o.id, c.region from orders o join customers c on o.cid = c.id;
+----
+1	east
+2	east
+3	west
+
+query I rowsort
+select b from t where a in (select k from u);
+----
+10
+20
+30
+30
+4
+5
+NULL
+
+query I rowsort
+select b from t where a not in (select k from u);
+----
+1
+3
+6
+7
+8
+
+# Nulls, contradictions and predicates that only look like the ones of a view.
+query IT rowsort
+select a, d from t where a > 0 or a is null;
+----
+1	x
+1	x
+1	y
+12	x
+15	q
+2	NULL
+3	y
+3	y
+NULL	n
+
+query I rowsort
+select t.a from t join u on t.a = u.k where t.a is not null;
+----
+1
+1
+1
+12
+2
+3
+3
+
+statement count 0
+select a, b from t where a > 0 and a < 0;
+
+query II rowsort
+select a, b from t where a > 0 and b is null;
+----
+1	NULL
+
+# More aggregations.
+query II rowsort
+select a + 1, sum(b) from t group by a + 1;
+----
+0	15
+1	1
+13	4
+16	6
+2	30
+3	5
+4	60
+NULL	3
+
+query II rowsort
+select c, count(*) from t where a = 1 group by c;
+----
+100	2
+200	1
+
+query II rowsort
+select a, count(*) from t where c = 100 group by a;
+----
+-1	1
+1	2
+12	1
+
+query II rowsort
+select a, sum(b) filter (where c > 60) from t group by a;
+----
+-1	7
+0	NULL
+1	30
+12	4
+15	NULL
+2	5
+3	NULL
+NULL	3
+
+query II
+select sum(distinct c), count(distinct a) from t;
+----
+796	7
+
+query II
+select max(b), min(b) from t where a in (1, 3);
+----
+30	10
+
+query III rowsort
+select a, c, n from (select a, c, count(*) as n from t group by a, c) s where n > 1 and a > 0;
+----
+1	100	2
+3	50	2
+
+query I
+select count(*) from t where a > 0;
+----
+8
+
+# More joins.
+query II rowsort
+select t.a, u.v from t join u on t.a = u.k where t.b > 5;
+----
+1	2
+1	2
+3	NULL
+3	NULL
+
+query II rowsort
+select u.v, count(*) from t join u on t.a = u.k where t.a > 0 group by u.v;
+----
+-1	1
+2	4
+NULL	2
+
+query II rowsort
+select x.a, y.b from t x join t y on x.b = y.b where x.a > 0 and y.a > 0;
+----
+1	10
+1	20
+12	4
+15	6
+2	5
+3	30
+3	30
+3	30
+3	30
+
+query I
+select count(*) from t x, t y where x.a = y.a;
+----
+21
+
+query II rowsort
+select t.a, u.v from t left join u on t.a = u.k;
+----
+-1	NULL
+-1	NULL
+0	NULL
+1	2
+1	2
+1	2
+12	-1
+15	NULL
+2	2
+3	NULL
+3	NULL
+NULL	NULL
