@@ -133,7 +133,8 @@ def exercise(server):
     # Invalid typed answers stay inside AI_DECIDE, even under an outer coalesce.
     before = server.count()
     malformed_state = "'{\"malformed\":true}'::jsonb"
-    assert sql(f"SET batch_expr_strict_mode = false; "
+    assert sql(f"SET batch_expr_strict_mode = false; SET ai_decide_retry_delay_ms = 1; "
+               "SET ai_decide_max_retry_delay_ms = 2; "
                f"SELECT coalesce(({analyze(malformed_state)}).signal, -1)") == ["0"]
     assert server.count() == before + 5, "retry the contract failure until a valid answer"
 

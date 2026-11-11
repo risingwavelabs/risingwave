@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
+use risingwave_common::config::AiDecideConfig;
+
 use crate::handler::HandlerArgs;
 
 /// Some options can be configured both in `WITH` clause and session variables.
 /// The config in `WITH` clause has higher priority.
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
+    pub ai_decide: BTreeMap<String, String>,
     pub source_rate_limit: Option<u32>,
     pub backfill_rate_limit: Option<u32>,
     pub dml_rate_limit: Option<u32>,
@@ -83,7 +88,16 @@ impl OverwriteOptions {
                 }
             }
         };
+        let ai_decide = AiDecideConfig::SESSION_OPTIONS
+            .into_iter()
+            .filter_map(|key| {
+                args.with_options
+                    .get(key)
+                    .map(|value| (key.to_owned(), value.clone()))
+            })
+            .collect();
         Self {
+            ai_decide,
             source_rate_limit,
             backfill_rate_limit,
             dml_rate_limit,

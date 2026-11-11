@@ -1266,6 +1266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunctionMetadata", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.AiDecideNode", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.CdcKeyOrdering", "#[derive(Eq, Hash)]")

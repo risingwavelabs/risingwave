@@ -60,6 +60,11 @@ pub struct StreamingConfig {
     #[config_doc(nested)]
     pub developer: StreamingDeveloperConfig,
 
+    /// HTTP execution defaults; supports per-job overrides and takes effect after recovery.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub ai_decide: AiDecideConfig,
+
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,

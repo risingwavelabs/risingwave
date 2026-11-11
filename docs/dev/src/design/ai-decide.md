@@ -177,9 +177,13 @@ the ordinary asynchronous projection path. Existing restrictions on volatile
 expressions in other SQL positions still apply; put the call in a SELECT
 projection. Leave `streaming_unsafe_allow_unmaterialized_impure_expr` disabled.
 
-Each expression instance reuses an HTTP client. All eligible rows may run
-concurrently, without an AI_DECIDE-specific request limit. Each visible row with
-non-NULL arguments makes one logical request with sequential retries. Fixed questions
+Each expression instance reuses an HTTP client. By default all eligible rows may
+run concurrently. `ai_decide_max_concurrency` optionally limits logical requests
+across all overlapping chunks of one expression instance; `0` keeps the default
+unlimited behavior. Each visible row with non-NULL arguments makes one logical
+request, retaining its permit through sequential retries and backoff. Cancelling
+local evaluation releases permits. Separate expressions and actors have separate
+limits, so this is not a job-wide or endpoint-wide quota. Fixed questions
 and the inferred result type are cached per expression. Other constant arguments
 keep their scalar representation instead of being expanded into per-row arrays.
 Each eligible request still serializes its own state and questions.
@@ -209,19 +213,21 @@ These settings do not apply to batch execution. `StreamMaterializedExprs` contin
 to evaluate chunks sequentially without these Project limits, while AI_DECIDE
 evaluates eligible rows within each chunk concurrently. The row budget is not an
 exact HTTP-request limit: a budget of eight still admits a whole 1,024-row chunk,
-which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row.
+which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row
+when the separate AI_DECIDE request limit is disabled.
 
-Each HTTP attempt has a fixed 30-second timeout. AI_DECIDE retries all remote
+Each HTTP attempt has a 30-second timeout by default. AI_DECIDE retries all remote
 failures indefinitely: transport errors, timeouts, all non-success HTTP statuses
 (including 401 and redirects), truncated bodies, oversized responses, invalid JSON,
 and invalid typed answers. It reuses the serialized request and waits until a valid
 answer arrives or evaluation is cancelled. Redirects are not followed.
 
-Exponential backoff starts at 100 ms and is capped at 10 seconds. A
+Exponential backoff starts at 100 ms and is capped at 10 seconds by default. A
 numeric `Retry-After` on a non-success response overrides the delay, capped at five
 seconds. Retry errors are logged with suppression and without credentials or
-request/response payloads. Successful rows in the same chunk may finish, but the
-chunk and subsequent barriers cannot pass until every eligible row has a result. Permanent service
+request/response payloads. A retrying row retains its concurrency permit through
+backoff. Successful rows in the same chunk may finish, but the chunk and subsequent
+barriers cannot pass until every eligible row has a result. Permanent service
 errors therefore block progress until resolved; they are not emitted as expression
 errors to trigger recovery. Other causes, such as barrier timeout, can still cause
 recovery while a service is unavailable.
@@ -236,25 +242,61 @@ semantics; there is no special external-error class in the expression framework.
 Retries and recovery may repeat requests that were not checkpointed. Exactly-once
 HTTP invocation is not guaranteed, and repeated inference can incur additional
 cost or return a different answer. Cancelling evaluation drops local futures and
-cancels pending backoff sleeps. Requests already received
+releases permits, including while sleeping in backoff. Requests already received
 by the service may continue running; local cancellation does not guarantee remote
 cancellation.
 
-## Fixed HTTP settings
+## Execution settings
 
-AI_DECIDE uses fixed execution constants in this version:
+These settings preserve the five-argument SQL function. They can be set as session
+variables for batch queries and new streaming jobs. For streaming job creation,
+the same names are accepted in `WITH`, with precedence over the session value;
+this does not change the session. Unset streaming values inherit the compute-node
+`[streaming.ai_decide]` configuration. Unset batch values use the defaults below.
 
-| Setting | Value |
-|---|---:|
-| Per-attempt timeout | 30 seconds |
-| Initial exponential retry delay | 100 milliseconds |
-| Maximum exponential retry delay | 10 seconds |
-| Numeric Retry-After cap | 5 seconds |
-| Maximum response size before JSON decoding | 16 MiB |
+| Session / WITH option | Default | Valid values |
+|---|---:|---|
+| `ai_decide_request_timeout_ms` | 30000 | Positive, per HTTP attempt |
+| `ai_decide_max_retry_delay_ms` | 10000 | Exponential delay cap; 0 disables it |
+| `ai_decide_retry_delay_ms` | 100 | Initial exponential delay; 0 disables it |
+| `ai_decide_max_retry_after_ms` | 5000 | Cap on numeric Retry-After; 0 disables that delay |
+| `ai_decide_max_response_bytes` | 16777216 | Positive, before JSON decoding |
+| `ai_decide_max_concurrency` | 0 | Per expression instance; 0 means unlimited |
 
-These AI_DECIDE-specific values are not session variables or job configuration
-options. They cannot be changed with `WITH` or `ALTER ... SET CONFIG`. The existing
-Async Projection settings described above remain available.
+Batch plans carry these settings in the dedicated `AiDecideNode` payload, inside
+`ExprNode.ai_decide.config`. Streaming rebuilds those expressions with the
+current merged job/global configuration, including after recovery. The settings
+are captured during expression construction; evaluation does not install an
+AI-specific task-local scope around the query or actor.
+
+All values are unsigned 32-bit integers. The initial delay is also clamped to the
+exponential cap, and doubling cannot overflow. There is no attempt-count setting.
+
+```sql
+SET ai_decide_max_concurrency = 16;
+CREATE MATERIALIZED VIEW decisions WITH (
+    ai_decide_max_concurrency = 8,
+    ai_decide_request_timeout_ms = 10000
+) AS SELECT id, ai_decide(state, endpoint, model, ai_questions(ai_prob_question('accept', 'Accept?')), api_key) AS result
+FROM inputs;
+```
+
+The job captures the explicit session and WITH settings in its
+streaming config override, which survives recovery and rescheduling. Existing
+jobs can be changed with the usual configuration mechanism:
+
+```sql
+ALTER MATERIALIZED VIEW decisions SET CONFIG (
+    streaming.ai_decide.max_concurrency = 4
+);
+RECOVER;
+```
+
+`SET/RESET CONFIG` takes effect after recovery; it does not resize a running
+expression's semaphore. RESET removes that job override and restores inheritance
+from the compute-node configuration. The same request cap applies to batch,
+ordinary streaming Project and MaterializedExprs. It does not change chunk output
+ordering, saved retractions, or barrier ordering. Retry behavior is described above.
 
 ## Tuning
 
@@ -264,15 +306,15 @@ parallelism can increase service queueing or rejection rather than throughput;
 coordinate shared endpoint quotas outside individual expressions.
 AI_DECIDE-specific metrics and dashboards are deferred.
 Result buffering remains bounded by the input chunks being evaluated, and each
-response is limited to 16 MiB. There is no separate aggregate byte budget.
+response is limited to 16 MiB by default. There is no separate aggregate byte budget.
 
 ## Regression coverage
 
 - Schema tests: named mixed result types and invalid question definitions.
 - Mock HTTP tests: request shape, response decoding and contract failures,
   retries/timeouts and truncated bodies, known/chunked response size limits,
-  credential redaction, scalar arguments, NULL and invisible rows, empty chunks,
-  concurrent requests across chunks, ordered results despite a blocked first row, and cancellation
+  credential redaction, scalar arguments, NULL and invisible rows, empty chunks, concurrent requests
+  across chunks, ordered results despite a blocked first row, and cancellation
   during persistent failure.
 - Project tests: saved results across updates, deletes and recovery; retrying evaluations
   and barrier/watermark ordering.

@@ -403,6 +403,7 @@ message ExprNode {
     UserDefinedFunction udf = 7;
     NowRexNode now = 8;
     SecretRefNode secret_ref = 9;
+    AiDecideNode ai_decide = 10;
   }
 }
 
@@ -496,6 +497,21 @@ message ProjectSetSelectItem {
 
 message FunctionCall {
   repeated ExprNode children = 1;
+}
+
+message AiDecideNode {
+  repeated ExprNode children = 1;
+  // Streaming resolves current job/global settings at construction and recovery.
+  AiDecideConfig config = 2;
+}
+
+message AiDecideConfig {
+  uint32 request_timeout_ms = 1;
+  uint32 max_retry_delay_ms = 2;
+  uint32 retry_delay_ms = 3;
+  uint32 max_retry_after_ms = 4;
+  uint32 max_response_bytes = 5;
+  uint32 max_concurrency = 6;
 }
 
 // Aggregate Function Calls for Aggregation
