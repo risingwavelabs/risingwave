@@ -1,4 +1,4 @@
-# Explicit CHANGELOG keys over a catalog-only CDC table source.
+# Explicit CHANGELOG keys over a catalog-only CDC table source and its materialized input.
 # Wait for every consumer after each upstream change so assertions do not depend on
 # which events are compacted together within a keyed changelog epoch.
 
@@ -50,17 +50,33 @@ CREATE MATERIALIZED VIEW keyed_cl_pk AS
 WITH c AS CHANGELOG FROM keyed_cl_table KEY (id)
 SELECT id, k, payload, changelog_op FROM c;
 
-# Explicit key different from the upstream primary key. Distinct upstream rows
-# sharing k must not be compacted into a single row.
-statement ok
+# Upsert deletes only guarantee the stream key. Reject other keys, including
+# when the explicit key and upstream primary key are pruned from the output.
+statement error KEY must be the same as or a subset of the stream key
 CREATE MATERIALIZED VIEW keyed_cl_value AS
 WITH c AS CHANGELOG FROM keyed_cl_table KEY (k)
+SELECT id, k, payload, changelog_op FROM c;
+
+statement error KEY must be the same as or a subset of the stream key
+CREATE MATERIALIZED VIEW keyed_cl_pruned AS
+WITH c AS CHANGELOG FROM keyed_cl_table KEY (k)
+SELECT payload, changelog_op FROM c;
+
+# Materialization supplies full old rows, allowing a key different from the
+# upstream primary key. Distinct upstream rows sharing k must remain separate.
+statement ok
+CREATE MATERIALIZED VIEW keyed_cl_materialized AS
+SELECT id, k, payload FROM keyed_cl_table;
+
+statement ok
+CREATE MATERIALIZED VIEW keyed_cl_value AS
+WITH c AS CHANGELOG FROM keyed_cl_materialized KEY (k)
 SELECT id, k, payload, changelog_op FROM c;
 
 # Neither the explicit key nor the upstream primary key is selected.
 statement ok
 CREATE MATERIALIZED VIEW keyed_cl_pruned AS
-WITH c AS CHANGELOG FROM keyed_cl_table KEY (k)
+WITH c AS CHANGELOG FROM keyed_cl_materialized KEY (k)
 SELECT payload, changelog_op FROM c;
 
 system ok
@@ -84,6 +100,8 @@ SELECT payload, changelog_op FROM keyed_cl_pruned;
 a 1
 b 1
 
+# The raw upsert stream emits the new row only. The materialized input also
+# supplies the old row, producing an update-delete (4) and update-insert (3).
 system ok
 mysql -e "USE risedev; UPDATE keyed_cl SET payload = 'a2' WHERE id = 1;"
 
@@ -98,14 +116,16 @@ query IITI rowsort retry 30 backoff 1s
 SELECT id, k, payload, changelog_op FROM keyed_cl_value;
 ----
 1 10 a 1
-1 10 a2 1
+1 10 a 4
+1 10 a2 3
 2 10 b 1
 
 query TI rowsort retry 30 backoff 1s
 SELECT payload, changelog_op FROM keyed_cl_pruned;
 ----
 a 1
-a2 1
+a 4
+a2 3
 b 1
 
 system ok
@@ -123,7 +143,8 @@ query IITI rowsort retry 30 backoff 1s
 SELECT id, k, payload, changelog_op FROM keyed_cl_value;
 ----
 1 10 a 1
-1 10 a2 1
+1 10 a 4
+1 10 a2 3
 2 10 b 1
 2 10 b 2
 
@@ -131,11 +152,14 @@ query TI rowsort retry 30 backoff 1s
 SELECT payload, changelog_op FROM keyed_cl_pruned;
 ----
 a 1
-a2 1
+a 4
+a2 3
 b 1
 b 2
 
-# Change the explicit routing key after rescaling the consumers.
+# Change the explicit routing key after rescaling the consumers. For the
+# materialized input, this produces a delete (2) at the old key and insert (1)
+# at the new key.
 statement ok
 ALTER MATERIALIZED VIEW keyed_cl_pk SET PARALLELISM = 1;
 
@@ -161,7 +185,9 @@ query IITI rowsort retry 30 backoff 1s
 SELECT id, k, payload, changelog_op FROM keyed_cl_value;
 ----
 1 10 a 1
-1 10 a2 1
+1 10 a 4
+1 10 a2 2
+1 10 a2 3
 1 20 a3 1
 2 10 b 1
 2 10 b 2
@@ -170,7 +196,9 @@ query TI rowsort retry 30 backoff 1s
 SELECT payload, changelog_op FROM keyed_cl_pruned;
 ----
 a 1
-a2 1
+a 4
+a2 2
+a2 3
 a3 1
 b 1
 b 2
@@ -192,7 +220,9 @@ query IITI rowsort retry 30 backoff 1s
 SELECT id, k, payload, changelog_op FROM keyed_cl_value;
 ----
 1 10 a 1
-1 10 a2 1
+1 10 a 4
+1 10 a2 2
+1 10 a2 3
 1 20 a3 1
 1 20 a3 2
 2 10 b 1
@@ -202,7 +232,9 @@ query TI rowsort retry 30 backoff 1s
 SELECT payload, changelog_op FROM keyed_cl_pruned;
 ----
 a 1
-a2 1
+a 4
+a2 2
+a2 3
 a3 1
 a3 2
 b 1
@@ -217,8 +249,8 @@ UNION ALL
 SELECT count(*), count(DISTINCT _changelog_row_id) FROM keyed_cl_pruned;
 ----
 6 6
-6 6
-6 6
+8 8
+8 8
 
 statement ok
 DROP MATERIALIZED VIEW keyed_cl_pruned;
@@ -228,6 +260,9 @@ DROP MATERIALIZED VIEW keyed_cl_value;
 
 statement ok
 DROP MATERIALIZED VIEW keyed_cl_pk;
+
+statement ok
+DROP MATERIALIZED VIEW keyed_cl_materialized;
 
 statement ok
 DROP SOURCE keyed_cl_table;
