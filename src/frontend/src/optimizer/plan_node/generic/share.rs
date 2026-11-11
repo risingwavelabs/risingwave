@@ -41,11 +41,10 @@ impl<PlanRef> fmt::Debug for Share<PlanRef> {
 }
 
 /// Compare and hash the shared subplan *structurally* instead of by `share_id`: ids are
-/// allocated per registration, so two plans built independently (e.g. an MV selection
-/// candidate vs. the query plan) never agree on ids even when they are semantically
-/// identical. Structural comparison keeps `Eq`/`Hash` consistent with the behavior
-/// before the share input was moved into the context side table, which structural
-/// matchers like `MvSelectionRule` and common sub-plan sharing rely on.
+/// allocated per registration, so two plans built independently never agree on ids even
+/// when they are semantically identical. Structural comparison keeps `Eq`/`Hash`
+/// consistent with the behavior before the share input was moved into the context side
+/// table, which structural matchers like common sub-plan sharing rely on.
 impl<PlanRef: PartialEq> PartialEq for Share<PlanRef> {
     fn eq(&self, other: &Self) -> bool {
         self.input == other.input
