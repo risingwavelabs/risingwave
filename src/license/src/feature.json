@@ -122,6 +122,11 @@
             "description": "Delivering data to Firestore.",
             "type": "string",
             "const": "FirestoreSink"
+        },
+        {
+            "description": "Delivering data to Turbopuffer.",
+            "type": "string",
+            "const": "TurbopufferSink"
         }
     ]
 }
