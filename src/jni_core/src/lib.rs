@@ -17,6 +17,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(try_blocks)]
 #![feature(used_with_arg)]
+#![recursion_limit = "256"]
 
 pub mod jvm_runtime;
 mod macros;
@@ -55,8 +56,8 @@ use risingwave_common::types::{Decimal, ScalarRefImpl};
 use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::connector_service::{
-    GetEventStreamResponse, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse,
-    SinkWriterStreamRequest, SinkWriterStreamResponse,
+    GetEventStreamResponse, OracleSnapshotReadResponse, SinkCoordinatorStreamRequest,
+    SinkCoordinatorStreamResponse, SinkWriterStreamRequest, SinkWriterStreamResponse,
 };
 use risingwave_pb::data::Op;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
@@ -293,6 +294,7 @@ pub type HummockJavaBindingIterator = BoxStream<'static, anyhow::Result<(Bytes, 
 pub enum JavaBindingIteratorInner<'a> {
     Hummock(HummockJavaBindingIterator),
     StreamChunk(StreamChunkRowIterator<'a>),
+    SingletonRow,
 }
 
 enum RowExtra {
@@ -318,7 +320,7 @@ impl RowExtra {
 
 struct RowCursor {
     row: OwnedRow,
-    extra: RowExtra,
+    extra: Option<RowExtra>,
 }
 
 pub struct JavaBindingIterator<'a> {
@@ -332,6 +334,16 @@ impl JavaBindingIterator<'static> {
         Self {
             inner: JavaBindingIteratorInner::Hummock(iter),
             cursor: None,
+            class_cache: Default::default(),
+        }
+    }
+
+    /// Create an iterator already positioned on `row`, so that Java can read it through
+    /// `BaseRow` getters without calling `next`.
+    pub fn new_singleton_row(row: OwnedRow) -> Self {
+        Self {
+            inner: JavaBindingIteratorInner::SingletonRow,
+            cursor: Some(RowCursor { row, extra: None }),
             class_cache: Default::default(),
         }
     }
@@ -434,7 +446,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
                     Some((key, row)) => {
                         iter.cursor = Some(RowCursor {
                             row,
-                            extra: RowExtra::Key(key),
+                            extra: Some(RowExtra::Key(key)),
                         });
                         Ok(JNI_TRUE)
                     }
@@ -449,11 +461,15 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
                     Some((op, row)) => {
                         iter.cursor = Some(RowCursor {
                             row,
-                            extra: RowExtra::Op(op),
+                            extra: Some(RowExtra::Op(op)),
                         });
                         Ok(JNI_TRUE)
                     }
                 }
+            }
+            JavaBindingIteratorInner::SingletonRow => {
+                iter.cursor = None;
+                Ok(JNI_FALSE)
             }
         }
     })
@@ -510,6 +526,8 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetKey<'a>(
                 .as_ref()
                 .expect("should exists when call get key")
                 .extra
+                .as_ref()
+                .expect("row should have a key")
                 .as_key()
                 .as_ref(),
         )?)
@@ -528,6 +546,8 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetOp<'a>(
             .as_ref()
             .expect("should exist when call get op")
             .extra
+            .as_ref()
+            .expect("row should have an op")
             .as_op() as jint)
     })
 }
@@ -1133,6 +1153,29 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose
     channel: OwnedPointer<JniSenderType<GetEventStreamResponse>>,
 ) {
     channel.release();
+}
+
+/// Send one Oracle snapshot response to the channel read by `OracleExternalTableReader`.
+/// Return false if the receiver has been dropped, so that the caller can stop the scan.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_risingwave_java_binding_Binding_sendOracleSnapshotResponseToChannel<
+    'a,
+>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, JniSenderType<OracleSnapshotReadResponse>>,
+    msg: JByteArray<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        let response: OracleSnapshotReadResponse =
+            Message::decode(to_guarded_slice(&msg, env)?.deref())?;
+        match channel.as_ref().blocking_send(Ok(response)) {
+            Ok(_) => Ok(JNI_TRUE),
+            Err(e) => {
+                tracing::info!(error = %e.as_report(), "send error");
+                Ok(JNI_FALSE)
+            }
+        }
+    })
 }
 
 pub enum JniSinkWriterStreamRequest {
