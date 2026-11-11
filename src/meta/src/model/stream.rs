@@ -305,7 +305,6 @@ impl StreamContext {
             // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
             time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
             strict_mode: false,
-            ai_decide: None,
         }
     }
 

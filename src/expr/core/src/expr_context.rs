@@ -14,7 +14,6 @@
 
 use std::future::Future;
 
-use risingwave_common::config::AiDecideConfig;
 use risingwave_common::id::FragmentId;
 use risingwave_expr::{Result as ExprResult, define_context};
 use risingwave_pb::plan_common::ExprContext;
@@ -25,7 +24,6 @@ define_context! {
     pub FRAGMENT_ID: FragmentId,
     pub VNODE_COUNT: usize,
     pub STRICT_MODE: bool,
-    pub AI_DECIDE_CONFIG: AiDecideConfig,
 }
 
 pub fn capture_expr_context() -> ExprResult<ExprContext> {
@@ -34,13 +32,7 @@ pub fn capture_expr_context() -> ExprResult<ExprContext> {
     Ok(ExprContext {
         time_zone,
         strict_mode,
-        ai_decide: Some((&ai_decide_config()).into()),
     })
-}
-
-/// Construction outside an execution context (e.g. planner analysis) uses defaults.
-pub fn ai_decide_config() -> AiDecideConfig {
-    AI_DECIDE_CONFIG::try_with(Clone::clone).unwrap_or_default()
 }
 
 /// Get the vnode count from the context.
@@ -66,13 +58,7 @@ where
 {
     TIME_ZONE::scope(
         expr_context.time_zone.clone(),
-        STRICT_MODE::scope(
-            expr_context.strict_mode,
-            AI_DECIDE_CONFIG::scope(
-                expr_context.ai_decide.map(Into::into).unwrap_or_default(),
-                future,
-            ),
-        ),
+        STRICT_MODE::scope(expr_context.strict_mode, future),
     )
     .await
 }

@@ -84,7 +84,7 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
             reason: "return type does not match fixed questions".into(),
         });
     }
-    let config = risingwave_expr::expr_context::ai_decide_config();
+    let config = risingwave_expr::scalar::ai_decide::config();
     config
         .validate()
         .map_err(|reason| ExprError::InvalidParam {
@@ -853,6 +853,63 @@ mod tests {
         assert_eq!(requests.load(Ordering::SeqCst), 36);
     }
 
+    fn configured_node(config: Option<&AiDecideConfig>) -> risingwave_pb::expr::ExprNode {
+        use risingwave_common::util::value_encoding::DatumToProtoExt;
+        use risingwave_pb::expr::expr_node::RexNode;
+        use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+        let children = (0..5)
+            .map(|i| ExprNode {
+                return_type: Some(if i == 0 || i == 3 {
+                    DataType::Jsonb.to_protobuf()
+                } else {
+                    DataType::Varchar.to_protobuf()
+                }),
+                rex_node: Some(if i == 3 {
+                    RexNode::Constant(Some(ScalarImpl::from(test_questions())).to_protobuf())
+                } else {
+                    RexNode::InputRef(i)
+                }),
+                ..Default::default()
+            })
+            .collect();
+        ExprNode {
+            function_type: ExprType::AiDecide as i32,
+            return_type: Some(test_schema().return_type().to_protobuf()),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children,
+                ai_decide: config.map(Into::into),
+            })),
+        }
+    }
+
+    #[test]
+    fn node_config_and_streaming_override_apply_to_nested_calls() {
+        use risingwave_expr::expr::build_from_prost;
+        use risingwave_expr::scalar::ai_decide::with_config;
+        use risingwave_pb::expr::expr_node::RexNode;
+        use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+        let invalid = AiDecideConfig {
+            request_timeout_ms: 0,
+            ..Default::default()
+        };
+        let node = ExprNode {
+            function_type: ExprType::Coalesce as i32,
+            return_type: Some(test_schema().return_type().to_protobuf()),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![configured_node(None), configured_node(Some(&invalid))],
+                ..Default::default()
+            })),
+        };
+        // The first child's defaults must not leak to its sibling's explicit config.
+        assert!(build_from_prost(&configured_node(None)).is_ok());
+        assert!(build_from_prost(&node).is_err());
+        // Recovery rebuilds all nested calls with the current job/global config.
+        assert!(with_config(AiDecideConfig::default(), || build_from_prost(&node)).is_ok());
+        assert!(build_from_prost(&node).is_err());
+    }
+
     #[tokio::test]
     async fn configured_limit_is_shared_across_chunks_and_released_on_cancellation() {
         let gate = Arc::new(Semaphore::new(0));
@@ -875,15 +932,9 @@ mod tests {
             max_concurrency: 2,
             ..Default::default()
         };
-        let expr = risingwave_expr::expr_context::AI_DECIDE_CONFIG::scope(config, async {
-            let mut children: Vec<_> = expression(REQUEST_TIMEOUT).children.into_iter().collect();
-            children.insert(
-                3,
-                LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed(),
-            );
-            Arc::new(build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap())
-        })
-        .await;
+        let expr = Arc::new(
+            risingwave_expr::expr::build_from_prost(&configured_node(Some(&config))).unwrap(),
+        );
         let input = chunk(&server.url, 6);
         let cancelled = {
             let expr = expr.clone();

@@ -14,9 +14,38 @@
 
 //! Fixed question schemas shared by the binder and executor.
 
+use risingwave_common::config::AiDecideConfig;
 use risingwave_common::types::{DataType, JsonbVal, MapType, StructType};
 
 use crate::{ExprError, Result};
+
+tokio::task_local! {
+    static BUILD_CONFIG: AiDecideConfig;
+}
+
+/// Apply settings only while synchronously serializing or building expressions.
+/// Streaming supplies the current job/global settings here, overriding the node's
+/// creation-time settings. No scope survives into expression evaluation.
+pub fn with_config<T>(config: AiDecideConfig, build: impl FnOnce() -> T) -> T {
+    BUILD_CONFIG.sync_scope(config, build)
+}
+
+/// Resolve streaming settings while an executor is being constructed. The returned
+/// executor retains the settings in its `AI_DECIDE` expressions, not in a task scope.
+pub async fn with_config_async<F: std::future::Future>(
+    config: AiDecideConfig,
+    build: F,
+) -> F::Output {
+    BUILD_CONFIG.scope(config, build).await
+}
+
+pub fn config() -> AiDecideConfig {
+    config_override().unwrap_or_default()
+}
+
+pub(crate) fn config_override() -> Option<AiDecideConfig> {
+    BUILD_CONFIG.try_with(Clone::clone).ok()
+}
 
 #[derive(Debug, Clone)]
 pub enum QuestionKind {

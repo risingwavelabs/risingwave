@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use risingwave_common_proc_macro::ConfigDoc;
-use risingwave_pb::plan_common::AiDecideConfig as PbAiDecideConfig;
+use risingwave_pb::expr::AiDecideConfig as PbAiDecideConfig;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::DefaultFromSerde;
 
-/// HTTP execution settings shared by streaming jobs and batch expression contexts.
+/// HTTP execution settings carried by `AI_DECIDE` expression nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct AiDecideConfig {

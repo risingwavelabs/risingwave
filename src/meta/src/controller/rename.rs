@@ -491,6 +491,7 @@ impl IndexItemRewriter {
                         function_type: expr_node::Type::CompositeCast as _,
                         return_type: Some(old_type),
                         rex_node: RexNode::FuncCall(FunctionCall {
+                            ai_decide: None,
                             children: vec![expr.clone()],
                         })
                         .into(),

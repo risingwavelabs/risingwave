@@ -912,7 +912,7 @@ mod test {
         assert_eq!(effective.ai_decide, session.ai_decide_config());
         assert_eq!(effective.ai_decide.max_concurrency, 3);
         assert_eq!(
-            crate::config::AiDecideConfig::from(risingwave_pb::plan_common::AiDecideConfig::from(
+            crate::config::AiDecideConfig::from(risingwave_pb::expr::AiDecideConfig::from(
                 &effective.ai_decide
             )),
             effective.ai_decide

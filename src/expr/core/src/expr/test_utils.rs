@@ -35,7 +35,10 @@ pub fn make_func_call(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> Exp
             type_name: ret as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        rex_node: Some(RexNode::FuncCall(FunctionCall {
+            children,
+            ..Default::default()
+        })),
     }
 }
 
@@ -83,7 +86,10 @@ pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
             type_name: ret as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        rex_node: Some(RexNode::FuncCall(FunctionCall {
+            children,
+            ..Default::default()
+        })),
     }
 }
 

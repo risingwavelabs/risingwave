@@ -254,19 +254,6 @@ message Cardinality {
 message ExprContext {
   string time_zone = 1;
   bool strict_mode = 2;
-  // Absent on older plans: use the AI_DECIDE defaults.
-  AiDecideConfig ai_decide = 3;
-}
-
-message AiDecideConfig {
-  uint32 request_timeout_ms = 1;
-  reserved 2;
-  reserved "max_attempts";
-  uint32 retry_delay_ms = 3;
-  uint32 max_retry_after_ms = 4;
-  uint32 max_response_bytes = 5;
-  uint32 max_concurrency = 6;
-  uint32 max_retry_delay_ms = 7;
 }
 
 message AdditionalColumnKey {}

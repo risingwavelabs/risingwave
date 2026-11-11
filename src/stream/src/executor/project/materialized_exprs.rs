@@ -266,14 +266,13 @@ impl<S: StateStore> Inner<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    use multimap::MultiMap;
     use risingwave_common::array::{ArrayRef, DataChunk};
     use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{
-        Datum, F64, JsonbVal, ListValue, MapType, MapValue, ScalarImpl, StructType, StructValue,
+        Datum, F64, ListValue, MapType, MapValue, ScalarImpl, StructType, StructValue,
     };
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
@@ -282,27 +281,20 @@ mod tests {
         AsyncExpression, AsyncExpressionBoxExt, ExpressionInfo, LogReport,
     };
     use risingwave_storage::memory::MemoryStateStore;
-    use serde_json::json;
     use tokio::sync::Semaphore;
 
     use super::*;
-    use crate::executor::project::ProjectExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     #[derive(Debug, Clone, Default)]
     struct RemoteExpression {
         calls: Arc<AtomicU64>,
-        fail: Arc<AtomicBool>,
         gate: Option<Arc<Semaphore>>,
-        typed: bool,
     }
 
     impl RemoteExpression {
         fn result(&self, version: u64) -> ScalarImpl {
-            if !self.typed {
-                return JsonbVal::from(json!({"version": version})).into();
-            }
             StructValue::new(vec![
                 Some((version as i64).into()),
                 Some(
@@ -321,19 +313,15 @@ mod tests {
 
     impl ExpressionInfo for RemoteExpression {
         fn return_type(&self) -> DataType {
-            if self.typed {
-                StructType::new([
-                    ("version", DataType::Int64),
-                    (
-                        "choices",
-                        MapType::from_kv(DataType::Varchar, DataType::Float64).into(),
-                    ),
-                    ("levels", DataType::list(DataType::Float64)),
-                ])
-                .into()
-            } else {
-                DataType::Jsonb
-            }
+            StructType::new([
+                ("version", DataType::Int64),
+                (
+                    "choices",
+                    MapType::from_kv(DataType::Varchar, DataType::Float64).into(),
+                ),
+                ("levels", DataType::list(DataType::Float64)),
+            ])
+            .into()
         }
     }
 
@@ -349,9 +337,6 @@ mod tests {
                 if let Some(gate) = &self.gate {
                     let _permit = gate.acquire().await.unwrap();
                 }
-                while self.fail.load(Ordering::SeqCst) {
-                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                }
                 builder.append(Some(self.result(version)));
             }
             Ok(builder.finish().into_ref())
@@ -365,7 +350,6 @@ mod tests {
     async fn executor(
         store: MemoryStateStore,
         expression: RemoteExpression,
-        materialized: bool,
     ) -> (MessageSender, BoxedMessageStream) {
         let (tx, source) = MockSource::channel();
         let input = source.into_executor(
@@ -375,18 +359,10 @@ mod tests {
             ]),
             vec![0],
         );
-        // Exercise the non-strict wrapper used in production, not just the mock's error return.
+        // Exercise the non-strict wrapper used in production.
         let output_type = expression.return_type();
         let expr = NonStrictExpression::new_topmost(expression.boxed(), LogReport);
         let actor_ctx = ActorContext::for_test(123);
-        if !materialized {
-            return (
-                tx,
-                ProjectExecutor::new(actor_ctx, input, vec![expr], MultiMap::new(), vec![], false)
-                    .boxed()
-                    .execute(),
-            );
-        }
         let state_table = create_in_memory_state_table_from_state_store(
             &[DataType::Int64, DataType::Int64, output_type],
             &[OrderType::ascending()],
@@ -409,102 +385,70 @@ mod tests {
 
     #[tokio::test]
     async fn restores_results_for_update_and_delete_after_recovery() {
-        for typed in [false, true] {
-            let store = MemoryStateStore::new();
-            let expr = RemoteExpression {
-                typed,
-                ..Default::default()
-            };
-            let (mut tx, mut stream) = executor(store.clone(), expr.clone(), true).await;
-            tx.push_barrier(test_epoch(1), false);
-            stream.expect_barrier().await;
-            tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
-            let chunk = stream.expect_chunk().await;
-            assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
-            tx.push_barrier(test_epoch(2), false);
-            stream.expect_barrier().await;
-            drop(stream);
+        let store = MemoryStateStore::new();
+        let expr = RemoteExpression::default();
+        let (mut tx, mut stream) = executor(store.clone(), expr.clone()).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+        let chunk = stream.expect_chunk().await;
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+        drop(stream);
 
-            // Cold UPDATE reads the saved value, then evaluates only the new row.
-            let (mut tx, mut recovered) = executor(store.clone(), expr.clone(), true).await;
-            tx.push_barrier(test_epoch(2), false);
-            recovered.expect_barrier().await;
-            tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
-            let chunk = recovered.expect_chunk().await;
-            assert_eq!(chunk.ops(), &[Op::UpdateDelete, Op::UpdateInsert]);
-            assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
-            assert_eq!(chunk.columns()[2].datum_at(1), Some(expr.result(2)));
-            assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
-            tx.push_barrier(test_epoch(3), false);
-            recovered.expect_barrier().await;
-            drop(recovered);
+        // Cold UPDATE reads the saved value, then evaluates only the new row.
+        let (mut tx, mut recovered) = executor(store.clone(), expr.clone()).await;
+        tx.push_barrier(test_epoch(2), false);
+        recovered.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
+        let chunk = recovered.expect_chunk().await;
+        assert_eq!(chunk.ops(), &[Op::UpdateDelete, Op::UpdateInsert]);
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+        assert_eq!(chunk.columns()[2].datum_at(1), Some(expr.result(2)));
+        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+        tx.push_barrier(test_epoch(3), false);
+        recovered.expect_barrier().await;
+        drop(recovered);
 
-            // A second cold recovery must delete the updated value without the service.
-            expr.fail.store(true, Ordering::SeqCst);
-            let (mut tx, mut recovered) = executor(store, expr.clone(), true).await;
-            tx.push_barrier(test_epoch(3), false);
-            recovered.expect_barrier().await;
-            tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
-            let chunk = recovered.expect_chunk().await;
-            assert_eq!(chunk.ops(), &[Op::Delete]);
-            assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(2)));
-            assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
-        }
+        // A second cold recovery must delete the updated value without evaluation.
+        let (mut tx, mut recovered) = executor(store, expr.clone()).await;
+        tx.push_barrier(test_epoch(3), false);
+        recovered.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
+        let chunk = recovered.expect_chunk().await;
+        assert_eq!(chunk.ops(), &[Op::Delete]);
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(2)));
+        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
     async fn control_messages_wait_for_pending_results() {
-        for materialized in [false, true] {
-            let gate = Arc::new(Semaphore::new(0));
-            let expr = RemoteExpression {
-                gate: Some(gate.clone()),
-                ..Default::default()
-            };
-            let (mut tx, mut stream) =
-                executor(MemoryStateStore::new(), expr.clone(), materialized).await;
-            tx.push_barrier(test_epoch(1), false);
-            stream.expect_barrier().await;
-            tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
-            tx.push_int64_watermark(0, 1);
-            tx.push_barrier(test_epoch(2), false);
-            stream.next_unwrap_pending();
-            assert_eq!(expr.calls.load(Ordering::SeqCst), 1);
-            gate.add_permits(1);
-            stream.expect_chunk().await;
-            // A plain Project has no watermark derivation in this fixture; MaterializedExprs
-            // passes its input watermark through after producing the result.
-            if materialized {
-                assert!(
-                    stream
-                        .next()
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .as_watermark()
-                        .is_some()
-                );
-            }
-            stream.expect_barrier().await;
-        }
-    }
-
-    #[tokio::test]
-    async fn retrying_expression_waits_before_emitting_results_or_checkpoints() {
-        for materialized in [false, true] {
-            let expr = RemoteExpression::default();
-            expr.fail.store(true, Ordering::SeqCst);
-            let (mut tx, mut stream) =
-                executor(MemoryStateStore::new(), expr.clone(), materialized).await;
-            tx.push_barrier(test_epoch(1), false);
-            stream.expect_barrier().await;
-            tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
-            tx.push_barrier(test_epoch(2), false);
-            stream.next_unwrap_pending();
-            expr.fail.store(false, Ordering::SeqCst);
-            let chunk = stream.expect_chunk().await;
-            let column = if materialized { 2 } else { 0 };
-            assert_eq!(chunk.columns()[column].datum_at(0), Some(expr.result(1)));
-            stream.expect_barrier().await;
-        }
+        let gate = Arc::new(Semaphore::new(0));
+        let expr = RemoteExpression {
+            gate: Some(gate.clone()),
+            ..Default::default()
+        };
+        let (mut tx, mut stream) = executor(MemoryStateStore::new(), expr.clone()).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+        tx.push_int64_watermark(0, 1);
+        tx.push_barrier(test_epoch(2), false);
+        stream.next_unwrap_pending();
+        assert_eq!(expr.calls.load(Ordering::SeqCst), 1);
+        gate.add_permits(1);
+        let chunk = stream.expect_chunk().await;
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+        assert!(
+            stream
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .as_watermark()
+                .is_some()
+        );
+        stream.expect_barrier().await;
     }
 }

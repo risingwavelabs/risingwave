@@ -108,6 +108,7 @@ fn with_legacy_sqlserver_table_name_compat(
         function_type: ExprType::Equal as i32,
         return_type: search_condition.return_type.clone(),
         rex_node: Some(RexNode::FuncCall(FunctionCall {
+            ai_decide: None,
             children: vec![table_name_ref_expr.clone(), normalized_literal_expr],
         })),
     };
@@ -116,6 +117,7 @@ fn with_legacy_sqlserver_table_name_compat(
         function_type: ExprType::Or as i32,
         return_type: search_condition.return_type.clone(),
         rex_node: Some(RexNode::FuncCall(FunctionCall {
+            ai_decide: None,
             children: vec![search_condition.clone(), compat_equal_expr],
         })),
     }
@@ -213,6 +215,7 @@ mod tests {
             function_type: ExprType::Equal as i32,
             return_type: Some(bool_type()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
+                ai_decide: None,
                 children: vec![lhs, rhs],
             })),
         }

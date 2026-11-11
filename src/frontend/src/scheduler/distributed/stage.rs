@@ -721,7 +721,6 @@ impl StageRunner {
         let expr_context = ExprContext {
             time_zone: self.ctx.session().config().timezone(),
             strict_mode: self.ctx.session().config().batch_expr_strict_mode(),
-            ai_decide: Some((&self.ctx.session().config().ai_decide_config()).into()),
         };
         // If root, we execute it locally.
         if !self.is_root_stage() {

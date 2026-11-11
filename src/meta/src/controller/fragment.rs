@@ -2303,7 +2303,6 @@ mod tests {
                     expr_context: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
-                        ai_decide: None,
                     }),
                     config_override: "a.b.c = true".into(),
                 }

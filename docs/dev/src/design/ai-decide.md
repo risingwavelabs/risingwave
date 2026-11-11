@@ -263,6 +263,12 @@ this does not change the session. Unset streaming values inherit the compute-nod
 | `ai_decide_max_response_bytes` | 16777216 | Positive, before JSON decoding |
 | `ai_decide_max_concurrency` | 0 | Per expression instance; 0 means unlimited |
 
+Batch plans carry these settings only on AI_DECIDE expression nodes, inside
+`ExprNode.func_call.ai_decide`. Streaming rebuilds those expressions with the
+current merged job/global configuration, including after recovery. The settings
+are captured during expression construction; evaluation does not install an
+AI-specific task-local scope around the query or actor.
+
 All values are unsigned 32-bit integers. The initial delay is also clamped to the
 exponential cap, and doubling cannot overflow. There is no attempt-count setting.
 
