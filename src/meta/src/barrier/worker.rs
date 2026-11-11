@@ -131,18 +131,19 @@ mod tests {
             collected: Some(_collected_tx),
         };
 
-        let new_barrier = schedule::NewBarrier {
+        let mut periodic_barriers = PeriodicBarriers::default();
+        let new_barrier = schedule::NewBarrier::for_test(
             database_id,
-            command: Some((
+            Some((
                 Command::RescheduleIntent {
                     context: RescheduleContext::empty(),
                     reschedule_plan: None,
                 },
                 vec![notifier],
             )),
-            span: tracing::Span::none(),
-            checkpoint: false,
-        };
+            false,
+            &mut periodic_barriers,
+        );
 
         let result =
             resolve_reschedule_intent(env, HashMap::new(), Some(&database_info), new_barrier);
@@ -186,12 +187,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 }
 
-fn resolve_reschedule_intent(
+fn resolve_reschedule_intent<'a>(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     database_info: Option<&InflightDatabaseInfo>,
-    mut new_barrier: schedule::NewBarrier,
-) -> MetaResult<Option<schedule::NewBarrier>> {
+    mut new_barrier: schedule::NewBarrier<'a>,
+) -> MetaResult<Option<schedule::NewBarrier<'a>>> {
     let Some((command, notifiers)) = new_barrier.command.take() else {
         return Ok(Some(new_barrier));
     };
@@ -766,7 +767,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(
                         new_barrier,
                         &mut self.partial_graph_manager,
-                        self.active_streaming_nodes.current()
+                        self.active_streaming_nodes.current(),
                     ) {
                         if !self.enable_recovery {
                             panic!(
