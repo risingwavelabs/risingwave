@@ -355,7 +355,11 @@ impl SnowflakeV2Config {
                 .clone()
                 .ok_or(SinkError::Config(anyhow!("stage is required")))?;
             snowflake_task_ctx.stage = Some(stage);
-            snowflake_task_ctx.pipe_name = Some(format!("{}_pipe", target_table_name));
+            // Upsert sinks load staged files from the merge task itself; only append-only
+            // sinks keep a Snowpipe.
+            if is_append_only {
+                snowflake_task_ctx.pipe_name = Some(format!("{}_pipe", target_table_name));
+            }
         }
         if !is_append_only {
             let cdc_table_name = self
@@ -656,22 +660,28 @@ impl SnowflakeSinkCommitter {
             if let Some((snowflake_task_ctx, client)) =
                 config.build_snowflake_task_ctx_jdbc_client(is_append_only, schema, pk_indices)?
             {
-                let (shutdown_sender, shutdown_receiver) = unbounded_channel();
-                let snowflake_client =
-                    SnowflakeJniClient::new(client.clone(), snowflake_task_ctx.clone());
-                let periodic_task_handle = tokio::spawn(async move {
-                    Self::run_periodic_query_task(
-                        snowflake_client,
-                        config.write_intermediate_interval_seconds,
-                        sink_id,
-                        shutdown_receiver,
-                    )
-                    .await;
-                });
+                let (periodic_task_handle, shutdown_sender) =
+                    if snowflake_task_ctx.pipe_name.is_some() {
+                        let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+                        let snowflake_client =
+                            SnowflakeJniClient::new(client.clone(), snowflake_task_ctx.clone());
+                        let periodic_task_handle = tokio::spawn(async move {
+                            Self::run_periodic_query_task(
+                                snowflake_client,
+                                config.write_intermediate_interval_seconds,
+                                sink_id,
+                                shutdown_receiver,
+                            )
+                            .await;
+                        });
+                        (Some(periodic_task_handle), Some(shutdown_sender))
+                    } else {
+                        (None, None)
+                    };
                 (
                     Some(SnowflakeJniClient::new(client, snowflake_task_ctx)),
-                    Some(periodic_task_handle),
-                    Some(shutdown_sender),
+                    periodic_task_handle,
+                    shutdown_sender,
                 )
             } else {
                 (None, None, None)
@@ -714,6 +724,7 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         if let Some(client) = &self.client {
             // Todo: move this to validate
+            client.execute_drop_legacy_pipe().await?;
             client.execute_create_pipe().await?;
             client.execute_create_merge_into_task().await?;
         }
@@ -898,6 +909,25 @@ impl SnowflakeJniClient {
         Ok(())
     }
 
+    pub async fn execute_drop_legacy_pipe(&self) -> Result<()> {
+        // Older upsert sinks created this pipe and refreshed it from a local timer. Remove it
+        // before starting the task so no asynchronous Snowpipe load can race with MERGE/DELETE.
+        if self.snowflake_task_context.task_name.is_some()
+            && self.snowflake_task_context.stage.is_some()
+        {
+            let pipe_name = format!("{}_pipe", self.snowflake_task_context.target_table_name);
+            let drop_pipe_sql = build_drop_pipe_sql(
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                &pipe_name,
+            );
+            self.jdbc_client
+                .execute_sql_sync(vec![drop_pipe_sql])
+                .await?;
+        }
+        Ok(())
+    }
+
     pub async fn execute_flush_pipe(&self) -> Result<()> {
         if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
             let flush_pipe_sql = build_flush_pipe_sql(
@@ -975,6 +1005,20 @@ fn build_create_pipe_sql(
     target_table_name: &str,
 ) -> String {
     let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
+    let copy_into_sql = build_copy_into_sql(table_name, database, schema, stage, target_table_name);
+    format!(
+        "CREATE OR REPLACE PIPE {} AUTO_INGEST = FALSE AS {}",
+        pipe_name, copy_into_sql
+    )
+}
+
+fn build_copy_into_sql(
+    table_name: &str,
+    database: &str,
+    schema: &str,
+    stage: &str,
+    target_table_name: &str,
+) -> String {
     // Trailing slash is required: Snowflake matches stage paths by prefix, so `t` would
     // also match sibling folders like `t_foo/`.
     let stage = format!(
@@ -983,14 +1027,19 @@ fn build_create_pipe_sql(
     );
     let table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
     format!(
-        "CREATE OR REPLACE PIPE {} AUTO_INGEST = FALSE AS COPY INTO {} FROM @{} MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (type = 'JSON');",
-        pipe_name, table_name, stage
+        "COPY INTO {} FROM @{} MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON');",
+        table_name, stage
     )
 }
 
 fn build_flush_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
     let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
     format!("ALTER PIPE {} REFRESH;", pipe_name,)
+}
+
+fn build_drop_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
+    let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
+    format!("DROP PIPE IF EXISTS {}", pipe_name)
 }
 
 fn build_alter_add_column_sql(
@@ -1046,6 +1095,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         all_column_names,
         database,
         schema_name,
+        stage,
         ..
     } = snowflake_task_context;
     let full_task_name = format!(
@@ -1101,6 +1151,63 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         .collect::<Vec<String>>()
         .join(", ");
 
+    if let Some(stage) = stage {
+        let copy_into_sql = build_copy_into_sql(
+            cdc_table_name.as_ref().unwrap(),
+            database,
+            schema_name,
+            stage,
+            target_table_name,
+        );
+        let row_id_ordering = format!(
+            r#"TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 2)) DESC NULLS LAST, "{row_id}" DESC"#,
+            row_id = __ROW_ID,
+        );
+        // Snowflake Scripting autocommits each statement. This sequence is safe because upsert
+        // writers only stage files in S3, COPY INTO is the only CDC-table writer, and NO_OVERLAP
+        // prevents a second task run from inserting rows between MERGE and DELETE.
+        return format!(
+            r#"CREATE OR REPLACE TASK {task_name}
+WAREHOUSE = {warehouse}
+SCHEDULE = '{writer_target_interval_seconds} SECONDS'
+OVERLAP_POLICY = NO_OVERLAP
+AS
+BEGIN
+    {copy_into_sql}
+
+    MERGE INTO {target_table_name} AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY {row_id_ordering}) AS dedupe_id
+            FROM {cdc_table_name}
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON {pk_names_eq_str}
+    WHEN MATCHED AND source."{snowflake_sink_op}" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
+    WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
+
+    DELETE FROM {cdc_table_name};
+END;"#,
+            task_name = full_task_name,
+            warehouse = warehouse.as_ref().unwrap(),
+            writer_target_interval_seconds = writer_target_interval_seconds,
+            copy_into_sql = copy_into_sql,
+            cdc_table_name = full_cdc_table_name,
+            target_table_name = full_target_table_name,
+            pk_names_str = pk_names_str,
+            row_id_ordering = row_id_ordering,
+            pk_names_eq_str = pk_names_eq_str,
+            all_column_names_set_str = all_column_names_set_str,
+            all_column_names_str = all_column_names_str,
+            all_column_names_insert_str = all_column_names_insert_str,
+            snowflake_sink_op = __OP,
+        );
+    }
+
+    // JDBC writers (`with_s3 = false`) insert into the CDC table directly; keep the original task.
     format!(
         r#"CREATE OR REPLACE TASK {task_name}
 WAREHOUSE = {warehouse}
@@ -1333,6 +1440,102 @@ END;"#;
         assert!(
             sql.contains(r#"FROM @"test_db"."test_schema"."RW_S3_STAGE"/reservations/ "#),
             "unexpected pipe sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_snowflake_sink_commit_coordinator_s3() {
+        let snowflake_task_context = SnowflakeTaskContext {
+            task_name: Some("test_task".to_owned()),
+            cdc_table_name: Some("test_cdc_table".to_owned()),
+            target_table_name: "test_target_table".to_owned(),
+            writer_target_interval_seconds: 3600,
+            warehouse: Some("test_warehouse".to_owned()),
+            pk_column_names: Some(vec!["v1".to_owned()]),
+            all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
+            database: "test_db".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
+            stage: Some("RW_S3_STAGE".to_owned()),
+            pipe_name: None,
+        };
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task"
+WAREHOUSE = test_warehouse
+SCHEDULE = '3600 SECONDS'
+OVERLAP_POLICY = NO_OVERLAP
+AS
+BEGIN
+    COPY INTO "test_db"."test_schema"."test_cdc_table" FROM @"test_db"."test_schema"."RW_S3_STAGE"/test_target_table/ MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON');
+
+    MERGE INTO "test_db"."test_schema"."test_target_table" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."test_cdc_table"
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."v1" = source."v1"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."v1" = source."v1", target."v2" = source."v2"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
+
+    DELETE FROM "test_db"."test_schema"."test_cdc_table";
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
+
+    #[test]
+    fn test_snowflake_sink_commit_coordinator_s3_multi_pk() {
+        let snowflake_task_context = SnowflakeTaskContext {
+            task_name: Some("test_task_multi_pk".to_owned()),
+            cdc_table_name: Some("cdc_multi_pk".to_owned()),
+            target_table_name: "target_multi_pk".to_owned(),
+            writer_target_interval_seconds: 300,
+            warehouse: Some("multi_pk_warehouse".to_owned()),
+            pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
+            all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
+            database: "test_db".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
+            stage: Some("RW_S3_STAGE".to_owned()),
+            pipe_name: None,
+        };
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task_multi_pk"
+WAREHOUSE = multi_pk_warehouse
+SCHEDULE = '300 SECONDS'
+OVERLAP_POLICY = NO_OVERLAP
+AS
+BEGIN
+    COPY INTO "test_db"."test_schema"."cdc_multi_pk" FROM @"test_db"."test_schema"."RW_S3_STAGE"/target_multi_pk/ MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON');
+
+    MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."cdc_multi_pk"
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."id1" = source."id1" AND target."id2" = source."id2"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id1" = source."id1", target."id2" = source."id2", target."val" = source."val"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
+
+    DELETE FROM "test_db"."test_schema"."cdc_multi_pk";
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
+
+    #[test]
+    fn test_build_drop_pipe_sql() {
+        assert_eq!(
+            build_drop_pipe_sql("test_db", "test_schema", "reservations_pipe"),
+            r#"DROP PIPE IF EXISTS "test_db"."test_schema"."reservations_pipe""#
         );
     }
 }
