@@ -141,6 +141,10 @@ pub struct Binder {
     /// The included secrets while binding a query (e.g., secret refs in UDF arguments).
     included_secrets: HashSet<SecretId>,
 
+    /// Whether a function that reads the session (its user, database, search path, settings or
+    /// id) was bound. Such a query means something else when bound in another session.
+    session_dependent: bool,
+
     param_types: ParameterTypes,
 
     /// The temporary sources that will be used during binding phase
@@ -270,6 +274,7 @@ impl Binder {
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
             included_secrets: HashSet::new(),
+            session_dependent: false,
             param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
             staging_catalog_manager: session.staging_catalog_manager(),
@@ -334,6 +339,11 @@ impl Binder {
     /// optimised away.
     pub fn included_relations(&self) -> &HashSet<ObjectId> {
         &self.included_relations
+    }
+
+    /// Whether the bound query read the session through a function like `current_user`.
+    pub fn is_session_dependent(&self) -> bool {
+        self.session_dependent
     }
 
     /// Get included user-defined functions in the query after binding.
