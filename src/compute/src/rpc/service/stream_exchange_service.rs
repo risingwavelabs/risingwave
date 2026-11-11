@@ -73,14 +73,9 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             }
         };
 
-        let receiver = self
+        let (receiver, record_ack_batch_size) = self
             .stream_mgr
-            .take_receiver(
-                up_partial_graph_id,
-                term_id,
-                (up_actor_id, down_actor_id),
-                up_fragment_id,
-            )
+            .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
             .await?;
 
         // Map the remaining stream to add-permits.
@@ -93,6 +88,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             self.metrics.clone(),
             peer_addr,
             receiver,
+            record_ack_batch_size,
             add_permits_stream,
             (up_fragment_id, down_fragment_id),
         )))
@@ -112,6 +108,7 @@ impl StreamExchangeServiceImpl {
         metrics: Arc<StreamExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver,
+        record_ack_batch_size: usize,
         add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
         up_down_fragment_ids: (FragmentId, FragmentId),
     ) {
@@ -119,7 +116,8 @@ impl StreamExchangeServiceImpl {
         let up_fragment_id = up_down_fragment_ids.0.to_string();
         let down_fragment_id = up_down_fragment_ids.1.to_string();
 
-        let permits = receiver.permits();
+        let channel_permits = receiver.permits();
+        let mut batched_record_permits = 0usize;
 
         // Select from the permits back from the downstream and the upstream receiver.
         let select_stream = futures::stream::select(
@@ -140,7 +138,7 @@ impl StreamExchangeServiceImpl {
         while let Some(r) = select_stream.try_next().await? {
             match r {
                 Either::Left(permits_to_add) => {
-                    permits.add_permits(permits_to_add);
+                    channel_permits.add_permits(permits_to_add);
                 }
                 Either::Right(MessageWithPermits { message, permits }) => {
                     let message = match message {
@@ -151,7 +149,25 @@ impl StreamExchangeServiceImpl {
                         | DispatcherMessageBatch::BarrierBatch(_)) => msg,
                     };
                     let proto = message.to_protobuf();
-                    // forward the acquired permit to the downstream
+                    // Batch credits upstream so that the downstream only needs to echo them.
+                    let permits = match permits {
+                        Some(permits::Value::Record(p)) => {
+                            batched_record_permits += p as usize;
+                            if batched_record_permits >= record_ack_batch_size {
+                                let credits = std::mem::take(&mut batched_record_permits)
+                                    .try_into()
+                                    .map_err(|_| {
+                                        Status::internal(
+                                            "batched record permits exceed the protocol limit",
+                                        )
+                                    })?;
+                                Some(permits::Value::Record(credits))
+                            } else {
+                                None
+                            }
+                        }
+                        permits => permits,
+                    };
                     let response = GetStreamResponse {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),
@@ -164,5 +180,143 @@ impl StreamExchangeServiceImpl {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::FutureExt;
+    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::config::StreamingConfig;
+    use risingwave_common::types::DataType;
+    use risingwave_stream::executor::exchange::permit::{
+        ChannelMetrics, channel_from_config_with_metrics, channel_with_metrics,
+    };
+    use risingwave_stream::executor::{DispatcherBarrier, Watermark};
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+
+    use super::*;
+
+    fn chunk(rows: usize) -> DispatcherMessageBatch {
+        DispatcherMessageBatch::Chunk(StreamChunk::new(vec![Op::Insert; rows], vec![]))
+    }
+
+    #[tokio::test]
+    async fn test_remote_permit_batching() {
+        let (tx, rx) = channel_with_metrics(100, 30, 1, ChannelMetrics::for_test());
+        let (_ack_tx, ack_rx) = mpsc::unbounded_channel();
+        let responses = StreamExchangeServiceImpl::get_stream_impl(
+            Arc::new(GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS.clone()),
+            "127.0.0.1:1234".parse().unwrap(),
+            rx,
+            30,
+            UnboundedReceiverStream::new(ack_rx).map(Ok),
+            (1.into(), 2.into()),
+        );
+        pin_mut!(responses);
+
+        tx.send(chunk(20)).await.unwrap();
+        let response = responses.next().await.unwrap().unwrap();
+        assert_eq!(response.permits.unwrap().value, None);
+
+        // Barriers are ACKed immediately, without flushing pending record credits.
+        tx.send(DispatcherMessageBatch::BarrierBatch(vec![
+            DispatcherBarrier::with_prev_epoch_for_test(2, 1),
+        ]))
+        .await
+        .unwrap();
+        let response = responses.next().await.unwrap().unwrap();
+        assert_eq!(
+            response.permits.unwrap().value,
+            Some(permits::Value::Barrier(1))
+        );
+
+        // Watermarks do not change the pending credits either.
+        tx.send(DispatcherMessageBatch::Watermark(Watermark::new(
+            0,
+            DataType::Int64,
+            1i64.into(),
+        )))
+        .await
+        .unwrap();
+        let response = responses.next().await.unwrap().unwrap();
+        assert_eq!(response.permits.unwrap().value, None);
+
+        for _ in 0..2 {
+            tx.send(chunk(20)).await.unwrap();
+            let response = responses.next().await.unwrap().unwrap();
+            assert_eq!(
+                response.permits.unwrap().value,
+                Some(permits::Value::Record(40)),
+            );
+
+            tx.send(chunk(20)).await.unwrap();
+            let response = responses.next().await.unwrap().unwrap();
+            assert_eq!(response.permits.unwrap().value, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remote_permits_only_released_after_ack() {
+        let mut config = StreamingConfig::default();
+        config.developer.exchange_initial_permits = 100;
+        config.developer.exchange_batched_permits = 30;
+        config.developer.exchange_concurrent_barriers = 1;
+        let (tx, rx) = channel_from_config_with_metrics(&config, ChannelMetrics::for_test());
+        let (ack_tx, ack_rx) = mpsc::unbounded_channel();
+        let responses = StreamExchangeServiceImpl::get_stream_impl(
+            Arc::new(GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS.clone()),
+            "127.0.0.1:1234".parse().unwrap(),
+            rx,
+            config.developer.exchange_batched_permits,
+            UnboundedReceiverStream::new(ack_rx).map(Ok),
+            (1.into(), 2.into()),
+        );
+        pin_mut!(responses);
+
+        // The server can wait for data without releasing any record permits.
+        assert!(responses.next().now_or_never().is_none());
+
+        for _ in 0..5 {
+            tx.send(chunk(20)).await.unwrap();
+        }
+        let sixth_send = tx.send(chunk(20));
+        pin_mut!(sixth_send);
+        assert!(sixth_send.as_mut().now_or_never().is_none());
+
+        let mut acks = vec![];
+        for expected in [None, Some(40), None, Some(40), None] {
+            let response = responses.next().await.unwrap().unwrap();
+            let credits = response.permits.unwrap().value;
+            assert_eq!(credits, expected.map(permits::Value::Record));
+            if let Some(credits) = credits {
+                acks.push(credits);
+            }
+        }
+        // Merely sending the responses must not release any permits.
+        assert!(sixth_send.as_mut().now_or_never().is_none());
+
+        ack_tx.send(acks.remove(0)).unwrap();
+        // Drive the server to apply the ACK, with no data left to send yet.
+        assert!(responses.next().now_or_never().is_none());
+        assert!(sixth_send.as_mut().now_or_never().unwrap().is_ok());
+        let response = responses.next().await.unwrap().unwrap();
+        assert_eq!(
+            response.permits.as_ref().unwrap().value,
+            Some(permits::Value::Record(40))
+        );
+        acks.push(response.permits.unwrap().value.unwrap());
+
+        for ack in acks {
+            ack_tx.send(ack).unwrap();
+        }
+        assert!(responses.next().now_or_never().is_none());
+
+        // All 120 consumed permits were returned exactly once: the budget is 100 again.
+        for _ in 0..5 {
+            assert!(tx.send(chunk(20)).now_or_never().unwrap().is_ok());
+        }
+        assert!(tx.send(chunk(20)).now_or_never().is_none());
     }
 }

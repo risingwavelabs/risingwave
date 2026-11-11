@@ -47,7 +47,7 @@ use crate::error::{ScoredStreamError, StreamError, StreamResult};
 use crate::task::LocalBarrierManager;
 use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
 use crate::task::{
-    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache, FragmentId,
+    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache,
     PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
 pub mod managed_state;
@@ -285,14 +285,6 @@ impl ControlStreamHandle {
     }
 }
 
-pub(super) enum TakeReceiverRequest {
-    Remote {
-        result_sender: oneshot::Sender<StreamResult<Receiver>>,
-        upstream_fragment_id: FragmentId,
-    },
-    Local(permit::Sender),
-}
-
 /// Sent from [`crate::task::stream_manager::LocalStreamManager`] to [`crate::task::barrier_worker::LocalBarrierWorker::run`].
 ///
 /// See [`crate::task`] for architecture overview.
@@ -306,7 +298,7 @@ pub(super) enum LocalActorOperation {
         partial_graph_id: PartialGraphId,
         term_id: String,
         ids: UpDownActorIds,
-        request: TakeReceiverRequest,
+        request: NewOutputRequest,
     },
     #[cfg(test)]
     GetCurrentLocalBarrierManager(oneshot::Sender<LocalBarrierManager>),
@@ -457,13 +449,13 @@ impl LocalBarrierWorker {
                             upstream_actor_id,
                             upstream_partial_graph_id,
                             term_id,
-                            tx
+                            result_sender
                         } => {
                             self.handle_actor_op(LocalActorOperation::TakeReceiver {
                                 partial_graph_id: upstream_partial_graph_id,
                                 term_id,
                                 ids: (upstream_actor_id, actor_id),
-                                request: TakeReceiverRequest::Local(tx),
+                                request: NewOutputRequest::Local(result_sender),
                             });
                         }
                     }
@@ -617,9 +609,7 @@ impl LocalBarrierWorker {
                         return;
                     }
                 };
-                if let TakeReceiverRequest::Remote { result_sender, .. } = request {
-                    let _ = result_sender.send(Err(err.into()));
-                }
+                request.reject(err.into());
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
@@ -734,8 +724,6 @@ mod await_epoch_completed_future {
 use await_epoch_completed_future::*;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
-
-use crate::executor::exchange::permit;
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -992,12 +980,10 @@ impl LocalBarrierWorker {
                                 current_term_id = term_id,
                                 "reject buffered exchange request with stale partial graph term"
                             );
-                            if let TakeReceiverRequest::Remote { result_sender, .. } = request {
-                                let _ = result_sender.send(Err(anyhow!(
+                            request.reject(anyhow!(
                                     "take receiver ({upstream_actor_id}, {actor_id}) on stale partial graph term {request_term_id}; current term is {term_id}"
                                 )
-                                .into()));
-                            }
+                                .into());
                         }
                     }
                     *status = PartialGraphStatus::Running(graph);
@@ -1183,8 +1169,21 @@ impl<T> EventSender<T> {
 }
 
 pub(crate) enum NewOutputRequest {
-    Local(permit::Sender),
-    Remote(permit::Sender),
+    Local(oneshot::Sender<StreamResult<Receiver>>),
+    Remote(oneshot::Sender<StreamResult<(Receiver, usize)>>),
+}
+
+impl NewOutputRequest {
+    pub(crate) fn reject(self, err: StreamError) {
+        match self {
+            Self::Local(sender) => {
+                let _ = sender.send(Err(err));
+            }
+            Self::Remote(sender) => {
+                let _ = sender.send(Err(err));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1205,6 +1204,7 @@ pub(crate) mod barrier_test_utils {
     use tonic::Status;
 
     use crate::executor::Barrier;
+    use crate::executor::exchange::permit;
     use crate::task::barrier_worker::{ControlStreamHandle, EventSender, LocalActorOperation};
     use crate::task::{ActorId, LocalBarrierManager, NewOutputRequest, TEST_PARTIAL_GRAPH_ID};
 
@@ -1295,11 +1295,37 @@ pub(crate) mod barrier_test_utils {
         pub(crate) async fn take_pending_new_output_requests(
             &self,
             actor_id: ActorId,
-        ) -> Vec<(ActorId, NewOutputRequest)> {
-            self.actor_op_tx
+        ) -> Vec<(ActorId, permit::Sender)> {
+            let requests = self
+                .actor_op_tx
                 .send_and_await(|tx| LocalActorOperation::TakePendingNewOutputRequest(actor_id, tx))
                 .await
-                .unwrap()
+                .unwrap();
+            // These tests create channels directly instead of running an upstream dispatcher.
+            requests
+                .into_iter()
+                .map(|(actor_id, request)| {
+                    let (tx, rx) = permit::channel_from_config_with_metrics(
+                        self.local_barrier_manager.env.global_config(),
+                        permit::ChannelMetrics::for_test(),
+                    );
+                    match request {
+                        NewOutputRequest::Local(sender) => {
+                            let _ = sender.send(Ok(rx));
+                        }
+                        NewOutputRequest::Remote(sender) => {
+                            let batch_size = self
+                                .local_barrier_manager
+                                .env
+                                .global_config()
+                                .developer
+                                .exchange_batched_permits;
+                            let _ = sender.send(Ok((rx, batch_size)));
+                        }
+                    }
+                    (actor_id, tx)
+                })
+                .collect()
         }
     }
 }

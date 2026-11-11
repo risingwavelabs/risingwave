@@ -505,7 +505,6 @@ impl UpstreamSinkBarrierManager {
                 ctx.actor_context.fragment_id,
                 actor,
                 upstream_fragment_id,
-                ctx.actor_context.config.clone(),
             )
         }))
         .await?;
@@ -550,7 +549,6 @@ mod tests {
     use crate::executor::exchange::permit::{Sender, channel_for_test};
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::{AddMutation, MessageInner, StopMutation};
-    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
@@ -771,11 +769,7 @@ mod tests {
         let mut output_req = test_env
             .take_pending_new_output_requests(upstream_actor_id)
             .await;
-        let (_, req) = output_req.pop().unwrap();
-        let tx = match req {
-            NewOutputRequest::Local(tx) => tx,
-            NewOutputRequest::Remote(_) => unreachable!(),
-        };
+        let (_, tx) = output_req.pop().unwrap();
 
         tx.send(MessageInner::Barrier(b2.clone().into_dispatcher()).into())
             .await
