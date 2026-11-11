@@ -1244,6 +1244,7 @@ pub async fn handle_create_table(
     }
 
     session.check_cluster_limits().await?;
+    handler_args.with_options.preserve_changes()?;
 
     let engine = match ast_engine {
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
