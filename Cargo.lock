@@ -9836,9 +9836,18 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.1"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b6180140927ee907000b0aa540091f6ea512ead4447c92b8fc35bc72788a5a6"
+checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
+name = "lru"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -10494,7 +10503,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "keyed_priority_queue",
- "lru 0.18.1",
+ "lru 0.18.5",
  "mysql_common",
  "native-tls",
  "pem 3.0.6",
@@ -14489,7 +14498,7 @@ dependencies = [
  "jni 0.21.1",
  "jsonbb",
  "linkme",
- "lru 0.18.1",
+ "lru 0.19.0",
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
@@ -15765,7 +15774,7 @@ dependencies = [
  "either",
  "futures",
  "http 1.5.0",
- "lru 0.18.1",
+ "lru 0.19.0",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
