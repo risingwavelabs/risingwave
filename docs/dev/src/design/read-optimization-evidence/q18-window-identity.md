@@ -195,3 +195,26 @@ members were all StreamScan block reads. The candidate emitted 6,504
 StreamScan Blockwise windows through the checkpoint. Trace group totals
 reconciled with the scheduler counters in both runs. This is one traced
 run per mode. [Structured results and build identities](./q18-source-blockwise.json).
+
+### Source Blockwise with trace disabled
+
+One follow-up run used the same frozen dev binary, cold seed, SQL,
+EXPLAIN plans, and loaded configuration. It set `RUST_LOG=info` and passed
+the 100-row oracle. The source checkpoint again used the first sample
+at 13,652,430 rows.
+
+| Metric | Source Blockwise with trace | Source Blockwise without trace |
+| --- | ---: | ---: |
+| Source checkpoint seconds | 45.278 | 45.260 |
+| Source phase CN GETs | 11,603 | 12,808 |
+| Source phase CN read GiB | 3.18 | 2.75 |
+| Full Q18 seconds | 393.037 | 343.845 |
+| Full Q18 CN GETs | 21,012 | 21,956 |
+| Full Q18 CN read GiB | 5.50 | 5.02 |
+| Full Q18 sampled peak CN RSS, GiB | 4.09 | 3.59 |
+
+The untraced run finished 49.2 seconds sooner than the traced run of the
+same binary. The historical untraced Locality ON run with Range prefetch
+and scheduler disabled completed in 335.8 seconds with 51,333 CN GETs.
+That run used a different experimental binary. The timings are single
+runs. [Untraced counters and build identity](./q18-source-blockwise-no-trace.json).

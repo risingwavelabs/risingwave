@@ -1,0 +1,30 @@
+{
+  "binary_sha256": "09e13b049e6a684d4867f6e8e8ac24297cf2fe214aa1052bb37f574bfa3f80ec",
+  "phases": {
+    "after_source_scan": {
+      "elapsed_s": 298.585,
+      "physical_bytes": 2433896505,
+      "physical_gets": 9148,
+      "scheduler_merges_saved": 27459,
+      "scheduler_window_budget_reject": 0
+    },
+    "full": {
+      "elapsed_s": 343.845,
+      "physical_bytes": 5389753414,
+      "physical_gets": 21956,
+      "sampled_peak_cn_rss_kib": 3760160,
+      "scheduler_merges_saved": 59778,
+      "scheduler_window_budget_reject": 3755
+    },
+    "through_source_scan": {
+      "elapsed_s": 45.26,
+      "physical_bytes": 2955856909,
+      "physical_gets": 12808,
+      "sampled_peak_cn_rss_kib": 3208608,
+      "scheduler_merges_saved": 32319,
+      "scheduler_window_budget_reject": 3755
+    }
+  },
+  "rust_log": "info",
+  "source_rows_at_checkpoint": 13652430.0
+}
