@@ -84,7 +84,8 @@ The source tables also reported 1,757 Range prefetch operations covering
 The trace identifies where the small requests were created. It does not
 record whether an individual source per-block read followed clipping to
 the last block of an SST iterator or the Range prefetch memory-budget
-fallback. Both paths use the same block-read trace.
+fallback. Both paths use the same block-read trace. The SST metadata
+comparison below resolves the dominant cause.
 
 ### Same-SST gaps among small StreamScan reads
 
@@ -136,3 +137,31 @@ For 38,863 GETs with a later adjacent GET, the median time from the
 first selection to the earliest later adjacent submission was 562 ms.
 Only 128 had that next submission within 10 ms of selection, including
 50 whose next request was submitted before selection but dequeued later.
+
+### Range prefetch buffer and scan boundaries
+
+The cold seed retained the SSTs for all 41,124 small StreamScan GETs.
+An offline footer decode matched all 119 SSTs and each traced block's
+offset and length. The source scans used full PK ranges per vnode. If
+the next block's smallest key has the same table and vnode as the
+current block's smallest key, the scan bound still includes that next
+block. For the 37,063 matching GETs, the iterator was eligible for Range
+prefetch. This includes 18,919 GETs with at least 16 blocks remaining
+in the same table and vnode.
+
+| Classification by the scan bound | GETs | Share |
+| --- | ---: | ---: |
+| Next block stays within the scan bound | 37,063 | 90.13% |
+| End of SST or table, or next vnode belongs to another actor | 2,353 | 5.72% |
+| Crosses a vnode boundary with insufficient request context to decide | 1,708 | 4.15% |
+
+The boundary count includes 294 SST or table tails and 2,059 vnode
+tails identified using actor ownership observed in the same trace. The
+Range path awaits an ordinary block get when the shared prefetch buffer
+is over capacity. This run's 2 GiB CN derives a 172 MiB capacity with
+the default memory configuration. Successful Range reads use a different
+trace path, and no Range prefetch error was logged. The iterator advances
+only after the demand block returns and its rows are consumed. Together
+the call path and the reconstructed bounds identify the over-capacity
+fallback for the non-tail reads. The archived scrapes do not record
+per-request buffer occupancy.
