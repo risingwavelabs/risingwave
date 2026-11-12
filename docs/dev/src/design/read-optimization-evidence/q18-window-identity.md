@@ -165,3 +165,33 @@ only after the demand block returns and its rows are consumed. Together
 the call path and the reconstructed bounds identify the over-capacity
 fallback for the non-tail reads. The archived scrapes do not record
 per-request buffer occupancy.
+
+### Source StreamScan with Blockwise prefetch
+
+The trial used the same cold seed, Q18 SQL, traced dev profile and
+[Q64 configuration](./q18-q64.toml) as the source Range baseline above.
+The loaded TOML and both EXPLAIN outputs matched byte for byte.
+The experimental build changed the source snapshot scan in
+`make_snapshot_stream` to use `PrefetchMode::Blockwise` while preserving
+the other fields of `PrefetchOptions::prefetch_for_large_range_scan()`.
+The 100-row oracle passed. The change was reverted after freezing the
+trial binary.
+
+| Scope and metric | Source Range | Source Blockwise | Change |
+| --- | ---: | ---: | ---: |
+| Source phase StreamScan GETs at most 64 KiB | 41,124 | 4,308 | −89.5% |
+| Source phase all CN GETs | 44,154 | 11,603 | −73.7% |
+| Source phase CN read bytes | 3,714,206,916 | 3,414,299,022 | −8.1% |
+| Source phase elapsed seconds | 60.503 | 45.278 | −25.2% |
+| Source phase sampled peak CN RSS, GiB | 2.40 | 3.64 | +52.0% |
+| Full Q18 CN GETs | 53,070 | 21,012 | −60.4% |
+| Full Q18 CN read bytes | 6,180,254,395 | 5,903,347,632 | −4.5% |
+| Full Q18 elapsed seconds | 464.659 | 393.037 | −15.4% |
+| Full Q18 sampled peak CN RSS, GiB | 2.48 | 4.09 | +65.1% |
+
+The source checkpoint is the first five-second scrape at 13,652,430
+source rows. The small GET row counts successful scheduled GETs whose
+members were all StreamScan block reads. The candidate emitted 6,504
+StreamScan Blockwise windows through the checkpoint. Trace group totals
+reconciled with the scheduler counters in both runs. This is one traced
+run per mode. [Structured results and build identities](./q18-source-blockwise.json).

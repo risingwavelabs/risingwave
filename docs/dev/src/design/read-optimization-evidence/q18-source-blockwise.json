@@ -1,0 +1,97 @@
+{
+  "source_blockwise": {
+    "binary_sha256": "09e13b049e6a684d4867f6e8e8ac24297cf2fe214aa1052bb37f574bfa3f80ec",
+    "phases": {
+      "after_source_scan": {
+        "elapsed_s": 347.759,
+        "physical_bytes": 2489048610,
+        "physical_gets": 9409,
+        "scheduled_gets": 9071,
+        "scheduled_gets_le_64kib": 4893,
+        "scheduled_successes_metric": 9071,
+        "scheduler_merges_saved": 27954,
+        "scheduler_window_admission_split": 6,
+        "scheduler_window_budget_reject": 0,
+        "scheduler_window_timeout": 96
+      },
+      "full": {
+        "elapsed_s": 393.037,
+        "physical_bytes": 5903347632,
+        "physical_gets": 21012,
+        "sampled_peak_cn_rss_kib": 4290528,
+        "scheduled_successes_metric": 20540,
+        "scheduler_merges_saved": 68514,
+        "scheduler_window_admission_split": 164,
+        "scheduler_window_budget_reject": 3759,
+        "scheduler_window_timeout": 286
+      },
+      "through_source_scan": {
+        "elapsed_s": 45.278,
+        "physical_bytes": 3414299022,
+        "physical_gets": 11603,
+        "sampled_peak_cn_rss_kib": 3821072,
+        "scheduled_gets": 11469,
+        "scheduled_gets_le_64kib": 4308,
+        "scheduled_successes_metric": 11469,
+        "scheduler_merges_saved": 40560,
+        "scheduler_window_admission_split": 158,
+        "scheduler_window_budget_reject": 3759,
+        "scheduler_window_timeout": 190,
+        "stream_scan_block_gets": 11469,
+        "stream_scan_block_gets_le_64kib": 4308,
+        "stream_scan_blockwise_windows": 6504
+      }
+    },
+    "source_base": "c417e3d81c6b00a1064a143c6763068fe381397d",
+    "source_patch_sha256": "a8caae5c0511b389eb8c1bcadb64113e914c70c0f56b655aba1e878ffafa9236",
+    "source_rows_at_checkpoint": 13652430.0,
+    "trace_sha256": "888ff872d0a8764c85aa65614822245bc025eaaeadd02511938a605442cbf8f9"
+  },
+  "source_range": {
+    "binary_sha256": "90ed156b69c24a91662fefb02d62d32ff513dccfbf8136228145bb49fb94dec4",
+    "phases": {
+      "after_source_scan": {
+        "elapsed_s": 404.156,
+        "physical_bytes": 2466047479,
+        "physical_gets": 8916,
+        "scheduled_gets": 8569,
+        "scheduled_gets_le_64kib": 4491,
+        "scheduled_successes_metric": 8569,
+        "scheduler_merges_saved": 28131,
+        "scheduler_window_admission_split": 1,
+        "scheduler_window_budget_reject": 1,
+        "scheduler_window_timeout": 57
+      },
+      "full": {
+        "elapsed_s": 464.659,
+        "physical_bytes": 6180254395,
+        "physical_gets": 53070,
+        "sampled_peak_cn_rss_kib": 2599488,
+        "scheduled_successes_metric": 52575,
+        "scheduler_merges_saved": 28572,
+        "scheduler_window_admission_split": 1,
+        "scheduler_window_budget_reject": 1,
+        "scheduler_window_timeout": 68
+      },
+      "through_source_scan": {
+        "elapsed_s": 60.503,
+        "mixed_stream_scan_block_gets": 9,
+        "mixed_stream_scan_block_gets_le_64kib": 0,
+        "physical_bytes": 3714206916,
+        "physical_gets": 44154,
+        "sampled_peak_cn_rss_kib": 2514112,
+        "scheduled_gets": 44006,
+        "scheduled_gets_le_64kib": 41230,
+        "scheduled_successes_metric": 44006,
+        "scheduler_merges_saved": 441,
+        "scheduler_window_admission_split": 0,
+        "scheduler_window_budget_reject": 0,
+        "scheduler_window_timeout": 11,
+        "stream_scan_block_gets": 41789,
+        "stream_scan_block_gets_le_64kib": 41124
+      }
+    },
+    "source_rows_at_checkpoint": 13652430.0,
+    "trace_sha256": "eb1962e64ac6467ff8ead4d5682f67886247e2f1da7226c432d68f0add98a732"
+  }
+}
