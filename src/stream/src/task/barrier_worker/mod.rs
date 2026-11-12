@@ -47,7 +47,7 @@ use crate::error::{ScoredStreamError, StreamError, StreamResult};
 use crate::task::LocalBarrierManager;
 use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
 use crate::task::{
-    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache,
+    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache, FragmentId,
     PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
 pub mod managed_state;

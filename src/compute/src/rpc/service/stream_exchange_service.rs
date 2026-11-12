@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use either::Either;
-use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeService;
@@ -73,25 +73,33 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             }
         };
 
-        let (receiver, record_ack_batch_size) = self
-            .stream_mgr
-            .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
-            .await?;
-
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
             Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
             Value::AddPermits(add_permits) => add_permits.value.unwrap(),
         });
 
-        Ok(Response::new(Self::get_stream_impl(
-            self.metrics.clone(),
-            peer_addr,
-            receiver,
-            record_ack_batch_size,
-            add_permits_stream,
-            (up_fragment_id, down_fragment_id),
-        )))
+        let stream_mgr = self.stream_mgr.clone();
+        let metrics = self.metrics.clone();
+        // Return the RPC response before waiting for the upstream dispatcher. Otherwise, a
+        // downstream adding this input can stop draining an existing input and backpressure the
+        // upstream actor whose progress is needed to create the new channel.
+        let responses = async move {
+            let (receiver, record_ack_batch_size) = stream_mgr
+                .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
+                .await?;
+            Ok::<_, Status>(Self::get_stream_impl(
+                metrics,
+                peer_addr,
+                receiver,
+                record_ack_batch_size,
+                add_permits_stream,
+                (up_fragment_id, down_fragment_id),
+            ))
+        }
+        .try_flatten_stream();
+
+        Ok(Response::new(responses))
     }
 }
 
@@ -200,6 +208,136 @@ mod tests {
 
     fn chunk(rows: usize) -> DispatcherMessageBatch {
         DispatcherMessageBatch::Chunk(StreamChunk::new(vec![Op::Insert; rows], vec![]))
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_remote_handshake_does_not_wait_for_channel() {
+        use std::sync::atomic::AtomicU64;
+        use std::time::Duration;
+
+        use risingwave_pb::stream_service::streaming_control_stream_request::{
+            InitRequest, Request as ControlRequest, ResetPartialGraphsRequest,
+        };
+        use risingwave_pb::stream_service::{
+            StreamingControlStreamRequest, streaming_control_stream_response,
+        };
+        use risingwave_pb::task_service::get_stream_request::{Get, Value};
+        use risingwave_pb::task_service::stream_exchange_service_client::StreamExchangeServiceClient;
+        use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeServiceServer;
+        use risingwave_stream::executor::monitor::StreamingMetrics;
+        use risingwave_stream::task::StreamEnvironment;
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+        use tokio::time::timeout;
+        use tokio_stream::wrappers::TcpListenerStream;
+
+        let stream_mgr = LocalStreamManager::new(
+            StreamEnvironment::for_test(),
+            Arc::new(StreamingMetrics::unused()),
+            None,
+            Arc::new(AtomicU64::new(0)),
+        );
+        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        stream_mgr.handle_new_control_stream(
+            response_tx,
+            UnboundedReceiverStream::new(control_rx).boxed(),
+            InitRequest {},
+        );
+        assert!(matches!(
+            response_rx.recv().await.unwrap().unwrap().response,
+            Some(streaming_control_stream_response::Response::Init(_))
+        ));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let service = StreamExchangeServiceImpl::new(
+            stream_mgr.clone(),
+            Arc::new(GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS.clone()),
+        );
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(StreamExchangeServiceServer::new(service))
+                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let mut client = StreamExchangeServiceClient::connect(format!("http://{addr}"))
+            .await
+            .unwrap();
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let partial_graph_id = 123.into();
+        request_tx
+            .send(GetStreamRequest {
+                value: Some(Value::Get(Get {
+                    up_actor_id: 1.into(),
+                    down_actor_id: 2.into(),
+                    up_fragment_id: 10.into(),
+                    down_fragment_id: 20.into(),
+                    up_partial_graph_id: partial_graph_id,
+                    term_id: "test".into(),
+                })),
+            })
+            .unwrap();
+
+        // No upstream actor exists to create this channel. Connection setup must still finish,
+        // allowing the downstream to resume draining its existing inputs.
+        let mut responses = timeout(
+            Duration::from_secs(5),
+            client.get_stream(UnboundedReceiverStream::new(request_rx)),
+        )
+        .await
+        .expect("RPC establishment must not wait for the upstream channel")
+        .unwrap()
+        .into_inner();
+        assert!(responses.message().now_or_never().is_none());
+
+        // Wait until the subscription is registered before resetting its partial graph.
+        timeout(Duration::from_secs(5), async {
+            while !stream_mgr
+                .inspect_barrier_state()
+                .await
+                .unwrap()
+                .contains("partial graph 123 status: ReceivedExchangeRequest")
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        control_tx
+            .send(Ok(StreamingControlStreamRequest {
+                request: Some(ControlRequest::ResetPartialGraphs(
+                    ResetPartialGraphsRequest {
+                        partial_graph_ids: vec![partial_graph_id],
+                    },
+                )),
+            }))
+            .unwrap();
+
+        // A subscription failure after the headers must propagate through the response body.
+        let error = timeout(Duration::from_secs(5), responses.message())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(error.message().contains("partial graph reset"));
+
+        drop(responses);
+        drop(client);
+        drop(request_tx);
+        drop(response_rx);
+        drop(control_tx);
+        stream_mgr.shutdown().await.unwrap();
+        shutdown_tx.send(()).unwrap();
+        timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
