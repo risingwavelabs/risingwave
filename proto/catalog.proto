@@ -160,6 +160,15 @@ message Source {
   optional uint32 rate_limit = 101;
 }
 
+// A source that reads its stages in order, each one starting after the previous one completes.
+message HybridSource {
+  repeated HybridStage stages = 1;
+}
+
+message HybridStage {
+  uint32 source_id = 1;
+}
+
 enum SinkType {
   SINK_TYPE_UNSPECIFIED = 0;
   SINK_TYPE_APPEND_ONLY = 1;
