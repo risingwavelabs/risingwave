@@ -127,6 +127,11 @@
             "description": "Delivering data to Turbopuffer.",
             "type": "string",
             "const": "TurbopufferSink"
+        },
+        {
+            "description": "Delivering data to Iceberg with a primary key index.",
+            "type": "string",
+            "const": "IcebergSinkWithPkIndex"
         }
     ]
 }

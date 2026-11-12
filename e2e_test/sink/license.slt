@@ -13,6 +13,49 @@ flush;
 statement ok
 CREATE TABLE t (k INT);
 
+# Reject PK-index sinks before attempting to access the Iceberg catalog.
+statement error feature IcebergSinkWithPkIndex is not available based on your license
+CREATE SINK iceberg_pk_index_sink
+FROM t
+WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    enable_pk_index = 'true',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:1',
+    warehouse.path = 's3://license-test',
+    database.name = 'license_test',
+    table.name = 'pk_index'
+);
+
+# Ordinary Iceberg sinks still reach planner validation without a license.
+statement error Sink primary key column not found: missing
+CREATE SINK iceberg_sink
+FROM t
+WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'missing',
+    create_table_if_not_exists = 'true',
+    warehouse.path = 's3://license-test',
+    database.name = 'license_test',
+    table.name = 'ordinary'
+);
+
+statement error Sink primary key column not found: missing
+CREATE SINK iceberg_sink
+FROM t
+WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'missing',
+    enable_pk_index = 'false',
+    create_table_if_not_exists = 'true',
+    warehouse.path = 's3://license-test',
+    database.name = 'license_test',
+    table.name = 'ordinary'
+);
+
 statement error feature TurbopufferSink is not available based on your license
 CREATE SINK turbopuffer_sink
 FROM t
@@ -168,6 +211,21 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 
 statement ok
 flush;
+
+# An authorized PK-index sink reaches planner validation without external services.
+statement error does not allow a user-specified `primary_key`
+CREATE SINK iceberg_pk_index_sink
+FROM t
+WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'k',
+    enable_pk_index = 'true',
+    create_table_if_not_exists = 'true',
+    warehouse.path = 's3://license-test',
+    database.name = 'license_test',
+    table.name = 'pk_index'
+);
 
 statement ok
 CREATE SINK turbopuffer_sink

@@ -231,6 +231,12 @@ impl Sink for IcebergSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        if self.config.enable_pk_index {
+            Feature::IcebergSinkWithPkIndex
+                .check_available()
+                .map_err(|e| anyhow!(e))?;
+        }
+
         let catalog_kind = self.config.catalog_kind()?;
         if matches!(catalog_kind, IcebergCatalogKind::Snowflake) {
             bail!("Snowflake catalog only supports iceberg sources");
