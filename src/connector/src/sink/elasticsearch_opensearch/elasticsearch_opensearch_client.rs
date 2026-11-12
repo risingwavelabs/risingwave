@@ -166,12 +166,12 @@ pub struct ElasticSearchOpenSearchSinkWriter {
 impl ElasticSearchOpenSearchSinkWriter {
     pub fn new(
         config: ElasticSearchOpenSearchConfig,
+        client: ElasticSearchOpenSearchClient,
         schema: Schema,
         pk_indices: Vec<usize>,
-        connector: &str,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = Arc::new(config.build_client(connector)?);
+        let client = Arc::new(client);
         let formatter = ElasticSearchOpenSearchFormatter::new(
             pk_indices,
             &schema,
