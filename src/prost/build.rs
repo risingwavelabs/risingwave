@@ -413,6 +413,9 @@ for_all_wrapped_id_fields! (
             removed_segments: HummockFullTextSegmentId,
             consumed_delete_files: HummockFullTextDeleteFileId,
         }
+        FullTextIndexObject {
+            id: HummockRawObjectId,
+        }
         FullTextSegmentInfo {
             object_id: HummockFullTextSegmentId,
         }
@@ -501,9 +504,6 @@ for_all_wrapped_id_fields! (
             left_group_id: CompactionGroupId,
             right_group_id: CompactionGroupId,
         }
-        ObjectIndexFile {
-            id: HummockRawObjectId,
-        }
         PinVersionRequest {
             context_id: WorkerId,
         }
@@ -572,6 +572,9 @@ for_all_wrapped_id_fields! (
         }
         VectorFileInfo {
             object_id: HummockVectorFileId,
+        }
+        VectorIndexObject {
+            id: HummockRawObjectId,
         }
         WriteLimits {
             write_limits: CompactionGroupId,

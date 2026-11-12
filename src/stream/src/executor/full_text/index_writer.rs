@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
+use bytes::BytesMut;
 use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
@@ -114,10 +114,10 @@ impl<S: StateStore> FullTextIndexWriteExecutor<S> {
                 }
                 Message::Chunk(chunk) => {
                     for (op, row) in chunk.rows() {
-                        let mut key = vec![];
+                        let mut key = BytesMut::new();
                         self.key_serde
                             .serialize(row.project(&key_indices), &mut key);
-                        let key = Bytes::from(key);
+                        let key = key.freeze();
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 let Some(doc) = row.datum_at(0) else {

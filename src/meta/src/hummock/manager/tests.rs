@@ -4379,6 +4379,211 @@ async fn test_time_travel_epoch_mapping_excludes_internal_tables() {
 }
 
 #[tokio::test]
+async fn test_time_travel_full_text_index_commit_and_replay() {
+    use bytes::Bytes;
+    use risingwave_hummock_sdk::full_text_index::{
+        FullTextDeleteFileInfo, FullTextDeletionVectorInfo, FullTextIndexAdd, FullTextIndexDelta,
+        FullTextSegmentInfo,
+    };
+    use risingwave_meta_model::object::{self, ObjectType};
+    use risingwave_meta_model::table::{self, HandleConflictBehavior, TableType};
+    use risingwave_pb::catalog::PbFullTextIndexInfo;
+    use sea_orm::ActiveValue::{NotSet, Set};
+    use sea_orm::EntityTrait;
+
+    let (env, hummock_manager, _, _) = setup_compute_env(80).await;
+    env.system_params_manager_impl_ref()
+        .set_param(
+            "time_travel_retention_ms",
+            Some((10 * 60 * 1000).to_string()),
+        )
+        .await
+        .unwrap();
+
+    let obj = object::ActiveModel {
+        oid: NotSet,
+        obj_type: Set(ObjectType::Table),
+        owner_id: Set(1.into()),
+        schema_id: Set(Some(2.into())),
+        database_id: Set(Some(1.into())),
+        belong_to_oid: Set(None),
+        initialized_at: NotSet,
+        created_at: NotSet,
+        initialized_at_cluster_version: Set(None),
+        created_at_cluster_version: Set(None),
+    };
+    let obj_res = object::Entity::insert(obj)
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    let index_table_id = obj_res.last_insert_id.as_table_id();
+    table::Entity::insert(table::ActiveModel {
+        table_id: Set(index_table_id),
+        name: Set("logs_message_fts".to_owned()),
+        optional_associated_source_id: Set(None),
+        table_type: Set(TableType::FullTextIndex),
+        belongs_to_job_id: Set(None),
+        columns: Set(vec![].into()),
+        pk: Set(vec![].into()),
+        distribution_key: Set(Vec::<i32>::new().into()),
+        stream_key: Set(Vec::<i32>::new().into()),
+        append_only: Set(false),
+        fragment_id: Set(None),
+        vnode_col_index: Set(None),
+        row_id_index: Set(None),
+        value_indices: Set(Vec::<i32>::new().into()),
+        definition: Set(
+            "CREATE INDEX logs_message_fts ON logs USING fulltext (message)".to_owned(),
+        ),
+        handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
+        version_column_indices: Set(None),
+        read_prefix_len_hint: Set(0),
+        watermark_indices: Set(Vec::<i32>::new().into()),
+        dist_key_in_pk: Set(Vec::<i32>::new().into()),
+        dml_fragment_id: Set(None),
+        cardinality: Set(None),
+        cleaned_by_watermark: Set(false),
+        description: Set(None),
+        version: Set(None),
+        retention_seconds: Set(None),
+        cdc_table_id: Set(None),
+        vnode_count: Set(1),
+        webhook_info: Set(None),
+        engine: Set(None),
+        clean_watermark_index_in_pk: Set(None),
+        clean_watermark_indices: Set(None),
+        refreshable: Set(false),
+        vector_index_info: Set(None),
+        full_text_index_info: Set(None),
+        cdc_table_type: Set(None),
+    })
+    .exec(&env.meta_store_ref().conn)
+    .await
+    .unwrap();
+
+    hummock_manager
+        .register_table_ids_for_test(&[(index_table_id.as_raw_id(), 2.into())])
+        .await
+        .unwrap();
+
+    let info = PbFullTextIndexInfo {
+        analyzer: "simple".to_owned(),
+        analyzer_version: 1,
+        is_jsonb: false,
+        format_version: 1,
+    };
+    let epoch1 = test_epoch(10);
+    let epoch2 = test_epoch(20);
+    let epoch3 = test_epoch(30);
+
+    // Epoch 1: Init full-text index (triggers initial time-travel snapshot).
+    hummock_manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            tables_to_commit: HashMap::from([(index_table_id, epoch1)]),
+            full_text_index_delta: HashMap::from([(
+                index_table_id,
+                FullTextIndexDelta::Init(info.clone()),
+            )]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Epoch 2: Add segment 101 and pending delete file 201 (persisted as time-travel delta).
+    let seg1 = FullTextSegmentInfo {
+        object_id: 101.into(),
+        file_size: 512,
+        segment_meta: Bytes::from_static(b"meta1"),
+        num_docs: 10,
+        min_epoch: epoch1,
+        max_epoch: epoch2,
+        min_key: Bytes::from_static(b"a"),
+        max_key: Bytes::from_static(b"z"),
+        deletion_vector: None,
+    };
+    let del1 = FullTextDeleteFileInfo {
+        object_id: 201.into(),
+        file_size: 64,
+        epoch: epoch2,
+        num_keys: 2,
+        min_key: Bytes::from_static(b"b"),
+        max_key: Bytes::from_static(b"m"),
+    };
+    hummock_manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            tables_to_commit: HashMap::from([(index_table_id, epoch2)]),
+            full_text_index_delta: HashMap::from([(
+                index_table_id,
+                FullTextIndexDelta::Adds(vec![FullTextIndexAdd {
+                    added_segments: vec![seg1.clone()],
+                    added_delete_files: vec![del1.clone()],
+                    ..Default::default()
+                }]),
+            )]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Epoch 3: Resolve delete file 201 into deletion vector 301 on segment 101.
+    let dv1 = FullTextDeletionVectorInfo {
+        object_id: 301.into(),
+        file_size: 32,
+        num_deleted: 2,
+    };
+    hummock_manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            tables_to_commit: HashMap::from([(index_table_id, epoch3)]),
+            full_text_index_delta: HashMap::from([(
+                index_table_id,
+                FullTextIndexDelta::Adds(vec![FullTextIndexAdd {
+                    deletion_vector_updates: vec![(101.into(), dv1.clone())],
+                    consumed_delete_files: vec![201.into()],
+                    ..Default::default()
+                }]),
+            )]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let v1 = hummock_manager
+        .epoch_to_version(epoch1, index_table_id)
+        .await
+        .unwrap();
+    assert_eq!(v1.full_text_indexes[&index_table_id].segments.len(), 0);
+
+    let v2 = hummock_manager
+        .epoch_to_version(epoch2, index_table_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        v2.full_text_indexes[&index_table_id].segments,
+        vec![seg1.clone()]
+    );
+    assert_eq!(
+        v2.full_text_indexes[&index_table_id].pending_delete_files,
+        vec![del1]
+    );
+
+    let v3 = hummock_manager
+        .epoch_to_version(epoch3, index_table_id)
+        .await
+        .unwrap();
+    let mut expected_seg1 = seg1;
+    expected_seg1.deletion_vector = Some(dv1);
+    assert_eq!(
+        v3.full_text_indexes[&index_table_id].segments,
+        vec![expected_seg1]
+    );
+    assert!(
+        v3.full_text_indexes[&index_table_id]
+            .pending_delete_files
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     use risingwave_hummock_sdk::level::Levels;
     use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;

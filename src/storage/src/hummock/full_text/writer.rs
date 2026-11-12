@@ -158,13 +158,12 @@ impl FullTextIndexWriter {
             Some(builder) => builder,
             None => self.builder.insert(SegmentBuilder::new()?),
         };
-        if let Some(prev_doc) = self.builder_docs.remove(&key) {
-            // A stream key has at most one alive row, so the previous row must have been
-            // deleted. Treat an unexpected duplicate as an implicit update.
-            builder.delete(prev_doc);
-        }
         let doc_id = builder.add(&key, self.current_epoch, tokens)?;
-        self.builder_docs.insert(key, doc_id);
+        if self.builder_docs.insert(key, doc_id).is_some() {
+            // A stream key has at most one alive row, so the previous row must have been
+            // deleted.
+            return Err(HummockError::other("unexpected duplicate document key"));
+        }
         Ok(())
     }
 

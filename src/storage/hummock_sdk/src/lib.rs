@@ -52,8 +52,10 @@ pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::PbObjectIndexFileType;
 use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
+use risingwave_pb::hummock::{
+    PbFullTextIndexObjectType, PbVectorIndexObjectType, VectorIndexObjectType,
+};
 pub use risingwave_pb::id::{
     CompactionGroupId, HummockFullTextDeleteFileId, HummockFullTextDeletionVectorId,
     HummockFullTextSegmentId, HummockHnswGraphFileId, HummockRawObjectId, HummockSstableId,
@@ -170,24 +172,35 @@ pub fn get_stale_object_ids(
         .id
         .iter()
         .map(|sst_id| HummockObjectId::Sstable(*sst_id))
-        .chain(stale_objects.object_index_files.iter().map(|file| {
-            match file.get_file_type().unwrap() {
-                PbObjectIndexFileType::Unspecified => {
+        .chain(stale_objects.vector_files.iter().map(
+            |file| match file.get_object_type().unwrap() {
+                PbVectorIndexObjectType::VectorIndexObjectUnspecified => {
                     unreachable!()
                 }
-                PbObjectIndexFileType::Vector => HummockObjectId::VectorFile(file.id.into()),
-                PbObjectIndexFileType::HnswGraph => HummockObjectId::HnswGraphFile(file.id.into()),
-                PbObjectIndexFileType::FullTextSegment => {
+                VectorIndexObjectType::VectorIndexObjectVector => {
+                    HummockObjectId::VectorFile(file.id.into())
+                }
+                VectorIndexObjectType::VectorIndexObjectHnswGraph => {
+                    HummockObjectId::HnswGraphFile(file.id.into())
+                }
+            },
+        ))
+        .chain(stale_objects.full_text_files.iter().map(
+            |file| match file.get_object_type().unwrap() {
+                PbFullTextIndexObjectType::Unspecified => {
+                    unreachable!()
+                }
+                PbFullTextIndexObjectType::Segment => {
                     HummockObjectId::FullTextSegment(file.id.into())
                 }
-                PbObjectIndexFileType::FullTextDeleteFile => {
+                PbFullTextIndexObjectType::DeleteFile => {
                     HummockObjectId::FullTextDeleteFile(file.id.into())
                 }
-                PbObjectIndexFileType::FullTextDeletionVector => {
+                PbFullTextIndexObjectType::DeletionVector => {
                     HummockObjectId::FullTextDeletionVector(file.id.into())
                 }
-            }
-        }))
+            },
+        ))
 }
 
 #[macro_export]
@@ -556,5 +569,52 @@ mod tests {
         assert!(full_key_can_concat(&[sst_1.clone().into(), sst_2.into()]));
 
         assert!(!full_key_can_concat(&[sst_1.into(), sst_3.into()]));
+    }
+
+    #[test]
+    fn test_get_stale_object_ids_supports_vector_and_full_text_files() {
+        use risingwave_pb::hummock::{PbFullTextIndexObject, PbVectorIndexObject};
+
+        let stale = PbStaleObjects {
+            id: vec![1u64.into()],
+            total_file_size: 100,
+            vector_files: vec![
+                PbVectorIndexObject {
+                    id: 2u64.into(),
+                    object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
+                },
+                PbVectorIndexObject {
+                    id: 3u64.into(),
+                    object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
+                },
+            ],
+            full_text_files: vec![
+                PbFullTextIndexObject {
+                    id: 4u64.into(),
+                    object_type: PbFullTextIndexObjectType::Segment as _,
+                },
+                PbFullTextIndexObject {
+                    id: 5u64.into(),
+                    object_type: PbFullTextIndexObjectType::DeleteFile as _,
+                },
+                PbFullTextIndexObject {
+                    id: 6u64.into(),
+                    object_type: PbFullTextIndexObjectType::DeletionVector as _,
+                },
+            ],
+        };
+
+        let ids: Vec<_> = get_stale_object_ids(&stale).collect();
+        assert_eq!(
+            ids,
+            vec![
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::VectorFile(2.into()),
+                HummockObjectId::HnswGraphFile(3.into()),
+                HummockObjectId::FullTextSegment(4.into()),
+                HummockObjectId::FullTextDeleteFile(5.into()),
+                HummockObjectId::FullTextDeletionVector(6.into()),
+            ]
+        );
     }
 }

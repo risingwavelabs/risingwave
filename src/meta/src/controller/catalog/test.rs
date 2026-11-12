@@ -3014,4 +3014,45 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_list_time_travel_table_ids_includes_object_indexes() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let mut expected = HashSet::new();
+        for (name, table_type, include_in_time_travel) in [
+            ("user_table", TableType::Table, true),
+            ("mv_table", TableType::MaterializedView, true),
+            ("secondary_idx", TableType::Index, true),
+            ("vector_idx", TableType::VectorIndex, true),
+            ("full_text_idx", TableType::FullTextIndex, true),
+            ("__internal_state", TableType::Internal, false),
+        ] {
+            let table_id = CatalogController::create_object(
+                &txn,
+                ObjectType::Table,
+                TEST_OWNER_ID,
+                Some(TEST_SCHEMA_ID.as_object_id()),
+            )
+            .await?
+            .oid
+            .as_table_id();
+            insert_test_table(&txn, table_id, name, table_type, None, "").await?;
+            if include_in_time_travel {
+                expected.insert(table_id);
+            }
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let actual: HashSet<TableId> = mgr
+            .list_time_travel_table_ids()
+            .await?
+            .into_iter()
+            .collect();
+        assert_eq!(actual, expected);
+        Ok(())
+    }
 }
