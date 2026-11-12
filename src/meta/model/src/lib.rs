@@ -56,6 +56,7 @@ pub mod object;
 pub mod object_dependency;
 pub mod pending_sink_state;
 pub mod refresh_job;
+pub mod replaced_sink_pending_state;
 pub mod schema;
 pub mod secret;
 pub mod serde_seaql_migration;
@@ -108,6 +109,7 @@ macro_rules! for_all_meta_model_entities {
             object_dependency,
             pending_sink_state,
             refresh_job,
+            replaced_sink_pending_state,
             schema,
             secret,
             serde_seaql_migration,
@@ -469,6 +471,7 @@ derive_from_blob!(
     SinkSchemachange,
     risingwave_pb::stream_plan::PbSinkSchemaChange
 );
+derive_from_blob!(ReplacedSinkCatalog, risingwave_pb::catalog::PbSink);
 
 derive_array_from_blob!(
     TypePairArray,

@@ -97,6 +97,10 @@ use crate::controller::utils::{
     list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
+use crate::manager::exactly_once_util::{
+    has_unfinished_replaced_sink, move_pending_epochs_to_replaced_sink,
+};
+use crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
@@ -117,6 +121,16 @@ pub struct AbortCreatingJobResult {
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
     pub cancel_info: Option<CancelStreamingJobInfo>,
+}
+
+/// What `REPLACE SINK` left behind when it removed the old sink in
+/// [`CatalogController::post_collect_job_fragments`].
+pub struct ReplacedSinkCutover {
+    /// State tables of the old sink, to unregister after its coordinator has stopped.
+    pub old_state_table_ids: Vec<TableId>,
+    /// Number of exactly-once epochs of the old sink that were moved to
+    /// `replaced_sink_pending_state` because their external commit has not happened yet.
+    pub uncommitted_epochs: usize,
 }
 
 /// Runtime and state cleanup information for canceling a creating streaming job.
@@ -622,6 +636,19 @@ impl CatalogController {
             }
             if old_streaming_job.job_status != JobStatus::Created {
                 bail!("sink {} is not ready to be replaced", old_sink_id);
+            }
+            if is_iceberg_pk_index_sink(old_sink.properties.inner_ref())
+                || is_iceberg_pk_index_sink(&sink.properties)
+            {
+                bail!("replace sink does not support Iceberg sinks with enable_pk_index");
+            }
+            // The epochs left by the sink that `old_sink_id` replaced are keyed by `old_sink_id`
+            // as their successor, and would be dropped together with it.
+            if has_unfinished_replaced_sink(&txn, *old_sink_id).await? {
+                return Err(MetaError::invalid_parameter(format!(
+                    "sink {} is still committing data left by its previous REPLACE SINK, retry later",
+                    old_sink.name
+                )));
             }
         } else {
             check_relation_name_duplicate(
@@ -1419,6 +1446,11 @@ impl CatalogController {
 
     /// Mark a job as creating after its first barrier is collected and notify frontend to add its
     /// creating catalogs.
+    ///
+    /// With `replace_sink`, the same transaction swaps the replacement sink in for the old sink.
+    /// Epochs that the old sink pre-committed for exactly-once delivery but has not committed to
+    /// the external system yet are moved to `replaced_sink_pending_state` before the old sink is
+    /// deleted, see [`ReplacedSinkCutover`].
     #[await_tree::instrument]
     pub async fn post_collect_job_fragments(
         &self,
@@ -1428,7 +1460,7 @@ impl CatalogController {
         split_assignment: Option<&SplitAssignment>,
         replace_sink: Option<&SinkId>,
         notify_creating: bool,
-    ) -> MetaResult<Option<Vec<TableId>>> {
+    ) -> MetaResult<Option<ReplacedSinkCutover>> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let mut replace_sink_post_collect = None;
@@ -1537,6 +1569,25 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
+            // Deleting the old sink cascades to its `pending_sink_state`. This runs after the
+            // Hummock commit of the barrier that stopped the old sink, so the epochs still pending
+            // there are durable and only wait for their external commit. Keep them for the sink
+            // coordinator manager, which commits them before the replacement sink may commit.
+            let old_sink_catalog = old_object_models
+                .iter()
+                .find_map(|object_info| match object_info {
+                    PbObjectInfo::Sink(sink) if sink.id == old_sink_id => Some(sink),
+                    _ => None,
+                })
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
+            let uncommitted_epochs = move_pending_epochs_to_replaced_sink(
+                &txn,
+                old_sink_id,
+                job_id.as_sink_id(),
+                old_sink_catalog,
+            )
+            .await?;
+
             // Internal objects and their catalog rows follow the old sink's belong-to cascade.
             let res = Object::delete_by_id(old_sink_id).exec(&txn).await?;
             if res.rows_affected == 0 {
@@ -1561,6 +1612,7 @@ impl CatalogController {
             let updated_user_info = list_user_info_by_ids(updated_user_ids, &txn).await?;
 
             replace_sink_post_collect = Some((
+                uncommitted_epochs,
                 old_state_table_ids,
                 old_fragment_ids,
                 old_objects,
@@ -1591,6 +1643,7 @@ impl CatalogController {
         }
 
         let Some((
+            uncommitted_epochs,
             old_state_table_ids,
             old_fragment_ids,
             old_objects,
@@ -1639,7 +1692,10 @@ impl CatalogController {
             .expect("the replacement notification batch contains the replacement sink");
         tracing::debug!(job_id = %job_id, version, "notified frontend of replacement streaming job");
 
-        Ok(Some(old_state_table_ids))
+        Ok(Some(ReplacedSinkCutover {
+            old_state_table_ids,
+            uncommitted_epochs,
+        }))
     }
 
     pub async fn create_job_catalog_for_replace(

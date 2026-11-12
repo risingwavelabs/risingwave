@@ -18,9 +18,9 @@ mod tests {
 
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::VirtualNode;
-    use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::table::HandleConflictBehavior;
+    use risingwave_meta_model::{FragmentId, replaced_sink_pending_state};
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::catalog::{PbSinkType, PbTable, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
@@ -29,6 +29,7 @@ mod tests {
     use risingwave_pb::plan_common::ExternalTableDesc;
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{PbStreamNode, StreamScanNode, StreamScanType};
+    use sea_orm::QueryOrder;
     use tokio::sync::{mpsc, oneshot};
 
     use crate::barrier::Command;
@@ -3098,6 +3099,232 @@ mod tests {
         assert_eq!(progress_subscriber.subscriber_job_id, iceberg_job_id);
         assert_eq!(progress_subscriber.upstream_table_id, upstream_table_id);
         assert_eq!(progress_subscriber.progress_table_id, progress_table_id);
+
+        Ok(())
+    }
+
+    /// Create the catalog of a sink named `name` from `upstream`, replacing `replace_sink` if
+    /// given, and return its id.
+    async fn create_test_sink_catalog(
+        mgr: &CatalogController,
+        name: &str,
+        upstream: JobId,
+        replace_sink: Option<SinkId>,
+    ) -> MetaResult<SinkId> {
+        let mut job = crate::manager::StreamingJob::Sink(
+            PbSink {
+                name: name.to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                sink_type: PbSinkType::AppendOnly as i32,
+                ..Default::default()
+            },
+            None,
+        );
+        mgr.create_job_catalog(
+            &mut job,
+            &crate::model::StreamContext::default(),
+            &None,
+            1,
+            HashSet::from([upstream.as_object_id()]),
+            risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(true),
+            &None,
+            None,
+            None,
+            replace_sink.as_ref(),
+            None,
+        )
+        .await?;
+        Ok(job.id().as_sink_id())
+    }
+
+    async fn set_test_job_created(mgr: &CatalogController, job_id: JobId) -> MetaResult<()> {
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            ..Default::default()
+        }
+        .update(&mgr.inner.read().await.db)
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_replace_sink_keeps_uncommitted_exactly_once_epochs() -> MetaResult<()> {
+        use risingwave_meta_model::pending_sink_state::SinkState;
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let upstream = {
+            let inner = mgr.inner.write().await;
+            let txn = inner.db.begin().await?;
+            let (upstream, _, _) = insert_test_streaming_job(&txn, "mv", true, None).await?;
+            txn.commit().await?;
+            upstream
+        };
+        let old_sink_id = create_test_sink_catalog(&mgr, "snk", upstream, None).await?;
+        set_test_job_created(&mgr, old_sink_id.as_job_id()).await?;
+
+        // The old sink has committed epoch 100 to the external system. Epochs 101 and 102 are
+        // pre-committed and wait for their external commit.
+        for (epoch, sink_state) in [
+            (100, SinkState::Committed),
+            (101, SinkState::Pending),
+            (102, SinkState::Pending),
+        ] {
+            pending_sink_state::ActiveModel {
+                sink_id: Set(old_sink_id),
+                epoch: Set(epoch),
+                sink_state: Set(sink_state),
+                metadata: Set(Some(vec![epoch as u8])),
+                schema_change: Set(None),
+            }
+            .insert(&mgr.inner.read().await.db)
+            .await?;
+        }
+
+        let new_sink_id =
+            create_test_sink_catalog(&mgr, "snk", upstream, Some(old_sink_id)).await?;
+        let cutover = mgr
+            .post_collect_job_fragments(
+                new_sink_id.as_job_id(),
+                &FragmentDownstreamRelation::new(),
+                None,
+                None,
+                Some(&old_sink_id),
+                false,
+            )
+            .await?
+            .expect("replace sink should report the cutover");
+        assert_eq!(cutover.uncommitted_epochs, 2);
+
+        {
+            let inner = mgr.inner.read().await;
+            let db = &inner.db;
+            // The old sink is gone together with its pending state, and the new sink took its
+            // name.
+            assert!(Object::find_by_id(old_sink_id).one(db).await?.is_none());
+            assert_eq!(pending_sink_state::Entity::find().count(db).await?, 0);
+            let new_sink = Sink::find_by_id(new_sink_id).one(db).await?.unwrap();
+            assert_eq!(new_sink.name, "snk");
+
+            // The uncommitted epochs are kept under the new sink, with what is needed to
+            // commit them.
+            let rows = replaced_sink_pending_state::Entity::find()
+                .order_by_asc(replaced_sink_pending_state::Column::Epoch)
+                .all(db)
+                .await?;
+            assert_eq!(
+                rows.iter()
+                    .map(|row| (row.sink_id, row.epoch, row.successor_sink_id))
+                    .collect_vec(),
+                vec![
+                    (old_sink_id, 101, new_sink_id),
+                    (old_sink_id, 102, new_sink_id)
+                ]
+            );
+            for row in &rows {
+                let sink = row.sink.to_protobuf();
+                assert_eq!(sink.id, old_sink_id);
+                assert_eq!(sink.name, "snk");
+                assert_eq!(row.metadata, Some(vec![row.epoch as u8]));
+            }
+        }
+
+        // The new sink cannot be replaced before these epochs are committed: deleting it would
+        // drop them.
+        set_test_job_created(&mgr, new_sink_id.as_job_id()).await?;
+        let err = create_test_sink_catalog(&mgr, "snk", upstream, Some(new_sink_id))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("still committing data left by its previous REPLACE SINK"),
+            "{err:?}"
+        );
+
+        // Once they are committed, it can be replaced again, and nothing is carried over.
+        replaced_sink_pending_state::Entity::delete_many()
+            .exec(&mgr.inner.read().await.db)
+            .await?;
+        let third_sink_id =
+            create_test_sink_catalog(&mgr, "snk", upstream, Some(new_sink_id)).await?;
+        let cutover = mgr
+            .post_collect_job_fragments(
+                third_sink_id.as_job_id(),
+                &FragmentDownstreamRelation::new(),
+                None,
+                None,
+                Some(&new_sink_id),
+                false,
+            )
+            .await?
+            .expect("replace sink should report the cutover");
+        assert_eq!(cutover.uncommitted_epochs, 0);
+        assert_eq!(
+            replaced_sink_pending_state::Entity::find()
+                .count(&mgr.inner.read().await.db)
+                .await?,
+            0
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_replacement_sink_discards_replaced_sink_epochs() -> MetaResult<()> {
+        use risingwave_meta_model::pending_sink_state::SinkState;
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let upstream = {
+            let inner = mgr.inner.write().await;
+            let txn = inner.db.begin().await?;
+            let (upstream, _, _) = insert_test_streaming_job(&txn, "mv", true, None).await?;
+            txn.commit().await?;
+            upstream
+        };
+        let old_sink_id = create_test_sink_catalog(&mgr, "snk", upstream, None).await?;
+        set_test_job_created(&mgr, old_sink_id.as_job_id()).await?;
+        pending_sink_state::ActiveModel {
+            sink_id: Set(old_sink_id),
+            epoch: Set(101),
+            sink_state: Set(SinkState::Pending),
+            metadata: Set(Some(vec![1])),
+            schema_change: Set(None),
+        }
+        .insert(&mgr.inner.read().await.db)
+        .await?;
+        let new_sink_id =
+            create_test_sink_catalog(&mgr, "snk", upstream, Some(old_sink_id)).await?;
+        mgr.post_collect_job_fragments(
+            new_sink_id.as_job_id(),
+            &FragmentDownstreamRelation::new(),
+            None,
+            None,
+            Some(&old_sink_id),
+            false,
+        )
+        .await?;
+        set_test_job_created(&mgr, new_sink_id.as_job_id()).await?;
+        assert_eq!(
+            replaced_sink_pending_state::Entity::find()
+                .count(&mgr.inner.read().await.db)
+                .await?,
+            1
+        );
+
+        mgr.drop_object(
+            ObjectType::Sink,
+            new_sink_id.as_object_id(),
+            DropMode::Restrict,
+        )
+        .await?;
+        assert_eq!(
+            replaced_sink_pending_state::Entity::find()
+                .count(&mgr.inner.read().await.db)
+                .await?,
+            0
+        );
 
         Ok(())
     }

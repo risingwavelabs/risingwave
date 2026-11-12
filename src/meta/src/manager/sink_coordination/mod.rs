@@ -15,6 +15,7 @@
 mod coordinator_worker;
 mod handle;
 mod manager;
+mod replaced_sink;
 
 use futures::stream::BoxStream;
 pub use manager::{RecoveryStart, RecoverySucceeded, SinkCoordinatorManager};

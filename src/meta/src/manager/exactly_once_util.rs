@@ -14,16 +14,20 @@
 
 use risingwave_meta_model::{
     Epoch, ObjectId, SinkId, SinkSchemachange, object, pending_sink_state,
+    replaced_sink_pending_state,
 };
+use risingwave_pb::catalog::PbSink;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
 // Helpers for accessing the `pending_sink_state` system table used by exactly-once sink coordinators
-// (both the generic sink coordinator and the Iceberg pk-index sink coordinator).
+// (both the generic sink coordinator and the Iceberg pk-index sink coordinator), and the
+// `replaced_sink_pending_state` table that keeps the uncommitted epochs of a sink removed by
+// `REPLACE SINK`.
 
 async fn sink_object_exists<C: ConnectionTrait>(
     db: &C,
@@ -220,11 +224,135 @@ pub async fn list_sink_states_ordered_by_epoch(
         .collect())
 }
 
+/// An epoch that a replaced sink pre-committed but had not committed to the external system.
+pub struct ReplacedSinkPendingEpoch {
+    pub epoch: u64,
+    pub metadata: Option<Vec<u8>>,
+    pub schema_change: Option<PbSinkSchemaChange>,
+}
+
+/// Move the epochs that `sink_id` has pre-committed but not yet committed to the external system
+/// into `replaced_sink_pending_state`, so that deleting the sink does not drop them.
+///
+/// Must run in the transaction that deletes `sink_id`, after the Hummock commit of the barrier
+/// that stopped it. Every moved epoch is therefore durable in Hummock and only waits for its
+/// external commit. Returns the number of moved epochs.
+pub async fn move_pending_epochs_to_replaced_sink<C: ConnectionTrait>(
+    txn: &C,
+    sink_id: SinkId,
+    successor_sink_id: SinkId,
+    sink: &PbSink,
+) -> Result<usize, sea_orm::DbErr> {
+    let pending_rows =
+        pending_sink_state::Entity::find()
+            .filter(pending_sink_state::Column::SinkId.eq(sink_id).and(
+                pending_sink_state::Column::SinkState.eq(pending_sink_state::SinkState::Pending),
+            ))
+            .order_by(pending_sink_state::Column::Epoch, Order::Asc)
+            .all(txn)
+            .await?;
+    if pending_rows.is_empty() {
+        return Ok(0);
+    }
+    let moved = pending_rows.len();
+    replaced_sink_pending_state::Entity::insert_many(pending_rows.into_iter().map(|row| {
+        replaced_sink_pending_state::ActiveModel {
+            sink_id: Set(sink_id),
+            epoch: Set(row.epoch),
+            successor_sink_id: Set(successor_sink_id),
+            sink: Set(sink.into()),
+            metadata: Set(row.metadata),
+            schema_change: Set(row.schema_change),
+        }
+    }))
+    .exec(txn)
+    .await?;
+    Ok(moved)
+}
+
+/// Whether `sink_id` replaced another sink whose pending epochs are not all committed yet.
+pub async fn has_unfinished_replaced_sink<C: ConnectionTrait>(
+    db: &C,
+    sink_id: SinkId,
+) -> Result<bool, sea_orm::DbErr> {
+    let count = replaced_sink_pending_state::Entity::find()
+        .filter(replaced_sink_pending_state::Column::SuccessorSinkId.eq(sink_id))
+        .count(db)
+        .await?;
+    Ok(count > 0)
+}
+
+/// List `(replaced sink, successor sink)` for every replaced sink with uncommitted epochs.
+pub async fn list_replaced_sinks(db: &DatabaseConnection) -> anyhow::Result<Vec<(SinkId, SinkId)>> {
+    let rows: Vec<(SinkId, SinkId)> = replaced_sink_pending_state::Entity::find()
+        .select_only()
+        .columns([
+            replaced_sink_pending_state::Column::SinkId,
+            replaced_sink_pending_state::Column::SuccessorSinkId,
+        ])
+        .distinct()
+        .order_by(replaced_sink_pending_state::Column::SinkId, Order::Asc)
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok(rows)
+}
+
+/// Load the catalog of a replaced sink and its uncommitted epochs in ascending order. Returns
+/// `None` when no epoch is left.
+pub async fn load_replaced_sink_pending_epochs(
+    db: &DatabaseConnection,
+    sink_id: SinkId,
+) -> anyhow::Result<Option<(PbSink, Vec<ReplacedSinkPendingEpoch>)>> {
+    let rows = replaced_sink_pending_state::Entity::find()
+        .filter(replaced_sink_pending_state::Column::SinkId.eq(sink_id))
+        .order_by(replaced_sink_pending_state::Column::Epoch, Order::Asc)
+        .all(db)
+        .await?;
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    let sink = first.sink.to_protobuf();
+    let epochs = rows
+        .into_iter()
+        .map(|row| ReplacedSinkPendingEpoch {
+            epoch: row.epoch as u64,
+            metadata: row.metadata,
+            schema_change: row.schema_change.map(|v| v.to_protobuf()),
+        })
+        .collect();
+    Ok(Some((sink, epochs)))
+}
+
+/// Remove an epoch of a replaced sink after its external commit. Returns `false` when the row is
+/// already gone, which means the successor sink was dropped and the remaining epochs are
+/// discarded with it.
+pub async fn delete_replaced_sink_pending_epoch(
+    db: &DatabaseConnection,
+    sink_id: SinkId,
+    epoch: u64,
+) -> anyhow::Result<bool> {
+    let result = replaced_sink_pending_state::Entity::delete_many()
+        .filter(
+            replaced_sink_pending_state::Column::SinkId
+                .eq(sink_id)
+                .and(replaced_sink_pending_state::Column::Epoch.eq(epoch as Epoch)),
+        )
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected > 0)
+}
+
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::catalog::PbSink;
     use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 
-    use super::{commit_and_prune_epoch, persist_pre_commit_metadata};
+    use super::{
+        commit_and_prune_epoch, delete_replaced_sink_pending_epoch, has_unfinished_replaced_sink,
+        list_replaced_sinks, load_replaced_sink_pending_epochs,
+        move_pending_epochs_to_replaced_sink, persist_pre_commit_metadata,
+    };
 
     async fn prepare_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -239,6 +367,16 @@ mod tests {
                 schema_change BLOB, \
                 PRIMARY KEY (sink_id, epoch), \
                 FOREIGN KEY (sink_id) REFERENCES object(oid) ON DELETE CASCADE\
+            )",
+            "CREATE TABLE replaced_sink_pending_state (\
+                sink_id INTEGER NOT NULL, \
+                epoch BIGINT NOT NULL, \
+                successor_sink_id INTEGER NOT NULL, \
+                sink BLOB NOT NULL, \
+                metadata BLOB, \
+                schema_change BLOB, \
+                PRIMARY KEY (sink_id, epoch), \
+                FOREIGN KEY (successor_sink_id) REFERENCES object(oid) ON DELETE CASCADE\
             )",
         ] {
             db.execute(Statement::from_string(DbBackend::Sqlite, ddl))
@@ -315,5 +453,123 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    async fn delete_object(db: &DatabaseConnection, oid: i32) {
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "DELETE FROM object WHERE oid = ?",
+            [oid.into()],
+        ))
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_replaced_sink_keeps_uncommitted_epochs() {
+        let db = prepare_db().await;
+        // Sink 1 is replaced by sink 2. Sink 3 is unrelated.
+        for sink_id in [1, 2, 3] {
+            insert_object(&db, sink_id).await;
+        }
+        let old_sink = PbSink {
+            id: 1.into(),
+            name: "old".to_owned(),
+            ..Default::default()
+        };
+
+        // Epoch 100 is already committed to the external system, 101 and 102 are not.
+        for epoch in [100, 101, 102] {
+            persist_pre_commit_metadata(&db, 1.into(), epoch, Some(vec![epoch as u8]), None)
+                .await
+                .unwrap();
+        }
+        commit_and_prune_epoch(&db, 1.into(), 100, None)
+            .await
+            .unwrap();
+        persist_pre_commit_metadata(&db, 3.into(), 101, Some(vec![3]), None)
+            .await
+            .unwrap();
+
+        // Only the epochs of the replaced sink that still wait for their commit are kept, and
+        // they survive the deletion of the replaced sink.
+        assert!(!has_unfinished_replaced_sink(&db, 2.into()).await.unwrap());
+        let moved = move_pending_epochs_to_replaced_sink(&db, 1.into(), 2.into(), &old_sink)
+            .await
+            .unwrap();
+        assert_eq!(moved, 2);
+        delete_object(&db, 1).await;
+
+        assert!(has_unfinished_replaced_sink(&db, 2.into()).await.unwrap());
+        assert!(!has_unfinished_replaced_sink(&db, 3.into()).await.unwrap());
+        assert_eq!(
+            list_replaced_sinks(&db).await.unwrap(),
+            vec![(1.into(), 2.into())]
+        );
+        let (sink, epochs) = load_replaced_sink_pending_epochs(&db, 1.into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(sink, old_sink);
+        assert_eq!(
+            epochs
+                .iter()
+                .map(|pending| (pending.epoch, pending.metadata.clone()))
+                .collect::<Vec<_>>(),
+            vec![(101, Some(vec![101])), (102, Some(vec![102]))]
+        );
+
+        // Epochs are removed one by one as they are committed.
+        assert!(
+            delete_replaced_sink_pending_epoch(&db, 1.into(), 101)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !delete_replaced_sink_pending_epoch(&db, 1.into(), 101)
+                .await
+                .unwrap()
+        );
+        let (_, epochs) = load_replaced_sink_pending_epochs(&db, 1.into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(epochs.len(), 1);
+        assert_eq!(epochs[0].epoch, 102);
+
+        // Dropping the successor discards what is left.
+        delete_object(&db, 2).await;
+        assert!(
+            load_replaced_sink_pending_epochs(&db, 1.into())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(list_replaced_sinks(&db).await.unwrap().is_empty());
+        assert!(
+            !delete_replaced_sink_pending_epoch(&db, 1.into(), 102)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_replaced_sink_without_uncommitted_epochs() {
+        let db = prepare_db().await;
+        insert_object(&db, 1).await;
+        insert_object(&db, 2).await;
+        persist_pre_commit_metadata(&db, 1.into(), 100, Some(vec![1]), None)
+            .await
+            .unwrap();
+        commit_and_prune_epoch(&db, 1.into(), 100, None)
+            .await
+            .unwrap();
+
+        let moved =
+            move_pending_epochs_to_replaced_sink(&db, 1.into(), 2.into(), &PbSink::default())
+                .await
+                .unwrap();
+        assert_eq!(moved, 0);
+        assert!(list_replaced_sinks(&db).await.unwrap().is_empty());
     }
 }

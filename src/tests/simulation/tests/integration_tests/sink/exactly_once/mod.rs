@@ -124,3 +124,157 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
 
     Ok(())
 }
+
+const CREATE_MV: &str = "create materialized view test_mv as select id, name from test_source";
+const CREATE_SINK_FROM_MV: &str =
+    "create sink test_sink from test_mv with (connector = 'test', type = 'upsert')";
+const REPLACE_SINK_FROM_MV: &str =
+    "replace sink test_sink from test_mv with (connector = 'test', type = 'upsert')";
+
+/// `REPLACE SINK` on an exactly-once sink while its commits fail now and then, both before and
+/// after they reach the external sink.
+#[tokio::test]
+async fn test_exactly_once_sink_replace() -> Result<()> {
+    test_exactly_once_sink_replace_inner(vec![0.0, 0.0, 0.2, 0.2, 0.0], false).await
+}
+
+/// `REPLACE SINK` on an exactly-once sink whose commits the external sink refuses, followed by
+/// a restart of the meta node while they are still refused. Only the old sink is refused, so
+/// the new sink could commit at any time if nothing held it back.
+#[tokio::test]
+async fn test_exactly_once_sink_replace_while_old_sink_cannot_commit() -> Result<()> {
+    test_exactly_once_sink_replace_inner(vec![0.0; 5], true).await
+}
+
+async fn test_exactly_once_sink_replace_inner(
+    err_rate_list: Vec<f64>,
+    old_sink_cannot_commit: bool,
+) -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+
+    let source_parallelism = 6;
+
+    let test_sink = SimulationTestIcebergExactlyOnceSink::register_new_with_err_rate(err_rate_list);
+    // Slow enough that the source is still producing when the sink is replaced.
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 5);
+    let count = test_source.id_list.len();
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 6").await?;
+    session.run(CREATE_SOURCE).await?;
+    session.run(CREATE_MV).await?;
+    session.run(CREATE_SINK_FROM_MV).await?;
+    test_sink.wait_initial_parallelism(6).await?;
+
+    // Let the old sink commit part of the data.
+    while test_sink.store.id_count() < count / 10 {
+        sleep(Duration::from_secs(1)).await;
+    }
+    let old_sink_id = sink_id(&mut session).await?;
+
+    if old_sink_cannot_commit {
+        test_sink.store.set_commits_refused(old_sink_id, true);
+        // Let the old sink acknowledge epochs that it cannot commit.
+        sleep(Duration::from_secs(5)).await;
+    }
+    let count_before_replace = test_sink.store.id_count();
+    assert!(count_before_replace < count);
+
+    // The replacement does not wait for the external sink.
+    tokio::time::timeout(Duration::from_secs(300), session.run(REPLACE_SINK_FROM_MV))
+        .await
+        .map_err(|_| anyhow::anyhow!("REPLACE SINK waited for the external sink"))??;
+    let new_sink_id = sink_id(&mut session).await?;
+    assert!(new_sink_id != old_sink_id);
+
+    if old_sink_cannot_commit {
+        // The epochs that the old sink could not commit were kept for the new sink.
+        assert!(replaced_sink_pending_epoch_count(&cluster, old_sink_id, new_sink_id).await? > 0);
+
+        // The new sink takes data and its own commits would succeed, but it does not commit
+        // ahead of the old sink.
+        sleep(Duration::from_secs(10)).await;
+        assert_eq!(test_sink.store.id_count(), count_before_replace);
+
+        // The same holds after the meta node restarts.
+        cluster.simple_kill_nodes(["meta-1"]).await;
+        sleep(Duration::from_secs(5)).await;
+        cluster.simple_restart_nodes(["meta-1"]).await;
+        sleep(Duration::from_secs(30)).await;
+        assert_eq!(test_sink.store.id_count(), count_before_replace);
+        assert!(replaced_sink_pending_epoch_count(&cluster, old_sink_id, new_sink_id).await? > 0);
+
+        test_sink.store.set_commits_refused(old_sink_id, false);
+    }
+
+    test_sink
+        .store
+        .wait_for_count_and_check_duplicate(count)
+        .await?;
+    test_sink.store.check_simple_result(&test_source.id_list)?;
+
+    // Every commit of the old sink reached the external sink before the first commit of the
+    // new sink.
+    assert_eq!(
+        test_sink.store.committed_sink_id_runs(),
+        vec![old_sink_id, new_sink_id]
+    );
+    assert_eq!(
+        replaced_sink_pending_epoch_count(&cluster, old_sink_id, new_sink_id).await?,
+        0
+    );
+
+    let mut session = cluster.start_session();
+    run_with_retry(&mut session, DROP_SINK).await?;
+    session.run("drop materialized view test_mv").await?;
+    session.run(DROP_SOURCE).await?;
+    assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
+
+    Ok(())
+}
+
+async fn sink_id(session: &mut risingwave_simulation::cluster::Session) -> Result<SinkId> {
+    let id = session
+        .run("select id from rw_catalog.rw_sinks where name = 'test_sink'")
+        .await?;
+    Ok(SinkId::from(id.trim().parse::<u32>()?))
+}
+
+/// The number of epochs of the replaced sink that still wait for their commit, read from the
+/// meta store.
+async fn replaced_sink_pending_epoch_count(
+    cluster: &Cluster,
+    old_sink_id: SinkId,
+    new_sink_id: SinkId,
+) -> Result<u64> {
+    use risingwave_meta_model::replaced_sink_pending_state;
+    use sea_orm::{ColumnTrait, Database, EntityTrait, PaginatorTrait, QueryFilter};
+
+    let url = format!("sqlite://{}?mode=ro", cluster.meta_sqlite_path().display());
+    let db = Database::connect(&url).await?;
+    let count = replaced_sink_pending_state::Entity::find()
+        .filter(replaced_sink_pending_state::Column::SinkId.eq(old_sink_id))
+        .filter(replaced_sink_pending_state::Column::SuccessorSinkId.eq(new_sink_id))
+        .count(&db)
+        .await?;
+    Ok(count)
+}
+
+/// Run a statement that may arrive while the meta node is still coming back.
+async fn run_with_retry(
+    session: &mut risingwave_simulation::cluster::Session,
+    sql: &str,
+) -> Result<()> {
+    let mut last_err = None;
+    for _ in 0..30 {
+        match session.run(sql).await {
+            Ok(_) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+    Err(anyhow::anyhow!(
+        "failed to run `{sql}`: {:?}",
+        last_err.expect("at least one attempt")
+    ))
+}

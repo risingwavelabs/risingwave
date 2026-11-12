@@ -52,6 +52,7 @@ use crate::manager::exactly_once_util::{
     persist_pre_commit_metadata,
 };
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+use crate::manager::sink_coordination::replaced_sink::ReplacedSinkFences;
 
 // Keep coordinator initialization below the default MetaStore pool size (10), leaving
 // connections available for recovery and other Meta services.
@@ -59,7 +60,7 @@ const MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS: usize = 8;
 static COORDINATOR_INIT_SEMAPHORE: LazyLock<Semaphore> =
     LazyLock::new(|| Semaphore::new(MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS));
 
-async fn run_future_with_periodic_fn<F: Future>(
+pub(super) async fn run_future_with_periodic_fn<F: Future>(
     future: F,
     interval: Duration,
     mut f: impl FnMut(),
@@ -73,6 +74,51 @@ async fn run_future_with_periodic_fn<F: Future>(
             Either::Right(_) => f(),
         }
     }
+}
+
+/// Commit one pre-committed epoch to the external system: the data described by `metadata` and
+/// then `schema_change`, whichever is present.
+pub(super) async fn commit_epoch_to_external(
+    coordinator: &mut SinkCommitCoordinator,
+    sink_id: SinkId,
+    epoch: u64,
+    metadata: Option<Vec<u8>>,
+    schema_change: Option<PbSinkSchemaChange>,
+) -> Result<(), SinkError> {
+    match coordinator {
+        SinkCommitCoordinator::SinglePhase(coordinator) => {
+            assert!(metadata.is_none());
+            if let Some(schema_change) = schema_change {
+                coordinator
+                    .commit_schema_change(epoch, schema_change)
+                    .instrument_await(commit_span("single_phase_schema_change", sink_id, epoch))
+                    .await?;
+            }
+        }
+        SinkCommitCoordinator::TwoPhase(coordinator) => {
+            if let Some(metadata) = metadata {
+                coordinator
+                    .commit_data(epoch, metadata)
+                    .instrument_await(commit_span("two_phase_commit_data", sink_id, epoch))
+                    .await?;
+            }
+            if let Some(schema_change) = schema_change {
+                coordinator
+                    .commit_schema_change(epoch, schema_change)
+                    .instrument_await(commit_span(
+                        "two_phase_commit_schema_change",
+                        sink_id,
+                        epoch,
+                    ))
+                    .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn commit_span(stage: &str, sink_id: SinkId, epoch: u64) -> await_tree::Span {
+    await_tree::span!("sink_coord_{stage} (sink_id {sink_id}, epoch {epoch})").long_running()
 }
 
 type HandleId = usize;
@@ -519,6 +565,9 @@ pub struct CoordinatorWorker {
     /// committed epoch persisted in `pending_sink_state`.
     last_writer_acked_epoch: Option<u64>,
     curr_state: CoordinatorWorkerState,
+    /// Blocks the commits of pre-committed epochs while a sink that this sink replaced still has
+    /// epochs to commit. See [`ReplacedSinkFences`].
+    replaced_sink_fences: ReplacedSinkFences,
 }
 
 enum CoordinatorWorkerEvent {
@@ -527,12 +576,13 @@ enum CoordinatorWorkerEvent {
 }
 
 impl CoordinatorWorker {
-    pub async fn run(
+    pub(super) async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
+        replaced_sink_fences: ReplacedSinkFences,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
@@ -559,16 +609,45 @@ impl CoordinatorWorker {
                         return;
                     }
                 };
-            Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
+            Self::execute_fenced_coordinator(
+                db,
+                param,
+                request_rx,
+                coordinator,
+                subscriber,
+                replaced_sink_fences,
+            )
+            .await
         });
     }
 
+    /// Run the coordinator of a sink that replaced no other sink.
+    #[cfg(test)]
     pub async fn execute_coordinator(
         db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
+    ) {
+        Self::execute_fenced_coordinator(
+            db,
+            param,
+            request_rx,
+            coordinator,
+            subscriber,
+            ReplacedSinkFences::default(),
+        )
+        .await
+    }
+
+    pub(super) async fn execute_fenced_coordinator(
+        db: DatabaseConnection,
+        param: SinkParam,
+        request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        coordinator: SinkCommitCoordinator,
+        subscriber: SinkCommittedEpochSubscriber,
+        replaced_sink_fences: ReplacedSinkFences,
     ) {
         let mut worker = CoordinatorWorker {
             handle_manager: CoordinationHandleManager {
@@ -579,6 +658,7 @@ impl CoordinatorWorker {
             },
             last_writer_acked_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
+            replaced_sink_fences,
         };
 
         if let Err(e) = worker.run_coordination(db, coordinator, subscriber).await {
@@ -654,13 +734,23 @@ impl CoordinatorWorker {
             self.curr_state = CoordinatorWorkerState::Running;
         }
 
+        let sink_id = self.handle_manager.param.sink_id;
+        let replaced_sink_fences = &self.replaced_sink_fences;
+        // The epochs left by a sink that this sink replaced are older than every epoch of this
+        // sink, and must reach the external system first. Writers are still acknowledged
+        // meanwhile, only the commits of the pre-committed epochs wait.
+        let next_to_commit = async {
+            replaced_sink_fences.wait_released(sink_id).await;
+            two_phase_handler.next_to_commit().await
+        };
+
         select! {
             next_handle_event = self.handle_manager.next_event() => {
                 let (handle_id, event) = next_handle_event?;
                 Ok(CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event))
             }
 
-            next_item_to_commit = two_phase_handler.next_to_commit() => {
+            next_item_to_commit = next_to_commit => {
                 let (epoch, metadata, schema_change) = next_item_to_commit?;
                 Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change))
             }
@@ -733,46 +823,13 @@ impl CoordinatorWorker {
                 },
                 CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
                     let start_time = Instant::now();
-                    let commit_fut = async {
-                        match &mut coordinator {
-                            SinkCommitCoordinator::SinglePhase(coordinator) => {
-                                assert!(metadata.is_none());
-                                if let Some(schema_change) = schema_change {
-                                    coordinator
-                                        .commit_schema_change(epoch, schema_change)
-                                        .instrument_await(Self::commit_span(
-                                            "single_phase_schema_change",
-                                            sink_id,
-                                            epoch,
-                                        ))
-                                        .await?;
-                                }
-                            }
-                            SinkCommitCoordinator::TwoPhase(coordinator) => {
-                                if let Some(metadata) = metadata {
-                                    coordinator
-                                        .commit_data(epoch, metadata)
-                                        .instrument_await(Self::commit_span(
-                                            "two_phase_commit_data",
-                                            sink_id,
-                                            epoch,
-                                        ))
-                                        .await?;
-                                }
-                                if let Some(schema_change) = schema_change {
-                                    coordinator
-                                        .commit_schema_change(epoch, schema_change)
-                                        .instrument_await(Self::commit_span(
-                                            "two_phase_commit_schema_change",
-                                            sink_id,
-                                            epoch,
-                                        ))
-                                        .await?;
-                                }
-                            }
-                        }
-                        Ok(())
-                    };
+                    let commit_fut = commit_epoch_to_external(
+                        &mut coordinator,
+                        sink_id,
+                        epoch,
+                        metadata,
+                        schema_change,
+                    );
                     let commit_res =
                         run_future_with_periodic_fn(commit_fut, Duration::from_secs(5), || {
                             warn!(
@@ -835,7 +892,7 @@ impl CoordinatorWorker {
                             let start_time = Instant::now();
                             run_future_with_periodic_fn(
                                 coordinator.commit_data(epoch, metadatas).instrument_await(
-                                    Self::commit_span("single_phase_commit_data", sink_id, epoch),
+                                    commit_span("single_phase_commit_data", sink_id, epoch),
                                 ),
                                 Duration::from_secs(5),
                                 || {
@@ -864,11 +921,7 @@ impl CoordinatorWorker {
                     SinkCommitCoordinator::TwoPhase(coordinator) => {
                         let commit_metadata = coordinator
                             .pre_commit(epoch, metadatas, first_schema_change.clone())
-                            .instrument_await(Self::commit_span(
-                                "two_phase_pre_commit",
-                                sink_id,
-                                epoch,
-                            ))
+                            .instrument_await(commit_span("two_phase_pre_commit", sink_id, epoch))
                             .await?;
                         // Persist every acknowledged epoch, even when there is no metadata or
                         // schema change. Writers may truncate the epoch as soon as they receive
@@ -960,9 +1013,5 @@ impl CoordinatorWorker {
         }
 
         Ok(two_phase_handler)
-    }
-
-    fn commit_span(stage: &str, sink_id: SinkId, epoch: u64) -> await_tree::Span {
-        await_tree::span!("sink_coord_{stage} (sink_id {sink_id}, epoch {epoch})").long_running()
     }
 }

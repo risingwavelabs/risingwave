@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::pin::pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{BoxFuture, Either, select};
@@ -23,8 +24,12 @@ use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::id::{DatabaseId, JobId};
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
-use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
+use risingwave_connector::dispatch_sink;
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
+use risingwave_connector::sink::{
+    Sink, SinkCommittedEpochSubscriber, SinkError, SinkParam, build_sink,
+};
+use risingwave_pb::catalog::PbSink;
 use risingwave_pb::connector_service::coordinate_request::Msg;
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, coordinate_request};
 use rw_futures_util::pending_on_none;
@@ -33,16 +38,20 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot::{Receiver, Sender, channel};
-use tokio::task::{JoinError, JoinHandle};
+use tokio::task::{AbortHandle, JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::{error, info, warn};
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
+use crate::manager::exactly_once_util::list_replaced_sinks;
 use crate::manager::sink_coordination::SinkWriterRequestStream;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+use crate::manager::sink_coordination::replaced_sink::{
+    BuildReplacedSinkCoordinatorFn, ReplacedSinkFences, commit_replaced_sink_pending_epochs,
+};
 use crate::notification::{
     CollectionNotifier, Notifier, NotifierStarter, StartReceiver, wait_collection,
 };
@@ -70,6 +79,13 @@ enum ManagerRequest {
     },
     RecoverySucceeded {
         recovery: RecoverySucceeded,
+        notifier: Notifier,
+    },
+    /// `REPLACE SINK` removed `replaced_sink_id` and moved its uncommitted epochs to
+    /// `replaced_sink_pending_state`.
+    CommitReplacedSink {
+        replaced_sink_id: SinkId,
+        successor_sink_id: SinkId,
         notifier: Notifier,
     },
 }
@@ -150,32 +166,72 @@ impl SinkCoordinatorManager {
         await_tree_reg: await_tree::Registry,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
-        Self::start_worker_with_spawn_worker({
-            move |param, manager_request_stream| {
-                let sink_id = param.sink_id;
-                let fut = CoordinatorWorker::run(
-                    param,
-                    manager_request_stream,
-                    db.clone(),
-                    subscriber.clone(),
-                    iceberg_compact_stat_sender.clone(),
-                );
-                tokio::spawn(
-                    await_tree_reg
-                        .register_derived_root(format!("Sink Coordinator {sink_id}"))
-                        .instrument(fut),
-                )
-            }
-        })
+        let replaced_sink_fences = ReplacedSinkFences::default();
+        let build_replaced_sink_coordinator: BuildReplacedSinkCoordinatorFn =
+            Arc::new(|sink| build_replaced_sink_coordinator(sink).boxed());
+        let replaced_sink_commits = ReplacedSinkCommits {
+            fences: replaced_sink_fences.clone(),
+            load_unfinished: load_unfinished_replaced_sinks(db.clone()).boxed(),
+            spawn_commit: Box::new({
+                let db = db.clone();
+                let await_tree_reg = await_tree_reg.clone();
+                move |sink_id| {
+                    let fut = commit_replaced_sink_pending_epochs(
+                        db.clone(),
+                        sink_id,
+                        build_replaced_sink_coordinator.clone(),
+                    );
+                    tokio::spawn(
+                        await_tree_reg
+                            .register_derived_root(format!("Replaced Sink Commit {sink_id}"))
+                            .instrument(fut),
+                    )
+                }
+            }),
+        };
+        Self::start_worker_with_spawn_fns(
+            {
+                move |param, manager_request_stream| {
+                    let sink_id = param.sink_id;
+                    let fut = CoordinatorWorker::run(
+                        param,
+                        manager_request_stream,
+                        db.clone(),
+                        subscriber.clone(),
+                        iceberg_compact_stat_sender.clone(),
+                        replaced_sink_fences.clone(),
+                    );
+                    tokio::spawn(
+                        await_tree_reg
+                            .register_derived_root(format!("Sink Coordinator {sink_id}"))
+                            .instrument(fut),
+                    )
+                }
+            },
+            replaced_sink_commits,
+        )
     }
 
+    /// Start a manager in which no sink was ever replaced.
+    #[cfg(test)]
     fn start_worker_with_spawn_worker(
         spawn_coordinator_worker: impl SpawnCoordinatorFn,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
+        Self::start_worker_with_spawn_fns(spawn_coordinator_worker, ReplacedSinkCommits::none())
+    }
+
+    fn start_worker_with_spawn_fns(
+        spawn_coordinator_worker: impl SpawnCoordinatorFn,
+        replaced_sink_commits: ReplacedSinkCommits,
+    ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let (request_tx, request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
         let (shutdown_tx, shutdown_rx) = channel();
-        let worker = ManagerWorker::new(request_rx, shutdown_rx);
-        let join_handle = tokio::spawn(worker.execute(spawn_coordinator_worker));
+        let worker = ManagerWorker::new(request_rx, shutdown_rx, replaced_sink_commits.fences);
+        let join_handle = tokio::spawn(worker.execute(
+            spawn_coordinator_worker,
+            replaced_sink_commits.load_unfinished,
+            replaced_sink_commits.spawn_commit,
+        ));
         (
             SinkCoordinatorManager { request_tx },
             (join_handle, shutdown_tx),
@@ -232,6 +288,30 @@ impl SinkCoordinatorManager {
         }
     }
 
+    /// Commit, in the background, the epochs that `REPLACE SINK` moved to
+    /// `replaced_sink_pending_state` when it removed `replaced_sink_id`, and keep
+    /// `successor_sink_id` from committing to the external system until they are committed.
+    ///
+    /// Returns once the successor is fenced. It does not wait for the commits, so it is safe to
+    /// call while completing a barrier. The caller must call it before the successor can observe
+    /// a Hummock commit later than the barrier that stopped the replaced sink.
+    pub async fn commit_replaced_sink(
+        &self,
+        replaced_sink_id: SinkId,
+        successor_sink_id: SinkId,
+    ) -> anyhow::Result<()> {
+        let (notifier, started_rx) = Notifier::new();
+        self.request_tx
+            .send(ManagerRequest::CommitReplacedSink {
+                replaced_sink_id,
+                successor_sink_id,
+                notifier,
+            })
+            .await
+            .map_err(|_| anyhow!("sink coordinator manager worker has stopped"))?;
+        Self::wait_for_completion(started_rx).await
+    }
+
     pub async fn start_recovery(&self, recovery: RecoveryStart) -> anyhow::Result<()> {
         let (notifier, started_rx) = Notifier::new();
         self.request_tx
@@ -266,6 +346,69 @@ struct CoordinatorWorkerHandle {
     finish_notifiers: Vec<CollectionNotifier>,
 }
 
+/// A sink removed by `REPLACE SINK` whose uncommitted epochs are being committed.
+struct ReplacedSink {
+    successor_sink_id: SinkId,
+    /// `None` while the coordinator worker of the replaced sink is still stopping. The epochs
+    /// are committed only after it has exited, so the two never commit concurrently.
+    commit_abort_handle: Option<AbortHandle>,
+}
+
+/// How the manager commits the epochs left by replaced sinks, see [`super::replaced_sink`].
+struct ReplacedSinkCommits {
+    /// Shared with the coordinator workers, which wait on it before committing.
+    fences: ReplacedSinkFences,
+    /// Resolves to the `(replaced sink, successor sink)` pairs that had uncommitted epochs when
+    /// the meta node started.
+    load_unfinished: BoxFuture<'static, Vec<(SinkId, SinkId)>>,
+    /// Spawns the task that commits the epochs left by the given replaced sink.
+    spawn_commit: Box<dyn SpawnReplacedSinkCommitFn>,
+}
+
+impl ReplacedSinkCommits {
+    #[cfg(test)]
+    fn none() -> Self {
+        Self {
+            fences: ReplacedSinkFences::default(),
+            load_unfinished: async { vec![] }.boxed(),
+            spawn_commit: Box::new(|sink_id| {
+                panic!("unexpected replaced sink {sink_id} in a test without replaced sinks")
+            }),
+        }
+    }
+}
+
+/// Load the replaced sinks that still have uncommitted epochs from the meta store.
+///
+/// The successors must be fenced before any of their writers is served, so keep retrying
+/// instead of continuing without the result.
+async fn load_unfinished_replaced_sinks(db: DatabaseConnection) -> Vec<(SinkId, SinkId)> {
+    loop {
+        match list_replaced_sinks(&db).await {
+            Ok(replaced_sinks) => return replaced_sinks,
+            Err(e) => {
+                error!(
+                    error = %e.as_report(),
+                    "failed to load the replaced sinks with uncommitted epochs, retrying"
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+/// Build the commit coordinator of a replaced sink from the catalog it had when it was replaced.
+async fn build_replaced_sink_coordinator(
+    sink: PbSink,
+) -> anyhow::Result<risingwave_connector::sink::SinkCommitCoordinator> {
+    let param = SinkParam::try_from_sink_catalog(SinkCatalog::from(sink))?;
+    let sink = build_sink(param)?;
+    // The replaced sink is no longer in the catalog, so it reports nothing to the Iceberg
+    // compaction scheduler.
+    let coordinator = dispatch_sink!(sink, sink, Box::pin(sink.new_coordinator(None)).await)?;
+    Ok(coordinator)
+}
+
 struct ManagerWorker {
     request_rx: mpsc::Receiver<ManagerRequest>,
     // Make it option so that it can be polled with &mut SinkManagerWorker
@@ -275,11 +418,21 @@ struct ManagerWorker {
         FuturesUnordered<BoxFuture<'static, (SinkId, Result<(), JoinError>)>>,
     running_coordinator_worker: HashMap<SinkId, CoordinatorWorkerHandle>,
     recovery_fence: Option<RecoveryFence>,
+
+    /// Replaced sinks with uncommitted epochs, see [`super::replaced_sink`].
+    replaced_sinks: HashMap<SinkId, ReplacedSink>,
+    replaced_sink_fences: ReplacedSinkFences,
+    running_replaced_sink_commit_join_handles:
+        FuturesUnordered<BoxFuture<'static, (SinkId, Result<(), JoinError>)>>,
 }
 
 enum ManagerEvent {
     NewRequest(ManagerRequest),
     CoordinatorWorkerFinished {
+        sink_id: SinkId,
+        join_result: Result<(), JoinError>,
+    },
+    ReplacedSinkCommitFinished {
         sink_id: SinkId,
         join_result: Result<(), JoinError>,
     },
@@ -289,18 +442,55 @@ trait SpawnCoordinatorFn = FnMut(SinkParam, UnboundedReceiver<SinkWriterCoordina
     + Send
     + 'static;
 
+trait SpawnReplacedSinkCommitFn = FnMut(SinkId) -> JoinHandle<()> + Send + 'static;
+
 impl ManagerWorker {
-    fn new(request_rx: mpsc::Receiver<ManagerRequest>, shutdown_rx: Receiver<()>) -> Self {
+    fn new(
+        request_rx: mpsc::Receiver<ManagerRequest>,
+        shutdown_rx: Receiver<()>,
+        replaced_sink_fences: ReplacedSinkFences,
+    ) -> Self {
         ManagerWorker {
             request_rx,
             shutdown_rx,
             running_coordinator_worker_join_handles: Default::default(),
             running_coordinator_worker: Default::default(),
             recovery_fence: None,
+            replaced_sinks: Default::default(),
+            replaced_sink_fences,
+            running_replaced_sink_commit_join_handles: Default::default(),
         }
     }
 
-    async fn execute(mut self, mut spawn_coordinator_worker: impl SpawnCoordinatorFn) {
+    async fn execute(
+        mut self,
+        mut spawn_coordinator_worker: impl SpawnCoordinatorFn,
+        load_unfinished_replaced_sinks: BoxFuture<'static, Vec<(SinkId, SinkId)>>,
+        mut spawn_replaced_sink_commit: Box<dyn SpawnReplacedSinkCommitFn>,
+    ) {
+        // Fence the successors before serving any writer. After a restart no coordinator worker
+        // of a replaced sink is running, so its epochs can be committed right away.
+        let unfinished_replaced_sinks =
+            match select(load_unfinished_replaced_sinks, &mut self.shutdown_rx).await {
+                Either::Left((replaced_sinks, _)) => replaced_sinks,
+                Either::Right(_) => {
+                    info!("sink manager worker exited before loading replaced sinks");
+                    return;
+                }
+            };
+        for (replaced_sink_id, successor_sink_id) in unfinished_replaced_sinks {
+            info!(
+                %replaced_sink_id,
+                %successor_sink_id,
+                "resume committing the epochs left by a replaced sink"
+            );
+            self.add_replaced_sink(
+                replaced_sink_id,
+                successor_sink_id,
+                &mut spawn_replaced_sink_commit,
+            );
+        }
+
         while let Some(event) = self.next_event().await {
             match event {
                 ManagerEvent::NewRequest(request) => match request {
@@ -327,15 +517,116 @@ impl ManagerWorker {
                         self.apply_recovery_succeeded(recovery);
                         notifier.started();
                     }
+                    ManagerRequest::CommitReplacedSink {
+                        replaced_sink_id,
+                        successor_sink_id,
+                        notifier,
+                    } => {
+                        let notifier = notifier.start();
+                        self.add_replaced_sink(
+                            replaced_sink_id,
+                            successor_sink_id,
+                            &mut spawn_replaced_sink_commit,
+                        );
+                        notifier.started();
+                    }
                 },
                 ManagerEvent::CoordinatorWorkerFinished {
                     sink_id,
                     join_result,
-                } => self.handle_coordinator_finished(sink_id, join_result),
+                } => {
+                    self.handle_coordinator_finished(sink_id, join_result);
+                    if self
+                        .replaced_sinks
+                        .get(&sink_id)
+                        .is_some_and(|replaced_sink| replaced_sink.commit_abort_handle.is_none())
+                    {
+                        self.spawn_replaced_sink_commit(sink_id, &mut spawn_replaced_sink_commit);
+                    }
+                }
+                ManagerEvent::ReplacedSinkCommitFinished {
+                    sink_id,
+                    join_result,
+                } => self.handle_replaced_sink_commit_finished(sink_id, join_result),
             }
         }
         self.clean_up().await;
         info!("sink manager worker exited");
+    }
+
+    /// Fence the successor of a replaced sink, and commit the epochs the replaced sink left
+    /// once its coordinator worker has exited.
+    fn add_replaced_sink(
+        &mut self,
+        replaced_sink_id: SinkId,
+        successor_sink_id: SinkId,
+        spawn_replaced_sink_commit: &mut impl SpawnReplacedSinkCommitFn,
+    ) {
+        if self.replaced_sinks.contains_key(&replaced_sink_id) {
+            warn!(%replaced_sink_id, "replaced sink is already being committed");
+            return;
+        }
+        self.replaced_sink_fences
+            .fence(successor_sink_id, replaced_sink_id);
+        self.replaced_sinks.insert(
+            replaced_sink_id,
+            ReplacedSink {
+                successor_sink_id,
+                commit_abort_handle: None,
+            },
+        );
+        match self.running_coordinator_worker.get_mut(&replaced_sink_id) {
+            Some(worker_handle) => {
+                // Stop the worker. `CoordinatorWorkerFinished` then starts the commit.
+                if let Some(sender) = worker_handle.request_sender.take() {
+                    drop(sender);
+                }
+            }
+            None => self.spawn_replaced_sink_commit(replaced_sink_id, spawn_replaced_sink_commit),
+        }
+    }
+
+    fn spawn_replaced_sink_commit(
+        &mut self,
+        replaced_sink_id: SinkId,
+        spawn_replaced_sink_commit: &mut impl SpawnReplacedSinkCommitFn,
+    ) {
+        let join_handle = spawn_replaced_sink_commit(replaced_sink_id);
+        self.replaced_sinks
+            .get_mut(&replaced_sink_id)
+            .expect("replaced sink should be registered before its commit starts")
+            .commit_abort_handle = Some(join_handle.abort_handle());
+        self.running_replaced_sink_commit_join_handles.push(
+            join_handle
+                .map(move |join_result| (replaced_sink_id, join_result))
+                .boxed(),
+        );
+    }
+
+    fn handle_replaced_sink_commit_finished(
+        &mut self,
+        replaced_sink_id: SinkId,
+        join_result: Result<(), JoinError>,
+    ) {
+        match join_result {
+            Ok(()) => {
+                let replaced_sink = self
+                    .replaced_sinks
+                    .remove(&replaced_sink_id)
+                    .expect("finished commit should have an associated replaced sink");
+                self.replaced_sink_fences
+                    .release(replaced_sink.successor_sink_id, replaced_sink_id);
+            }
+            Err(err) => {
+                // The epochs may still be uncommitted. Keep the successor fenced rather than
+                // let it commit ahead of them. The commit is retried when the meta node restarts.
+                error!(
+                    %replaced_sink_id,
+                    error = %err.as_report(),
+                    "the task committing the epochs left by a replaced sink failed,                      its replacement sink stays blocked from committing",
+                );
+            }
+        }
     }
 
     fn apply_recovery_start(&mut self, recovery: RecoveryStart, notifier: Notifier) {
@@ -429,9 +720,14 @@ impl ManagerWorker {
         match select(
             select(
                 pin!(self.request_rx.recv()),
-                pin!(pending_on_none(
-                    self.running_coordinator_worker_join_handles.next()
-                )),
+                select(
+                    pin!(pending_on_none(
+                        self.running_coordinator_worker_join_handles.next()
+                    )),
+                    pin!(pending_on_none(
+                        self.running_replaced_sink_commit_join_handles.next()
+                    )),
+                ),
             ),
             &mut self.shutdown_rx,
         )
@@ -440,8 +736,14 @@ impl ManagerWorker {
             Either::Left((either, _)) => match either {
                 Either::Left((Some(request), _)) => Some(ManagerEvent::NewRequest(request)),
                 Either::Left((None, _)) => None,
-                Either::Right(((sink_id, join_result), _)) => {
+                Either::Right((Either::Left(((sink_id, join_result), _)), _)) => {
                     Some(ManagerEvent::CoordinatorWorkerFinished {
+                        sink_id,
+                        join_result,
+                    })
+                }
+                Either::Right((Either::Right(((sink_id, join_result), _)), _)) => {
+                    Some(ManagerEvent::ReplacedSinkCommitFinished {
                         sink_id,
                         join_result,
                     })
@@ -453,6 +755,13 @@ impl ManagerWorker {
 
     async fn clean_up(&mut self) {
         info!("sink manager worker start cleaning up");
+        // The commits of replaced sinks retry until they succeed. They resume from the meta
+        // store when the meta node starts again.
+        for replaced_sink in self.replaced_sinks.values() {
+            if let Some(abort_handle) = &replaced_sink.commit_abort_handle {
+                abort_handle.abort();
+            }
+        }
         for worker_handle in self.running_coordinator_worker.values_mut() {
             if let Some(sender) = worker_handle.request_sender.take() {
                 // drop the sender to notify the coordinator worker to stop
@@ -544,8 +853,9 @@ mod tests {
     use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::task::Poll;
+    use std::time::Duration;
 
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -562,6 +872,7 @@ mod tests {
         TwoPhaseCommitCoordinator,
     };
     use risingwave_meta_model::SinkSchemachange;
+    use risingwave_pb::catalog::PbSink;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_pb::connector_service::{CoordinateResponse, SinkMetadata};
     use risingwave_pb::data::PbDataType;
@@ -578,11 +889,18 @@ mod tests {
 
     use super::{
         ManagerRequest, ManagerWorker, RecoveryFence, RecoveryStart, RecoverySucceeded,
-        SinkWriterCoordinationHandle,
+        ReplacedSinkCommits, SinkWriterCoordinationHandle,
+    };
+    use crate::manager::exactly_once_util::{
+        list_replaced_sinks, load_replaced_sink_pending_epochs,
+        move_pending_epochs_to_replaced_sink,
     };
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
     use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
+    use crate::manager::sink_coordination::replaced_sink::{
+        BuildReplacedSinkCoordinatorFn, ReplacedSinkFences, commit_replaced_sink_pending_epochs,
+    };
 
     fn test_writer_handle(
         param: SinkParam,
@@ -606,7 +924,7 @@ mod tests {
     fn test_recovery_fence_transitions() {
         let (_request_tx, request_rx) = tokio::sync::mpsc::channel(1);
         let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let mut worker = ManagerWorker::new(request_rx, shutdown_rx);
+        let mut worker = ManagerWorker::new(request_rx, shutdown_rx, Default::default());
         let database_1 = DatabaseId::new(1);
         let database_2 = DatabaseId::new(2);
         let sink_1 = SinkId::new(11);
@@ -2997,5 +3315,461 @@ mod tests {
             assert_eq!(rows[0].2, "COMMITTED");
             assert_eq!(rows[0].4, Some(schema_change.clone()));
         }
+    }
+
+    /// The pieces shared by the tests of sinks removed by `REPLACE SINK`: a meta store with the
+    /// tables involved, and an external system that records the order of the commits it receives.
+    struct ReplacedSinkTestEnv {
+        db: DatabaseConnection,
+        fences: ReplacedSinkFences,
+        /// `(sink, epoch)` of every commit that reached the external system, in order.
+        commits: Arc<parking_lot::Mutex<Vec<(SinkId, u64)>>>,
+        /// While `false`, commits of replaced sinks fail.
+        external_available: Arc<AtomicBool>,
+        /// Commit attempts of replaced sinks, including failed ones.
+        replaced_sink_commit_attempts: Arc<AtomicUsize>,
+        /// Number of commit tasks of replaced sinks that have returned.
+        finished_replaced_sink_commits: Arc<AtomicUsize>,
+        /// Senders of Hummock committed epochs, by sink.
+        committed_epoch_senders:
+            Arc<parking_lot::Mutex<HashMap<SinkId, tokio::sync::mpsc::UnboundedSender<u64>>>>,
+    }
+
+    impl ReplacedSinkTestEnv {
+        async fn new() -> Self {
+            let db = prepare_db_backend().await;
+            let ddl = "
+                CREATE TABLE IF NOT EXISTS replaced_sink_pending_state (
+                    sink_id i32 NOT NULL,
+                    epoch i64 NOT NULL,
+                    successor_sink_id i32 NOT NULL,
+                    sink BLOB NOT NULL,
+                    metadata BLOB,
+                    schema_change BLOB,
+                    PRIMARY KEY (sink_id, epoch)
+                )
+            ";
+            db.execute(sea_orm::Statement::from_string(
+                db.get_database_backend(),
+                ddl.to_owned(),
+            ))
+            .await
+            .unwrap();
+            Self {
+                db,
+                fences: ReplacedSinkFences::default(),
+                commits: Default::default(),
+                external_available: Arc::new(AtomicBool::new(true)),
+                replaced_sink_commit_attempts: Default::default(),
+                finished_replaced_sink_commits: Default::default(),
+                committed_epoch_senders: Default::default(),
+            }
+        }
+
+        fn param(sink_id: SinkId) -> SinkParam {
+            SinkParam {
+                sink_id,
+                sink_name: "test".into(),
+                properties: Default::default(),
+                columns: vec![],
+                downstream_pk: None,
+                sink_type: SinkType::AppendOnly,
+                ignore_delete: false,
+                format_desc: None,
+                db_name: "test".into(),
+                sink_from_name: "test".into(),
+            }
+        }
+
+        fn metadata(metadata: Vec<u8>) -> SinkMetadata {
+            SinkMetadata {
+                metadata: Some(Metadata::Serialized(SerializedMetadata { metadata })),
+            }
+        }
+
+        /// Start a manager whose coordinators commit to the recording external system. Every
+        /// sink subscribes to Hummock with `initial_committed_epoch` as the committed epoch.
+        fn start_manager(
+            &self,
+            initial_committed_epoch: u64,
+        ) -> (
+            SinkCoordinatorManager,
+            (
+                tokio::task::JoinHandle<()>,
+                tokio::sync::oneshot::Sender<()>,
+            ),
+        ) {
+            let subscriber: SinkCommittedEpochSubscriber = {
+                let senders = self.committed_epoch_senders.clone();
+                Arc::new(move |sink_id: SinkId| {
+                    let (sender, receiver) = unbounded_channel();
+                    senders.lock().insert(sink_id, sender);
+                    async move { Ok((initial_committed_epoch, receiver)) }.boxed()
+                })
+            };
+            let build_replaced_sink_coordinator: BuildReplacedSinkCoordinatorFn = Arc::new({
+                let commits = self.commits.clone();
+                let external_available = self.external_available.clone();
+                let attempts = self.replaced_sink_commit_attempts.clone();
+                move |sink: PbSink| {
+                    let sink_id = sink.id;
+                    let commits = commits.clone();
+                    let external_available = external_available.clone();
+                    let attempts = attempts.clone();
+                    async move {
+                        Ok(MockTwoPhaseCoordinator::new_coordinator(
+                            |_epoch, _metadata_list, _schema_change| {
+                                unreachable!("a replaced sink receives no new data")
+                            },
+                            move |epoch, _commit_metadata| {
+                                attempts.fetch_add(1, Ordering::SeqCst);
+                                if !external_available.load(Ordering::SeqCst) {
+                                    return Err(SinkError::Coordinator(anyhow!(
+                                        "external system is unavailable"
+                                    )));
+                                }
+                                commits.lock().push((sink_id, epoch));
+                                Ok(())
+                            },
+                            |_epoch, _schema_change| unreachable!(),
+                        ))
+                    }
+                    .boxed()
+                }
+            });
+            let replaced_sink_commits = ReplacedSinkCommits {
+                fences: self.fences.clone(),
+                load_unfinished: {
+                    let db = self.db.clone();
+                    async move { list_replaced_sinks(&db).await.unwrap() }.boxed()
+                },
+                spawn_commit: Box::new({
+                    let db = self.db.clone();
+                    let finished = self.finished_replaced_sink_commits.clone();
+                    move |sink_id| {
+                        let db = db.clone();
+                        let build_coordinator = build_replaced_sink_coordinator.clone();
+                        let finished = finished.clone();
+                        tokio::spawn(async move {
+                            commit_replaced_sink_pending_epochs(db, sink_id, build_coordinator)
+                                .await;
+                            finished.fetch_add(1, Ordering::SeqCst);
+                        })
+                    }
+                }),
+            };
+            SinkCoordinatorManager::start_worker_with_spawn_fns(
+                {
+                    let db = self.db.clone();
+                    let commits = self.commits.clone();
+                    let fences = self.fences.clone();
+                    move |param, new_writer_rx| {
+                        let sink_id = param.sink_id;
+                        let commits = commits.clone();
+                        tokio::spawn(CoordinatorWorker::execute_fenced_coordinator(
+                            db.clone(),
+                            param,
+                            new_writer_rx,
+                            MockTwoPhaseCoordinator::new_coordinator(
+                                |_epoch, metadata_list, _schema_change| {
+                                    let metadata =
+                                        Itertools::exactly_one(metadata_list.into_iter()).unwrap();
+                                    Ok(match metadata.metadata {
+                                        Some(Metadata::Serialized(SerializedMetadata {
+                                            metadata,
+                                        })) => Some(metadata),
+                                        _ => unreachable!(),
+                                    })
+                                },
+                                move |epoch, _commit_metadata| {
+                                    commits.lock().push((sink_id, epoch));
+                                    Ok(())
+                                },
+                                |_epoch, _schema_change| unreachable!(),
+                            ),
+                            subscriber.clone(),
+                            fences.clone(),
+                        ))
+                    }
+                },
+                replaced_sink_commits,
+            )
+        }
+
+        async fn new_writer(
+            manager: &SinkCoordinatorManager,
+            sink_id: SinkId,
+        ) -> CoordinatorStreamHandle {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in 0..VirtualNode::COUNT_FOR_TEST {
+                builder.set(i, true);
+            }
+            CoordinatorStreamHandle::new_with_init_stream(
+                Self::param(sink_id).to_proto(),
+                builder.finish(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
+            .await
+            .unwrap()
+            .0
+        }
+
+        /// Tell the coordinator of `sink_id` that Hummock has committed `epoch`.
+        fn commit_hummock_epoch(&self, sink_id: SinkId, epoch: u64) {
+            self.committed_epoch_senders
+                .lock()
+                .get(&sink_id)
+                .expect("the sink should have subscribed")
+                .send(epoch)
+                .unwrap();
+        }
+
+        /// What the transaction of the cutover does to the meta store: keep the uncommitted
+        /// epochs of the old sink, then delete the old sink together with its pending state.
+        async fn cut_over(&self, old_sink_id: SinkId, new_sink_id: SinkId) -> usize {
+            let moved = move_pending_epochs_to_replaced_sink(
+                &self.db,
+                old_sink_id,
+                new_sink_id,
+                &PbSink {
+                    id: old_sink_id,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            self.execute(format!(
+                "DELETE FROM pending_sink_state WHERE sink_id = {old_sink_id}"
+            ))
+            .await;
+            moved
+        }
+
+        async fn execute(&self, sql: String) {
+            self.db
+                .execute(sea_orm::Statement::from_string(
+                    self.db.get_database_backend(),
+                    sql,
+                ))
+                .await
+                .unwrap();
+        }
+
+        async fn insert_replaced_sink_epoch(
+            &self,
+            old_sink_id: SinkId,
+            new_sink_id: SinkId,
+            epoch: u64,
+        ) {
+            self.execute(format!(
+                "INSERT INTO pending_sink_state (sink_id, epoch, sink_state, metadata) \
+                 VALUES ({old_sink_id}, {epoch}, 'PENDING', x'0102')"
+            ))
+            .await;
+            assert_eq!(self.cut_over(old_sink_id, new_sink_id).await, 1);
+        }
+
+        async fn replaced_sink_epochs(&self) -> Vec<(SinkId, u64)> {
+            let mut epochs = vec![];
+            for (sink_id, _) in list_replaced_sinks(&self.db).await.unwrap() {
+                let (_, pending) = load_replaced_sink_pending_epochs(&self.db, sink_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                epochs.extend(pending.into_iter().map(|pending| (sink_id, pending.epoch)));
+            }
+            epochs
+        }
+
+        fn commits(&self) -> Vec<(SinkId, u64)> {
+            self.commits.lock().clone()
+        }
+
+        async fn wait_until(&self, what: &str, mut condition: impl FnMut() -> bool) {
+            for _ in 0..1000 {
+                if condition() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("timed out waiting until {what}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_replaced_sink_commits_before_successor() {
+        let env = ReplacedSinkTestEnv::new().await;
+        let old_sink_id = SinkId::from(1);
+        let new_sink_id = SinkId::from(2);
+        let old_epoch = 233;
+        let new_epoch = 234;
+        let (manager, (_join_handle, _stop_tx)) = env.start_manager(old_epoch - 1);
+
+        // The old sink pre-commits its last epoch at the barrier that stops it.
+        let mut old_writer = ReplacedSinkTestEnv::new_writer(&manager, old_sink_id).await;
+        old_writer.align_initial_epoch(1).await.unwrap();
+        old_writer
+            .commit(old_epoch, ReplacedSinkTestEnv::metadata(vec![1, 2]), None)
+            .await
+            .unwrap();
+        old_writer.stop().await.unwrap();
+
+        // Hummock then commits the epoch, but a coordinator without writers no longer commits.
+        env.commit_hummock_epoch(old_sink_id, old_epoch);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(env.commits(), vec![]);
+        {
+            let rows = list_rows(&env.db).await;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].1, old_epoch as i64);
+            assert_eq!(rows[0].2, "PENDING");
+        }
+
+        // The cutover keeps the epoch and hands it to the manager while the external system is
+        // unavailable. None of this waits for the commit.
+        env.external_available.store(false, Ordering::SeqCst);
+        assert_eq!(env.cut_over(old_sink_id, new_sink_id).await, 1);
+        manager
+            .commit_replaced_sink(old_sink_id, new_sink_id)
+            .await
+            .unwrap();
+        manager
+            .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
+            .await;
+        assert_eq!(
+            env.replaced_sink_epochs().await,
+            vec![(old_sink_id, old_epoch)]
+        );
+
+        // The new sink is acknowledged as usual, so its checkpoints keep completing.
+        let mut new_writer = ReplacedSinkTestEnv::new_writer(&manager, new_sink_id).await;
+        new_writer.align_initial_epoch(new_epoch).await.unwrap();
+        new_writer
+            .commit(new_epoch, ReplacedSinkTestEnv::metadata(vec![3, 4]), None)
+            .await
+            .unwrap();
+        env.commit_hummock_epoch(new_sink_id, new_epoch);
+
+        // But it does not commit ahead of the old sink.
+        env.wait_until("the commit of the replaced sink is retried", || {
+            env.replaced_sink_commit_attempts.load(Ordering::SeqCst) >= 3
+        })
+        .await;
+        assert_eq!(env.commits(), vec![]);
+        assert!(env.fences.is_fenced(new_sink_id));
+
+        env.external_available.store(true, Ordering::SeqCst);
+        env.wait_until("both sinks have committed", || env.commits().len() == 2)
+            .await;
+        assert_eq!(
+            env.commits(),
+            vec![(old_sink_id, old_epoch), (new_sink_id, new_epoch)]
+        );
+        assert_eq!(env.replaced_sink_epochs().await, vec![]);
+        env.wait_until("the new sink is no longer fenced", || {
+            !env.fences.is_fenced(new_sink_id)
+        })
+        .await;
+        for _ in 0..1000 {
+            let rows = list_rows(&env.db).await;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].0, new_sink_id.as_raw_id() as i32);
+            assert_eq!(rows[0].1, new_epoch as i64);
+            if rows[0].2 == "COMMITTED" {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the epoch of the new sink is not marked committed");
+    }
+
+    #[tokio::test]
+    async fn test_replaced_sink_resumes_after_restart() {
+        let env = ReplacedSinkTestEnv::new().await;
+        let old_sink_id = SinkId::from(1);
+        let new_sink_id = SinkId::from(2);
+        let new_epoch = 234;
+
+        // The meta node stopped after the cutover, before the old sink's epochs were committed.
+        env.insert_replaced_sink_epoch(old_sink_id, new_sink_id, 232)
+            .await;
+        env.insert_replaced_sink_epoch(old_sink_id, new_sink_id, 233)
+            .await;
+        env.external_available.store(false, Ordering::SeqCst);
+
+        let (manager, (_join_handle, _stop_tx)) = env.start_manager(233);
+        let mut new_writer = ReplacedSinkTestEnv::new_writer(&manager, new_sink_id).await;
+        // The new sink had acknowledged nothing, so its writer aligns its first epoch.
+        new_writer.align_initial_epoch(new_epoch).await.unwrap();
+        new_writer
+            .commit(new_epoch, ReplacedSinkTestEnv::metadata(vec![3, 4]), None)
+            .await
+            .unwrap();
+        env.commit_hummock_epoch(new_sink_id, new_epoch);
+
+        env.wait_until("the commit of the replaced sink is retried", || {
+            env.replaced_sink_commit_attempts.load(Ordering::SeqCst) >= 3
+        })
+        .await;
+        assert_eq!(env.commits(), vec![]);
+        assert!(env.fences.is_fenced(new_sink_id));
+
+        env.external_available.store(true, Ordering::SeqCst);
+        env.wait_until("both sinks have committed", || env.commits().len() == 3)
+            .await;
+        assert_eq!(
+            env.commits(),
+            vec![
+                (old_sink_id, 232),
+                (old_sink_id, 233),
+                (new_sink_id, new_epoch)
+            ]
+        );
+        assert_eq!(env.replaced_sink_epochs().await, vec![]);
+    }
+
+    #[tokio::test]
+    async fn test_replaced_sink_discarded_with_successor() {
+        let env = ReplacedSinkTestEnv::new().await;
+        let old_sink_id = SinkId::from(1);
+        let new_sink_id = SinkId::from(2);
+        env.insert_replaced_sink_epoch(old_sink_id, new_sink_id, 232)
+            .await;
+        env.insert_replaced_sink_epoch(old_sink_id, new_sink_id, 233)
+            .await;
+        env.external_available.store(false, Ordering::SeqCst);
+
+        let (_manager, (_join_handle, _stop_tx)) = env.start_manager(233);
+        env.wait_until("the commit of the replaced sink is retried", || {
+            env.replaced_sink_commit_attempts.load(Ordering::SeqCst) >= 3
+        })
+        .await;
+        assert!(env.fences.is_fenced(new_sink_id));
+
+        // Dropping the new sink deletes the rows through the foreign key.
+        env.execute(format!(
+            "DELETE FROM replaced_sink_pending_state WHERE successor_sink_id = {new_sink_id}"
+        ))
+        .await;
+        env.external_available.store(true, Ordering::SeqCst);
+
+        env.wait_until("the commit task of the replaced sink returns", || {
+            env.finished_replaced_sink_commits.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        env.wait_until("the fence is released", || {
+            !env.fences.is_fenced(new_sink_id)
+        })
+        .await;
+        // At most the attempt that was in flight when the sink was dropped went through.
+        assert!(env.commits().len() <= 1, "{:?}", env.commits());
     }
 }

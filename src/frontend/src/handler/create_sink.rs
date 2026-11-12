@@ -36,7 +36,7 @@ use risingwave_common::types::{DataType, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
-use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
@@ -759,6 +759,7 @@ async fn create_sink_or_replace(
                     )
                     .into());
                 }
+                check_replace_sink_commit_order(&original_sink.properties, &sink.properties)?;
 
                 sink.schema_id = original_sink.schema_id;
                 sink.database_id = original_sink.database_id;
@@ -876,6 +877,8 @@ fn prepare_replace_sink(
         )
         .into());
     }
+    // Reject before planning: planning such a sink creates its Iceberg table.
+    ensure_not_iceberg_pk_index_sink(&handle_args.with_options)?;
     match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
         Some(value) if !value.eq_ignore_ascii_case("false") => {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -916,17 +919,66 @@ fn prepare_replace_sink(
             )
             .into());
         }
-        if sink_is_exactly_once(&sink.properties)? {
-            return Err(ErrorCode::NotSupported(
-                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
-                "set is_exactly_once=false or recreate the sink manually".to_owned(),
-            )
-            .into());
-        }
+        ensure_not_iceberg_pk_index_sink(&sink.properties)?;
         sink.clone()
     };
 
     Ok(SinkCreateMode::Replace { original_sink })
+}
+
+fn ensure_not_iceberg_pk_index_sink(properties: &BTreeMap<String, String>) -> Result<()> {
+    let is_iceberg_pk_index_sink = properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+        && properties
+            .get(ENABLE_PK_INDEX)
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    if is_iceberg_pk_index_sink {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK does not support Iceberg sinks with `enable_pk_index = 'true'`"
+                .to_owned(),
+            "the primary key index is built by the initial snapshot, drop and recreate the sink"
+                .to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Check that the data of the old and the new sink reach the external system in order.
+///
+/// An exactly-once sink commits an epoch to the external system only after the epoch is durable
+/// in RisingWave, so at the cutover its last epochs are still to be committed. The meta node
+/// commits them after the cutover and holds back the two-phase commits of the new sink until
+/// then. It cannot hold back a sink that commits in a single phase, and for an upsert sink a
+/// later commit of the old sink would delete rows written by the new one.
+fn check_replace_sink_commit_order(
+    old_properties: &BTreeMap<String, String>,
+    new_properties: &BTreeMap<String, String>,
+) -> Result<()> {
+    ensure_not_iceberg_pk_index_sink(old_properties)?;
+    ensure_not_iceberg_pk_index_sink(new_properties)?;
+    let same_connector = match (
+        old_properties.get(CONNECTOR_TYPE_KEY),
+        new_properties.get(CONNECTOR_TYPE_KEY),
+    ) {
+        (Some(old), Some(new)) => old.eq_ignore_ascii_case(new),
+        _ => false,
+    };
+    if same_connector
+        && sink_is_exactly_once(old_properties)?
+        && !sink_is_exactly_once(new_properties)?
+    {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK cannot replace an exactly-once sink with a sink of the same connector \
+             that is not exactly-once"
+                .to_owned(),
+            "keep `is_exactly_once = 'true'` on the new sink, or drop and recreate the sink"
+                .to_owned(),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 pub fn fetch_incoming_sinks(
@@ -1278,21 +1330,42 @@ pub mod tests {
     }
 
     #[test]
-    fn test_sink_replace_requires_exactly_once_state_defaults() {
-        let properties = BTreeMap::from([("connector".to_owned(), "iceberg".to_owned())]);
-        assert!(super::sink_is_exactly_once(&properties).unwrap());
+    fn test_check_replace_sink_commit_order() {
+        fn properties(options: &[(&str, &str)]) -> BTreeMap<String, String> {
+            options
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect()
+        }
+        // An Iceberg sink is exactly-once unless that is disabled.
+        let iceberg = properties(&[("connector", "iceberg")]);
+        let iceberg_at_least_once =
+            properties(&[("connector", "iceberg"), ("is_exactly_once", "false")]);
+        let iceberg_pk_index = properties(&[("connector", "iceberg"), ("enable_pk_index", "true")]);
+        let jdbc = properties(&[("connector", "jdbc")]);
 
-        let properties = BTreeMap::from([
-            ("connector".to_owned(), "iceberg".to_owned()),
-            ("is_exactly_once".to_owned(), "false".to_owned()),
-        ]);
-        assert!(!super::sink_is_exactly_once(&properties).unwrap());
+        // An exactly-once sink can be replaced by another exactly-once sink.
+        super::check_replace_sink_commit_order(&iceberg, &iceberg).unwrap();
+        // A sink that has nothing left to commit can be replaced by any sink.
+        super::check_replace_sink_commit_order(&iceberg_at_least_once, &iceberg).unwrap();
+        super::check_replace_sink_commit_order(&iceberg_at_least_once, &iceberg_at_least_once)
+            .unwrap();
+        super::check_replace_sink_commit_order(&jdbc, &iceberg).unwrap();
+        // A different connector writes to a different system, so the order does not matter.
+        super::check_replace_sink_commit_order(&iceberg, &jdbc).unwrap();
 
-        let properties = BTreeMap::from([
-            ("connector".to_owned(), "jdbc".to_owned()),
-            ("is_exactly_once".to_owned(), "true".to_owned()),
-        ]);
-        assert!(!super::sink_is_exactly_once(&properties).unwrap());
+        // The single-phase commits of the new sink cannot be held back.
+        let err =
+            super::check_replace_sink_commit_order(&iceberg, &iceberg_at_least_once).unwrap_err();
+        assert!(
+            err.to_string().contains("that is not exactly-once"),
+            "{err:?}"
+        );
+
+        for (old, new) in [(&iceberg_pk_index, &iceberg), (&iceberg, &iceberg_pk_index)] {
+            let err = super::check_replace_sink_commit_order(old, new).unwrap_err();
+            assert!(err.to_string().contains("enable_pk_index"), "{err:?}");
+        }
     }
 
     #[tokio::test]

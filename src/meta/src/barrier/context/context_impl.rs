@@ -830,7 +830,7 @@ impl PostCollectCommand {
                         None
                     };
 
-                let old_state_table_ids = barrier_manager_context
+                let replaced_sink_cutover = barrier_manager_context
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
@@ -842,6 +842,26 @@ impl PostCollectCommand {
                         replace_sink.is_none(),
                     )
                     .await?;
+                if let Some(old_sink_id) = replace_sink
+                    && let Some(cutover) = &replaced_sink_cutover
+                    && cutover.uncommitted_epochs > 0
+                {
+                    // The old sink still has exactly-once epochs to commit to the external
+                    // system. They were kept in the transaction above. Fence the replacement sink
+                    // behind them here, before any later checkpoint can let it commit, and leave
+                    // the commits to the background: waiting for an external system in this
+                    // post-collect step would stop every checkpoint from completing.
+                    tracing::info!(
+                        %old_sink_id,
+                        new_sink_id = %new_job_id,
+                        uncommitted_epochs = cutover.uncommitted_epochs,
+                        "replaced sink has uncommitted epochs, committing them in the background"
+                    );
+                    barrier_manager_context
+                        .sink_manager
+                        .commit_replaced_sink(old_sink_id, new_job_id.as_sink_id())
+                        .await?;
+                }
 
                 let added_source_fragments = stream_job_fragments.stream_source_fragments();
                 let added_backfill_fragments = stream_job_fragments.source_backfill_fragments();
@@ -875,7 +895,9 @@ impl PostCollectCommand {
                         &barrier_manager_context.sink_manager,
                         &barrier_manager_context.iceberg_pk_index_sink_manager,
                         [old_sink_id.as_job_id()],
-                        old_state_table_ids.expect("replace sink should return old state tables"),
+                        replaced_sink_cutover
+                            .expect("replace sink should return old state tables")
+                            .old_state_table_ids,
                         "replace_sink",
                     )
                     .await?;

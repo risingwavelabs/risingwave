@@ -73,6 +73,10 @@ pub struct TestSinkStoreInner {
     id_name: HashMap<i32, Vec<String>>,
     // snapshot_id -> id + name map
     snapshot_id_to_data: BTreeMap<i64, HashMap<i32, Vec<String>>>,
+    // the sink of every commit that reached the external system, in commit order
+    committed_sink_ids: Vec<SinkId>,
+    // sinks whose commits the external system currently refuses
+    refused_sink_ids: HashSet<SinkId>,
     epochs: Vec<u64>,
 
     checkpoint_count: usize,
@@ -96,6 +100,8 @@ impl TestSinkStore {
             inner: Arc::new(Mutex::new(TestSinkStoreInner {
                 id_name: HashMap::new(),
                 snapshot_id_to_data: BTreeMap::new(),
+                committed_sink_ids: Vec::new(),
+                refused_sink_ids: HashSet::new(),
                 epochs: Vec::new(),
                 checkpoint_count: 0,
                 err_count: 0,
@@ -104,11 +110,17 @@ impl TestSinkStore {
         }
     }
 
-    pub fn insert_many(&self, snapshot_id: i64, pairs: impl Iterator<Item = (i32, Vec<String>)>) {
+    pub fn insert_many(
+        &self,
+        sink_id: SinkId,
+        snapshot_id: i64,
+        pairs: impl Iterator<Item = (i32, Vec<String>)>,
+    ) {
         let mut inner = self.inner();
         if inner.snapshot_id_to_data.contains_key(&snapshot_id) {
             panic!("snapshot_id {} already exists!", snapshot_id);
         }
+        inner.committed_sink_ids.push(sink_id);
         let entry = inner.snapshot_id_to_data.entry(snapshot_id).or_default();
 
         for (id, names) in pairs {
@@ -122,6 +134,28 @@ impl TestSinkStore {
 
     pub fn begin_epoch(&self, epoch: u64) {
         self.inner().epochs.push(epoch)
+    }
+
+    /// The sinks that committed to the external system, in commit order and without
+    /// consecutive repetitions.
+    pub fn committed_sink_id_runs(&self) -> Vec<SinkId> {
+        let mut runs = self.inner().committed_sink_ids.clone();
+        runs.dedup();
+        runs
+    }
+
+    /// Make the external system refuse the commits of `sink_id`, or accept them again.
+    pub fn set_commits_refused(&self, sink_id: SinkId, refused: bool) {
+        let mut inner = self.inner();
+        if refused {
+            inner.refused_sink_ids.insert(sink_id);
+        } else {
+            inner.refused_sink_ids.remove(&sink_id);
+        }
+    }
+
+    fn is_commit_refused(&self, sink_id: SinkId) -> bool {
+        self.inner().refused_sink_ids.contains(&sink_id)
     }
 
     fn inner(&self) -> MutexGuard<'_, TestSinkStoreInner> {
@@ -418,6 +452,13 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
             )));
         }
 
+        if self.store.is_commit_refused(self.sink_id) {
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "external sink refuses the commits of sink {}",
+                self.sink_id
+            )));
+        }
+
         let mut write_results_bytes = deserialize_metadata(commit_metadata);
 
         let snapshot_id_bytes = write_results_bytes.pop().unwrap();
@@ -466,6 +507,7 @@ impl SimulationTestIcebergCommitter {
             usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
         });
         self.store.insert_many(
+            self.sink_id,
             snapshot_id,
             file_ids
                 .into_iter()

@@ -1,0 +1,166 @@
+# REPLACE SINK on an exactly-once Iceberg sink.
+#
+# An exactly-once sink commits an epoch to Iceberg only after the epoch is durable in RisingWave.
+# The old sink below uses `commit_checkpoint_interval = 60`, so the row written before the
+# replacement is still uncommitted when the old sink is removed. It must reach the table anyway.
+
+system ok
+sparksql --e "DROP TABLE IF EXISTS demo.demo_db.e2e_replace_sink_append_only_table PURGE;"
+
+statement ok
+set sink_decouple = true;
+
+statement ok
+DROP SOURCE IF EXISTS iceberg_replace_sink_append_only_source;
+
+statement ok
+DROP SINK IF EXISTS s_iceberg_replace_sink_append_only;
+
+statement ok
+DROP TABLE IF EXISTS t_iceberg_replace_sink_old;
+
+statement ok
+DROP TABLE IF EXISTS t_iceberg_replace_sink_new;
+
+# An append-only sink is replaced by a sink on another upstream table.
+
+statement ok
+CREATE TABLE t_iceberg_replace_sink_old (id int, v varchar);
+
+statement ok
+CREATE TABLE t_iceberg_replace_sink_new (id int, v varchar);
+
+statement ok
+CREATE SINK s_iceberg_replace_sink_append_only FROM t_iceberg_replace_sink_old WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_append_only_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 60,
+    is_exactly_once = 'true'
+);
+
+statement ok
+INSERT INTO t_iceberg_replace_sink_old VALUES (1, 'old-before-replace');
+
+statement ok
+INSERT INTO t_iceberg_replace_sink_new VALUES (2, 'new-before-replace');
+
+statement ok
+FLUSH;
+
+# The commits of a sink that is not exactly-once cannot be held back behind the old sink's.
+statement error REPLACE SINK cannot replace an exactly-once sink with a sink of the same connector that is not exactly-once
+REPLACE SINK s_iceberg_replace_sink_append_only FROM t_iceberg_replace_sink_new WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_append_only_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 1,
+    is_exactly_once = 'false'
+);
+
+statement error REPLACE SINK does not support Iceberg sinks with `enable_pk_index = 'true'`
+REPLACE SINK s_iceberg_replace_sink_append_only FROM t_iceberg_replace_sink_new WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_append_only_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    write_mode = 'merge-on-read',
+    format_version = '3',
+    enable_pk_index = 'true'
+);
+
+statement ok
+REPLACE SINK s_iceberg_replace_sink_append_only FROM t_iceberg_replace_sink_new WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_append_only_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 1,
+    is_exactly_once = 'true'
+);
+
+statement ok
+INSERT INTO t_iceberg_replace_sink_old VALUES (3, 'old-after-replace');
+
+statement ok
+INSERT INTO t_iceberg_replace_sink_new VALUES (4, 'new-after-replace');
+
+statement ok
+FLUSH;
+
+statement ok retry 6 backoff 1s
+CREATE SOURCE iceberg_replace_sink_append_only_source WITH (
+    connector = 'iceberg',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_append_only_table',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+# The row the old sink had not committed is there. The new sink starts at the replacement and
+# does not backfill, and the old upstream is no longer read.
+query IT rowsort retry 30 backoff 1s
+SELECT id, v FROM iceberg_replace_sink_append_only_source;
+----
+1 old-before-replace
+4 new-after-replace
+
+query I
+SELECT count(*) FROM rw_sinks WHERE name = 's_iceberg_replace_sink_append_only';
+----
+1
+
+statement ok
+DROP SOURCE iceberg_replace_sink_append_only_source;
+
+statement ok
+DROP SINK s_iceberg_replace_sink_append_only;
+
+statement ok
+DROP TABLE t_iceberg_replace_sink_old;
+
+statement ok
+DROP TABLE t_iceberg_replace_sink_new;
+
+system ok
+sparksql --e "DROP TABLE IF EXISTS demo.demo_db.e2e_replace_sink_append_only_table PURGE;"

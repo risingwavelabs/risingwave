@@ -79,6 +79,7 @@ mod m20260805_000000_object_belong_to_oid;
 mod m20261013_000000_backfill_iceberg_writer_fragment_flag;
 mod m20261031_000000_sql_server_cdc_table_name_with_database;
 mod m20261103_000000_function_purity_options;
+mod m20261112_000000_replaced_sink_pending_state;
 mod utils;
 
 pub struct Migrator;
@@ -196,6 +197,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261013_000000_backfill_iceberg_writer_fragment_flag::Migration),
             Box::new(m20261031_000000_sql_server_cdc_table_name_with_database::Migration),
             Box::new(m20261103_000000_function_purity_options::Migration),
+            Box::new(m20261112_000000_replaced_sink_pending_state::Migration),
         ]
     }
 }
