@@ -22,7 +22,6 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
 };
-use thiserror_ext::AsReport;
 
 use super::{PinCache, PinCacheFile, PinCacheRefillToken};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -245,22 +244,19 @@ impl PinCache {
         })
     }
 
-    pub(crate) async fn download(
+    /// Drives a fixture download to completion in the calling test task.
+    #[cfg(test)]
+    pub(super) async fn download(
         self: &Arc<Self>,
         object_id: HummockSstableObjectId,
         object_size: u64,
         remote_store: ObjectStoreRef,
         remote_path: String,
     ) -> Result<PinCacheDownload, PinCacheDownloadError> {
-        let prepared = self.prepare_download(object_id, object_size).await?;
-        tokio::spawn(prepared.run(remote_store, remote_path))
+        self.prepare_download(object_id, object_size)
+            .await?
+            .run(remote_store, remote_path)
             .await
-            .map_err(|error| {
-                ObjectError::internal(format!(
-                    "owned test download stopped: {}",
-                    error.as_report()
-                ))
-            })?
     }
 
     /// Installs a downloaded file only if its original admission is still current.
