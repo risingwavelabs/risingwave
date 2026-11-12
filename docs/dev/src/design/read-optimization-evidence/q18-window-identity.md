@@ -85,3 +85,27 @@ The trace identifies where the small requests were created. It does not
 record whether an individual source per-block read followed clipping to
 the last block of an SST iterator or the Range prefetch memory-budget
 fallback. Both paths use the same block-read trace.
+
+### Same-SST gaps among small StreamScan reads
+
+All 41,124 StreamScan GETs at most 64 KiB had one logical request each.
+The [replay script](./analyze-source-gaps.py) rebuilt the worker's ready
+set from dequeue and selection events and checked its size at each
+selection. A pair qualifies when both original GETs belong to the same
+SST and all their members are already dequeued when the first GET is
+selected. The combined range must fit the existing 1 MiB limit.
+
+| Maximum gap | Eligible pairs, cumulative | GETs saved | Extra bytes |
+| ---: | ---: | ---: | ---: |
+| 32 KiB | 0 | 0 | 0 |
+| 64 KiB | 2 | 2 | 130,636 |
+| 128 KiB | 8 | 8 | 915,467 |
+| 256 KiB | 51 | 51 | 11,907,137 |
+| 512 KiB | 122 | 98 | 31,270,782 |
+
+The estimate replaces whole original GETs without waiting, follows the
+recorded selection order, and counts each original GET once per threshold.
+Extra bytes are the gaps covered by the resulting merged ranges. The
+64 KiB cases cross gaps of 65,273 and 65,363 bytes. The estimate holds
+request timing fixed and covers only pairs of small StreamScan GETs.
+[Replay data and request IDs](./q18-source-small-get-gaps.json).

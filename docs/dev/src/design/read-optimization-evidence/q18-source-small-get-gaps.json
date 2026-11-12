@@ -1,0 +1,162 @@
+{
+  "start_unix_s": 1794473842.9965832,
+  "source_checkpoint_unix_s": 1794473903.4995832,
+  "scheduled_successes": 44006,
+  "scheduled_successes_at_most_64kib": 41230,
+  "stream_scan_small_gets": 41124,
+  "stream_scan_small_gets_single_request": 41124,
+  "simultaneously_ready_pairs_by_gap_bucket_upper_kib": {
+    "512": 71,
+    "256": 43,
+    "64": 2,
+    ">512": 130,
+    "128": 6
+  },
+  "examples": {
+    "512": {
+      "object_hash": 3727691763447030925,
+      "earlier_selected_get": 149,
+      "later_selected_get": 152,
+      "ranges": [
+        [
+          3139094,
+          3204594
+        ],
+        [
+          3531204,
+          3596511
+        ]
+      ],
+      "gap_bytes": 326610
+    },
+    "256": {
+      "object_hash": 3727691763447030925,
+      "earlier_selected_get": 149,
+      "later_selected_get": 158,
+      "ranges": [
+        [
+          3269867,
+          3335179
+        ],
+        [
+          3531204,
+          3596511
+        ]
+      ],
+      "gap_bytes": 196025
+    },
+    "64": {
+      "object_hash": 3727691763447030925,
+      "earlier_selected_get": 152,
+      "later_selected_get": 158,
+      "ranges": [
+        [
+          3139094,
+          3204594
+        ],
+        [
+          3269867,
+          3335179
+        ]
+      ],
+      "gap_bytes": 65273
+    },
+    ">512": {
+      "object_hash": 5655761870658565045,
+      "earlier_selected_get": 187,
+      "later_selected_get": 186,
+      "ranges": [
+        [
+          392383,
+          457835
+        ],
+        [
+          1308308,
+          1373653
+        ]
+      ],
+      "gap_bytes": 850473
+    },
+    "128": {
+      "object_hash": 919578784659004400,
+      "earlier_selected_get": 493,
+      "later_selected_get": 498,
+      "ranges": [
+        [
+          523402,
+          588829
+        ],
+        [
+          719636,
+          785083
+        ]
+      ],
+      "gap_bytes": 130807
+    }
+  },
+  "pairs_at_most_64kib": [
+    {
+      "object_hash": 3727691763447030925,
+      "earlier_selected_get": 152,
+      "later_selected_get": 158,
+      "ranges": [
+        [
+          3139094,
+          3204594
+        ],
+        [
+          3269867,
+          3335179
+        ]
+      ],
+      "gap_bytes": 65273
+    },
+    {
+      "object_hash": 13172784204042100492,
+      "earlier_selected_get": 3747,
+      "later_selected_get": 3750,
+      "ranges": [
+        [
+          3074355,
+          3139631
+        ],
+        [
+          3204994,
+          3270334
+        ]
+      ],
+      "gap_bytes": 65363
+    }
+  ],
+  "no_wait_merge_estimate_by_max_gap_kib": {
+    "4": {
+      "saved_gets": 0,
+      "extra_bytes": 0
+    },
+    "16": {
+      "saved_gets": 0,
+      "extra_bytes": 0
+    },
+    "32": {
+      "saved_gets": 0,
+      "extra_bytes": 0
+    },
+    "64": {
+      "saved_gets": 2,
+      "extra_bytes": 130636
+    },
+    "128": {
+      "saved_gets": 8,
+      "extra_bytes": 915467
+    },
+    "256": {
+      "saved_gets": 51,
+      "extra_bytes": 11907137
+    },
+    "512": {
+      "saved_gets": 98,
+      "extra_bytes": 31270782
+    }
+  },
+  "uncompressed_trace_sha256": "eb1962e64ac6467ff8ead4d5682f67886247e2f1da7226c432d68f0add98a732"
+}
