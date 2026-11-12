@@ -121,7 +121,6 @@ pub(super) async fn local_object_store_with_config(
 ) -> (tempfile::TempDir, ObjectStoreRef) {
     let dir = tempfile::tempdir().unwrap();
     config.set_atomic_write_dir();
-    config.retry.delete_objects_attempt_timeout_ms = 0;
     let store = Arc::new(
         build_remote_object_store(
             &format!("fs://{}", dir.path().display()),

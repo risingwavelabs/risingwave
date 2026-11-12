@@ -356,7 +356,19 @@ impl ObjectStoreImpl {
     /// If a hybrid storage is used, the method will first attempt to delete objects in local
     /// storage. Only if that is successful, it will remove objects from remote storage.
     pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, delete_objects(paths).await)
+        object_store_impl_method_body!(
+            self,
+            delete_objects(paths, OperationType::DeleteObjects).await
+        )
+    }
+
+    /// Deletes without an attempt timeout so submitted FS unlinks settle before returning.
+    /// The caller must drive this future to completion.
+    pub async fn delete_objects_owned(&self, paths: &[String]) -> ObjectResult<()> {
+        object_store_impl_method_body!(
+            self,
+            delete_objects(paths, OperationType::DeleteObjectsOwned).await
+        )
     }
 
     pub async fn list(
@@ -851,8 +863,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        let operation_type = OperationType::DeleteObjects;
+    async fn delete_objects(
+        &self,
+        paths: &[String],
+        operation_type: OperationType,
+    ) -> ObjectResult<()> {
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
 
@@ -1219,6 +1234,66 @@ mod tests {
         assert_eq!(&rest, b"defg");
     }
 
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_owned_delete_waits_for_submitted_unlink_past_attempt_timeout() {
+        use std::cell::Cell;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use risingwave_common::config::ObjectStoreConfig;
+        use tokio::sync::oneshot;
+
+        use super::{ObjectStoreMetrics, OperationType, retry_request};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1001.sst");
+        std::fs::write(&path, b"old cache file").unwrap();
+        let (started_tx, started) = oneshot::channel();
+        let (resume, resume_rx) = oneshot::channel();
+        let unlink = Cell::new(Some((started_tx, resume_rx)));
+        let mut config = ObjectStoreConfig::default();
+        config.retry.delete_objects_attempt_timeout_ms = 10;
+        config.retry.delete_objects_retry_attempts = 0;
+
+        let delete = retry_request(
+            || {
+                let (started, resume) = unlink.take().unwrap();
+                let path = path.clone();
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        started.send(()).unwrap();
+                        // Wait inside the submitted blocking task, before the pathname is used.
+                        if resume.blocking_recv().is_ok() {
+                            std::fs::remove_file(path).unwrap();
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    Ok(())
+                }
+            },
+            &config,
+            OperationType::DeleteObjectsOwned,
+            Arc::new(ObjectStoreMetrics::unused()),
+            "fs",
+        );
+        tokio::pin!(delete);
+        tokio::select! {
+            biased;
+            _ = &mut delete => panic!("delete returned before its submitted unlink completed"),
+            () = async {
+                started.await.unwrap();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            } => {}
+        }
+
+        assert!(path.exists());
+        resume.send(()).unwrap();
+        delete.await.unwrap();
+        assert!(!path.exists());
+    }
+
     #[tokio::test]
     async fn test_object_data_stream_reader_returns_stream_error() {
         let stream = stream::iter([
@@ -1245,6 +1320,7 @@ enum OperationType {
     Metadata,
     Delete,
     DeleteObjects,
+    DeleteObjectsOwned,
     List,
 }
 
@@ -1260,7 +1336,7 @@ impl OperationType {
             Self::StreamingRead => "streaming_read",
             Self::Metadata => "metadata",
             Self::Delete => "delete",
-            Self::DeleteObjects => "delete_objects",
+            Self::DeleteObjects | Self::DeleteObjectsOwned => "delete_objects",
             Self::List => "list",
         }
     }
@@ -1278,7 +1354,9 @@ fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: Operat
         }
         OperationType::Metadata => config.retry.metadata_retry_attempts,
         OperationType::Delete => config.retry.delete_retry_attempts,
-        OperationType::DeleteObjects => config.retry.delete_objects_retry_attempts,
+        OperationType::DeleteObjects | OperationType::DeleteObjectsOwned => {
+            config.retry.delete_objects_retry_attempts
+        }
         OperationType::List => config.retry.list_retry_attempts,
     }
 }
@@ -1296,6 +1374,7 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
         OperationType::Metadata => config.retry.metadata_attempt_timeout_ms,
         OperationType::Delete => config.retry.delete_attempt_timeout_ms,
         OperationType::DeleteObjects => config.retry.delete_objects_attempt_timeout_ms,
+        OperationType::DeleteObjectsOwned => 0,
         OperationType::List => config.retry.list_attempt_timeout_ms,
     }
 }

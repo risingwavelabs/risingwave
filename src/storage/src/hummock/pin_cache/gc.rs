@@ -102,8 +102,8 @@ impl PinCacheGcSelection {
                         state.remove_file(path);
                     }
                 }
-                // A returned error may leave an orphan on disk for the next full scan,
-                // but the unlink has settled and can no longer race a new upload.
+                // The owned delete waits for physical I/O even on error. Any remaining
+                // orphan can be retried by a later scan without racing a new upload.
                 for target in orphan_targets.drain() {
                     state.deleting_orphans.remove(target);
                 }
@@ -152,7 +152,7 @@ impl PinCacheGcSelection {
         }
         self.cache
             .store
-            .delete_objects(paths)
+            .delete_objects_owned(paths)
             .await
             .inspect_err(|_| GLOBAL_PIN_CACHE_METRICS.gc_failures.inc())
     }

@@ -484,6 +484,10 @@ async fn test_gc_worker_coalesces_pressure_and_preserves_arrivals_during_full() 
 
     // A scan that cannot reclaim anything still consumes this ended attempt's hint.
     reject_copy(&cache, 400).await;
+    // Let the simulated worker reset its deadline and run the next eligible tick.
+    #[cfg(madsim)]
+    tokio::time::sleep(FULL_GC_COOLDOWN + MINOR_GC_INTERVAL).await;
+    #[cfg(not(madsim))]
     advance_gc(FULL_GC_COOLDOWN).await;
     let (paths, resume) = next_full_scan(&mut scans).await;
     assert!(paths.is_empty());
