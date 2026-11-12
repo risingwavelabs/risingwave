@@ -109,3 +109,30 @@ Extra bytes are the gaps covered by the resulting merged ranges. The
 64 KiB cases cross gaps of 65,273 and 65,363 bytes. The estimate holds
 request timing fixed and covers only pairs of small StreamScan GETs.
 [Replay data and request IDs](./q18-source-small-get-gaps.json).
+
+### Adjacent blocks and request arrival
+
+The same 41,124 single-request GETs covered 119 SSTs. Requests were joined
+by SST ID and consecutive block index, and byte offsets had to touch.
+Repeated reads of a block count as distinct requests. The table assigns
+each GET once, with the strongest matching evidence first.
+
+| Evidence of an adjacent small GET in the same SST | GETs | Share |
+| --- | ---: | ---: |
+| Same StreamScan actor and executor, with the second submission after the first physical GET completed | 40,471 | 98.41% |
+| An adjacent GET was observed, with no pair satisfying the condition above | 567 | 1.38% |
+| No adjacent small GET in the phase | 86 | 0.21% |
+
+Consecutive small GET selections switched SST in 39,676 of 41,123
+transitions. At selection, 40,317 of 41,124 GETs had no other small GET
+from the same SST in the worker's ready set. The 807 with a same-SST
+peer had no adjacent ready peer. Across the full phase, all 71,683
+observed adjacent request pairs reached the worker in different
+selection intervals. In 71,601 pairs the second logical submission
+followed completion of the first physical GET. The trace identifies the
+actor and executor but has no iterator ID.
+
+For 38,863 GETs with a later adjacent GET, the median time from the
+first selection to the earliest later adjacent submission was 562 ms.
+Only 128 had that next submission within 10 ms of selection, including
+50 whose next request was submitted before selection but dequeued later.
