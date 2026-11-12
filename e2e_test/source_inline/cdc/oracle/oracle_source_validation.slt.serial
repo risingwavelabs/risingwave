@@ -71,6 +71,14 @@ execute_oracle_sqls(
 )
 PY
 
+statement error (?s).*'debezium.database.connection.adapter' must be 'logminer' or 'logminer_unbuffered', got 'xstream'.*
+CREATE SOURCE oracle_validation_bad_adapter WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    debezium.database.connection.adapter = 'xstream'
+) FORMAT PLAIN ENCODE JSON;
+
 statement ok
 CREATE SOURCE oracle_validation_source WITH (
     ${TEST_ORACLE_WITH_OPTIONS_COMMON},
@@ -153,7 +161,8 @@ FROM oracle_validation_source TABLE 'APP.RW_LOG_NONE';
 
 query I
 SELECT count(*) FROM rw_catalog.rw_relations
-WHERE name IN ('oracle_validation_no_logmining', 'oracle_log_none', 'oracle_log_pk',
+WHERE name IN ('oracle_validation_no_logmining', 'oracle_validation_bad_adapter',
+               'oracle_log_none', 'oracle_log_pk',
                'oracle_log_partial', 'oracle_log_all', 'oracle_log_pdb', 'oracle_log_cdb');
 ----
 0

@@ -19,6 +19,7 @@ package com.risingwave.connector.source.common;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import io.debezium.heartbeat.DatabaseHeartbeatImpl;
 import java.util.Properties;
+import java.util.Set;
 
 public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     public static final String PDB_NAME = "database.pdb.name";
@@ -26,6 +27,10 @@ public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     public static final String HEARTBEAT_ACTION_QUERY_KEY =
             DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
     public static final String DEBEZIUM_RAC_NODES = "debezium.rac.nodes";
+    public static final String CONNECTION_ADAPTER_KEY =
+            DBZ_PROPERTY_PREFIX + "database.connection.adapter";
+    public static final Set<String> SUPPORTED_CONNECTION_ADAPTERS =
+            Set.of("logminer", "logminer_unbuffered");
 
     OracleDbzConnectorConfig(CdcSource source) {
         super(source);

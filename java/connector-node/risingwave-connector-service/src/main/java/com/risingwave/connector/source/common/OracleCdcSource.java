@@ -19,6 +19,7 @@ package com.risingwave.connector.source.common;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -59,6 +60,15 @@ public class OracleCdcSource extends CdcSource {
                             "'%s' is generated internally; configure '%s' instead",
                             OracleDbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY,
                             OracleDbzConnectorConfig.HEARTBEAT_TABLE_NAME));
+        }
+        var adapter = userProps.get(OracleDbzConnectorConfig.CONNECTION_ADAPTER_KEY);
+        if (adapter != null
+                && !OracleDbzConnectorConfig.SUPPORTED_CONNECTION_ADAPTERS.contains(
+                        adapter.trim().toLowerCase(Locale.ROOT))) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'%s' must be 'logminer' or 'logminer_unbuffered', got '%s'",
+                            OracleDbzConnectorConfig.CONNECTION_ADAPTER_KEY, adapter));
         }
         try (var validator = new OracleValidator(userProps, tableSchema, isCdcSourceJob())) {
             validator.validateAll();
