@@ -225,7 +225,8 @@ impl IndexSelectionRule {
         let offset = index_scan.table().columns().len();
 
         let primary_table_scan = LogicalScan::create(
-            index.primary_table.clone(),
+            // Preserve query-only system columns on the primary-table lookup.
+            logical_scan.table().clone(),
             logical_scan.ctx(),
             logical_scan.as_of(),
         );
@@ -776,6 +777,10 @@ impl<'a> TableScanIoEstimator<'a> {
             + table
                 .columns
                 .iter()
+                // The query-only vnode column aliases the key prefix already counted above.
+                .filter(|column| {
+                    column.column_id() != risingwave_common::catalog::RW_VNODE_COLUMN_ID
+                })
                 // add order key twice for its appearance both in key and value
                 .chain(table.pk.iter().map(|x| &table.columns[x.column_index]))
                 .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))

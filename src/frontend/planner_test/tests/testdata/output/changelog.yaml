@@ -41,7 +41,7 @@
     LogicalProject { exprs: [t.name, changelog_op] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { key: [t.id] }
-        └─LogicalScan { table: t, columns: [t.id, t.name, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.name, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.name, changelog_op] }
     └─LogicalChangeLog { key: [t.id] }
@@ -88,7 +88,7 @@
     LogicalProject { exprs: [t.name] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { key: [t.tenant, t.id] }
-        └─LogicalScan { table: t, columns: [t.id, t.age, t.tenant, t.name, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.age, t.tenant, t.name, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.name] }
     └─LogicalChangeLog { key: [t.tenant, t.id] }
@@ -289,7 +289,7 @@
     LogicalProject { exprs: [t.payload] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
-        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.payload] }
     └─LogicalChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }

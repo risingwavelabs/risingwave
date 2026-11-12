@@ -528,7 +528,7 @@
         └─LogicalProject { exprs: [count, a.k1] }
           └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
             └─LogicalProject { exprs: [a.k1, a.k2] }
-              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp] }
+              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp, a.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [max(count)] }
     └─LogicalAgg { group_key: [a.k1], aggs: [max(count)] }
@@ -589,7 +589,7 @@
         └─LogicalProject { exprs: [count, a.k2] }
           └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
             └─LogicalProject { exprs: [a.k1, a.k2] }
-              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp] }
+              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp, a.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [max(count)] }
     └─LogicalAgg { group_key: [a.k2], aggs: [max(count)] }
@@ -701,12 +701,12 @@
   logical_plan: |-
     LogicalProject { exprs: [ak1.v, count] }
     └─LogicalJoin { type: Inner, on: (ak1.k1 = a.k1), output: all }
-      ├─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id, ak1._rw_timestamp] }
+      ├─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id, ak1._rw_timestamp, ak1.__rw_vnode] }
       └─LogicalShare { id: 4 }
         └─LogicalProject { exprs: [count, a.k1] }
           └─LogicalAgg { group_key: [a.k1], aggs: [count] }
             └─LogicalProject { exprs: [a.k1] }
-              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp] }
+              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp, a.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count] }
@@ -799,8 +799,8 @@
       │ └─LogicalProject { exprs: [count, a.k1] }
       │   └─LogicalAgg { group_key: [a.k1], aggs: [count] }
       │     └─LogicalProject { exprs: [a.k1] }
-      │       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp] }
-      └─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id, ak1._rw_timestamp] }
+      │       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp, a.__rw_vnode] }
+      └─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id, ak1._rw_timestamp, ak1.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count], lookup table: ak1 }
@@ -897,12 +897,12 @@
       │ └─LogicalProject { exprs: [count, a.k1] }
       │   └─LogicalAgg { group_key: [a.k1], aggs: [count] }
       │     └─LogicalProject { exprs: [a.k1] }
-      │       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp] }
+      │       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id, a._rw_timestamp, a.__rw_vnode] }
       └─LogicalShare { id: 8 }
         └─LogicalProject { exprs: [count, b.k1] }
           └─LogicalAgg { group_key: [b.k1], aggs: [count] }
             └─LogicalProject { exprs: [b.k1] }
-              └─LogicalScan { table: b, columns: [b.k1, b.k2, b.k3, b.v, b._row_id, b._rw_timestamp] }
+              └─LogicalScan { table: b, columns: [b.k1, b.k2, b.k3, b.v, b._row_id, b._rw_timestamp, b.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count] }
@@ -984,7 +984,7 @@
     LogicalProject { exprs: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id, t1._rw_timestamp] }
+        └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
     └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at], predicate: IsNotNull(t1.created_at) }

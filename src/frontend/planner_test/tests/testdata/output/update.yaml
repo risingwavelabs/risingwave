@@ -139,7 +139,7 @@
       └─LogicalApply { type: LeftAnti, on: (t.b = t.a), correlated_id: 1 }
         ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
         └─LogicalProject { exprs: [t.a] }
-          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [$4, $1, $2] }
@@ -160,7 +160,7 @@
       └─LogicalApply { type: LeftAnti, on: (t.a = t.b), correlated_id: 1 }
         ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
         └─LogicalProject { exprs: [t.b] }
-          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchDelete { table: t }

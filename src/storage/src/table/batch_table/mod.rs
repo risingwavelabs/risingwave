@@ -293,6 +293,9 @@ pub struct BatchTableInner<S: StateStore, SD: ValueRowSerde> {
     /// The index of system column `_rw_timestamp` in the output columns.
     epoch_idx: Option<usize>,
 
+    /// The table column index of the virtual vnode read from the storage key.
+    vnode_idx: Option<usize>,
+
     /// Row deserializer to deserialize the value in storage to a row.
     /// The row can be either complete or partial, depending on whether the row encoding is versioned.
     row_serde: Arc<SD>,
@@ -448,14 +451,18 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
 
         let mut value_output_indices = vec![];
         let mut key_output_indices = vec![];
-        // system column currently only contains `_rw_timestamp`
         let mut epoch_idx = None;
+        let mut vnode_idx = None;
 
         for idx in &output_indices {
             if value_indices.contains(idx) {
                 value_output_indices.push(*idx);
             } else if pk_indices.contains(idx) {
                 key_output_indices.push(*idx);
+            } else if table_columns[*idx].column_id
+                == risingwave_common::catalog::RW_VNODE_COLUMN_ID
+            {
+                vnode_idx = Some(*idx);
             } else {
                 assert!(epoch_idx.is_none());
                 epoch_idx = Some(*idx);
@@ -519,6 +526,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             output_row_in_key_indices,
             mapping: Arc::new(mapping),
             epoch_idx,
+            vnode_idx,
             row_serde: Arc::new(row_serde),
             pk_indices,
             distribution,
@@ -611,11 +619,15 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         match read_snapshot
             .on_key_value(serialized_pk, read_options, move |key, value| {
                 let row = self.row_serde.deserialize(value)?;
-                Ok((key.epoch_with_gap.pure_epoch(), row))
+                Ok((
+                    key.epoch_with_gap.pure_epoch(),
+                    key.user_key.table_key.vnode_part(),
+                    row,
+                ))
             })
             .await?
         {
-            Some((epoch, row)) => {
+            Some((epoch, vnode, row)) => {
                 let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
                 match &self.key_output_indices {
@@ -630,6 +642,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                                 let epoch = Epoch::from(epoch);
                                 result_row_vec
                                     .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                            } else if Some(*idx) == self.vnode_idx {
+                                result_row_vec.push(Some(vnode.to_scalar().into()));
                             } else if self.value_output_indices.contains(idx) {
                                 let item_position_in_value_indices = &self
                                     .value_output_indices
@@ -654,15 +668,18 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                         let result_row = OwnedRow::new(result_row_vec);
                         Ok(Some(result_row))
                     }
-                    None => match &self.epoch_idx {
-                        Some(epoch_idx) => {
+                    None => match (self.epoch_idx, self.vnode_idx) {
+                        (None, None) => Ok(Some(result_row_in_value.into_owned_row())),
+                        _ => {
                             let mut result_row_vec = vec![];
                             for idx in &self.output_indices {
-                                if idx == epoch_idx {
+                                if Some(*idx) == self.epoch_idx {
                                     let epoch = Epoch::from(epoch);
                                     result_row_vec.push(risingwave_common::types::Datum::from(
                                         epoch.as_scalar(),
                                     ));
+                                } else if Some(*idx) == self.vnode_idx {
+                                    result_row_vec.push(Some(vnode.to_scalar().into()));
                                 } else {
                                     let item_position_in_value_indices = &self
                                         .value_output_indices
@@ -679,7 +696,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                             let result_row = OwnedRow::new(result_row_vec);
                             Ok(Some(result_row))
                         }
-                        None => Ok(Some(result_row_in_value.into_owned_row())),
                     },
                 }
             }
@@ -914,6 +930,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             iter,
             mapping: self.mapping.clone(),
             epoch_idx: self.epoch_idx,
+            vnode_idx: self.vnode_idx,
             row_deserializer: self.row_serde.clone(),
             pk_serializer,
             output_indices: self.output_indices.clone(),
@@ -1373,6 +1390,9 @@ struct BatchTableInnerIterInner<SI: StateStoreIter, SD: ValueRowSerde> {
     /// The index of system column `_rw_timestamp` in the output columns.
     epoch_idx: Option<usize>,
 
+    /// The table column index of the virtual vnode read from the storage key.
+    vnode_idx: Option<usize>,
+
     row_deserializer: Arc<SD>,
 
     /// Used for serializing and deserializing the primary key.
@@ -1422,6 +1442,8 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
                             let epoch = Epoch::from(epoch_with_gap.pure_epoch());
                             result_row_vec
                                 .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                        } else if Some(*idx) == self.vnode_idx {
+                            result_row_vec.push(Some(table_key.vnode_part().to_scalar().into()));
                         } else if self.value_output_indices.contains(idx) {
                             let item_position_in_value_indices = &self
                                 .value_output_indices
@@ -1445,14 +1467,18 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
                     }
                     OwnedRow::new(result_row_vec)
                 }
-                None => match &self.epoch_idx {
-                    Some(epoch_idx) => {
+                None => match (self.epoch_idx, self.vnode_idx) {
+                    (None, None) => result_row_in_value.into_owned_row(),
+                    _ => {
                         let mut result_row_vec = vec![];
                         for idx in &self.output_indices {
-                            if idx == epoch_idx {
+                            if Some(*idx) == self.epoch_idx {
                                 let epoch = Epoch::from(epoch_with_gap.pure_epoch());
                                 result_row_vec
                                     .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                            } else if Some(*idx) == self.vnode_idx {
+                                result_row_vec
+                                    .push(Some(table_key.vnode_part().to_scalar().into()));
                             } else {
                                 let item_position_in_value_indices = &self
                                     .value_output_indices
@@ -1468,7 +1494,6 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
                         }
                         OwnedRow::new(result_row_vec)
                     }
-                    None => result_row_in_value.into_owned_row(),
                 },
             };
             yield (K::copy_from_slice(table_key.as_ref()), row);

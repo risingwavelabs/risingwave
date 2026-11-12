@@ -127,6 +127,8 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
 pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
+pub const RW_VNODE_COLUMN_NAME: &str = "__rw_vnode";
+pub const RW_VNODE_COLUMN_ID: ColumnId = ColumnId::new(-2);
 
 /// The column name for the projected row ID in `ProjectSet`.
 /// This is a hidden column used to track row indices when expanding set-returning functions.

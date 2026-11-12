@@ -16,7 +16,7 @@
     from t;
   logical_plan: |-
     LogicalProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
+    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
@@ -46,7 +46,7 @@
     from t;
   logical_plan: |-
     LogicalProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
-    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
+    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
@@ -176,7 +176,7 @@
     from t;
   logical_plan: |-
     LogicalProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
+    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
@@ -194,7 +194,7 @@
     from t;
   logical_plan: |-
     LogicalProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
-    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
+    └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }

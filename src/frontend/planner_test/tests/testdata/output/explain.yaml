@@ -94,15 +94,15 @@
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Predicate Push Down:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Push down the calculation of inputs of join's condition:
 
@@ -110,15 +110,15 @@
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Predicate Push Down:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Prune Columns:
 
@@ -145,48 +145,48 @@
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Project Remove:
 
     apply ProjectJoinMergeRule 1 time(s)
 
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Common Sub-plan Sharing:
 
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Predicate Push Down:
 
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Predicate Push Down:
 
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Push down the calculation of inputs of join's condition:
 
     apply PushCalculationOfJoinRule 1 time(s)
 
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Predicate Push Down:
 
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
-    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
-    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp, __rw_vnode] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp, __rw_vnode] }
 
     Prune Columns:
 

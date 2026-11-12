@@ -7,7 +7,7 @@
     LogicalProject { exprs: [t.payload] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { distribution_key: [t.tenant] }
-        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.payload] }
     └─LogicalChangeLog { distribution_key: [t.tenant] }

@@ -12,35 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME};
+use risingwave_common::catalog::{
+    RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME, RW_VNODE_COLUMN_ID, RW_VNODE_COLUMN_NAME,
+};
 
 use super::{DefaultBehavior, Merge, StreamPlanVisitor};
 use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
-pub struct RwTimestampValidator {}
+pub struct SystemColumnValidator {}
 
-impl RwTimestampValidator {
-    pub fn select_rw_timestamp_in_stream_query(plan: PlanRef) -> bool {
-        RwTimestampValidator::default().visit(plan)
+impl SystemColumnValidator {
+    pub fn unsupported_column_in_stream_query(plan: PlanRef) -> Option<&'static str> {
+        SystemColumnValidator::default().visit(plan)
     }
 }
 
-impl StreamPlanVisitor for RwTimestampValidator {
-    type Result = bool;
+impl StreamPlanVisitor for SystemColumnValidator {
+    type Result = Option<&'static str>;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|a, b| a | b)
+        Merge(|a: Option<&'static str>, b| a.or(b))
     }
 
-    fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {
+    fn visit_stream_table_scan(
+        &mut self,
+        stream_table_scan: &StreamTableScan,
+    ) -> Option<&'static str> {
         stream_table_scan
             .core()
             .column_descs()
             .iter()
-            .any(|c| c.column_id == RW_TIMESTAMP_COLUMN_ID && c.name == RW_TIMESTAMP_COLUMN_NAME)
+            .find_map(|c| {
+                if c.column_id == RW_TIMESTAMP_COLUMN_ID {
+                    Some(RW_TIMESTAMP_COLUMN_NAME)
+                } else if c.column_id == RW_VNODE_COLUMN_ID {
+                    Some(RW_VNODE_COLUMN_NAME)
+                } else {
+                    None
+                }
+            })
     }
 }

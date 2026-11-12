@@ -10,7 +10,7 @@
     └─LogicalAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] }
       └─LogicalProject { exprs: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount] }
         └─LogicalFilter { predicate: (order_line.ol_delivery_d > '2007-01-02 00:00:00':Timestamp) }
-          └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+          └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1, Case((count(order_line.ol_amount) = 0:Int32), null:Decimal, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal)) as $expr2, count] }
     └─LogicalAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] }
@@ -67,11 +67,11 @@
         │ ├─LogicalJoin { type: Inner, on: true, output: all }
         │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
         │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ │ │ │ ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
-        │ │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-        │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-        │ │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-        │ └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp] }
+        │ │ │ │ ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
+        │ │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+        │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+        │ │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
+        │ └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp, region.__rw_vnode] }
         └─LogicalProject { exprs: [stock.s_i_id, min(stock.s_quantity)] }
           └─LogicalAgg { group_key: [stock.s_i_id], aggs: [min(stock.s_quantity)] }
             └─LogicalProject { exprs: [stock.s_i_id, stock.s_quantity] }
@@ -79,10 +79,10 @@
                 └─LogicalJoin { type: Inner, on: true, output: all }
                   ├─LogicalJoin { type: Inner, on: true, output: all }
                   │ ├─LogicalJoin { type: Inner, on: true, output: all }
-                  │ │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-                  │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-                  │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-                  └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp] }
+                  │ │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+                  │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+                  │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
+                  └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp, region.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (nation.n_regionkey = region.r_regionkey), output: [supplier.s_suppkey, supplier.s_name, nation.n_name, item.i_id, item.i_name, supplier.s_address, supplier.s_phone, supplier.s_comment] }
     ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [item.i_id, item.i_name, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_comment, nation.n_name, nation.n_regionkey] }
@@ -378,10 +378,10 @@
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalJoin { type: Inner, on: true, output: all }
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-            │ │ └─LogicalScan { table: new_order, columns: [new_order.no_o_id, new_order.no_d_id, new_order.no_w_id, new_order._rw_timestamp] }
-            │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+            │ │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+            │ │ └─LogicalScan { table: new_order, columns: [new_order.no_o_id, new_order.no_d_id, new_order.no_w_id, new_order._rw_timestamp, new_order.__rw_vnode] }
+            │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, sum(order_line.ol_amount), orders.o_entry_d] }
     └─LogicalAgg { group_key: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, orders.o_entry_d], aggs: [sum(order_line.ol_amount)] }
@@ -526,10 +526,10 @@
       └─LogicalProject { exprs: [orders.o_ol_cnt] }
         └─LogicalFilter { predicate: (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) AND (orders.o_entry_d < '2032-01-02 00:00:00':Timestamp) }
           └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-            ├─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
+            ├─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
             └─LogicalProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } = order_line.ol_o_id) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = order_line.ol_w_id) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = order_line.ol_d_id) AND (order_line.ol_delivery_d >= CorrelatedInputRef { index: 4, correlated_id: 1 }) }
-                └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+                └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [orders.o_ol_cnt], aggs: [count] }
     └─LogicalJoin { type: LeftSemi, on: (orders.o_id = order_line.ol_o_id) AND (orders.o_w_id = order_line.ol_w_id) AND (orders.o_d_id = order_line.ol_d_id) AND (order_line.ol_delivery_d >= orders.o_entry_d), output: [orders.o_ol_cnt] }
@@ -616,13 +616,13 @@
             │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-            │ │ │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-            │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-            └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp] }
+            │ │ │ │ │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+            │ │ │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+            │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
+            └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp, region.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [nation.n_name], aggs: [sum(order_line.ol_amount)] }
     └─LogicalJoin { type: Inner, on: (nation.n_regionkey = region.r_regionkey), output: [nation.n_name, order_line.ol_amount] }
@@ -855,7 +855,7 @@
     └─LogicalAgg { aggs: [sum(order_line.ol_amount)] }
       └─LogicalProject { exprs: [order_line.ol_amount] }
         └─LogicalFilter { predicate: (order_line.ol_delivery_d >= '1997-01-01 00:00:00':Timestamp) AND (order_line.ol_delivery_d < '2030-01-01 00:00:00':Timestamp) AND (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 100000:Int32) }
-          └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+          └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(order_line.ol_amount)] }
     └─LogicalScan { table: order_line, output_columns: [order_line.ol_amount], required_columns: [order_line.ol_amount, order_line.ol_delivery_d, order_line.ol_quantity], predicate: (order_line.ol_delivery_d >= '1997-01-01 00:00:00':Timestamp) AND (order_line.ol_delivery_d < '2030-01-01 00:00:00':Timestamp) AND (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 100000:Int32) }
@@ -913,13 +913,13 @@
             │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-            │ │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            │ │ └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+            │ │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+            │ │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            │ │ └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
+            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
     └─LogicalProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
@@ -1163,15 +1163,15 @@
             │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ │ │ │ ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
-            │ │ │ │ │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-            │ │ │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-            │ │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            │ │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            │ │ │ └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-            │ │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-            └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp] }
+            │ │ │ │ │ │ │ ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
+            │ │ │ │ │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+            │ │ │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+            │ │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            │ │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            │ │ │ └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+            │ │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
+            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
+            └─LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._rw_timestamp, region.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [$expr3, (sum($expr4) / sum(order_line.ol_amount)) as $expr5] }
     └─LogicalAgg { group_key: [$expr3], aggs: [sum($expr4), sum(order_line.ol_amount)] }
@@ -1483,12 +1483,12 @@
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
-            │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-            │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-            │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+            │ │ │ │ ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
+            │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+            │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+            │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [nation.n_name, $expr2], aggs: [sum(order_line.ol_amount)] }
     └─LogicalProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_entry_d) as $expr2, order_line.ol_amount] }
@@ -1697,10 +1697,10 @@
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalJoin { type: Inner, on: true, output: all }
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-            │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+            │ │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+            │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [customer.c_id, customer.c_last, sum(order_line.ol_amount), customer.c_city, customer.c_phone, nation.n_name] }
     └─LogicalAgg { group_key: [customer.c_id, customer.c_last, customer.c_city, customer.c_phone, nation.n_name], aggs: [sum(order_line.ol_amount)] }
@@ -1852,18 +1852,18 @@
         │   └─LogicalFilter { predicate: (((stock.s_w_id * stock.s_i_id) % 10000:Int32) = supplier.s_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'CHINA':Varchar) }
         │     └─LogicalJoin { type: Inner, on: true, output: all }
         │       ├─LogicalJoin { type: Inner, on: true, output: all }
-        │       │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-        │       │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-        │       └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+        │       │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+        │       │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+        │       └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
         └─LogicalProject { exprs: [(sum(stock.s_order_cnt)::Decimal * 0.005:Decimal) as $expr1] }
           └─LogicalAgg { aggs: [sum(stock.s_order_cnt)] }
             └─LogicalProject { exprs: [stock.s_order_cnt] }
               └─LogicalFilter { predicate: (((stock.s_w_id * stock.s_i_id) % 10000:Int32) = supplier.s_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'CHINA':Varchar) }
                 └─LogicalJoin { type: Inner, on: true, output: all }
                   ├─LogicalJoin { type: Inner, on: true, output: all }
-                  │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-                  │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-                  └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+                  │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+                  │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+                  └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: ($expr2 > $expr4), output: [stock.s_i_id, sum(stock.s_order_cnt)] }
     ├─LogicalProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt), sum(stock.s_order_cnt)::Decimal as $expr2] }
@@ -2049,8 +2049,8 @@
       └─LogicalProject { exprs: [orders.o_ol_cnt, Case(((orders.o_carrier_id = 1:Int32) OR (orders.o_carrier_id = 2:Int32)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_carrier_id <> 1:Int32) AND (orders.o_carrier_id <> 2:Int32)), 1:Int32, 0:Int32) as $expr2] }
         └─LogicalFilter { predicate: (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id) AND (orders.o_entry_d <= order_line.ol_delivery_d) AND (order_line.ol_delivery_d < '2030-01-01 00:00:00':Timestamp) }
           └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+            ├─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [orders.o_ol_cnt], aggs: [sum($expr1), sum($expr2)] }
     └─LogicalProject { exprs: [orders.o_ol_cnt, Case(((orders.o_carrier_id = 1:Int32) OR (orders.o_carrier_id = 2:Int32)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_carrier_id <> 1:Int32) AND (orders.o_carrier_id <> 2:Int32)), 1:Int32, 0:Int32) as $expr2] }
@@ -2137,8 +2137,8 @@
           └─LogicalAgg { group_key: [customer.c_id], aggs: [count(orders.o_id)] }
             └─LogicalProject { exprs: [customer.c_id, orders.o_id] }
               └─LogicalJoin { type: LeftOuter, on: (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id) AND (customer.c_id = orders.o_c_id) AND (orders.o_carrier_id > 8:Int32), output: all }
-                ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-                └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
+                ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+                └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [count(orders.o_id)], aggs: [count] }
     └─LogicalAgg { group_key: [customer.c_id], aggs: [count(orders.o_id)] }
@@ -2232,8 +2232,8 @@
       └─LogicalProject { exprs: [Case(Like(item.i_data, 'PR%':Varchar), order_line.ol_amount, 0:Int32::Decimal) as $expr1, order_line.ol_amount] }
         └─LogicalFilter { predicate: (order_line.ol_i_id = item.i_id) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d < '2030-01-02 00:00:00':Timestamp) }
           └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
+            ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [((100.00:Decimal * sum($expr1)) / (1:Int32::Decimal + sum(order_line.ol_amount))) as $expr2] }
     └─LogicalAgg { aggs: [sum($expr1), sum(order_line.ol_amount)] }
@@ -2319,12 +2319,12 @@
     └─LogicalFilter { predicate: (supplier.s_suppkey = revenue1.supplier_no) AND (revenue1.total_revenue = max(revenue1.total_revenue)) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
         ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-        │ └─LogicalScan { table: revenue1, columns: [revenue1.supplier_no, revenue1.total_revenue, revenue1._rw_timestamp] }
+        │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+        │ └─LogicalScan { table: revenue1, columns: [revenue1.supplier_no, revenue1.total_revenue, revenue1._rw_timestamp, revenue1.__rw_vnode] }
         └─LogicalProject { exprs: [max(revenue1.total_revenue)] }
           └─LogicalAgg { aggs: [max(revenue1.total_revenue)] }
             └─LogicalProject { exprs: [revenue1.total_revenue] }
-              └─LogicalScan { table: revenue1, columns: [revenue1.supplier_no, revenue1.total_revenue, revenue1._rw_timestamp] }
+              └─LogicalScan { table: revenue1, columns: [revenue1.supplier_no, revenue1.total_revenue, revenue1._rw_timestamp, revenue1.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (revenue1.total_revenue = max(revenue1.total_revenue)), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue1.total_revenue] }
     ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = $expr1), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue1.total_revenue] }
@@ -2442,11 +2442,11 @@
         └─LogicalFilter { predicate: (item.i_id = stock.s_i_id) AND Not(Like(item.i_data, 'zz%':Varchar)) }
           └─LogicalApply { type: LeftAnti, on: (((stock.s_w_id * stock.s_i_id) % 10000:Int32) = supplier.s_suppkey), correlated_id: 1 }
             ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-            │ └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
+            │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+            │ └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
             └─LogicalProject { exprs: [supplier.s_suppkey] }
               └─LogicalFilter { predicate: Like(supplier.s_comment, '%bad%':Varchar) }
-                └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
+                └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [item.i_name, $expr2, item.i_price], aggs: [count($expr3)] }
     └─LogicalAgg { group_key: [item.i_name, $expr2, item.i_price, $expr3], aggs: [] }
@@ -2590,14 +2590,14 @@
       └─LogicalProject { exprs: [order_line.ol_amount] }
         └─LogicalFilter { predicate: (order_line.ol_i_id = item.i_id) AND (order_line.ol_quantity::Decimal < $expr1) }
           └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+            ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
             └─LogicalProject { exprs: [item.i_id, Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1] }
               └─LogicalAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity)] }
                 └─LogicalProject { exprs: [item.i_id, order_line.ol_quantity] }
                   └─LogicalFilter { predicate: Like(item.i_data, '%b':Varchar) AND (order_line.ol_i_id = item.i_id) }
                     └─LogicalJoin { type: Inner, on: true, output: all }
-                      ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
-                      └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+                      ├─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
+                      └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(sum(order_line.ol_amount) / 2.0:Decimal) as $expr3] }
     └─LogicalAgg { aggs: [sum(order_line.ol_amount)] }
@@ -2729,9 +2729,9 @@
           └─LogicalFilter { predicate: (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id) AND (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-              │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-              └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+              │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
+              │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+              └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
     └─LogicalFilter { predicate: (sum(order_line.ol_amount) > 200:Int32::Decimal) }
@@ -2840,8 +2840,8 @@
       └─LogicalProject { exprs: [order_line.ol_amount] }
         └─LogicalFilter { predicate: (order_line.ol_i_id = item.i_id) AND (order_line.ol_quantity >= 1:Int32) AND (order_line.ol_quantity <= 10:Int32) AND (item.i_price >= 1:Int32::Decimal) AND (item.i_price <= 400000:Int32::Decimal) AND (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))) }
           └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
+            ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(order_line.ol_amount)] }
     └─LogicalJoin { type: Inner, on: (order_line.ol_i_id = item.i_id) AND (((Like(item.i_data, '%a':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 3:Int32)) OR (Like(item.i_data, '%b':Varchar) AND In(order_line.ol_w_id, 1:Int32, 2:Int32, 4:Int32))) OR (Like(item.i_data, '%c':Varchar) AND In(order_line.ol_w_id, 1:Int32, 5:Int32, 3:Int32))), output: [order_line.ol_amount] }
@@ -2929,8 +2929,8 @@
     └─LogicalFilter { predicate: (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'CHINA':Varchar) }
       └─LogicalApply { type: LeftSemi, on: (supplier.s_suppkey = $expr1), correlated_id: 1 }
         ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-        │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+        │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+        │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
         └─LogicalProject { exprs: [((stock.s_i_id * stock.s_w_id) % 10000:Int32) as $expr1] }
           └─LogicalFilter { predicate: ((2:Int32 * stock.s_quantity) > sum(order_line.ol_quantity)) }
             └─LogicalAgg { group_key: [stock.s_i_id, stock.s_w_id, stock.s_quantity], aggs: [sum(order_line.ol_quantity)] }
@@ -2938,11 +2938,11 @@
                 └─LogicalFilter { predicate: (order_line.ol_i_id = stock.s_i_id) AND (order_line.ol_delivery_d > '2010-05-23 12:00:00':Timestamp) }
                   └─LogicalApply { type: LeftSemi, on: (stock.s_i_id = item.i_id), correlated_id: 2 }
                     ├─LogicalJoin { type: Inner, on: true, output: all }
-                    │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-                    │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+                    │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+                    │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
                     └─LogicalProject { exprs: [item.i_id] }
                       └─LogicalFilter { predicate: Like(item.i_data, 'co%':Varchar) }
-                        └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp] }
+                        └─LogicalScan { table: item, columns: [item.i_id, item.i_im_id, item.i_name, item.i_price, item.i_data, item._rw_timestamp, item.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (supplier.s_suppkey = $expr1), output: [supplier.s_name, supplier.s_address] }
     ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address] }
@@ -3128,14 +3128,14 @@
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+            │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp, supplier.__rw_vnode] }
+            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
+            │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
+            │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp, stock.__rw_vnode] }
+            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp, nation.__rw_vnode] }
             └─LogicalProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info] }
-              └─LogicalFilter { predicate: (order_line.ol_o_id = CorrelatedInputRef { index: 8, correlated_id: 1 }) AND (order_line.ol_w_id = CorrelatedInputRef { index: 10, correlated_id: 1 }) AND (order_line.ol_d_id = CorrelatedInputRef { index: 9, correlated_id: 1 }) AND (order_line.ol_delivery_d > CorrelatedInputRef { index: 14, correlated_id: 1 }) }
-                └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+              └─LogicalFilter { predicate: (order_line.ol_o_id = CorrelatedInputRef { index: 9, correlated_id: 1 }) AND (order_line.ol_w_id = CorrelatedInputRef { index: 11, correlated_id: 1 }) AND (order_line.ol_d_id = CorrelatedInputRef { index: 10, correlated_id: 1 }) AND (order_line.ol_delivery_d > CorrelatedInputRef { index: 15, correlated_id: 1 }) }
+                └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp, order_line.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [supplier.s_name], aggs: [count] }
     └─LogicalJoin { type: LeftAnti, on: (order_line.ol_o_id = order_line.ol_o_id) AND (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_delivery_d > order_line.ol_delivery_d), output: [supplier.s_name] }
@@ -3341,15 +3341,15 @@
         └─LogicalFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) AND (customer.c_balance > $expr1) }
           └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
             ├─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-            │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
+            │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
             │ └─LogicalProject { exprs: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local] }
             │   └─LogicalFilter { predicate: (orders.o_c_id = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (orders.o_w_id = CorrelatedInputRef { index: 2, correlated_id: 1 }) AND (orders.o_d_id = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-            │     └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
+            │     └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp, orders.__rw_vnode] }
             └─LogicalProject { exprs: [Case((count(customer.c_balance) = 0:Int32), null:Decimal, (sum(customer.c_balance) / count(customer.c_balance)::Decimal)) as $expr1] }
               └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
                 └─LogicalProject { exprs: [customer.c_balance] }
                   └─LogicalFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-                    └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
+                    └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp, customer.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
     └─LogicalProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance] }

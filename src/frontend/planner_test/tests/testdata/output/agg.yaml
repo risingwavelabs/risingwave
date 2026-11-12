@@ -116,7 +116,7 @@
     LogicalProject { exprs: [min(t.v1), sum($expr1)] }
     └─LogicalAgg { group_key: [$expr1], aggs: [min(t.v1), sum($expr1)] }
       └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int, v3 int);
@@ -125,7 +125,7 @@
     LogicalProject { exprs: [t.v1, sum($expr2)] }
     └─LogicalAgg { group_key: [$expr1, t.v1], aggs: [sum($expr2)] }
       └─LogicalProject { exprs: [((t.v1 + t.v2) / t.v3) as $expr1, t.v1, (t.v1 * t.v2) as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int);
@@ -134,7 +134,7 @@
     LogicalProject { exprs: [$expr1] }
     └─LogicalAgg { group_key: [$expr1], aggs: [] }
       └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: "test logical_agg with complex group expression \nshould complain about nested agg call \n"
   sql: |
     create table t(v1 int, v2 int);
@@ -150,7 +150,7 @@
     LogicalProject { exprs: [(t.v1 + t.v2) as $expr1] }
     └─LogicalAgg { group_key: [t.v1, t.v2], aggs: [] }
       └─LogicalProject { exprs: [t.v1, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
@@ -229,7 +229,7 @@
     LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr1, (2:Int32 + 3:Int32) as $expr2] }
     └─LogicalAgg { group_key: [t.a], aggs: [] }
       └─LogicalProject { exprs: [t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: group by output column name expr disallowed
   sql: |
     select 4 + 5 as a group by a + 1;
@@ -437,7 +437,7 @@
     └─LogicalFilter { predicate: (t.v1 > 5:Int32::Float64) }
       └─LogicalAgg { group_key: [t.v1], aggs: [] }
         └─LogicalProject { exprs: [t.v1] }
-          └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+          └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: having with non-group column
   sql: |
     create table t (v1 real, v2 int);
@@ -450,7 +450,7 @@
   logical_plan: |-
     LogicalAgg { group_key: [t.v1], aggs: [] }
     └─LogicalProject { exprs: [t.v1] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [v1], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.v1], noop_update_hint: true }
@@ -466,7 +466,7 @@
     └─LogicalProject { exprs: [sum(t.v1)] }
       └─LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [sum], stream_key: [sum], pk_columns: [sum], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1], noop_update_hint: true }
@@ -484,7 +484,7 @@
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalTopN { order: [t.v3 ASC, t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v3 ASC, t.v1 ASC], dist: Single }
@@ -500,7 +500,7 @@
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalTopN { order: [t.v1 ASC, t.v3 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: Single }
@@ -515,7 +515,7 @@
   logical_plan: |-
     LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: distinct on order by distinct columns and additional sorting columns
   sql: |
     create table t (id int, ts timestamp, foo int, bar varchar);
@@ -523,7 +523,7 @@
   logical_plan: |-
     LogicalTopN { order: [t.id ASC, t.ts DESC], limit: 1, offset: 0, group_key: [t.id] }
     └─LogicalProject { exprs: [t.id, t.ts, t.foo, t.bar] }
-      └─LogicalScan { table: t, columns: [t.id, t.ts, t.foo, t.bar, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.foo, t.bar, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: distinct on with expression
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -532,7 +532,7 @@
     LogicalProject { exprs: [$expr1] }
     └─LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1] }
       └─LogicalProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [$expr1] }
     └─BatchExchange { order: [t.v1 ASC], dist: Single }
@@ -549,7 +549,7 @@
     LogicalProject { exprs: [count(t.v3), min(t.v2), max(t.v1)] }
     └─LogicalAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
       └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
@@ -566,7 +566,7 @@
     LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr1] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
       └─LogicalProject { exprs: [t.v1, t.v3, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr1] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
@@ -593,7 +593,7 @@
     LogicalProject { exprs: [t.v1] }
     └─LogicalAgg { group_key: [t.v1], aggs: [] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [t.v1], aggs: [] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -611,7 +611,7 @@
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
     └─LogicalAgg { group_key: [t.v3, t.v2], aggs: [min(t.v1), max(t.v1)] }
       └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
     └─LogicalAgg { group_key: [t.v2, t.v3], aggs: [min(t.v1), max(t.v1)] }
@@ -630,7 +630,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -649,7 +649,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -668,7 +668,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -687,7 +687,7 @@
     LogicalProject { exprs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
     └─LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -708,7 +708,7 @@
     LogicalProject { exprs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalAgg { aggs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
       └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
@@ -721,7 +721,7 @@
     LogicalProject { exprs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
     └─LogicalAgg { aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
       └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
@@ -742,7 +742,7 @@
     LogicalProject { exprs: [Case((count(t.a) filter((t.a > t.b)) = 0:Int32), null:Decimal, (sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))::Decimal)) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.b, t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [Case((count(t.a) filter((t.a > t.b)) = 0:Int32), null:Decimal, (sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))::Decimal)) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
@@ -761,7 +761,7 @@
     LogicalProject { exprs: [Case((count(t.a) filter(false:Boolean) = 0:Int32), null:Decimal, (sum(t.a) filter(false:Boolean)::Decimal / count(t.a) filter(false:Boolean)::Decimal)) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter(false:Boolean), count(t.a) filter(false:Boolean)] }
       └─LogicalProject { exprs: [t.b, t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [avga, t.b(hidden)], stream_key: [t.b], pk_columns: [t.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Case((count(t.a) filter(false:Boolean) = 0:Int32), null:Decimal, (Case((count(t.a) filter(false:Boolean) = 0:Int64), null:Int64, sum(t.a) filter(false:Boolean))::Decimal / count(t.a) filter(false:Boolean)::Decimal)) as $expr1, t.b] }
@@ -776,7 +776,7 @@
     LogicalProject { exprs: [count filter((t.a > t.b))] }
     └─LogicalAgg { aggs: [count filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.a, t.b] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count filter((t.a > t.b))] }
     └─LogicalScan { table: t, columns: [t.a, t.b] }
@@ -911,7 +911,7 @@
     LogicalProject { exprs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
     └─LogicalAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
       └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
     └─BatchExchange { order: [], dist: Single }
@@ -932,7 +932,7 @@
     LogicalProject { exprs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─LogicalAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
       └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─BatchExchange { order: [], dist: Single }
@@ -953,7 +953,7 @@
     LogicalProject { exprs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─LogicalAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
       └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─BatchExchange { order: [], dist: Single }
@@ -1022,7 +1022,7 @@
     LogicalProject { exprs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
     └─LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
       └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
     └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
@@ -1279,7 +1279,7 @@
     └─LogicalProjectSet { select_list: [$0, Unnest(Array(2:Int32, $1))] }
       └─LogicalAgg { aggs: [min(t.v1), max(t.v2)] }
         └─LogicalProject { exprs: [t.v1, t.v2] }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: post-agg project set - error
   sql: |
     create table t (v1 int, v2 int);
@@ -1294,7 +1294,7 @@
     └─LogicalProjectSet { select_list: [$1, Unnest(Array(2:Int32, $0))] }
       └─LogicalAgg { group_key: [t.v2], aggs: [min(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: min/max on index
   sql: |
     create table t (v1 varchar, v2 int);
@@ -1304,7 +1304,7 @@
     LogicalProject { exprs: [max(t.v2)] }
     └─LogicalAgg { aggs: [max(t.v2)] }
       └─LogicalProject { exprs: [t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [max(idx.v2)] }
     └─LogicalTopN { order: [idx.v2 DESC], limit: 1, offset: 0 }
@@ -1319,7 +1319,7 @@
     LogicalProject { exprs: [max(t.v2)] }
     └─LogicalAgg { group_key: [t.v1], aggs: [max(t.v2)] }
       └─LogicalProject { exprs: [t.v1, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [max(t.v2)] }
     └─LogicalAgg { group_key: [t.v1], aggs: [max(t.v2)] }
@@ -1332,7 +1332,7 @@
     LogicalProject { exprs: [min(t.v1)] }
     └─LogicalAgg { aggs: [min(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._rw_timestamp, t.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [min(t.v1)] }
     └─LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0 }
@@ -1346,7 +1346,7 @@
     LogicalProject { exprs: [Case((count(t.v1) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)), 0:Int32::Decimal) / (count(t.v1) - 1:Int32)::Decimal))) as $expr2, Case((count(t.v1) = 0:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)), 0:Int32::Decimal) / count(t.v1)::Decimal))) as $expr3] }
     └─LogicalAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
       └─LogicalProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)), 0:Decimal) / (sum0(count(t.v1)) - 1:Int32)::Decimal))) as $expr2, Case((sum0(count(t.v1)) = 0:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)), 0:Decimal) / sum0(count(t.v1))::Decimal))) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
@@ -1385,7 +1385,7 @@
     LogicalProject { exprs: [Case((count(t.v) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v)::Decimal * sum(t.v)::Decimal) / count(t.v)::Decimal)), 0:Int32::Decimal) / (count(t.v) - 1:Int32)::Decimal))) as $expr2] }
     └─LogicalAgg { group_key: [t.w], aggs: [sum($expr1), sum(t.v), count(t.v)] }
       └─LogicalProject { exprs: [t.w, (t.v * t.v) as $expr1, t.v] }
-        └─LogicalScan { table: t, columns: [t.v, t.w, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v, t.w, t._row_id, t._rw_timestamp, t.__rw_vnode] }
 - name: force two phase aggregation should succeed with UpstreamHashShard and SomeShard (batch only).
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1931,7 +1931,7 @@
     LogicalProject { exprs: [sum(t.v1), count(t.v1), sum(t.v1), count(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, w], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, sum0(count(t.v1)), $expr1, sum0(count(t.v1))] }
@@ -1948,7 +1948,7 @@
     LogicalProject { exprs: [approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -1969,7 +1969,7 @@
     LogicalProject { exprs: [approx_percentile($expr1), sum(t.v1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -1999,7 +1999,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), sum(t.v1), count(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), sum(t.v1), count(t.v1)] }
     └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
@@ -2031,7 +2031,7 @@
     LogicalProject { exprs: [approx_percentile($expr1), approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [approx_percentile, approx_percentile] }
@@ -2048,7 +2048,7 @@
     LogicalProject { exprs: [approx_percentile($expr1), approx_percentile($expr2)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2077,7 +2077,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
@@ -2115,7 +2115,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
@@ -2153,7 +2153,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2183,7 +2183,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2219,7 +2219,7 @@
     LogicalProject { exprs: [approx_percentile($expr1)] }
     └─LogicalAgg { group_key: [t.v2], aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v2, t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [approx_percentile($expr1)] }
@@ -2250,7 +2250,7 @@
     LogicalProject { exprs: [approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2340,7 +2340,7 @@
     └─LogicalAgg { group_key: [m6.col_0], aggs: [] }
       └─LogicalProject { exprs: [m6.col_0] }
         └─LogicalFilter { predicate: false:Boolean }
-          └─LogicalScan { table: m6, columns: [m6.col_0, m6._rw_timestamp], cardinality: 1..=1 }
+          └─LogicalScan { table: m6, columns: [m6.col_0, m6._rw_timestamp, m6.__rw_vnode], cardinality: 1..=1 }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [m6.col_0], aggs: [] }
     └─LogicalValues { rows: [], schema: Schema { fields: [m6.col_0:Int32] } }

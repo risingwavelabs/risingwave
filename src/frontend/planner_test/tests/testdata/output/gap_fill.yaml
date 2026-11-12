@@ -6,7 +6,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }] }
-      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [id, ts, val], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }] }
@@ -22,7 +22,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.ts, t.val] }
     └─LogicalGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $1 }] }
-      └─LogicalScan { table: t, columns: [t.ts, t.val, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [ts, val], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $1 }] }
@@ -38,7 +38,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.ts, t.name] }
     └─LogicalGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Null, target_col: $1 }] }
-      └─LogicalScan { table: t, columns: [t.ts, t.name, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.ts, t.name, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [ts, name], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Null, target_col: $1 }] }
@@ -499,7 +499,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }] }
-      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [val, t.ts(hidden)], stream_key: [t.ts], pk_columns: [t.ts], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.val, t.ts] }
@@ -516,7 +516,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
-      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
@@ -554,7 +554,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
-      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
@@ -567,7 +567,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.region, t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $2, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $3 }], partition_by: [$0, $1] }
-      └─LogicalScan { table: t, columns: [t.region, t.device_id, t.ts, t.val, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.region, t.device_id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [region, device_id, ts, val], stream_key: [region, device_id, ts], pk_columns: [region, device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $2, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $3 }], partition_by: [$0, $1] }
@@ -684,7 +684,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
-      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t.extra, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t.extra, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }

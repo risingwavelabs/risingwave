@@ -1,0 +1,204 @@
+# The hidden vnode is read from the named relation's storage key.
+statement ok
+SET streaming_max_parallelism = 32;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE hidden_vnode_t (tenant INT, id INT, value VARCHAR, PRIMARY KEY (tenant, id));
+
+statement ok
+INSERT INTO hidden_vnode_t VALUES (1, 10, 'a'), (1, 11, 'b'), (2, 20, 'c'), (3, 30, 'd');
+
+statement ok
+FLUSH;
+
+# Neither wildcard form exposes the hidden column.
+query IIT rowsort
+SELECT * FROM hidden_vnode_t;
+----
+1 10 a
+1 11 b
+2 20 c
+3 30 d
+
+query IIT rowsort
+SELECT t.* FROM hidden_vnode_t AS t;
+----
+1 10 a
+1 11 b
+2 20 c
+3 30 d
+
+statement ok
+SET query_mode = local;
+
+query IB
+SELECT COUNT(*), BOOL_AND(__rw_vnode = rw_vnode(32, tenant, id)) FROM hidden_vnode_t;
+----
+4 t
+
+statement ok
+SET query_mode = distributed;
+
+query IB
+SELECT COUNT(*), BOOL_AND(t.__rw_vnode = rw_vnode(32, t.tenant, t.id)) FROM hidden_vnode_t t;
+----
+4 t
+
+query I
+SELECT SUM(n) FROM (SELECT __rw_vnode, COUNT(*) AS n FROM hidden_vnode_t GROUP BY __rw_vnode) v;
+----
+4
+
+query I
+SELECT COUNT(*) FROM hidden_vnode_t WHERE __rw_vnode <> rw_vnode(32, tenant, id);
+----
+0
+
+# An absent outer-join row has no vnode.
+query I
+SELECT COUNT(*) FROM hidden_vnode_t a LEFT JOIN hidden_vnode_t b ON a.id = b.id + 1000 WHERE a.__rw_vnode IS NOT NULL AND b.__rw_vnode IS NULL;
+----
+4
+
+# Hidden columns do not cross a wildcard subquery boundary.
+query error
+SELECT __rw_vnode FROM (SELECT * FROM hidden_vnode_t) s;
+
+query error
+SELECT __rw_vnode FROM hidden_vnode_t a JOIN hidden_vnode_t b ON a.id = b.id;
+
+statement ok
+SET streaming_max_parallelism = 64;
+
+statement ok
+CREATE INDEX hidden_vnode_idx ON hidden_vnode_t(id) INCLUDE (tenant, value);
+
+query IB
+SELECT COUNT(*), BOOL_AND(__rw_vnode = rw_vnode(32, tenant, id)) FROM hidden_vnode_t WHERE id = 10;
+----
+1 t
+
+# Directly querying the index reports that relation's own distribution.
+query IB
+SELECT COUNT(*), BOOL_AND(__rw_vnode = rw_vnode(64, id)) FROM hidden_vnode_idx;
+----
+4 t
+
+# Vnodes can be inspected on materialized views, including singleton views.
+statement ok
+CREATE MATERIALIZED VIEW hidden_vnode_copy AS SELECT * FROM hidden_vnode_t;
+
+statement ok
+CREATE MATERIALIZED VIEW hidden_vnode_total AS SELECT COUNT(*) AS n FROM hidden_vnode_t;
+
+statement ok
+FLUSH;
+
+query II
+SELECT n, __rw_vnode FROM hidden_vnode_total;
+----
+4 0
+
+query I
+SELECT SUM(n) FROM (SELECT __rw_vnode, COUNT(*) AS n FROM hidden_vnode_copy GROUP BY __rw_vnode) v;
+----
+4
+
+# System columns are not available as inputs to streaming jobs.
+statement error selecting `__rw_vnode` in a streaming query is not allowed
+CREATE MATERIALIZED VIEW hidden_vnode_invalid AS SELECT __rw_vnode FROM hidden_vnode_t;
+
+statement ok
+INSERT INTO hidden_vnode_t VALUES (4, 40, 'e');
+
+statement ok
+DELETE FROM hidden_vnode_t WHERE id = 11;
+
+statement ok
+FLUSH;
+
+query IB
+SELECT COUNT(*), BOOL_AND(__rw_vnode = rw_vnode(32, tenant, id)) FROM hidden_vnode_t;
+----
+4 t
+
+# Point reads exercise system columns both alone and alongside key/value columns.
+query B
+SELECT __rw_vnode = rw_vnode(32, tenant, id) FROM hidden_vnode_t WHERE tenant = 4 AND id = 40;
+----
+t
+
+query ITB
+SELECT id, value, __rw_vnode = rw_vnode(32, tenant, id) AND _rw_timestamp IS NOT NULL FROM hidden_vnode_t WHERE tenant = 4 AND id = 40;
+----
+40 e t
+
+query B
+SELECT __rw_vnode = rw_vnode(32, 4, 40) FROM hidden_vnode_t WHERE tenant = 4 AND id = 40;
+----
+t
+
+query B
+SELECT __rw_vnode = rw_vnode(32, 4, 40) AND _rw_timestamp IS NOT NULL FROM hidden_vnode_t WHERE tenant = 4 AND id = 40;
+----
+t
+
+# Preserve Serial's vnode extraction for tables with an implicit row ID.
+statement ok
+CREATE TABLE hidden_vnode_rowid (value INT);
+
+statement ok
+INSERT INTO hidden_vnode_rowid VALUES (10), (20), (30);
+
+statement ok
+FLUSH;
+
+query IB
+SELECT COUNT(*), BOOL_AND(__rw_vnode = rw_vnode(64, _row_id)) FROM hidden_vnode_rowid;
+----
+3 t
+
+# Existing user columns with this name keep their original type and values.
+statement ok
+CREATE TABLE hidden_vnode_user (id INT PRIMARY KEY, __rw_vnode VARCHAR);
+
+statement ok
+INSERT INTO hidden_vnode_user VALUES (1, 'user value');
+
+statement ok
+FLUSH;
+
+query IT
+SELECT * FROM hidden_vnode_user;
+----
+1 user value
+
+statement ok
+DROP TABLE hidden_vnode_user;
+
+statement ok
+DROP TABLE hidden_vnode_rowid;
+
+statement ok
+DROP MATERIALIZED VIEW hidden_vnode_total;
+
+statement ok
+DROP MATERIALIZED VIEW hidden_vnode_copy;
+
+statement ok
+DROP INDEX hidden_vnode_idx;
+
+statement ok
+DROP TABLE hidden_vnode_t;
+
+statement ok
+SET query_mode = default;
+
+statement ok
+SET streaming_parallelism = default;
+
+statement ok
+SET streaming_max_parallelism = default;

@@ -11,7 +11,7 @@
     LogicalProject { exprs: [items.id, items.embedding] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 1 }
       └─LogicalProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 1 }
     └─LogicalProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
@@ -31,7 +31,7 @@
     LogicalProject { exprs: [items.id, items.embedding] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: L2Sqr, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3)] }
     └─LogicalScan { table: items, columns: [items.id, items.embedding] }
@@ -50,7 +50,7 @@
     LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
     └─LogicalProject { exprs: [items.id, items.embedding, items._rw_timestamp, $expr1] }
       └─LogicalProject { exprs: [items.id, items.embedding, items._rw_timestamp, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: L2Sqr, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3), items._rw_timestamp:Timestamptz] }
     └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
@@ -69,7 +69,7 @@
     └─LogicalProject { exprs: [$expr1, $expr2] }
       └─LogicalProject { exprs: [$expr1, ($expr1 + 1:Int32::Float64) as $expr2] }
         └─LogicalProject { exprs: [items.id, items.embedding, items._rw_timestamp, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
-          └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+          └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [vector_distance, (L2Distance(items.embedding, '[3,1,2]':Vector(3)) + 1:Int32::Float64) as $expr1] }
     └─LogicalVectorSearch { distance_type: L2Sqr, top_n: 5, left: $0, right: '[3,1,2]':Vector(3), output_columns: [items.embedding:Vector(3)] }
@@ -93,7 +93,7 @@
           └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
             └─LogicalProject { exprs: [items.embedding, items.id, $expr1] }
               └─LogicalProject { exprs: [items.id, items._rw_timestamp, CosineDistance(items.embedding, '[3,1,2]':Vector(3)) as $expr1, items.embedding] }
-                └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+                └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [count, items.id] }
     └─LogicalAgg { group_key: [items.id], aggs: [count] }
@@ -117,7 +117,7 @@
     LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
     └─LogicalProject { exprs: [items.embedding, $expr1, items.id] }
       └─LogicalProject { exprs: [items.id, items._rw_timestamp, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1, items.embedding] }
-        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [items.embedding, vector_distance, items.id] }
     └─LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3)] }
@@ -150,7 +150,7 @@
     LogicalProject { exprs: [items.id, items.name] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, Neg(InnerProduct(items.embedding, '[1,2,3]':Vector(3))) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $2, right: '[1,2,3]':Vector(3), output_columns: [items.id:Int32, items.name:Varchar] }
     └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
@@ -172,7 +172,7 @@
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, Neg(InnerProduct(items.embedding, '[1,2,3]':Vector(3))) as $expr1] }
         └─LogicalFilter { predicate: (items.id > 0:Int32) }
-          └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+          └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $2, right: '[1,2,3]':Vector(3), output_columns: [items.id:Int32, items.name:Varchar] }
     └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding], predicate: (items.id > 0:Int32) }
@@ -191,7 +191,7 @@
     LogicalProject { exprs: [items.id, items.name] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, Neg(InnerProduct(items.embedding, OpenaiEmbedding('{"model": "model"}':Jsonb, 'hello':Varchar)::Vector(3))) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $2, right: OpenaiEmbedding('{"model": "model"}':Jsonb, 'hello':Varchar)::Vector(3), output_columns: [items.id:Int32, items.name:Varchar] }
     └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
@@ -214,7 +214,7 @@
         └─LogicalProject { exprs: [$expr1] }
           └─LogicalTopN { order: [$expr2 ASC], limit: 5, offset: 0 }
             └─LogicalProject { exprs: [(items.id + 1:Int32) as $expr1, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr2] }
-              └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+              └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [count, $expr1] }
     └─LogicalAgg { group_key: [$expr1], aggs: [count] }
@@ -238,7 +238,7 @@
     LogicalProject { exprs: [items.id, items.name, items.embedding] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, items.embedding, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $2, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.name:Varchar, items.embedding:Vector(3)] }
     └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
@@ -260,7 +260,7 @@
     LogicalProject { exprs: [items.id, items.name, items.unindexed] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, items.unindexed, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [items.id, items.name, items.unindexed, vector_distance] }
     └─LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $3, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.unindexed:Timestamptz, items.name:Varchar] }
@@ -284,7 +284,7 @@
     LogicalProject { exprs: [items.id, items.name, items.unindexed, Pow($expr1, 2:Int32::Float64)::Int32 as $expr2] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 2, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, items.unindexed, Neg(InnerProduct('[3,1,2]':Vector(3), items.embedding)) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [items.id, items.name, items.unindexed, Pow(vector_distance, 2:Int32::Float64)::Int32 as $expr1] }
     └─LogicalVectorSearch { distance_type: InnerProduct, top_n: 2, left: '[3,1,2]':Vector(3), right: $3, output_columns: [items.id:Int32, items.unindexed:Timestamptz, items.name:Varchar] }
@@ -311,7 +311,7 @@
             └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
               └─LogicalProject { exprs: [items.embedding, items.id, $expr1] }
                 └─LogicalProject { exprs: [items.id, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1, items.embedding] }
-                  └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp] }
+                  └─LogicalScan { table: items, columns: [items.id, items.unindexed, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [count, items.id] }
     └─LogicalAgg { group_key: [items.id], aggs: [count] }
@@ -350,7 +350,7 @@
     LogicalProject { exprs: [items.id, items.name] }
     └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─LogicalProject { exprs: [items.id, items.name, Neg(InnerProduct(OpenaiEmbedding('{"model": "model"}':Jsonb, items.text)::Vector(3), '[3,1,2]':Vector(3))) as $expr1] }
-        └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.text, items._rw_timestamp] }
+        └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.text, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: OpenaiEmbedding('{"model": "model"}':Jsonb, $2)::Vector(3), right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.name:Varchar] }
     └─LogicalScan { table: items, columns: [items.id, items.name, items.text] }
@@ -382,12 +382,12 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr1 order_by($expr2 ASC)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr1 order_by($expr2 ASC))] }
           └─LogicalTopN { order: [$expr2 ASC], limit: 3, offset: 0 }
             └─LogicalProject { exprs: [Row(items.id, items.name) as $expr1, CosineDistance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr2] }
-              └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+              └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [events.event_id, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3, events.time] }
     └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(events.embedding, events.embedding), output: all }
@@ -440,12 +440,12 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, events.time, events.embedding, $expr3] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr1 order_by($expr2 ASC)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr1 order_by($expr2 ASC))] }
           └─LogicalTopN { order: [$expr2 ASC], limit: 3, offset: 0 }
             └─LogicalProject { exprs: [Row(items.id, items.name) as $expr1, CosineDistance(items.embedding, CorrelatedInputRef { index: 2, correlated_id: 1 }) as $expr2] }
-              └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+              └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [events.event_id, events.time, events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
     └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(events.embedding, events.embedding), output: all }
@@ -497,13 +497,13 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
           └─LogicalProject { exprs: [Row(items.id, $expr1, items.name) as $expr2] }
             └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
               └─LogicalProject { exprs: [items.id, items.name, CosineDistance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
-                └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+                └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [events.event_id, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3, events.time] }
     └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(events.embedding, events.embedding), output: all }
@@ -560,19 +560,19 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
           └─LogicalProject { exprs: [Row(items.name) as $expr2] }
             └─LogicalProject { exprs: [items.name] }
               └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
                 └─LogicalProject { exprs: [items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
-                  └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+                  └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [events.event_id, array, events.time] }
     └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.name:Varchar], include_distance: false }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [events.event_id, vector_info, events.time] }
@@ -592,18 +592,18 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Int32, Varchar, Float64))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
           └─LogicalProject { exprs: [Row(items.id, items.name, $expr1) as $expr2] }
             └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
               └─LogicalProject { exprs: [items.id, items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
-                └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+                └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [events.event_id, array, events.time] }
     └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [events.event_id, vector_info, events.time] }
@@ -623,19 +623,19 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
           └─LogicalProject { exprs: [Row(items.name) as $expr2] }
             └─LogicalProject { exprs: [items.name] }
               └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
                 └─LogicalProject { exprs: [items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
-                  └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+                  └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [events.event_id, array, events.time] }
     └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.name:Varchar], include_distance: false }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [events.event_id, vector_info, events.time] }
@@ -655,18 +655,18 @@
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp, events.__rw_vnode] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Int32, Varchar, Float64))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
           └─LogicalProject { exprs: [Row(items.id, items.name, $expr1) as $expr2] }
             └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
               └─LogicalProject { exprs: [items.id, items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
-                └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+                └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [events.event_id, array, events.time] }
     └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp, items.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [events.event_id, vector_info, events.time] }

@@ -104,7 +104,7 @@
     ├─LogicalProject { exprs: [x, y] }
     │ └─LogicalSource { source: s, is_shared: true, columns: [x, y, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
     └─LogicalProject { exprs: [t.x, t.y] }
-      └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [x, y], pk_columns: [x, y], pk_conflict: NoCheck }
     └─StreamProject { exprs: [x, y], noop_update_hint: true }
