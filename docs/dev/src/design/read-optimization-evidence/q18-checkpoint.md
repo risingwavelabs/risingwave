@@ -12,6 +12,7 @@ describes the historical runs.
 | [I/O distributions](./q18-io-distribution.json) | Successful physical GET sizes, logical read sizes, group sizes, gap sizes, and accounting for Range and the two Q64 whole-window runs. |
 | [Admission comparison](./q18-admission-comparison.json) | Historical Range, Q32, traced Q32, and Q128 comparison with per-arm measurements. |
 | [Q32 trace analysis](./q18-gap-trace-complete.json) | Matched complete windows and split attribution. Its source path names the original local trace. |
+| [Stage results archive](./stage-results.json) | Additional changelog, Locality Backfill, and fixed-SST replay results. Entries use the original experiment name and result filename. |
 
 The runs used a fresh `risedev d full` cluster with one 2 GiB CN, four-way
 streaming parallelism, MinIO, and the same cold seed at Hummock version 392.

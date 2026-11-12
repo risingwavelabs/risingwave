@@ -5,6 +5,9 @@ changing a SQL session parameter does not change them. Use the same TOML on ever
 No object format, visibility or compaction policy changes are required.
 See the [read scheduling design](./hummock-read-scheduling.md) for the current
 read path, resource ownership, and Q18 stage assessment.
+The [stage results archive](./read-optimization-evidence/stage-results.json)
+retains the machine-readable measurements behind the changelog, Locality
+Backfill, and fixed-SST replay experiments below.
 
 ## Configuration
 
