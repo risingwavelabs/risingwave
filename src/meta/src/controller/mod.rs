@@ -32,7 +32,9 @@ use risingwave_pb::catalog::{
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
     PbView,
 };
-use sea_orm::{ConnectOptions, DatabaseConnection, DbBackend, ModelTrait};
+use sea_orm::{
+    ConnectOptions, ConnectionTrait, DatabaseConnection, DbBackend, ModelTrait, Statement,
+};
 
 use crate::{MetaError, MetaResult, MetaStoreBackend};
 
@@ -86,6 +88,26 @@ impl SqlMetaStore {
             }
         }
 
+        /// Enable SQLite foreign-key enforcement on an established connection.
+        ///
+        /// `SQLite` disables foreign-key enforcement by default and requires
+        /// `PRAGMA foreign_keys = ON` to be issued on **every connection**.
+        /// sea-orm 1.x `ConnectOptions` has no dedicated API for this, so we
+        /// run the statement once after the pool is created.  Because `SQLite`
+        /// connections always use `max_connections(1)`, the single pooled
+        /// connection retains the pragma for its lifetime.
+        ///
+        /// See: <https://www.sqlite.org/foreignkeys.html#fk_enable>
+        async fn enable_sqlite_foreign_keys(conn: &DatabaseConnection) -> MetaResult<()> {
+            conn.execute(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA foreign_keys = ON".to_owned(),
+            ))
+            .await
+            .context("failed to enable SQLite foreign-key enforcement")?;
+            Ok(())
+        }
+
         Ok(match backend {
             MetaStoreBackend::Mem => {
                 const IN_MEMORY_STORE: &str = "sqlite::memory:";
@@ -102,6 +124,7 @@ impl SqlMetaStore {
                     .max_lifetime(MAX_DURATION);
 
                 let conn = sea_orm::Database::connect(options).await?;
+                enable_sqlite_foreign_keys(&conn).await?;
                 Self {
                     conn,
                     endpoint: IN_MEMORY_STORE.to_owned(),
@@ -126,6 +149,9 @@ impl SqlMetaStore {
                 }
 
                 let conn = sea_orm::Database::connect(options).await?;
+                if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                    enable_sqlite_foreign_keys(&conn).await?;
+                }
                 Self { conn, endpoint }
             }
         })
