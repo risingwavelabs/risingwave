@@ -14,8 +14,6 @@
 
 use std::sync::LazyLock;
 
-use indexmap::IndexMap;
-use indexmap::map::Entry;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
 use risingwave_common::log::LogSuppressor;
@@ -23,6 +21,9 @@ use risingwave_common::row::{Row, RowExt as _};
 use risingwave_common::types::DataType;
 
 use crate::consistency::consistency_panic;
+
+mod insertion_ordered_map;
+use insertion_ordered_map::{Entry, InsertionOrderedMap};
 
 /// Behavior when inconsistency is detected when aggregating changes to [`ChangeBuffer`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,8 +71,8 @@ struct Slot<R> {
 /// A buffer that accumulates changes and produce compacted changes.
 #[derive(Debug)]
 pub struct ChangeBuffer<K, R> {
-    // We use an `IndexMap` to preserve the original order of the changes as much as possible.
-    buffer: IndexMap<K, Slot<R>>,
+    // `InsertionOrderedMap` preserves the original order of the changes as much as possible.
+    buffer: InsertionOrderedMap<K, Slot<R>>,
     ib: InconsistencyBehavior,
 }
 
@@ -115,9 +116,7 @@ where
                 if slot.new.take().is_some() {
                     if slot.old.is_none() {
                         // The previous `Insert` is fully cancelled by this deletion.
-                        // FIXME: though preserving the order well,
-                        // this is not performant compared to `swap_remove`
-                        e.shift_remove();
+                        e.remove();
                     }
                 } else {
                     self.ib.report("inconsistent changes: double-deleting");
@@ -232,7 +231,7 @@ impl<K, R> ChangeBuffer<K, R> {
     /// Create a new `ChangeBuffer` with the given capacity that panics on inconsistency.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            buffer: IndexMap::with_capacity(capacity),
+            buffer: InsertionOrderedMap::with_capacity(capacity),
             ib: InconsistencyBehavior::Panic,
         }
     }
