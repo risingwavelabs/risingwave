@@ -6361,6 +6361,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrace-tracing"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e26ee74fc06c6a7b49cce575ccd4e4ce2c8992c35d83e5c2f41babcbef862712"
+dependencies = [
+ "fastrace",
+ "take_mut",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6555,7 +6568,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=0d624ea20adc70f5f517c27b202d0a794d6daabb#0d624ea20adc70f5f517c27b202d0a794d6daabb"
 dependencies = [
  "anyhow",
  "asyncband",
@@ -6575,7 +6588,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=0d624ea20adc70f5f517c27b202d0a794d6daabb#0d624ea20adc70f5f517c27b202d0a794d6daabb"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -6602,7 +6615,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=0d624ea20adc70f5f517c27b202d0a794d6daabb#0d624ea20adc70f5f517c27b202d0a794d6daabb"
 dependencies = [
  "anyhow",
  "asyncband",
@@ -6627,7 +6640,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=0d624ea20adc70f5f517c27b202d0a794d6daabb#0d624ea20adc70f5f517c27b202d0a794d6daabb"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -6660,7 +6673,7 @@ dependencies = [
 [[package]]
 name = "foyer-tokio"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=0d624ea20adc70f5f517c27b202d0a794d6daabb#0d624ea20adc70f5f517c27b202d0a794d6daabb"
 dependencies = [
  "madsim-tokio",
  "tokio",
@@ -15694,6 +15707,7 @@ dependencies = [
  "either",
  "fastrace",
  "fastrace-opentelemetry",
+ "fastrace-tracing",
  "futures",
  "hostname",
  "madsim-tokio",
@@ -15971,6 +15985,7 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
+ "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",

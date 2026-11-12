@@ -534,6 +534,7 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
+        batch: Option<&risingwave_object_store::object::ReadBatch>,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
@@ -553,6 +554,17 @@ impl SstableStore {
             policy
         };
 
+        // A policy override must resolve outside the preparation barrier too.
+        let registration = if matches!(policy, CachePolicy::Fill(_)) {
+            batch.and_then(|batch| batch.register())
+        } else {
+            None
+        };
+        let (registration, member) = match registration {
+            Some((registration, member)) => (Some(registration), Some(member)),
+            None => (None, None),
+        };
+
         let idx = SstableBlockIndex {
             sst_id: object_id,
             block_idx: block_index as _,
@@ -562,14 +574,14 @@ impl SstableStore {
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         // future: fetch block if hybrid cache miss
-        let span = tracing::trace_span!(target: "state_store_read_batch", "block_read",
+        let span = tracing::debug_span!(target: "state_store_read_batch", "block_read",
             object_id = %object_id, block = block_index, start = range.start, end = range.end);
         let fetch_block = || {
             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
             async move {
             outer_fetch.inc();
             let block_data = match store
-                .read(&data_path, range.clone())
+                .read_with_batch(&data_path, range.clone(), member)
                 .instrument_await("get_block_response".verbose())
                 .await
             {
@@ -586,7 +598,7 @@ impl SstableStore {
             };
             let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
             Ok(block)
-        }.instrument(span)
+        }.instrument(span.clone())
         };
 
         match policy {
@@ -595,12 +607,15 @@ impl SstableStore {
                 let fetch = self.block_cache.get_or_fetch(&idx, || {
                     fetch_block().map(|res| res.map(|block| (block, properties)))
                 });
+                if let Some(registration) = registration {
+                    registration.set_leader(fetch.role() == foyer::GetOrFetchRole::Lead);
+                }
                 if fetch.need_await() {
                     self.read_metrics.block_cache_pending.inc();
                 } else {
                     self.read_metrics.block_cache_memory_hit.inc();
                 }
-                tracing::trace!(target: "state_store_read_batch", object_id = %object_id,
+                tracing::debug!(target: "state_store_read_batch", parent: &span, object_id = %object_id,
                     block = block_index, memory_hit = !fetch.need_await(), "block cache request registered");
                 Ok(BlockResponse::Fetch(fetch))
             }
@@ -634,7 +649,27 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let block_response = self.get_block_response(sst, block_index, policy).await?;
+        self.get_with_read_batch(sst, block_index, policy, stats, None)
+            .await
+    }
+
+    /// Register the demand block, close registration, then await only that block.
+    /// A resident demand block must not wait for neighbor disk-cache lookups.
+    pub(crate) async fn get_with_read_batch(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+        batch: Option<&risingwave_object_store::object::ReadBatch>,
+    ) -> HummockResult<BlockHolder> {
+        let response = self
+            .get_block_response(sst, block_index, policy, batch)
+            .await;
+        if let Some(batch) = batch {
+            batch.seal();
+        }
+        let block_response = response?;
         let block_holder = block_response.wait().await?;
         stats.cache_data_block_total += 1;
         if let BlockEntry::HybridCache(entry) = block_holder.entry()

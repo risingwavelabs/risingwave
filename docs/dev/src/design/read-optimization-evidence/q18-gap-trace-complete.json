@@ -1,0 +1,88 @@
+{
+  "dequeued_requests": 74105,
+  "dispatched": 45816,
+  "examples": {
+    "LocalityProvider/contiguous/later_dequeue": {
+      "blocks": [
+        11,
+        12
+      ],
+      "first_selection_line": 367518,
+      "gap_bytes": 0,
+      "group_ranges": [
+        [
+          720535,
+          786048
+        ],
+        [
+          786048,
+          982535
+        ]
+      ],
+      "groups": [
+        37024,
+        37013
+      ],
+      "later_dequeue": [
+        367596,
+        15756662351628514775,
+        53609590
+      ],
+      "object_id": 1526,
+      "requests": [
+        37024,
+        37013
+      ],
+      "window": [
+        11,
+        18
+      ]
+    }
+  },
+  "pair_scope": "complete_windows",
+  "selected_groups": 45816,
+  "successful_groups": 45816,
+  "totals": {
+    "HashJoin": {
+      "complete_cold_runs": 3555,
+      "complete_legacy_gets": 3555,
+      "complete_windows": 4176,
+      "complete_windows_with_reads": 3555,
+      "contiguous_edges": 1,
+      "linked_outer_reads": 3572,
+      "matched_head_windows": 4177,
+      "matched_neighbor_windows": 4199,
+      "matched_registrations": 8376,
+      "memory_hits": 4803,
+      "unknown_registrations": 1,
+      "window_events": 4199
+    },
+    "LocalityProvider": {
+      "complete_cold_runs": 4447,
+      "complete_legacy_gets": 4447,
+      "complete_windows": 5116,
+      "complete_windows_with_reads": 4447,
+      "contiguous_admission_order_unresolved": 165,
+      "contiguous_admitted_after_selection": 71,
+      "contiguous_admitted_before_selection": 1,
+      "contiguous_distinct_group_pairs": 237,
+      "contiguous_edges": 28382,
+      "contiguous_later_dequeue": 237,
+      "contiguous_split_edges": 237,
+      "linked_outer_reads": 32932,
+      "matched_head_windows": 5143,
+      "matched_neighbor_windows": 5143,
+      "matched_registrations": 37068,
+      "memory_hits": 4108,
+      "unknown_registrations": 28,
+      "window_events": 5143
+    },
+    "all": {
+      "contiguous_distinct_group_pairs": 237
+    }
+  },
+  "trace_events": {
+    "unscoped_submission": 1782
+  },
+  "trace_path": "target/locality-tpch-q18/on-gap-trace/logs/compute-node-5688.log.gz"
+}

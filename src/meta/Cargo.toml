@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
-test = ["risingwave_hummock_sdk/test"]
+test = ["risingwave_hummock_sdk/test", "risingwave_object_store/test"]
 failpoints = ["fail/failpoints"]
 
 [dependencies]

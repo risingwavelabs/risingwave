@@ -432,7 +432,11 @@ pub mod verify {
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
         fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
-            self.actual.read_batch_config()
+            if self.expected.is_some() {
+                Default::default()
+            } else {
+                self.actual.read_batch_config()
+            }
         }
 
         async fn on_key_values<'a, O: Send + 'a>(

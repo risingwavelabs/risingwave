@@ -460,8 +460,9 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-# Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
-foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
+# Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery,
+# and expose get_or_fetch registration roles without changing cache ownership.
+foyer = { git = "https://github.com/Li0k/foyer.git", rev = "0d624ea20adc70f5f517c27b202d0a794d6daabb" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Keep transitive madsim-family resolution aligned to the same upstream rev.
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }

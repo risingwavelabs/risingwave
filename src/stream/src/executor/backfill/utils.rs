@@ -657,16 +657,11 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         let datum: [Datum; 1] = [Some(vnode.to_scalar().into())];
         datum
     });
+    let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
     // 2. Fetch the state for each vnode.
     //    It should have the following schema, it should not contain vnode:
     //    | pk | `backfill_finished` | `row_count` |
-    let state_for_vnodes = if state_table.native_point_batch_enabled() {
-        state_table
-            .get_rows(&vnode_keys.collect::<Vec<_>>())
-            .await?
-    } else {
-        try_join_all(vnode_keys.map(|vnode_key| state_table.get_row(vnode_key))).await?
-    };
+    let state_for_vnodes = try_join_all(tasks).await?;
     for (vnode, state_for_vnode) in state_table
         .vnodes()
         .iter_vnodes()

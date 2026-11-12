@@ -171,7 +171,7 @@ impl MaterializeCache {
         // Populate the LRU cache with the keys in input chunk.
         // For new keys, row values are set to None.
         static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(0);
-        let span = tracing::trace_span!(
+        let span = tracing::debug_span!(
             target: "state_store_read_batch",
             "materialize_read_batch",
             batch_id = NEXT_BATCH_ID.fetch_add(1, Ordering::Relaxed),

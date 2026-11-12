@@ -1,0 +1,863 @@
+{
+  "on": {
+    "source_rows_at_checkpoint": 13652430.0,
+    "through_source_scan": {
+      "elapsed_s": 40.239,
+      "physical_gets": 42207,
+      "physical_bytes": 3392342634,
+      "scheduled_input_bytes": null,
+      "routes": null,
+      "events": {
+        "group_ok": 0,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 0,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 0,
+        "split_bytes": 0,
+        "split_object": 0,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 0,
+        "window_complete": 0,
+        "window_timeout": 0,
+        "window_late": 0
+      },
+      "read_errors": null,
+      "scheduled_requests_minus_groups_and_merges": null,
+      "physical_gets_minus_scheduled_groups_and_other_routes": null,
+      "blockwise_prefetch": {
+        "registered_ready": 0,
+        "registered_pending": 0,
+        "consumed": 0,
+        "consume_pending": 0,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 44076,
+          "data_miss": 36606,
+          "prefetch_count": 1614,
+          "prefetch_data_count": 10607
+        },
+        "locality_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 0
+    },
+    "after_source_scan": {
+      "elapsed_s": 295.532,
+      "physical_gets": 9126,
+      "physical_bytes": 2500182153,
+      "scheduled_input_bytes": null,
+      "routes": null,
+      "events": {
+        "group_ok": 0,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 0,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 0,
+        "split_bytes": 0,
+        "split_object": 0,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 0,
+        "window_complete": 0,
+        "window_timeout": 0,
+        "window_late": 0
+      },
+      "read_errors": null,
+      "scheduled_requests_minus_groups_and_merges": null,
+      "physical_gets_minus_scheduled_groups_and_other_routes": null,
+      "blockwise_prefetch": {
+        "registered_ready": 0,
+        "registered_pending": 0,
+        "consumed": 0,
+        "consume_pending": 0,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 7361,
+          "data_miss": 6286,
+          "prefetch_count": 159,
+          "prefetch_data_count": 793
+        },
+        "locality_state": {
+          "data_total": 5377,
+          "data_miss": 326,
+          "prefetch_count": 3484,
+          "prefetch_data_count": 24029
+        },
+        "hash_join_state": {
+          "data_total": 3090569,
+          "data_miss": 3975,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 397,
+          "data_miss": 2,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 0
+    },
+    "full": {
+      "elapsed_s": 335.771,
+      "physical_gets": 51333,
+      "physical_bytes": 5892524787,
+      "scheduled_input_bytes": 0,
+      "routes": {
+        "scheduled": 0,
+        "direct": 51333,
+        "oversized": 0,
+        "unbounded": 0,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 0,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 0,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 0,
+        "split_bytes": 0,
+        "split_object": 0,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 0,
+        "window_complete": 0,
+        "window_timeout": 0,
+        "window_late": 0
+      },
+      "read_errors": {
+        "logical": 0,
+        "physical": 0,
+        "attempt": 0
+      },
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 0,
+        "registered_pending": 0,
+        "consumed": 0,
+        "consume_pending": 0,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 51437,
+          "data_miss": 42892,
+          "prefetch_count": 1773,
+          "prefetch_data_count": 11400
+        },
+        "locality_state": {
+          "data_total": 5377,
+          "data_miss": 326,
+          "prefetch_count": 3484,
+          "prefetch_data_count": 24029
+        },
+        "hash_join_state": {
+          "data_total": 3090569,
+          "data_miss": 3975,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 397,
+          "data_miss": 2,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 0,
+      "disjoint_histograms": {
+        "physical_bytes_16k_64k_256k_above": [
+          114,
+          44270,
+          2816,
+          4133
+        ],
+        "scheduled_bytes_16k_64k_256k_512k_1m_above": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "scheduler_group_size_1_2_4_8_16_above": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "prepared_group_size_1_2_4_8_16_above": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "gap_bytes_32k_64k_128k_256k_1m_above": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "blockwise_window_size_1_2_4_8_16_above": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "on-q64-whole-window": {
+    "source_rows_at_checkpoint": 13652430.0,
+    "through_source_scan": {
+      "elapsed_s": 45.346,
+      "physical_gets": 44609,
+      "physical_bytes": 3529663416,
+      "scheduled_input_bytes": null,
+      "routes": {
+        "scheduled": 44563,
+        "direct": 0,
+        "oversized": 0,
+        "unbounded": 135,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 44474,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 89,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 1386,
+        "split_bytes": 0,
+        "split_object": 2397,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 0,
+        "window_complete": 0,
+        "window_timeout": 0,
+        "window_late": 0
+      },
+      "read_errors": null,
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 0,
+        "registered_pending": 0,
+        "consumed": 0,
+        "consume_pending": 0,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 42104,
+          "data_miss": 35811,
+          "prefetch_count": 1398,
+          "prefetch_data_count": 9028
+        },
+        "locality_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 3537292785
+    },
+    "after_source_scan": {
+      "elapsed_s": 322.053,
+      "physical_gets": 9305,
+      "physical_bytes": 2494558691,
+      "scheduled_input_bytes": null,
+      "routes": {
+        "scheduled": 37140,
+        "direct": 0,
+        "oversized": 0,
+        "unbounded": 336,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 8969,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 28171,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 16,
+        "split_bytes": 0,
+        "split_object": 402,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 4,
+        "window_admitted_with_preparation": 8,
+        "window_complete": 9653,
+        "window_timeout": 1,
+        "window_late": 4
+      },
+      "read_errors": null,
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 3023,
+        "registered_pending": 33308,
+        "consumed": 36331,
+        "consume_pending": 3644,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 9592,
+          "data_miss": 8049,
+          "prefetch_count": 470,
+          "prefetch_data_count": 2113
+        },
+        "locality_state": {
+          "data_total": 26376,
+          "data_miss": 21234,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 3095860,
+          "data_miss": 4075,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 390,
+          "data_miss": 10,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 21151176
+    },
+    "full": {
+      "elapsed_s": 367.399,
+      "physical_gets": 53914,
+      "physical_bytes": 6024222107,
+      "scheduled_input_bytes": 5939414730,
+      "routes": {
+        "scheduled": 81703,
+        "direct": 0,
+        "oversized": 0,
+        "unbounded": 471,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 53443,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 28260,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 1402,
+        "split_bytes": 0,
+        "split_object": 2799,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 4,
+        "window_admitted_with_preparation": 8,
+        "window_complete": 9653,
+        "window_timeout": 1,
+        "window_late": 4
+      },
+      "read_errors": {
+        "logical": 0,
+        "physical": 0,
+        "attempt": 0
+      },
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 3023,
+        "registered_pending": 33308,
+        "consumed": 36331,
+        "consume_pending": 3644,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 51696,
+          "data_miss": 43860,
+          "prefetch_count": 1868,
+          "prefetch_data_count": 11141
+        },
+        "locality_state": {
+          "data_total": 26376,
+          "data_miss": 21234,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 3095860,
+          "data_miss": 4075,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 390,
+          "data_miss": 10,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 3558443961,
+      "disjoint_histograms": {
+        "physical_bytes_16k_64k_256k_above": [
+          99,
+          46708,
+          3439,
+          3668
+        ],
+        "scheduled_bytes_16k_64k_256k_512k_1m_above": [
+          69,
+          78905,
+          1864,
+          361,
+          504,
+          0
+        ],
+        "scheduler_group_size_1_2_4_8_16_above": [
+          49051,
+          608,
+          1078,
+          1410,
+          1296,
+          0
+        ],
+        "prepared_group_size_1_2_4_8_16_above": [
+          3875,
+          555,
+          1064,
+          1408,
+          1295,
+          0
+        ],
+        "gap_bytes_32k_64k_128k_256k_1m_above": [
+          0,
+          5,
+          3,
+          304,
+          390,
+          700
+        ],
+        "blockwise_window_size_1_2_4_8_16_above": [
+          3089680,
+          5543,
+          1050,
+          1668,
+          1397,
+          0
+        ]
+      }
+    }
+  },
+  "on-q64-whole-window-io-distribution": {
+    "source_rows_at_checkpoint": 13652430.0,
+    "through_source_scan": {
+      "elapsed_s": 50.384,
+      "physical_gets": 38944,
+      "physical_bytes": 3544544509,
+      "scheduled_input_bytes": 3528438001,
+      "routes": {
+        "scheduled": 39085,
+        "direct": 0,
+        "oversized": 0,
+        "unbounded": 134,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 38810,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 275,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 1370,
+        "split_bytes": 9,
+        "split_object": 2411,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 4,
+        "window_complete": 268,
+        "window_timeout": 2,
+        "window_late": 1
+      },
+      "read_errors": null,
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 150,
+        "registered_pending": 271,
+        "consumed": 331,
+        "consume_pending": 1,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 38356,
+          "data_miss": 31263,
+          "prefetch_count": 2095,
+          "prefetch_data_count": 16306
+        },
+        "locality_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 1090,
+          "data_miss": 3,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 0,
+          "data_miss": 0,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 3834967535,
+      "disjoint_histograms": {
+        "physical_bytes_16k_64k_256k_above": [
+          32,
+          36005,
+          1364,
+          1543
+        ],
+        "scheduled_bytes_16k_64k_256k_512k_1m_above": [
+          28,
+          36300,
+          1260,
+          600,
+          897,
+          0
+        ],
+        "scheduler_group_size_1_2_4_8_16_above": [
+          38668,
+          87,
+          33,
+          21,
+          1,
+          0
+        ],
+        "prepared_group_size_1_2_4_8_16_above": [
+          69,
+          33,
+          25,
+          19,
+          0,
+          0
+        ],
+        "gap_bytes_32k_64k_128k_256k_1m_above": [
+          0,
+          4,
+          14,
+          187,
+          427,
+          738
+        ],
+        "blockwise_window_size_1_2_4_8_16_above": [
+          1397,
+          218,
+          27,
+          25,
+          0,
+          0
+        ]
+      }
+    },
+    "after_source_scan": {
+      "elapsed_s": 371.907,
+      "physical_gets": 8564,
+      "physical_bytes": 2453628770,
+      "scheduled_input_bytes": 2377907370,
+      "routes": {
+        "scheduled": 36390,
+        "direct": 0,
+        "oversized": 0,
+        "unbounded": 356,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 8208,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 28182,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 6,
+        "split_bytes": 0,
+        "split_object": 238,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 3,
+        "window_complete": 8603,
+        "window_timeout": 5,
+        "window_late": 22
+      },
+      "read_errors": null,
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 2574,
+        "registered_pending": 32729,
+        "consumed": 35393,
+        "consume_pending": 3357,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 7207,
+          "data_miss": 6202,
+          "prefetch_count": 191,
+          "prefetch_data_count": 968
+        },
+        "locality_state": {
+          "data_total": 29231,
+          "data_miss": 24468,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 3089828,
+          "data_miss": 3761,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 400,
+          "data_miss": 16,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 6942902,
+      "disjoint_histograms": {
+        "physical_bytes_16k_64k_256k_above": [
+          76,
+          4315,
+          1467,
+          2706
+        ],
+        "scheduled_bytes_16k_64k_256k_512k_1m_above": [
+          29,
+          36074,
+          287,
+          0,
+          0,
+          0
+        ],
+        "scheduler_group_size_1_2_4_8_16_above": [
+          4273,
+          540,
+          777,
+          1187,
+          1431,
+          0
+        ],
+        "prepared_group_size_1_2_4_8_16_above": [
+          3624,
+          536,
+          776,
+          1186,
+          1431,
+          0
+        ],
+        "gap_bytes_32k_64k_128k_256k_1m_above": [
+          0,
+          3,
+          0,
+          0,
+          2,
+          1
+        ],
+        "blockwise_window_size_1_2_4_8_16_above": [
+          3083570,
+          4800,
+          945,
+          1246,
+          1617,
+          0
+        ]
+      }
+    },
+    "full": {
+      "elapsed_s": 422.291,
+      "physical_gets": 47508,
+      "physical_bytes": 5998173279,
+      "scheduled_input_bytes": 5906345371,
+      "routes": {
+        "scheduled": 75475,
+        "direct": 0,
+        "oversized": 0,
+        "unbounded": 490,
+        "empty_range": 0
+      },
+      "events": {
+        "group_ok": 47018,
+        "group_error": 0,
+        "group_cancelled": 0,
+        "merged_requests": 28457,
+        "cancelled_queued": 0,
+        "cancelled_before_dispatch": 0,
+        "split_gap": 1376,
+        "split_bytes": 9,
+        "split_object": 2649,
+        "window_split_limit": 0,
+        "window_split_admission": 0,
+        "window_budget_reject": 0,
+        "window_admitted_with_preparation": 7,
+        "window_complete": 8871,
+        "window_timeout": 7,
+        "window_late": 23
+      },
+      "read_errors": {
+        "logical": 0,
+        "physical": 0,
+        "attempt": 0
+      },
+      "scheduled_requests_minus_groups_and_merges": 0,
+      "physical_gets_minus_scheduled_groups_and_other_routes": 0,
+      "blockwise_prefetch": {
+        "registered_ready": 2724,
+        "registered_pending": 33000,
+        "consumed": 35724,
+        "consume_pending": 3358,
+        "discarded": 0
+      },
+      "hummock_io_by_table_role": {
+        "source": {
+          "data_total": 45563,
+          "data_miss": 37465,
+          "prefetch_count": 2286,
+          "prefetch_data_count": 17274
+        },
+        "locality_state": {
+          "data_total": 29231,
+          "data_miss": 24468,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_join_state": {
+          "data_total": 3090918,
+          "data_miss": 3764,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        },
+        "hash_agg_state": {
+          "data_total": 400,
+          "data_miss": 16,
+          "prefetch_count": 0,
+          "prefetch_data_count": 0
+        }
+      },
+      "gap_sum_bytes": 3841910437,
+      "disjoint_histograms": {
+        "physical_bytes_16k_64k_256k_above": [
+          108,
+          40320,
+          2831,
+          4249
+        ],
+        "scheduled_bytes_16k_64k_256k_512k_1m_above": [
+          57,
+          72374,
+          1547,
+          600,
+          897,
+          0
+        ],
+        "scheduler_group_size_1_2_4_8_16_above": [
+          42941,
+          627,
+          810,
+          1208,
+          1432,
+          0
+        ],
+        "prepared_group_size_1_2_4_8_16_above": [
+          3693,
+          569,
+          801,
+          1205,
+          1431,
+          0
+        ],
+        "gap_bytes_32k_64k_128k_256k_1m_above": [
+          0,
+          7,
+          14,
+          187,
+          429,
+          739
+        ],
+        "blockwise_window_size_1_2_4_8_16_above": [
+          3084967,
+          5018,
+          972,
+          1271,
+          1617,
+          0
+        ]
+      }
+    }
+  }
+}

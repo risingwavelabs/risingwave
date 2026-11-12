@@ -45,8 +45,7 @@ pub struct StoreLocalStatistic {
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
     pub cache_meta_batch_ready: u64,
-    pub cache_meta_batch_loading: u64,
-    pub cache_meta_batch_load: u64,
+    pub cache_meta_batch_retained: u64,
     pub cache_meta_batch_oversized: u64,
     pub cache_meta_batch_budget_reject: u64,
 
@@ -219,8 +218,7 @@ impl StoreLocalStatistic {
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
             || self.cache_meta_batch_ready != 0
-            || self.cache_meta_batch_loading != 0
-            || self.cache_meta_batch_load != 0
+            || self.cache_meta_batch_retained != 0
             || self.cache_meta_batch_oversized != 0
             || self.cache_meta_batch_budget_reject != 0
             || self.cache_data_prefetch_count != 0
@@ -252,8 +250,7 @@ struct LocalStoreMetrics {
     cache_data_block_miss: LabelGuardedLocalIntCounter,
     cache_meta_block_total: LabelGuardedLocalIntCounter,
     cache_meta_batch_ready: LabelGuardedLocalIntCounter,
-    cache_meta_batch_loading: LabelGuardedLocalIntCounter,
-    cache_meta_batch_load: LabelGuardedLocalIntCounter,
+    cache_meta_batch_retained: LabelGuardedLocalIntCounter,
     cache_meta_batch_oversized: LabelGuardedLocalIntCounter,
     cache_meta_batch_budget_reject: LabelGuardedLocalIntCounter,
 
@@ -315,13 +312,9 @@ impl LocalStoreMetrics {
             .sst_store_block_request_counts
             .with_guarded_label_values(&[table_id_label, "meta_batch_ready"])
             .local();
-        let cache_meta_batch_loading = metrics
+        let cache_meta_batch_retained = metrics
             .sst_store_block_request_counts
-            .with_guarded_label_values(&[table_id_label, "meta_batch_loading"])
-            .local();
-        let cache_meta_batch_load = metrics
-            .sst_store_block_request_counts
-            .with_guarded_label_values(&[table_id_label, "meta_batch_load"])
+            .with_guarded_label_values(&[table_id_label, "meta_batch_retained"])
             .local();
         let cache_meta_batch_oversized = metrics
             .sst_store_block_request_counts
@@ -420,8 +413,7 @@ impl LocalStoreMetrics {
             cache_data_block_miss,
             cache_meta_block_total,
             cache_meta_batch_ready,
-            cache_meta_batch_loading,
-            cache_meta_batch_load,
+            cache_meta_batch_retained,
             cache_meta_batch_oversized,
             cache_meta_batch_budget_reject,
 
@@ -529,8 +521,7 @@ add_local_metrics_count!(
     cache_data_block_miss,
     cache_meta_block_total,
     cache_meta_batch_ready,
-    cache_meta_batch_loading,
-    cache_meta_batch_load,
+    cache_meta_batch_retained,
     cache_meta_batch_oversized,
     cache_meta_batch_budget_reject,
     cache_meta_block_miss,

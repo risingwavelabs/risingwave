@@ -91,6 +91,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
+risingwave_meta = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"

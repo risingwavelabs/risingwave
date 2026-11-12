@@ -1,0 +1,24 @@
+[server]
+metrics_level = "Debug"
+
+[frontend]
+unsafe_enable_local_fs_connector = true
+
+[streaming]
+unsafe_disable_strict_consistency = true
+
+[storage.blockwise_prefetch]
+enabled = true
+locality_backfill_enabled = true
+max_blocks = 16
+max_bytes = 1048576
+
+[storage.object_store]
+enable_hummock_read_coalescing = true
+
+[storage.object_store.read_scheduler]
+max_read_bytes = 1048576
+max_admitted_requests = 64
+max_inflight_reads = 32
+max_batch_requests = 16
+batch_prepare_timeout_ms = 1

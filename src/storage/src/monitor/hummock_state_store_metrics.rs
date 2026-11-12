@@ -62,7 +62,6 @@ pub struct HummockStateStoreMetrics {
     pub blockwise_prefetch_window_blocks: HistogramVec,
     pub blockwise_prefetch_window_bytes: Histogram,
     pub block_cache_read_events: IntCounterVec,
-    pub meta_batch_wait_duration: Histogram,
     pub blockwise_prefetch_bytes: IntCounterVec,
     pub blockwise_prefetch_wait_duration: Histogram,
 
@@ -162,8 +161,6 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let meta_batch_wait_duration = register_histogram_with_registry!(
-            "state_store_meta_batch_wait_duration_seconds", "Latency resolving an existing batch metadata loading cell, including cancellation or retry of an abandoned producer", exponential_buckets(0.000001, 2.0, 25).unwrap(), registry).unwrap();
         let blockwise_prefetch_bytes = register_int_counter_vec_with_registry!(
             "state_store_blockwise_prefetch_bytes", "Compressed block bytes represented by registered, consumed or discarded handles; not physical IO bytes", &["event"], registry).unwrap();
         let blockwise_prefetch_wait_duration = register_histogram_with_registry!(
@@ -728,7 +725,6 @@ impl HummockStateStoreMetrics {
             prefetch_consumed_bytes,
             prefetch_discarded_bytes,
 
-            meta_batch_wait_duration,
             blockwise_prefetch_bytes,
             blockwise_prefetch_wait_duration,
             blockwise_prefetch_events,

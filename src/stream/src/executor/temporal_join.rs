@@ -134,7 +134,7 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                         .iter_with_prefix(
                             &pk_prefix,
                             &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                            PrefetchOptions::default(),
+                            PrefetchOptions::prefetch_for_prefix_scan(),
                         )
                         .await?;
 
@@ -336,6 +336,7 @@ pub(super) mod phase1 {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_storage::StateStore;
     use risingwave_storage::row_serde::value_serde::ValueRowSerde;
+    use risingwave_storage::store::PrefetchOptions;
 
     use super::{StreamExecutorError, TemporalSide};
     use crate::common::table::state_table::StateTable;
@@ -559,7 +560,11 @@ pub(super) mod phase1 {
                                 &(Bound::Unbounded, Bound::Unbounded);
                             let prefix = left_row.project(memo_table_lookup_prefix);
                             let state_table_iter = memo_table
-                                .iter_with_prefix(prefix, sub_range, Default::default())
+                                .iter_with_prefix(
+                                    prefix,
+                                    sub_range,
+                                    PrefetchOptions::prefetch_for_prefix_scan(),
+                                )
                                 .await?;
                             pin_mut!(state_table_iter);
 

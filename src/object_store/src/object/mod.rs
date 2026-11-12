@@ -46,10 +46,11 @@ pub mod error;
 pub mod object_metrics;
 
 pub mod prefix;
+mod read_batch;
 mod read_scheduler;
-
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+pub use read_batch::{ReadBatch, ReadBatchMember};
 use read_scheduler::ReadScheduler;
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
@@ -298,6 +299,7 @@ impl ObjectStoreImpl {
     pub fn with_read_coalescing(mut self) -> Self {
         match &mut self {
             Self::S3(store) => store.enable_read_coalescing(),
+            Self::InMem(store) => store.enable_read_coalescing(),
             Self::Opendal(store)
                 if store.media_type() == MediaType::S3.as_str()
                     || store.media_type() == MediaType::Minio.as_str() =>
@@ -321,6 +323,19 @@ impl ObjectStoreImpl {
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         object_store_impl_method_body!(self, read(path, range).await)
+    }
+
+    pub fn read_batch(&self, count: usize) -> Option<ReadBatch> {
+        dispatch_object_store_enum!(self, |store| store.read_batch(count))
+    }
+
+    pub async fn read_with_batch(
+        &self,
+        path: &str,
+        range: impl ObjectRangeBounds,
+        member: Option<ReadBatchMember>,
+    ) -> ObjectResult<Bytes> {
+        object_store_impl_method_body!(self, read_with_batch(path, range, member).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -558,7 +573,8 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     config: Arc<ObjectStoreConfig>,
-    read_scheduler: Option<ReadScheduler>,
+    // Keep optional scheduling state out of every backend variant and its callers' futures.
+    read_scheduler: Option<Arc<ReadScheduler>>,
 }
 
 /// Manually dispatch trait methods.
@@ -602,7 +618,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             self.object_store_metrics.clone(),
             self.config.clone(),
         ));
-        self.read_scheduler = Some(ReadScheduler::new(
+        self.read_scheduler = Some(Arc::new(ReadScheduler::new(
             &self.object_store_metrics,
             self.media_type(),
             self.config.read_scheduler,
@@ -610,7 +626,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 let direct = direct.clone();
                 async move { direct.read_direct(&path, range).await }
             },
-        ));
+        )));
     }
 
     fn media_type(&self) -> &'static str {
@@ -690,31 +706,43 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ))
     }
 
+    pub fn read_batch(&self, count: usize) -> Option<ReadBatch> {
+        ReadBatch::new(self.read_scheduler.as_ref()?.clone(), count)
+    }
+
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        self.read_with_batch(path, range, None).await
+    }
+
+    pub async fn read_with_batch(
+        &self,
+        path: &str,
+        range: impl ObjectRangeBounds,
+        member: Option<ReadBatchMember>,
+    ) -> ObjectResult<Bytes> {
         use std::ops::Bound::{Excluded, Included};
 
         static NEXT_TRACE_REQUEST: std::sync::atomic::AtomicU64 =
             std::sync::atomic::AtomicU64::new(1);
-        let trace_id = tracing::enabled!(target: "state_store_read_batch", tracing::Level::TRACE)
-            .then(|| NEXT_TRACE_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let trace_id = (tracing::enabled!(target: "state_store_read_batch", tracing::Level::DEBUG)
+            || tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG))
+        .then(|| NEXT_TRACE_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let media_type = self.media_type();
         let mut read_guard = self.object_store_metrics.begin_read(media_type, "logical");
-        let (route, response) = match &self.read_scheduler {
+        let (route, scheduled) = match &self.read_scheduler {
             None => ("direct", None),
             Some(scheduler) => match (range.start_bound(), range.end_bound()) {
                 (Included(&start), Excluded(&end)) if start >= end => ("empty_range", None),
                 (Included(&start), Excluded(&end)) if scheduler.can_schedule(&(start..end)) => {
-                    match scheduler.try_submit(path, start..end, trace_id) {
-                        Some(response) => ("scheduled", Some(response)),
-                        None => ("scheduler_bypass", None),
-                    }
+                    ("scheduled", Some((scheduler, start..end)))
                 }
                 (Included(_), Excluded(_)) => ("oversized", None),
                 _ => ("unbounded", None),
             },
         };
         if let Some(request_id) = trace_id {
-            tracing::trace!(target: "state_store_read_batch", request_id, route,
+            let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
+            tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,
                 range = ?range, "object read submitted");
         }
         let labels = &[media_type, route];
@@ -733,12 +761,29 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .with_label_values(labels)
                 .observe(end.saturating_sub(start) as f64);
         }
-        let result = match response {
-            Some(response) => response.await.unwrap_or_else(|error| Err(error.into())),
-            None => self.read_direct(path, range).await,
+        let result = match scheduled {
+            Some((scheduler, range)) => {
+                let staged = match member {
+                    Some(member) => Box::pin(member.stage(path, range.clone(), trace_id)).await,
+                    None => None,
+                };
+                let response = match staged {
+                    Some(response) => Ok(response),
+                    None => scheduler.submit(path, range, trace_id).await,
+                };
+                match response {
+                    Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
+                    Err(error) => Err(error),
+                }
+            }
+            None => {
+                drop(member);
+                self.read_direct(path, range).await
+            }
         };
         if let Some(request_id) = trace_id {
-            tracing::trace!(target: "state_store_read_batch", request_id, route,
+            let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
+            tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,
                 ok = result.is_ok(), "object read completed");
         }
         read_guard.finish(&result);
@@ -1153,7 +1198,7 @@ pub async fn build_remote_object_store(
             }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
         }
-        #[cfg(debug_assertions)]
+        #[cfg(any(debug_assertions, test, feature = "test"))]
         "memory-isolated-for-test" /* isolated memory is only available for tests */ => {
             ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(metrics, config))
         }

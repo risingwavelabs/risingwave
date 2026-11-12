@@ -989,6 +989,7 @@ pub mod tests {
                 vec![
                     "max_batch_requests",
                     "max_admitted_requests",
+                    "max_inflight_reads",
                     "max_read_bytes",
                 ],
             ),
@@ -1013,6 +1014,7 @@ pub mod tests {
         }
         let defaults = RwConfig::default();
         assert!(!defaults.storage.blockwise_prefetch.enabled);
+        assert!(!defaults.storage.blockwise_prefetch.changelog_enabled);
         assert!(!defaults.storage.read_batch.enabled);
         assert!(!defaults.storage.read_batch.meta_reuse);
         assert!(!defaults.storage.object_store.enable_hummock_read_coalescing);

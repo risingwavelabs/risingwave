@@ -615,6 +615,12 @@ pub struct BlockwisePrefetchConfig {
     /// Enable blockwise lookahead requested by prefix scans. Point reads are unaffected.
     #[serde(default)]
     pub enabled: bool,
+    /// Enable the same bounded blockwise lookahead for change log scans independently of prefix scans.
+    #[serde(default)]
+    pub changelog_enabled: bool,
+    /// Use blockwise instead of contiguous range prefetch for Locality Backfill snapshot scans.
+    #[serde(default)]
+    pub locality_backfill_enabled: bool,
     /// Maximum blocks per iterator window, including the demand block. 1 disables lookahead.
     #[serde(default = "default_read_window_blocks")]
     pub max_blocks: NonZeroUsize,
@@ -628,16 +634,16 @@ pub struct BlockwisePrefetchConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadBatchConfig {
-    /// Adapted streaming operators use `MultiGet` when enabled.
+    /// HashAgg and Materialize use `MultiGet` when enabled.
     #[serde(default)]
     pub enabled: bool,
     /// Maximum keys executing concurrently in each `MultiGet`, not a node-wide limit.
     #[serde(default = "default_read_batch_concurrency")]
     pub concurrency: NonZeroUsize,
-    /// Share SST metadata within `MultiGet` independently of concurrent key reads.
+    /// Share SST metadata within `MultiGet`. Set to false to bypass batch metadata reuse.
     #[serde(default)]
     pub meta_reuse: bool,
-    /// Maximum retained regular metadata entries. Loading cells are bounded by concurrency.
+    /// Maximum retained regular metadata entries per `MultiGet`.
     #[serde(default = "default_read_meta_entries")]
     pub meta_max_entries: NonZeroUsize,
     /// Retained regular metadata bytes; one oversized SST may additionally be retained.
@@ -649,28 +655,43 @@ pub struct ReadBatchConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadSchedulerConfig {
-    /// Maximum ready requests planned per dequeue. Effective limit is also bounded by admission.
-    #[serde(default = "default_read_meta_entries")]
+    /// Maximum preparation wait after the first cold member of an explicit read window.
+    /// 0 disables window batching. Admission wait is separate. Preparation reservations
+    /// have a separate nonblocking budget equal to max_admitted_requests.
+    #[serde(default = "default_read_batch_prepare_timeout_ms")]
+    pub batch_prepare_timeout_ms: u32,
+    /// Maximum requests received per dequeue. Pending requests across dequeues may merge.
+    /// This is not a minimum batch size.
+    #[serde(default = "default_read_scheduler_batch_requests")]
     pub max_batch_requests: NonZeroUsize,
-    /// Maximum retained logical requests, including queued and in-flight reads. When full,
-    /// reads bypass the scheduler. This does not limit total object-store concurrency.
+    /// Maximum retained logical requests under the ordinary admission budget, including queued
+    /// and in-flight reads. A complete mergeable window can use its existing preparation permits
+    /// through completion when this budget is short. Oversized and unbounded reads bypass scheduling.
     #[serde(
         default = "default_read_admitted_requests",
-        deserialize_with = "deserialize_read_admission"
+        deserialize_with = "deserialize_read_permits"
     )]
     pub max_admitted_requests: NonZeroUsize,
+    /// Maximum concurrent scheduled physical reads, including individual range-error fallbacks.
+    /// A merged GET consumes one slot regardless of its logical member count. Direct oversized
+    /// and unbounded reads are excluded. Independent of the retained logical request limit.
+    #[serde(
+        default = "default_read_inflight_reads",
+        deserialize_with = "deserialize_read_permits"
+    )]
+    pub max_inflight_reads: NonZeroUsize,
     /// Maximum input or merged range length. Larger reads bypass scheduling.
     #[serde(default = "default_read_window_bytes")]
     pub max_read_bytes: NonZeroUsize,
 }
 
-fn deserialize_read_admission<'de, D: serde::Deserializer<'de>>(
+fn deserialize_read_permits<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<NonZeroUsize, D::Error> {
     let value = NonZeroUsize::deserialize(deserializer)?;
     if value.get() > tokio::sync::Semaphore::MAX_PERMITS {
         return Err(D::Error::custom(
-            "read scheduler admission exceeds semaphore capacity",
+            "read scheduler limit exceeds semaphore capacity",
         ));
     }
     Ok(value)
@@ -685,11 +706,20 @@ fn default_read_window_bytes() -> NonZeroUsize {
 fn default_read_batch_concurrency() -> NonZeroUsize {
     NonZeroUsize::new(10).unwrap()
 }
+fn default_read_batch_prepare_timeout_ms() -> u32 {
+    1
+}
+fn default_read_scheduler_batch_requests() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
 fn default_read_meta_entries() -> NonZeroUsize {
     NonZeroUsize::new(16).unwrap()
 }
 fn default_read_meta_bytes() -> NonZeroUsize {
     NonZeroUsize::new(1024 * 1024).unwrap()
+}
+fn default_read_inflight_reads() -> NonZeroUsize {
+    NonZeroUsize::new(32).unwrap()
 }
 fn default_read_admitted_requests() -> NonZeroUsize {
     NonZeroUsize::new(32).unwrap()

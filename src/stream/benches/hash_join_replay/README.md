@@ -83,8 +83,7 @@ on a commit barrier, absent here, and are not collected. Earlier result files
 containing zero deltas cannot establish zero lookups or misses.
 
 Set the replay JSON's `rw_config` field to a production TOML path. The bundled
-`read-optimization.toml` enables blockwise prefetch and native MultiGet/meta reuse;
-change its independent switches for attribution. The replay `schedulers` array
+`read-optimization.toml` enables blockwise prefetch and sets scheduler bounds. The replay `schedulers` array
 still selects scheduler OFF/ON arms, with bounds loaded from that same TOML.
 Omitting `rw_config` uses disabled production defaults. Restart the process after
 changing it. Neither in-image mode is clean main: other candidate source changes
@@ -646,6 +645,15 @@ Evidence, exact configuration/identities, review and standalone report: `target/
 
 ## Distributed state-key controls
 
+Set `checked_materialize: true` on a distributed downstream fixture to
+exercise Materialize's `Overwrite` conflict checks. The actor has a downstream
+dispatcher, and the replay requires old-row cache misses and SST meta lookups
+on table 5. The fixture identity, final outputs and empty staged tables are
+verified by the same gates as the existing delete replay. With
+`workload: "hash_agg"`, `fixture_epochs` can spread the groups across separately
+committed vnode ranges. Confirm the resulting SST count before using this
+as a low-locality comparison.
+
 `agg-distributed.json` restores and retracts2,097,152 existing COUNT groups in
 seeded shuffled order through HashAgg -> Materialize. `join-regroup.json` reads
 2048 join prefixes x256 rows with1024-byte payload, then aggregates by an
@@ -662,12 +670,18 @@ actual aggregation-key vnode coverage and reports both compressed block bytes
 and decoded cache weight. Data layout inspection uses a separate store before
 timing: Foyer starts fresh, but MinIO/OS caches are not guaranteed cold.
 
-Historical candidates enabled native MultiGet and metadata sharing with
-`RW_EXPERIMENTAL_SST_META_BATCH_REUSE=1`; current code uses the independent
-`storage.read_batch.enabled` and `meta_reuse` TOML controls. Ready-block batch reuse has been
-removed; the historical OFF/ON switch below only applies to the archived binary
-from that experiment. Current point reads always use ordinary Foyer block
-lookups. Iterator-owned prefetch responses and the scheduler remain unchanged.
+Point reads are scalar by default. To exercise the optional HashAgg and
+Materialize MultiGet path, set
+
+```toml
+[storage.read_batch]
+enabled = true
+meta_reuse = true
+```
+
+Keep `enabled` and `concurrency` fixed and toggle `meta_reuse` to isolate
+metadata reuse. To reproduce a historical measurement, use its recorded
+binary and configuration.
 A clean main comparison needs this same harness with test-only support and
 scheduler unavailable, not an old singleton-fixture result. Keep build profiles,
 configuration, fixture fingerprints and final-state checks identical across arms.
@@ -757,3 +771,332 @@ SstableStore and HummockTestEnv construction. See
 for defaults, counter semantics, tuning guidance and Cloud preflight. Historical
 samples above describe archived code, not measurements of this configuration
 and observability update.
+
+## Hummock change log read diagnostic
+
+`change_log_reads: true` selects a separate storage diagnostic. It calls real
+`HummockStorage::iter_log`; the older `fanout-*-changelog.json` cases instead
+feed insert/delete rows into HashJoin and do not exercise this API.
+
+Use a fresh output directory and empty dedicated MinIO bucket for each invocation.
+`keys` is the number of scanned vnodes, `rows_per_key` is the number of keys per
+vnode, and `value_bytes` controls deterministic value entropy/size. The fixture
+commits three epochs, then scans only epoch 2 to check insert/update/delete values
+without including epoch 3. Each invocation creates this fixture once and shares
+its unchanged SSTs, version and metadata manager across all arms; it does not
+reuse the older `fixture.pb` workflow.
+
+The diagnostic runs three arms (all OFF, scheduler only, changelog prefetch plus
+scheduler), reversing order every other repeat. Each arm has fresh actual Foyer
+caches and the same configured storage budgets. Window budgets come from `rw_config`;
+only `changelog_enabled` and scheduler activation vary between arms. Cases are a
+full cold-cache scan, every-third-block cache warming, a two-key hard range, and
+one-row early termination of a wide range. These are storage scenarios, not a
+full snapshot-backfill actor or Cloud throughput benchmark. MinIO's OS cache is
+not reset between arms. The in-image OFF arm is not a separate main build.
+
+Treat the artificial cache holes, two-key bound, and one-row early termination as
+mechanism/correctness diagnostics, not representative production performance
+workloads. In particular, early termination declares a wide range and then drops
+the iterator; it does not model ordinary chunk delivery or backpressure.
+Production evaluation should follow snapshot backfill's `batch_iter_vnode_log`
+callers: scan committed change logs from the saved PK through the vnode end,
+consume through `VnodeStream` with the real chunk size and assigned vnodes, and
+let normal reads and writes determine cache residency. Validate ongoing
+insert/update/delete ingestion and log catch-up using the existing snapshot
+backfill workload before drawing rollout conclusions from this diagnostic.
+
+Results are saved under `changelog-results/`, including fixture object IDs/block
+counts, effective storage options, per-arm metrics and `results.json`. Elapsed time
+includes result validation and excludes draining outstanding prefetch. Physical
+counts include that tail work. Cache-only gets join already registered Foyer
+producers without supplying an outer-fetch closure; the drain's Foyer lookup
+statistics must not be interpreted as scan lookup counts. No per-arm CPU metric
+is collected. A long prefetch arm must consume at least one prefetched handle,
+and every arm checks row content/order, stable version, no writes/retries/errors,
+and zero pending/in-flight object reads after draining.
+
+
+## Latest scheduler on the distributed join-regroup fixture (2026-11-10)
+
+One current candidate replay reused the accepted `distributed-read-replay`
+join-regroup SST/version/spec/manifest/layout and its historical main results.
+This is the 256-vnode fixture with 262,144 groups and two input rows/group;
+group key is decoupled from join prefix. One actor owns all vnodes, with four
+runtime threads, shuffled probes, chunk256, weighted64MiB caches, dev build,
+storage sanity OFF and strict consistency ON. It models post-distribution state
+access without network exchange. The earlier legacy512-wide plan was stopped
+in guard idle before build or execution after the fixture-selection correction.
+
+Current settings: prefix lookaheadN3, MultiGet/meta reuseON at concurrency10,
+Q1024/P32, batch16 and maxread256KiB; ready-block batch reuse is removed. The new
+production TOML controls were checked in saved effective storage options. Only
+one small current preflight and one long current sample ran, with no profiler.
+
+| Version | Seconds | CPU seconds | GETs | Read bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Saved main88b98114 | 22.766 | 18 | 10,420 | 678,319,392 |
+| Saved candidate, ready-block reuse OFF | 15.949 | 15 | 7,622 | 673,322,318 |
+| Latest candidate Q1024/P32 | 15.919 | 15 | 6,739 | 673,322,318 |
+
+Latest logical reads10,343 minus saved3,604 requests equals6,739 physical GETs.
+Compared with the saved candidate, physical reads fell11.58% at identical bytes
+and logical counts; elapsed/CPU did not materially change. Compared with main,
+elapsed fell30.08% and GETs35.33%, but that includes all candidate changes and
+some changed read bytes; it is not isolated scheduler attribution. Aggregation
+still makes262,144 point gets and262,236 block queries, with1,024 metadata queries.
+All256 aggregation vnodes, frozen fixture hashes, output/finalstate invariants
+and no measured writes/errors/retries were checked by the existing harness.
+One-sample dev/MinIO evidence, not production rollout qualification.
+
+Evidence: `target/replay-latest-regroup/`, with `index.jsonl`, per-case raw
+metrics, effective options, logs, and identical source snapshots across build/run.
+Latest binary SHA256
+`b2864550af5a0f6e344c6749bb27ae1dbe7c72973fbfccb3f6d2a6b01a1515f5`.
+
+
+## Latest distributed join-regroup CPU diagnosis (2026-11-10)
+
+One separate Time Profiler run reused the exact latest binary and accepted
+256-vnode fixture/configuration, with storage sanity OFF and strict consistency
+ON. No rebuild or extra normal sample ran. PID-filtered Running samples within
+the measured interval (10ms trimmed at each boundary) captured14.490CPU seconds;
+whole-second process metric reported14s, unresolved stacks0.069%. Normal timing
+remains15.919s; the diagnostic15.502s and7,200GETs are not performance comparisons.
+
+| Nearest executor/background owner | Sampled CPU seconds | Share |
+| --- | ---: | ---: |
+| HashAgg | 7.934 | 54.8% |
+| Background storage/IO/cache | 2.470 | 17.0% |
+| HashJoin | 2.435 | 16.8% |
+| Runtime/other | 1.011 | 7.0% |
+| Materialize | 0.519 | 3.6% |
+| Harness and unresolved | 0.121 | 0.8% |
+
+Within HashAgg, state restoration includes5.019s and get_rows3.820s; nested
+per-key get_with_metadata includes3.208s. These are inclusive, not additive.
+Batch coordination outside per-key futures samples0.263s. Actual SST metadata
+lookup0.037s and scheduler planning0.022s are small. Aggregate state fits in the
+64MiBcache but262,144 pointgets/262,236 blockqueries still execute, explaining
+why fewer remoteGETs leave substantial hot-read and aggregation CPU.
+
+Copy leaves total1.950s (13.5%), spread among existing aggregate outputs, futures,
+containers and read paths. This is not proof of one oversized future or a new
+MultiGet regression. Dev Rust precondition paths include1.327s and overlap the
+owner totals. No missingCONFIG warning storm or storage sanity path recurred.
+Details, source attribution and limitations: `target/profile-latest-regroup/REPORT.txt`.
+Output/fixture/config/source gates passed and ownedMinIO was stopped; raw trace,
+XML, symbols, folded stacks and targeted stackaudit are retained beside the report.
+
+
+## Bounded HashAgg allocation cleanup (2026-11-10)
+
+The native batch restore now borrows GroupKey PK projections instead of copying
+OwnedRows. Restore futures are created as buffer_unordered(10) admits them,
+rather than collected for every missing group in advance. The missing-key list
+remains to finish cache mutation before result insertion. Root and Astra reviewed
+key/result alignment, borrowed-key lifetime, scalar fallback, errors and cancellation.
+The single-state get_outputs fast path was deferred because directly awaiting its
+large enum future needs separate frame-size evidence.
+
+One guarded replay reused the exact accepted 256-vnode join-regroup fixture:
+524,288 inputs, 262,144 groups, chunk256, four runtime workers, 64MiB caches,
+N3, read batch concurrency10/meta reuseON, Q1024/P32, sanityOFF/strictON.
+No main rerun, profiler, fixture generation or parameter sweep was performed.
+
+| Version | Seconds | CPU seconds | GETs | Read bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Saved main88b98114 | 22.766 | 18 | 10,420 | 678,319,392 |
+| Previous latest | 15.919 | 15 | 6,739 | 673,322,318 |
+| HashAgg cleanup | 15.431 | 14 | 7,087 | 673,322,318 |
+
+Elapsed decreased3.07% versus the preceding sample; GETs increased5.16% with
+unchanged10,343 logical reads and bytes. Async scheduling affects merge grouping;
+these single dev/MinIO samples cannot attribute elapsed or CPU changes solely to
+the cleanup. Agg pointgets262,144, blockqueries262,236 and metaqueries1,024 are
+unchanged. No new block reuse/cache strategy was added.
+
+Existing HashAgg integration tests4/4 and full workspace all-target Clippy passed.
+Frozen source hashes match before checks/build and after replay; fixtures, output
+and final state invariants passed; measured object writes/errors/retries werezero.
+All scheduler gauges drained and owned MinIO was stopped. Full evidence and
+limitations: `target/agg-hotpath-cleanup/REPORT.txt`; binary SHA256
+`d66a32257abb5ef8aaa3eaa3731b1684e4df4e90e634148381eb01d9c256f0e7`.
+
+### Changelog analysis while replay ran
+
+No CPU stack profile exists for the saved full-cluster changelog run. A re-read
+of its107 metric scrapes found8 with nonzero queued requests, including queues
+of572/579/556 with observed physical in-flight1/3/6. Gauges are non-atomic and
+coarse; this neither proves underutilization nor supports attributing all24.082ms
+queue time to P32 saturation. Queue time includes wakeup, planning and time until
+the group future is polled. Current source has no mandatory full-batch wait.
+New/old change-log iterator initial positioning is serial despite independent
+inputs; concurrent initialization is only a candidate, not a measured win, and
+later epoch pairing still requires ordered advancement. No changelog source was
+changed. Detailed source/metric limits and next diagnostic scope are recorded in
+`target/cross-db-changelog-dispatch/PROFILE-INTERPRETATION.txt`.
+
+
+## Aggregate output future size (2026-11-10)
+
+Following the get_outputs copy samples, an actual HummockStorage monomorphization
+was compiled with rustc -Zprint-type-sizes. The large per-aggregate future was
+caused by the materialized-input cache-miss branch: iter construction4176B and
+live scan3592B. Even count/sum shared that static future layout. TryJoinAll's
+outer future was only88B, but each TryMaybeDone slot occupied4352B. Profile
+copy stacks include collection, Pin::set and take_output/mem::replace.
+
+The unchanged cache-fill body now lives in private sync_cache, boxed only when
+input cache is unsynced. Count/sum and synced materialized states incur no added
+allocation; misses incur one. Parallel output collection, reset, stats, limits,
+prefix/prefetch, errors and cancellation remain unchanged. This keeps the entire
+scan, not merely iterator construction, outside hot output futures.
+
+| Actual compiled future/layout | Before bytes | After bytes |
+| --- | ---: | ---: |
+| AggState::get_output | 4,344 | 312 |
+| MaterializedInputState::get_output | 4,304 | 272 |
+| TryMaybeDone element | 4,352 | 320 |
+| AggGroup::get_outputs | 152 | 152 |
+| TryJoinAll | 88 | 88 |
+
+The extracted cold sync_cache future is4248B on the heap when needed. These are
+current dev-build layouts, not a measurement of main's sizes or release CPU.
+Main88b98114 already contains the same inline-scan structure.
+
+Astra reviewed the scoped extraction;8 existing materialized-input unit tests,
+4 HashAgg integration tests and workspace all-target Clippy passed. The ordinary
+benchmark was built separately without diagnostic rustc flags. One guarded
+preflight and one formal replay used the same frozen256-vnode join-regroup
+fixture/configuration as the preceding round; no profile/mainrerun/newdata.
+
+| Version | Seconds | CPU seconds | GETs | Read bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Saved main88b98114 | 22.766 | 18 | 10,420 | 678,319,392 |
+| Previous HashAgg allocation cleanup | 15.431 | 14 | 7,087 | 673,322,318 |
+| Cold input-cache future boxed | 14.863 | 14 | 7,157 | 673,322,318 |
+
+Elapsed decreased3.68% in this sample. Logicalreads10,343, Aggpointgets262,144,
+Foyerqueries262,236 and metaqueries1,024 remained unchanged. GETgrouping changed
+by~1%; the optimization targets CPU/allocation, not IOvolume. Future-size savings
+are confirmed; a single dev/MinIO sample does not prove stable/release speedup.
+Cold-miss allocation cost was not performance-benchmarked for every aggregate.
+
+Fixture/output/final-state checks and unchanged source snapshots passed, zero
+measured object writes/errors/retries, all scheduler gauges drained; ownedMinIO
+stopped. Evidence: `target/agg-output-audit/` and
+`target/agg-output-cold-box/REPORT.txt`. Ordinary binary SHA256:
+`6259a3412f76f3519d1664da278dd30b11c727dcc54e723c46a91dc6bbd2b95e`.
+
+## Release validation of aggregate cold-path boxing (2026-11-10)
+
+This comparison isolates only the preceding `sync_cache` boxing change on the
+current optimization branch, not main. Both binaries use ordinary Cargo release
+(opt-level 3, debug assertions and overflow checks disabled), without profiler
+or profile overrides. HEAD was `817b276bcf69917c61b093f4251d080035d2e618`;
+dirty-source snapshots and binary hashes are retained with the evidence.
+
+The immutable join-regroup fixture and configuration were reused: 524,288 inputs,
+262,144 groups, 256 aggregation vnodes owned by one actor, four runtime workers,
+chunk 256, 64 MiB Foyer block cache, N3/256 KiB, MultiGet C10 and meta reuse ON,
+scheduler Q1024/P32/batch quantum16, sanity OFF and strict consistency ON. Each
+formal sample starts a fresh replay process and cache against real MinIO. The
+measurement covers the replay phase, excluding build and fixture preparation.
+Order: unboxed, boxed, boxed, unboxed, unboxed, boxed.
+
+| Release variant | Three elapsed samples (s) | Median (s) | Physical GETs |
+| --- | --- | ---: | --- |
+| Unboxed | 4.724, 4.676, 4.698 | 4.698 | 10,190 / 10,197 / 10,208 |
+| Boxed | 4.622, 4.628, 4.747 | 4.628 | 10,224 / 10,199 / 10,178 |
+
+The boxed median is 1.50% lower, but ranges overlap and the boxed slowest sample
+is slower than every unboxed sample. Three samples per arm do not establish a
+stable release benefit. The coarse CPU counter reports 3 seconds for every run;
+it cannot resolve sub-second CPU differences. All runs have 10,343 logical reads,
+673,322,318 read bytes, 262,144 aggregation point gets, 262,236 Foyer queries and
+1,024 meta queries. Output and final-state oracles pass.
+
+Separately, release saves only 119–165 physical requests (1.15–1.60%) versus
+about 30.8% in the preceding boxed dev sample. Build profiles differ; this does
+not identify the cause. Dev IO-coalescing results must not be extrapolated to
+release. No follow-up scheduler experiment was performed in this round.
+
+The initial attempt failed before measurement because the Meta test checkpoint
+store uses `memory-isolated-for-test`, previously accepted only with debug
+assertions. An explicit object-store test feature, enabled by the existing Meta
+test feature, now supports this isolated store in release tests. The SST fixture
+still uses real MinIO. Default production builds do not enable the test feature.
+A source-inventory false positive when unboxed `minput.rs` exactly matched HEAD
+was also corrected. The replacement round passed runtime preflight immediately
+after each build, then the formal matrix. Workspace Clippy and scoped review
+passed. Earlier failed-attempt evidence remains in `target/agg-output-release/`.
+
+Evidence: `target/agg-output-release-ready/REPORT.txt`, `comparison.json`,
+`index.jsonl`, per-run logs/metrics/effective options and source snapshots.
+Unboxed binary SHA256:
+`a86a680b36da0a827719496ba8ce68e666124bdd64571e77a44cd24a2756a446`;
+boxed binary SHA256:
+`fb233af2d6b16fa2c9dd2d1851dbdb2eee380ecf494b9191b4223f355b2f5e96`.
+Source snapshots match after restoring the boxed source. There were no measured
+object writes, errors or retries; scheduler gauges drained. Owned MinIO/replay
+processes stopped, ports 9301/9400 closed, and the immutable fixture was retained.
+
+### HashAgg miss launch order
+
+Compared original miss order with sorting misses by the intermediate StateTable's
+encoded PK, with the same 10 rolling get-to-restore futures. Two alternating
+pairs per case used fixed SSTs on local MinIO with fresh real Foyer caches.
+Both regenerated fixtures matched the previous byte/layout manifests.
+
+| Case | Median GETs, original → sorted | Median elapsed |
+| --- | ---: | ---: |
+| Five SST COUNT, 22 MiB cache | 70,427 → 68,379 | 35.87 → 34.89 s |
+| Same COUNT fixture, 64 MiB cache | 377 → 355 | 31.62 → 33.42 s |
+| 512-wide pipeline, 64 MiB cache | 11,590 → 11,590 | 31.27 → 31.92 s |
+
+In the cold COUNT case both pairs saved GETs. About 96% of the reduction came
+from fewer Foyer outer fetches. The remaining GET savings came from scheduler
+merges. HashAgg meta query counts were identical. Elapsed changes were -6.5%
+and +1.4% in the cold case, and both other cases ran slower after sorting.
+The sorted arm includes eager key preparation and a second key encoding for
+the comparator. The temporary dev replay patch was removed from product source.
+See `target/hashagg-launch-order/round-summary.md` for exact identity,
+configuration, per-pair metrics, and cleanup evidence.
+
+### HashAgg meta reuse at C10, C32 and C64
+
+The archived fixed ordered MultiGet binary ran two pairs per concurrency and
+fixture. Within each pair, only the meta reuse switch changed. Each fixture
+reused its pinned SST snapshot and the historical byte/layout manifest.
+
+| COUNT case | Foyer meta queries saved at C10 / C32 / C64 | Median elapsed change at C10 / C32 / C64 |
+| --- | ---: | ---: |
+| 5 SST, 64 MiB cache | 94.1% / 94.0% / 94.0% | −4.7% / −4.4% / −5.6% |
+| 128 SST, 5 MiB cache | 12.1% / 12.1% / 12.1% | +0.5% / +0.7% / +0.8% |
+
+The 5 SST case benefits at all three limits. In the 128 SST case C64
+raises chunk P99 in both pairs, and the retention budget rejects about
+214,000 lookup attempts per sample at each limit. Physical GET counts
+show no consistent reduction. See `target/hashagg-meta-concurrency/round-summary.md`
+for the effective settings, exact pairs and raw evidence.
+
+### Longer HashAgg meta reuse replay
+
+Replayed 1,048,576 COUNT retractions against one fixed five-SST snapshot
+at C64, using fresh Foyer caches and local MinIO. Both cache sizes had an
+OFF/ON pair and an ON/OFF pair, with the scheduler unchanged. A diagnostic
+32 MiB meta retention budget avoided evicting these five handles.
+
+| Block cache | Median elapsed, OFF → ON | Process CPU seconds | Physical GETs |
+| --- | ---: | ---: | ---: |
+| 64 MiB | 31.70 → 30.14 s (−4.9%) | 35.36 → 33.82 | 359 → 359 |
+| 22 MiB | 36.22 → 34.69 s (−4.2%) | 63.18 → 61.22 | 68,826 → 68,343 |
+
+Both cache sizes saved about 1.57 seconds during input processing and 98%
+of Foyer meta lookups. At 64 MiB, the warm input windows had no GETs and
+the same two roughly 2.8-second HashAgg output flushes. At 22 MiB, GETs
+continued throughout the input and averaged 0.707 ms with either setting.
+The evidence points to CPU savings from avoiding Foyer meta lookups. It
+does not establish a gain under the default retention budget or on S3.
+See `target/hashagg-meta-long/round-summary.md` for settings and raw evidence.

@@ -17,7 +17,6 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::row::RowExt;
-use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -150,21 +149,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         &mut self,
         keys: impl Iterator<Item = &'a OwnedRow>,
     ) -> StreamExecutorResult<()> {
-        if self.state_table.native_point_batch_enabled() {
-            let keys: Vec<_> = keys
-                .filter(|key| !self.cache.contains(*key))
-                .cloned()
-                .collect();
-            for (key, exists) in keys
-                .iter()
-                .zip_eq_fast(self.state_table.exists_many(&keys).await?)
-            {
-                if exists {
-                    self.cache.put(key.clone(), ());
-                }
-            }
-            return Ok(());
-        }
         let mut futures = vec![];
         for key in keys {
             if self.cache.contains(key) {

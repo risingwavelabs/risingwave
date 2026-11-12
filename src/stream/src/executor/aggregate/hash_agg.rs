@@ -292,68 +292,65 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             })
             .collect_vec();
-        let restored = if this.intermediate_state_table.native_point_batch_enabled() {
-            let group_keys = missing
-                .iter()
-                .map(|key| {
-                    Ok(GroupKey::new(
-                        key.deserialize(group_key_types)?,
-                        Some(this.group_key_table_pk_projection.clone()),
-                    ))
-                })
-                .collect::<StreamExecutorResult<Vec<_>>>()?;
-            let pks = group_keys
-                .iter()
-                .map(|key| key.table_pk().into_owned_row())
-                .collect_vec();
-            let rows = this.intermediate_state_table.get_rows(&pks).await?;
-            Some(group_keys.into_iter().zip_eq_fast(rows))
-        } else {
-            None
-        };
+        let restored =
+            if missing.len() > 1 && this.intermediate_state_table.native_point_batch_enabled() {
+                let group_keys = missing
+                    .iter()
+                    .map(|key| {
+                        Ok(GroupKey::new(
+                            key.deserialize(group_key_types)?,
+                            Some(this.group_key_table_pk_projection.clone()),
+                        ))
+                    })
+                    .collect::<StreamExecutorResult<Vec<_>>>()?;
+                let rows = {
+                    let pks = group_keys.iter().map(GroupKey::table_pk).collect_vec();
+                    this.intermediate_state_table.get_rows(&pks).await?
+                };
+                Some(group_keys.into_iter().zip_eq_fast(rows))
+            } else {
+                None
+            };
         let mut restored = restored;
-        let futs = missing
-            .into_iter()
-            .map(|key| {
-                let restored = restored
-                    .as_mut()
-                    .map(|rows| rows.next().expect("aligned batch"));
-                async move {
-                    let (group_key, inter_states) = match restored {
-                        Some(pair) => pair,
-                        None => {
-                            let group_key = GroupKey::new(
-                                key.deserialize(group_key_types)?,
-                                Some(this.group_key_table_pk_projection.clone()),
-                            );
-                            let row = this
-                                .intermediate_state_table
-                                .get_row(group_key.table_pk())
-                                .await?;
-                            (group_key, row)
-                        }
-                    };
-                    let (agg_group, stats) = AggGroup::create_from_intermediate_state(
-                        this.version,
-                        Some(group_key),
-                        &this.agg_calls,
-                        &this.agg_funcs,
-                        &this.storages,
-                        inter_states,
-                        &this.input_stream_key,
-                        this.row_count_index,
-                        this.emit_on_window_close,
-                        this.extreme_cache_size,
-                        &this.input_schema,
-                    )
-                    .await?;
-                    Ok::<_, StreamExecutorError>((key.clone(), Box::new(agg_group), stats))
-                }
-            })
-            .collect_vec();
+        let futs = missing.into_iter().map(|key| {
+            let restored = restored
+                .as_mut()
+                .map(|rows| rows.next().expect("aligned batch"));
+            async move {
+                let (group_key, inter_states) = match restored {
+                    Some(pair) => pair,
+                    None => {
+                        let group_key = GroupKey::new(
+                            key.deserialize(group_key_types)?,
+                            Some(this.group_key_table_pk_projection.clone()),
+                        );
+                        let row = this
+                            .intermediate_state_table
+                            .get_row(group_key.table_pk())
+                            .await?;
+                        (group_key, row)
+                    }
+                };
+                let (agg_group, stats) = AggGroup::create_from_intermediate_state(
+                    this.version,
+                    Some(group_key),
+                    &this.agg_calls,
+                    &this.agg_funcs,
+                    &this.storages,
+                    inter_states,
+                    &this.input_stream_key,
+                    this.row_count_index,
+                    this.emit_on_window_close,
+                    this.extreme_cache_size,
+                    &this.input_schema,
+                )
+                .await?;
+                Ok::<_, StreamExecutorError>((key.clone(), Box::new(agg_group), stats))
+            }
+        });
 
         vars.stats.chunk_total_lookup_count += 1;
-        if !futs.is_empty() {
+        if futs.len() != 0 {
             // If not all the required states/keys are in the cache, it's a chunk-level cache miss.
             vars.stats.chunk_lookup_miss_count += 1;
             let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();

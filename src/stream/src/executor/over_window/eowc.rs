@@ -389,7 +389,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_with_prefix(&partition_key, sub_range, PrefetchOptions::default())
+            .iter_with_prefix(
+                &partition_key,
+                sub_range,
+                PrefetchOptions::prefetch_for_prefix_scan(),
+            )
             .await?;
 
         #[for_await]

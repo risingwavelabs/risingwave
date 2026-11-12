@@ -270,10 +270,6 @@ pub struct LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
-    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
-        self.hummock_version_reader.read_batch_config()
-    }
-
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
@@ -338,7 +334,11 @@ impl StateStoreGet for LocalHummockStorage {
         let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
         let config = self.read_batch_config();
         let metadata = crate::hummock::sst_meta_batch::SstMetaBatch::new(config);
-        tracing::trace!(target: "state_store_read_batch", keys = requests.len(), concurrency = config.concurrency.get(), "native point batch");
+        let batch_span =
+            tracing::debug_span!(target: "state_store_read_batch", "native_point_batch");
+        tracing::debug!(target: "state_store_read_batch", parent: &batch_span,
+            keys = requests.len(), concurrency = config.concurrency.get(), "native point batch");
+        drop(batch_span);
         // Prepare versions only when a key is admitted. Completed keys release their slots
         // immediately; neither input order nor shared metadata requires waiting for a batch.
         let mut reads = stream::iter(requests.into_iter().enumerate().map(

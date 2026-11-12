@@ -37,6 +37,13 @@ pub struct ObjectStoreMetrics {
     pub(super) read_in_flight: IntGaugeVec,
     pub(super) read_scheduler_events: IntCounterVec,
     pub(super) read_scheduler_pending: IntGaugeVec,
+    pub(super) read_scheduler_preparing: IntGaugeVec,
+    pub(super) read_scheduler_prepare_duration: HistogramVec,
+    pub(super) read_scheduler_prepared_batch_size: HistogramVec,
+    pub(super) read_scheduler_queued: IntGaugeVec,
+    pub(super) read_scheduler_in_flight: IntGaugeVec,
+    pub(super) read_scheduler_waiting: IntGaugeVec,
+    pub(super) read_scheduler_admission_duration: HistogramVec,
     pub(super) read_scheduler_batch_size: HistogramVec,
     pub(super) read_requests: GenericCounterVec<AtomicU64>,
     pub(super) read_request_duration: HistogramVec,
@@ -64,9 +71,60 @@ impl ObjectStoreMetrics {
             registry
         )
         .unwrap();
+        let read_scheduler_preparing = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_preparing",
+            "Reserved window slots before publication, including prepared requests awaiting admission",
+            &["media_type"], registry).unwrap();
+        let read_scheduler_prepare_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_prepare_duration_seconds",
+                "First cold member to window release, excluding admission wait",
+                exponential_buckets(0.000_01, 2.0, 22).unwrap()
+            ),
+            &["media_type", "reason"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_prepared_batch_size = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_prepared_batch_size",
+                "Cold requests present at window release before admission splitting",
+                exponential_buckets(1.0, 2.0, 16).unwrap()
+            ),
+            &["media_type"],
+            registry
+        )
+        .unwrap();
         let read_scheduler_pending = register_int_gauge_vec_with_registry!(
             "object_store_read_scheduler_pending",
-            "Admitted logical reads, queued or in flight",
+            "Admitted logical reads, queued or in flight, including requests admitted with preparation permits",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_queued = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_queued",
+            "Admitted logical reads not yet dispatched",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_in_flight = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_in_flight", "Scheduled physical reads including retry loops and range-error fallbacks; excludes direct reads",
+            &["media_type"], registry).unwrap();
+        let read_scheduler_waiting = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_waiting",
+            "Logical reads waiting for scheduler admission in caller futures",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_admission_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_admission_duration_seconds",
+                "Time waiting for admission, including cancelled waits",
+                exponential_buckets(0.000_01, 2.0, 22).unwrap()
+            ),
             &["media_type"],
             registry
         )
@@ -201,6 +259,13 @@ impl ObjectStoreMetrics {
             read_in_flight,
             read_scheduler_events,
             read_scheduler_pending,
+            read_scheduler_preparing,
+            read_scheduler_prepare_duration,
+            read_scheduler_prepared_batch_size,
+            read_scheduler_queued,
+            read_scheduler_in_flight,
+            read_scheduler_waiting,
+            read_scheduler_admission_duration,
             read_scheduler_batch_size,
             read_requests,
             read_request_duration,

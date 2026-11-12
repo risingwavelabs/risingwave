@@ -192,40 +192,9 @@ impl MaterializedInputState {
 
         if !self.cache.is_synced() {
             stats.agg_state_cache_miss_count += 1;
-
-            let mut cache_filler = self.cache.begin_syncing();
-            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                &(Bound::Unbounded, Bound::Unbounded);
-            let all_data_iter = state_table
-                .iter_with_prefix(
-                    group_key.map(GroupKey::table_pk),
-                    sub_range,
-                    PrefetchOptions::new(cache_filler.capacity().is_none(), false),
-                )
-                .await?;
-            pin_mut!(all_data_iter);
-
-            #[for_await]
-            for keyed_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
-                let state_row = keyed_row?;
-                let cache_key = {
-                    let mut cache_key = Vec::new();
-                    self.cache_key_serializer.serialize(
-                        state_row
-                            .as_ref()
-                            .project(&self.state_table_order_col_indices),
-                        &mut cache_key,
-                    );
-                    cache_key.into()
-                };
-                let cache_value = self
-                    .state_table_arg_col_indices
-                    .iter()
-                    .map(|i| state_row[*i].clone())
-                    .collect();
-                cache_filler.append(cache_key, cache_value);
-            }
-            cache_filler.finish();
+            // Keep the scan future out of every aggregate output future, including value
+            // states. Only an input-cache miss needs this allocation.
+            Box::pin(self.sync_cache(state_table, group_key)).await?;
         }
         assert!(self.cache.is_synced());
 
@@ -242,6 +211,46 @@ impl MaterializedInputState {
             }
             Ok((func.get_result(&state).await?, stats))
         }
+    }
+
+    async fn sync_cache(
+        &mut self,
+        state_table: &StateTable<impl StateStore>,
+        group_key: Option<&GroupKey>,
+    ) -> StreamExecutorResult<()> {
+        let mut cache_filler = self.cache.begin_syncing();
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
+        let all_data_iter = state_table
+            .iter_with_prefix(
+                group_key.map(GroupKey::table_pk),
+                sub_range,
+                PrefetchOptions::new(cache_filler.capacity().is_none(), false),
+            )
+            .await?;
+        pin_mut!(all_data_iter);
+
+        #[for_await]
+        for keyed_row in all_data_iter.take(cache_filler.capacity().unwrap_or(usize::MAX)) {
+            let state_row = keyed_row?;
+            let cache_key = {
+                let mut cache_key = Vec::new();
+                self.cache_key_serializer.serialize(
+                    state_row
+                        .as_ref()
+                        .project(&self.state_table_order_col_indices),
+                    &mut cache_key,
+                );
+                cache_key.into()
+            };
+            let cache_value = self
+                .state_table_arg_col_indices
+                .iter()
+                .map(|i| state_row[*i].clone())
+                .collect();
+            cache_filler.append(cache_key, cache_value);
+        }
+        cache_filler.finish();
+        Ok(())
     }
 
     #[cfg(test)]

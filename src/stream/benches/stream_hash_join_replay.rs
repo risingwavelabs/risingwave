@@ -80,6 +80,9 @@ use tokio::runtime::{Builder, Runtime};
 #[path = "hash_join_replay/distributed.rs"]
 mod distributed;
 
+#[path = "hash_join_replay/changelog.rs"]
+mod changelog;
+
 risingwave_expr_impl::enable!();
 
 #[derive(Default, Deserialize, Serialize)]
@@ -118,6 +121,8 @@ struct Config {
     rw_config: Option<String>,
     #[serde(default)]
     workload: distributed::Workload,
+    #[serde(default)]
+    hash_agg_min: bool,
     #[serde(default = "default_probe_rounds")]
     group_rows: usize,
     #[serde(default = "distributed::default_vnode_count")]
@@ -125,7 +130,14 @@ struct Config {
     #[serde(default)]
     point_reads: bool,
     #[serde(default)]
+    change_log_reads: bool,
+    #[serde(default)]
     downstream: bool,
+    /// Keep Materialize conflict checks active in a distributed downstream replay.
+    #[serde(default)]
+    checked_materialize: bool,
+    #[serde(default)]
+    replay_stage: distributed::ReplayStage,
     #[serde(default)]
     disable_sanity_check: bool,
     #[serde(default = "default_probe_rounds")]
@@ -199,10 +211,18 @@ fn catalog(id: u32, config: &Config) -> PbTable {
     table
 }
 
+fn table_count(config: &Config) -> u32 {
+    if config.hash_agg_min {
+        7
+    } else if config.downstream {
+        6
+    } else {
+        4
+    }
+}
+
 fn table_ids(config: &Config) -> HashSet<TableId> {
-    (0..if config.downstream { 6 } else { 4 })
-        .map(TableId::new)
-        .collect()
+    (0..table_count(config)).map(TableId::new).collect()
 }
 
 // Stable bytes with enough entropy that compression does not erase block geometry.
@@ -249,8 +269,7 @@ fn storage_options(replay: &Config) -> StorageOpts {
 }
 
 #[expect(clippy::borrowed_box)]
-async fn store(url: &str, scheduler: bool, config: &Config) -> SstableStoreRef {
-    let opts = storage_options(config);
+async fn store(url: &str, scheduler: bool, opts: StorageOpts) -> SstableStoreRef {
     let object = build_remote_object_store(
         url,
         Arc::new(ObjectStoreMetrics::unused()),
@@ -313,7 +332,7 @@ async fn environment(store: SstableStoreRef, config: &Config) -> HummockTestEnv 
         opts.shared_buffer_capacity_mb = 688;
     }
     let env = prepare_hummock_test_env_with_store(store, opts).await;
-    for id in 0..if config.downstream { 6 } else { 4 } {
+    for id in 0..table_count(config) {
         env.register_table(catalog(id, config)).await;
     }
     env
@@ -323,7 +342,7 @@ async fn make_fixture(url: &str, config: &Config) -> HummockVersion {
     if config.workload != distributed::Workload::LegacyJoin {
         return Box::pin(distributed::make_fixture(url, config)).await;
     }
-    let store = store(url, false, config).await;
+    let store = store(url, false, storage_options(config)).await;
     assert!(
         store
             .store()
@@ -418,7 +437,7 @@ fn sstables(version: &HummockVersion) -> Vec<SstableInfo> {
 }
 
 async fn manifest(url: &str, version: &HummockVersion, config: &Config) -> serde_json::Value {
-    let store = store(url, false, config).await;
+    let store = store(url, false, storage_options(config)).await;
     let mut files = Vec::new();
     for info in sstables(version) {
         let bytes = store
@@ -473,7 +492,7 @@ async fn replay_points(
     scheduler: bool,
     dest: &Path,
 ) {
-    let store = store(url, scheduler, config).await;
+    let store = store(url, scheduler, storage_options(config)).await;
     let env = environment(store.clone(), config).await;
     env.storage.update_version_and_wait(version.clone()).await;
     let epoch = test_epoch((config.fixture_epochs + 1) as u64);
@@ -635,7 +654,7 @@ async fn replay(
         .await;
         return;
     }
-    let store = store(url, scheduler, config).await;
+    let store = store(url, scheduler, storage_options(config)).await;
     let env = environment(store.clone(), config).await;
     assert!(env.storage.get_pinned_version().id < version.id);
     // Read-only fixture metadata is authoritative for this probe epoch. No commit is issued
@@ -1051,9 +1070,13 @@ fn main() {
     let dir = config_path.parent().unwrap();
     let config: Config = serde_json::from_slice(&std::fs::read(config_path).unwrap()).unwrap();
     assert!((1..=4).contains(&config.probe_rounds));
-    assert!((1..=8).contains(&config.fixture_epochs));
-    assert!(config.fixture_epochs <= config.rows_per_key);
-    assert!(config.point_reads || config.fixture_epochs == 1);
+    if config.workload == distributed::Workload::HashAgg {
+        assert!((1..=config.vnode_count).contains(&config.fixture_epochs));
+    } else {
+        assert!((1..=8).contains(&config.fixture_epochs));
+        assert!(config.fixture_epochs <= config.rows_per_key);
+        assert!(config.point_reads || config.fixture_epochs == 1);
+    }
     assert!(
         !config.downstream
             || (!config.point_reads
@@ -1080,6 +1103,16 @@ fn main() {
     assert!(config.warm_every_nth_block.is_none_or(|n| n > 0));
     assert!(!config.schedulers.is_empty() && config.schedulers.len() <= 2);
     assert!(config.schedulers.len() != 2 || config.schedulers[0] != config.schedulers[1]);
+    if config.checked_materialize {
+        assert!(config.downstream && config.workload != distributed::Workload::LegacyJoin);
+    }
+    if config.replay_stage != distributed::ReplayStage::Pipeline {
+        assert!(config.downstream && config.workload == distributed::Workload::HashAgg);
+        assert!(
+            config.replay_stage != distributed::ReplayStage::Materialize
+                || config.checked_materialize
+        );
+    }
     let url = std::env::var("RW_HASH_JOIN_REPLAY_URL")
         .expect("set RW_HASH_JOIN_REPLAY_URL to a dedicated MinIO bucket");
     assert!(
@@ -1097,11 +1130,17 @@ fn main() {
         .json()
         .with_writer(std::io::stderr)
         .init();
+    if config.change_log_reads {
+        assert!(!config.point_reads && !config.downstream);
+        assert!(config.workload == distributed::Workload::LegacyJoin);
+        runtime().block_on(Box::pin(changelog::run(&url, &config, dir)));
+        return;
+    }
     let mut opts = storage_options(&config);
     if config.downstream {
         opts.shared_buffer_capacity_mb = 688;
     }
-    let mut spec = json!({"format_version": 3, "fixture_epochs": config.fixture_epochs, "sstable_size_mb": opts.sstable_size_mb, "block_size_kb": opts.block_size_kb, "keys": config.keys, "rows_per_key": config.rows_per_key, "value_bytes": config.value_bytes, "tables": (0..if config.downstream { 6 } else { 4 }).map(|id| catalog(id, &config).encode_to_vec()).collect::<Vec<_>>()});
+    let mut spec = json!({"format_version": 3, "fixture_epochs": config.fixture_epochs, "sstable_size_mb": opts.sstable_size_mb, "block_size_kb": opts.block_size_kb, "keys": config.keys, "rows_per_key": config.rows_per_key, "value_bytes": config.value_bytes, "tables": (0..table_count(&config)).map(|id| catalog(id, &config).encode_to_vec()).collect::<Vec<_>>()});
     if config.downstream {
         spec["format_version"] = json!(4);
         spec["downstream"] = json!(true);
@@ -1125,6 +1164,11 @@ fn main() {
         spec["workload"] = json!(config.workload);
         spec["group_rows"] = json!(config.group_rows);
         spec["vnode_count"] = json!(config.vnode_count);
+    }
+    if config.hash_agg_min {
+        assert!(config.workload == distributed::Workload::HashAgg);
+        assert!(config.group_rows > 1 && config.probe_chunk_size.is_multiple_of(config.group_rows));
+        spec["hash_agg_min"] = json!(true);
     }
     let version_path = dir.join("fixture.pb");
     let version = if version_path.exists() {

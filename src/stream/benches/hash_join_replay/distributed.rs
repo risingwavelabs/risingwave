@@ -14,10 +14,13 @@
 
 //! Single actor owning all vnodes: isolate state access after distribution, not network exchange.
 use std::collections::BTreeSet;
+use std::sync::Mutex;
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::Key64;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_stream::common::StateTableColumnMapping;
+use risingwave_stream::executor::{BoxedMessageStream, Execute};
 use risingwave_stream::task::LocalBarrierManager;
 
 use super::*;
@@ -29,6 +32,96 @@ pub(super) enum Workload {
     LegacyJoin,
     HashAgg,
     JoinRegroup,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ReplayStage {
+    #[default]
+    Pipeline,
+    HashAgg,
+    Materialize,
+}
+
+#[derive(Default)]
+struct StageTiming {
+    chunk_us: Vec<f64>,
+    windows: Vec<ReadWindowSample>,
+    final_barrier: Option<Instant>,
+}
+
+#[derive(Serialize)]
+struct ReadWindowSample {
+    elapsed_s: f64,
+    chunks: usize,
+    rows: usize,
+    get_count: u64,
+    read_bytes: u64,
+}
+
+struct TimedInput {
+    input: Executor,
+    timing: Arc<Mutex<StageTiming>>,
+    final_epoch: u64,
+}
+
+impl Execute for TimedInput {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        let Self {
+            input,
+            timing,
+            final_epoch,
+        } = *self;
+        let object_metrics = ObjectStoreMetrics::unused();
+        let get_count = object_metrics
+            .operation_latency
+            .with_label_values(&["Minio", "read"]);
+        let mut previous_chunk = None;
+        let mut first_chunk = None;
+        let mut last_window_s = 0.0;
+        let mut rows = 0;
+        // An isolated operator consumes its current chunk before pulling the next input.
+        input
+            .execute()
+            .inspect(move |message| {
+                let now = Instant::now();
+                let final_barrier = matches!(message, Ok(Message::Barrier(barrier)) if barrier.epoch.curr == final_epoch);
+                if let Some((start, cardinality)) = previous_chunk.take() {
+                    let mut timing = timing.lock().unwrap();
+                    rows += cardinality;
+                    timing.chunk_us.push(now.duration_since(start).as_secs_f64() * 1e6);
+                    let elapsed_s = now.duration_since(first_chunk.unwrap()).as_secs_f64();
+                    if final_barrier || elapsed_s - last_window_s >= 1.0 {
+                        let chunks = timing.chunk_us.len();
+                        timing.windows.push(ReadWindowSample {
+                            elapsed_s,
+                            chunks,
+                            rows,
+                            get_count: get_count.get_sample_count(),
+                            read_bytes: object_metrics.read_bytes.get(),
+                        });
+                        last_window_s = elapsed_s;
+                    }
+                }
+                if let Ok(Message::Chunk(chunk)) = message {
+                    if first_chunk.is_none() {
+                        first_chunk = Some(now);
+                        timing.lock().unwrap().windows.push(ReadWindowSample {
+                            elapsed_s: 0.0,
+                            chunks: 0,
+                            rows: 0,
+                            get_count: get_count.get_sample_count(),
+                            read_bytes: object_metrics.read_bytes.get(),
+                        });
+                    }
+                    previous_chunk = Some((now, chunk.cardinality()));
+                }
+                if final_barrier {
+                    timing.lock().unwrap().final_barrier = Some(now);
+                }
+            })
+            .boxed()
+    }
 }
 
 pub(super) fn default_vnode_count() -> usize {
@@ -53,9 +146,13 @@ pub(super) fn catalog(id: u32, config: &Config) -> PbTable {
     let types = if id < 4 {
         types()
     } else {
-        vec![DataType::Int64; 2]
+        vec![DataType::Int64; if id == 4 && config.hash_agg_min { 3 } else { 2 }]
     };
-    let pk = if id < 4 { vec![0, 1] } else { vec![0] };
+    let pk = if id < 4 || id == 6 {
+        vec![0, 1]
+    } else {
+        vec![0]
+    };
     let mut table = gen_pbtable(
         TableId::new(id),
         types
@@ -71,13 +168,17 @@ pub(super) fn catalog(id: u32, config: &Config) -> PbTable {
     table.stream_key = pk.into_iter().map(|i| i as i32).collect();
     table.maybe_vnode_count = Some(config.vnode_count as u32);
     if id == 4 {
-        table.value_indices = vec![1];
+        table.value_indices = if config.hash_agg_min {
+            vec![1, 2]
+        } else {
+            vec![1]
+        };
     }
     table
 }
 
 pub(super) async fn make_fixture(url: &str, config: &Config) -> HummockVersion {
-    let store = store(url, false, config).await;
+    let store = store(url, false, storage_options(config)).await;
     assert!(
         store
             .store()
@@ -91,7 +192,7 @@ pub(super) async fn make_fixture(url: &str, config: &Config) -> HummockVersion {
     let env = environment(store, config).await;
     env.storage.start_epoch(test_epoch(1), table_ids(config));
     let mut states = Vec::new();
-    for id in 0..6 {
+    for id in 0..table_count(config) {
         let mut state = StateTable::from_table_catalog(
             &catalog(id, config),
             env.storage.clone(),
@@ -126,26 +227,54 @@ pub(super) async fn make_fixture(url: &str, config: &Config) -> HummockVersion {
             states[2].try_flush().await.unwrap();
         }
     }
+    let mut groups_by_epoch = vec![Vec::new(); config.fixture_epochs];
     for g in 0..groups(config) {
-        for id in [4, 5] {
-            states[id].insert(OwnedRow::new(vec![
-                Some((g as i64).into()),
-                Some((config.group_rows as i64).into()),
-            ]));
-            if (g + 1).is_multiple_of(256) {
-                states[id].try_flush().await.unwrap();
+        // Write each contiguous vnode range in its own committed epoch. Each flush
+        // contains both state tables, so object-level L0 ranges may still overlap.
+        let pk = [Some(risingwave_common::types::ScalarImpl::Int64(g as i64))];
+        let vnode = states[4].compute_vnode_by_pk(&pk);
+        groups_by_epoch[vnode.to_index() * config.fixture_epochs / config.vnode_count].push(g);
+    }
+    for (index, epoch_groups) in groups_by_epoch.into_iter().enumerate() {
+        for (offset, g) in epoch_groups.into_iter().enumerate() {
+            if config.hash_agg_min {
+                for value in 0..config.group_rows {
+                    states[6].insert(min_input(g, value));
+                }
+            }
+            for id in [4, 5] {
+                let mut row = vec![
+                    Some((g as i64).into()),
+                    Some((config.group_rows as i64).into()),
+                ];
+                if config.hash_agg_min && id == 4 {
+                    // Materialized MIN does not store an encoded value state.
+                    row.push(None);
+                }
+                states[id].insert(OwnedRow::new(row));
+                if (offset + 1).is_multiple_of(256) {
+                    states[id].try_flush().await.unwrap();
+                }
             }
         }
+        let next_epoch = test_epoch(index as u64 + 2);
+        env.storage.start_epoch(next_epoch, table_ids(config));
+        for state in &mut states {
+            state
+                .commit_assert_no_update_vnode_bitmap(EpochPair::new_test_epoch(next_epoch))
+                .await
+                .unwrap();
+        }
+        env.commit_epoch(test_epoch(index as u64 + 1)).await;
     }
-    env.storage.start_epoch(test_epoch(2), table_ids(config));
-    for state in &mut states {
-        state
-            .commit_assert_no_update_vnode_bitmap(EpochPair::new_test_epoch(test_epoch(2)))
-            .await
-            .unwrap();
-    }
-    env.commit_epoch(test_epoch(1)).await;
     (*env.storage.get_pinned_version()).clone()
+}
+
+fn min_input(group: usize, value: usize) -> OwnedRow {
+    OwnedRow::new(vec![
+        Some((group as i64).into()),
+        Some((value as i64).into()),
+    ])
 }
 
 fn shuffle(values: &mut [usize]) {
@@ -164,7 +293,7 @@ pub(super) async fn layout(
     version: &HummockVersion,
     config: &Config,
 ) -> serde_json::Value {
-    let store = store(url, false, config).await;
+    let store = store(url, false, storage_options(config)).await;
     let mut table_vnodes: BTreeMap<u32, BTreeSet<usize>> = BTreeMap::new();
     let mut agg_vnodes = BTreeSet::new();
     let mut agg_keys = 0;
@@ -224,21 +353,79 @@ pub(super) async fn replay(
     dest: &Path,
     actor: ActorContextRef,
 ) {
+    assert!(
+        !config.hash_agg_min || config.replay_stage == ReplayStage::HashAgg,
+        "the retractable MIN fixture requires isolated HashAgg replay"
+    );
     let shape = layout(url, version, config).await;
     std::fs::write(
         dest.join("layout.json"),
         serde_json::to_vec_pretty(&shape).unwrap(),
     )
     .unwrap();
-    let store = store(url, scheduler, config).await;
+    let store = store(url, scheduler, storage_options(config)).await;
     let env = environment(store.clone(), config).await;
     env.storage.update_version_and_wait(version.clone()).await;
     assert_eq!(&*env.storage.get_pinned_version(), version);
-    env.storage.start_epoch(test_epoch(2), table_ids(config));
+    let fixture_epoch = test_epoch(config.fixture_epochs as u64);
+    let read_epoch = test_epoch(config.fixture_epochs as u64 + 1);
+    let next_epoch = test_epoch(config.fixture_epochs as u64 + 2);
+    env.storage.start_epoch(read_epoch, table_ids(config));
     let chunk_size = actor.config.developer.chunk_size;
     let (mut tx_l, source_l) = MockSource::channel();
     let (mut tx_r, source_r) = MockSource::channel();
-    let (input, group_index, chunks) = if config.workload == Workload::HashAgg {
+    let (input, group_index, chunks) = if config.replay_stage == ReplayStage::Materialize {
+        let types = [DataType::Int64, DataType::Int64];
+        let schema = Schema::new(types.iter().cloned().map(Field::unnamed).collect());
+        let input = source_l
+            .stop_on_finish(false)
+            .into_executor(schema, vec![0]);
+        let mut order: Vec<_> = (0..groups(config)).collect();
+        shuffle(&mut order);
+        let chunks = order
+            .chunks(config.probe_chunk_size)
+            .map(|ids| {
+                let rows: Vec<_> = ids
+                    .iter()
+                    .map(|&id| {
+                        (
+                            Op::Delete,
+                            OwnedRow::new(vec![
+                                Some((id as i64).into()),
+                                Some((config.group_rows as i64).into()),
+                            ]),
+                        )
+                    })
+                    .collect();
+                StreamChunk::from_rows(&rows, &types)
+            })
+            .collect::<Vec<_>>();
+        (input, 0, chunks)
+    } else if config.hash_agg_min {
+        let types = [DataType::Int64, DataType::Int64];
+        let schema = Schema::new(types.iter().cloned().map(Field::unnamed).collect());
+        let input = source_l
+            .stop_on_finish(false)
+            .into_executor(schema, vec![0, 1]);
+        let mut order: Vec<_> = (0..groups(config)).collect();
+        shuffle(&mut order);
+        // Retract all rows of a group in one chunk so every output is an exact DELETE.
+        let chunks = order
+            .chunks(config.probe_chunk_size / config.group_rows)
+            .map(|groups| {
+                let rows = groups
+                    .iter()
+                    .flat_map(|&group| {
+                        (0..config.group_rows)
+                            .map(move |value| (Op::Delete, min_input(group, value)))
+                    })
+                    .collect::<Vec<_>>();
+                StreamChunk::from_rows(&rows, &types)
+            })
+            .collect();
+        drop(source_r);
+        (input, 0, chunks)
+    } else if config.workload == Workload::HashAgg {
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let input = source_l
             .stop_on_finish(false)
@@ -324,56 +511,113 @@ pub(super) async fn replay(
             .collect();
         ((info, join).into(), 4, chunks)
     };
-    let schema = Schema::new(vec![Field::unnamed(DataType::Int64); 2]);
+    let input_rows = match config.replay_stage {
+        ReplayStage::Materialize => groups(config),
+        _ => config.keys * config.rows_per_key,
+    };
+    let input_chunks = chunks.len();
+    let timing = (config.replay_stage != ReplayStage::Pipeline)
+        .then(|| Arc::new(Mutex::new(StageTiming::default())));
+    let input = if let Some(timing) = &timing {
+        (
+            input.info().clone(),
+            TimedInput {
+                input,
+                timing: timing.clone(),
+                final_epoch: next_epoch,
+            },
+        )
+            .into()
+    } else {
+        input
+    };
+    let schema = Schema::new(vec![
+        Field::unnamed(DataType::Int64);
+        if config.hash_agg_min { 3 } else { 2 }
+    ]);
     let info = ExecutorInfo::for_test(schema.clone(), vec![0], "DistributedReplayAgg".into(), 1);
-    let aggregate = HashAggExecutor::<Key64, HummockStorage>::new(AggExecutorArgs {
-        version: PbAggNodeVersion::LATEST,
-        input,
-        actor_ctx: actor.clone(),
-        info: info.clone(),
-        extreme_cache_size: actor.config.developer.unsafe_extreme_cache_size,
-        agg_calls: vec![AggCall::from_pretty("(count:int8)")],
-        row_count_index: 0,
-        storages: vec![AggStateStorage::Value],
-        intermediate_state_table: StateTable::from_table_catalog(
-            &catalog(4, config),
-            env.storage.clone(),
-            vnodes(config),
-        )
-        .await,
-        distinct_dedup_tables: Default::default(),
-        watermark_epoch: Arc::new(AtomicU64::new(0)),
-        extra: HashAggExecutorExtraArgs {
-            group_key_indices: vec![group_index],
-            chunk_size,
-            max_dirty_groups_heap_size: actor.config.developer.hash_agg_max_dirty_groups_heap_size,
-            emit_on_window_close: false,
-        },
-    })
-    .unwrap();
-    let aggregate: Executor = (info.clone(), aggregate).into();
-    let materialize =
-        MaterializeExecutor::<_, risingwave_common::util::value_encoding::BasicSerde>::new(
-            aggregate,
-            schema,
-            env.storage.clone(),
-            vec![ColumnOrder::new(0, OrderType::ascending())],
-            actor,
-            vnodes(config),
-            &catalog(5, config),
-            Arc::new(AtomicU64::new(0)),
-            ConflictBehavior::NoCheck,
-            vec![],
-            Arc::new(StreamingMetrics::unused()),
-            None,
-            false,
-            LocalBarrierManager::for_test(),
-        )
-        .await;
-    let mut output = Executor::from((info, materialize)).execute();
-    tx_l.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+    let input = if config.replay_stage == ReplayStage::Materialize {
+        input
+    } else {
+        let mut agg_calls = vec![AggCall::from_pretty("(count:int8)")];
+        let mut storages = vec![AggStateStorage::Value];
+        if config.hash_agg_min {
+            agg_calls.push(AggCall::from_pretty("(min:int8 $1:int8)"));
+            storages.push(AggStateStorage::MaterializedInput {
+                table: StateTable::from_table_catalog(
+                    &catalog(6, config),
+                    env.storage.clone(),
+                    vnodes(config),
+                )
+                .await,
+                mapping: StateTableColumnMapping::new(vec![0, 1], None),
+                order_columns: vec![ColumnOrder::new(1, OrderType::ascending())],
+            });
+        }
+        let aggregate = HashAggExecutor::<Key64, HummockStorage>::new(AggExecutorArgs {
+            version: PbAggNodeVersion::LATEST,
+            input,
+            actor_ctx: actor.clone(),
+            info: info.clone(),
+            extreme_cache_size: actor.config.developer.unsafe_extreme_cache_size,
+            agg_calls,
+            row_count_index: 0,
+            storages,
+            intermediate_state_table: StateTable::from_table_catalog(
+                &catalog(4, config),
+                env.storage.clone(),
+                vnodes(config),
+            )
+            .await,
+            distinct_dedup_tables: Default::default(),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
+            extra: HashAggExecutorExtraArgs {
+                group_key_indices: vec![group_index],
+                chunk_size,
+                max_dirty_groups_heap_size: actor
+                    .config
+                    .developer
+                    .hash_agg_max_dirty_groups_heap_size,
+                emit_on_window_close: false,
+            },
+        })
+        .unwrap();
+        (info.clone(), aggregate).into()
+    };
+    let output = if config.replay_stage == ReplayStage::HashAgg {
+        input
+    } else {
+        let conflict_behavior = if config.checked_materialize {
+            // A dispatcher keeps Overwrite on the checked path.
+            assert_ne!(actor.initial_dispatch_num, 0);
+            ConflictBehavior::Overwrite
+        } else {
+            ConflictBehavior::NoCheck
+        };
+        let materialize =
+            MaterializeExecutor::<_, risingwave_common::util::value_encoding::BasicSerde>::new(
+                input,
+                schema,
+                env.storage.clone(),
+                vec![ColumnOrder::new(0, OrderType::ascending())],
+                actor,
+                vnodes(config),
+                &catalog(5, config),
+                Arc::new(AtomicU64::new(0)),
+                conflict_behavior,
+                vec![],
+                Arc::new(StreamingMetrics::unused()),
+                None,
+                false,
+                LocalBarrierManager::for_test(),
+            )
+            .await;
+        (info, materialize).into()
+    };
+    let mut output = output.execute();
+    tx_l.push_barrier_with_prev_epoch_for_test(read_epoch, fixture_epoch, false);
     if config.workload == Workload::JoinRegroup {
-        tx_r.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+        tx_r.push_barrier_with_prev_epoch_for_test(read_epoch, fixture_epoch, false);
     }
     assert!(matches!(
         output.next().await.unwrap().unwrap(),
@@ -391,10 +635,10 @@ pub(super) async fn replay(
     for chunk in chunks {
         tx_l.push_chunk(chunk);
     }
-    env.storage.start_epoch(test_epoch(3), table_ids(config));
-    tx_l.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+    env.storage.start_epoch(next_epoch, table_ids(config));
+    tx_l.push_barrier_with_prev_epoch_for_test(next_epoch, read_epoch, false);
     if config.workload == Workload::JoinRegroup {
-        tx_r.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+        tx_r.push_barrier_with_prev_epoch_for_test(next_epoch, read_epoch, false);
     }
     let mut rows = Vec::new();
     loop {
@@ -404,18 +648,70 @@ pub(super) async fn replay(
                 assert!(rows.len() <= 3 * config.keys * config.rows_per_key);
             }
             Message::Barrier(barrier) => {
-                assert_eq!(barrier.epoch.curr, test_epoch(3));
+                assert_eq!(barrier.epoch.curr, next_epoch);
                 assert!(output.next().now_or_never().is_none());
                 break;
             }
             other => panic!("unexpected message {other:?}"),
         }
     }
-    let elapsed = start.elapsed().as_secs_f64();
+    let end = Instant::now();
+    let elapsed = (end - start).as_secs_f64();
+    let final_barrier_ms = timing.map(|timing| {
+        let timing = timing.lock().unwrap();
+        assert_eq!(timing.chunk_us.len(), input_chunks);
+        std::fs::write(
+            dest.join("chunk-us.json"),
+            serde_json::to_vec(&timing.chunk_us).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(timing.windows.last().unwrap().rows, input_rows);
+        std::fs::write(
+            dest.join("read-windows.json"),
+            serde_json::to_vec(&timing.windows).unwrap(),
+        )
+        .unwrap();
+        (end - timing.final_barrier.unwrap()).as_secs_f64() * 1e3
+    });
     StoreLocalStatistic::flush_all();
     let after = metrics();
     std::fs::write(dest.join("after.prom"), &after).unwrap();
     let delta = |name| counter(&after, name) - counter(&before, name);
+    let materialize_misses =
+        delta("stream_materialize_cache_total_count") - delta("stream_materialize_cache_hit_count");
+    let table_block_delta = |table_id, kind| {
+        let table_id = format!("table_id=\"{table_id}\"");
+        let kind = format!("type=\"{kind}\"");
+        let value = |raw: &str| {
+            counter(
+                &raw.lines()
+                    .filter(|line| line.contains(&table_id) && line.contains(&kind))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                "state_store_sst_store_block_request_counts",
+            )
+        };
+        value(&after) - value(&before)
+    };
+    let materialize_meta = table_block_delta(5, "meta_total");
+    let materialize_meta_batch_retained = table_block_delta(5, "meta_batch_retained");
+    let materialize_meta_batch_hits = table_block_delta(5, "meta_batch_ready");
+    let hash_agg_meta_batch_hits = table_block_delta(4, "meta_batch_ready");
+    if config.checked_materialize && config.replay_stage != ReplayStage::HashAgg {
+        assert!(
+            materialize_misses > 0.0 && materialize_meta > 0.0,
+            "Materialize did not read old rows from an SST"
+        );
+    }
+    if config.replay_stage == ReplayStage::HashAgg {
+        assert!(table_block_delta(4, "meta_total") > 0.0);
+    }
+    let read_batch = storage_options(config).read_batch;
+    if !read_batch.enabled || !read_batch.meta_reuse {
+        assert_eq!(materialize_meta_batch_retained, 0.0);
+        assert_eq!(materialize_meta_batch_hits, 0.0);
+        assert_eq!(hash_agg_meta_batch_hits, 0.0);
+    }
     for name in [
         "object_store_write_bytes",
         "object_store_failure_count",
@@ -437,12 +733,20 @@ pub(super) async fn replay(
             "object_store_operation_latency_count",
         )
     };
+    let min_blocks = table_block_delta(6, "data_total");
+    if config.hash_agg_min {
+        assert!(min_blocks > 0.0, "MIN did not read materialized input");
+    }
     let mut expected_counts = vec![config.group_rows as i64; groups(config)];
     let mut pending_update = None;
     for (op, row) in &rows {
         let g = row.datum_at(0).unwrap().into_int64() as usize;
         let count = row.datum_at(1).unwrap().into_int64();
         assert!(g < groups(config) && count > 0);
+        if config.hash_agg_min {
+            assert_eq!(*op, Op::Delete);
+            assert_eq!(row.datum_at(2).unwrap().into_int64(), 0);
+        }
         match op {
             Op::Delete => {
                 assert!(pending_update.is_none());
@@ -468,15 +772,18 @@ pub(super) async fn replay(
     }
     assert!(pending_update.is_none());
     assert!(expected_counts.iter().all(|count| *count == 0));
-    for id in if config.workload == Workload::JoinRegroup {
-        vec![0, 4, 5]
-    } else {
-        vec![4, 5]
-    } {
+    let state_tables: &[u32] = match config.replay_stage {
+        ReplayStage::HashAgg if config.hash_agg_min => &[4, 6],
+        ReplayStage::HashAgg => &[4],
+        ReplayStage::Materialize => &[5],
+        ReplayStage::Pipeline if config.workload == Workload::JoinRegroup => &[0, 4, 5],
+        ReplayStage::Pipeline => &[4, 5],
+    };
+    for &id in state_tables {
         let reader = env
             .storage
             .new_read_snapshot(
-                HummockReadEpoch::NoWait(test_epoch(2)),
+                HummockReadEpoch::NoWait(read_epoch),
                 NewReadSnapshotOptions {
                     table_id: TableId::new(id),
                     table_option: Default::default(),
@@ -502,11 +809,19 @@ pub(super) async fn replay(
         }
     }
     let result = json!({"workload": config.workload, "topology": "one_actor_all_vnodes_no_network_exchange", "vnode_count": config.vnode_count,
-        "groups": groups(config), "input_rows": config.keys * config.rows_per_key, "rows": rows.len(), "final_barriers": 1,
+        "groups": groups(config), "input_rows": input_rows, "input_chunks": input_chunks,
+        "rows": rows.len(), "final_barriers": 1, "final_barrier_ms": final_barrier_ms,
+        "replay_stage": config.replay_stage,
         "output_chunk_size": chunk_size, "elapsed_s": elapsed, "scheduler": scheduler,
         "sanity_check_enabled": cfg!(debug_assertions) && !config.disable_sanity_check,
         "physical_reads": physical(&after) - physical(&before), "read_bytes": delta("object_store_read_bytes"),
         "logical_reads": delta("object_store_read_requests"), "layout": shape,
+        "checked_materialize": config.checked_materialize, "materialize_misses": materialize_misses,
+        "hash_agg_meta": table_block_delta(4, "meta_total"),
+        "materialized_input_blocks": min_blocks,
+        "hash_agg_meta_batch_hits": hash_agg_meta_batch_hits,
+        "materialize_meta": materialize_meta, "materialize_meta_batch_retained": materialize_meta_batch_retained,
+        "materialize_meta_batch_hits": materialize_meta_batch_hits,
         "block_cache_capacity_bytes": store.block_cache().memory().capacity()});
     std::fs::write(
         dest.join("result.json"),

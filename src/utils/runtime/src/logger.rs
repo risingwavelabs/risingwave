@@ -17,6 +17,8 @@ use std::env;
 use std::path::PathBuf;
 
 use either::Either;
+#[cfg(not(madsim))]
+use fastrace::collector::{Reporter, SpanRecord};
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::TracerProvider;
@@ -185,6 +187,25 @@ fn disabled_filter() -> filter::Targets {
     filter::Targets::new()
 }
 
+#[cfg(not(madsim))]
+struct FastraceBatchReporter {
+    reporter: OpenTelemetryReporter,
+    max_batch_size: std::num::NonZeroUsize,
+}
+
+#[cfg(not(madsim))]
+impl Reporter for FastraceBatchReporter {
+    fn report(&mut self, spans: Vec<SpanRecord>) {
+        // Fastrace passes all completed spans to the reporter at once. Split the
+        // export on the collector thread to avoid oversized OTLP messages.
+        let mut spans = spans.into_iter();
+        while spans.len() > 0 {
+            self.reporter
+                .report(spans.by_ref().take(self.max_batch_size.get()).collect());
+        }
+    }
+}
+
 /// Init logger for RisingWave binaries.
 ///
 /// ## Environment variables to configure logger dynamically
@@ -233,6 +254,16 @@ fn disabled_filter() -> filter::Targets {
 /// ```
 pub fn init_risingwave_logger(settings: LoggerSettings) {
     let deployment = Deployment::current();
+    let io_fastrace = cfg!(not(madsim)) && env_var_is_true("RW_STORAGE_IO_FASTRACE");
+    assert!(
+        !io_fastrace || settings.tracing_endpoint.is_some(),
+        "RW_STORAGE_IO_FASTRACE requires a tracing endpoint"
+    );
+    let io_targets = |filter: Targets, level| {
+        filter
+            .with_target("object_store_read_scheduler", level)
+            .with_target("state_store_read_batch", level)
+    };
 
     // Default timer for logging with local time offset.
     let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
@@ -260,6 +291,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target(PGWIRE_QUERY_LOG, Level::OFF)
             // debug-purposed events are disabled unless `RUST_LOG` overrides
             .with_target("events", Level::OFF);
+        // These events are DEBUG so release binaries retain them. Keep them
+        // opt-in even when the default log level is DEBUG.
+        filter = io_targets(filter, Level::OFF);
 
         // Configure levels for external crates. Can still be overridden by `RUST_LOG`.
         // Other external crates will follow the default level.
@@ -319,6 +353,11 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     };
 
     let mut layers = vec![];
+    let log_filter = if io_fastrace {
+        io_targets(default_filter, Level::OFF)
+    } else {
+        default_filter
+    };
 
     // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
@@ -351,7 +390,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         layers.push(
             fmt_layer
-                .with_filter(default_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
+                .with_filter(log_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
                 .boxed(),
         );
     };
@@ -542,7 +581,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         set_toggle_otel_layer_fn(move |enabled: bool| {
             let result = reload_handle.modify(|f| {
                 *f = if enabled {
-                    default_filter.clone()
+                    log_filter.clone()
                 } else {
                     disabled_filter()
                 }
@@ -593,7 +632,29 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             ),
             InstrumentationScope::builder("opentelemetry-instrumentation-foyer").build(),
         );
-        fastrace::set_reporter(reporter, fastrace::collector::Config::default());
+        let config = fastrace::collector::Config::default();
+        if io_fastrace {
+            let max_batch_size = env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(std::num::NonZeroUsize::new(512).unwrap());
+            fastrace::set_reporter(
+                FastraceBatchReporter {
+                    reporter,
+                    max_batch_size,
+                },
+                config,
+            );
+            layers.push(
+                fastrace_tracing::FastraceCompatLayer::new()
+                    .with_location(false)
+                    .with_threads(false)
+                    .with_filter(io_targets(Targets::new(), Level::DEBUG))
+                    .boxed(),
+            );
+        } else {
+            fastrace::set_reporter(reporter, config);
+        }
         tracing::info!("opentelemetry exporter for fastrace is set at {endpoint}");
     }
 

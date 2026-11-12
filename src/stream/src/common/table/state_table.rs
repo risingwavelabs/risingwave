@@ -1327,20 +1327,7 @@ where
             .iter()
             .map(|key| self.serialize_pk_and_get_prefix_hint(key))
             .collect();
-        let rows = self
-            .row_store
-            .get_many(
-                requests,
-                |row| row.clone(),
-                |value| {
-                    self.row_store
-                        .row_serde
-                        .deserialize(value)
-                        .map(OwnedRow::new)
-                        .map_err(Into::into)
-                },
-            )
-            .await?;
+        let rows = self.row_store.get_many(requests).await?;
         Ok(rows
             .into_iter()
             .map(|row| {
@@ -1352,20 +1339,6 @@ where
                     }
                 })
             })
-            .collect())
-    }
-
-    pub async fn exists_many(&self, keys: &[OwnedRow]) -> StreamExecutorResult<Vec<bool>> {
-        let requests = keys
-            .iter()
-            .map(|key| self.serialize_pk_and_get_prefix_hint(key))
-            .collect();
-        Ok(self
-            .row_store
-            .get_many(requests, |_| (), |_| Ok(()))
-            .await?
-            .into_iter()
-            .map(|row| row.is_some())
             .collect())
     }
 
@@ -1398,13 +1371,11 @@ where
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
-    async fn get_many<O: Send>(
+    async fn get_many(
         &self,
         requests: Vec<(TableKey<Bytes>, Option<Bytes>)>,
-        from_cached: impl Fn(&OwnedRow) -> O + Send + Sync,
-        decode: impl Fn(&[u8]) -> risingwave_storage::error::StorageResult<O> + Send + Sync,
-    ) -> StreamExecutorResult<Vec<Option<O>>> {
-        let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+    ) -> StreamExecutorResult<Vec<Option<OwnedRow>>> {
+        let mut output = vec![None; requests.len()];
         let mut pending = Vec::new();
         let mut positions = Vec::new();
         for (index, (key, prefix_hint)) in requests.into_iter().enumerate() {
@@ -1413,11 +1384,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             }
             if let Some(rows) = &self.all_rows {
                 let (vnode, key) = key.split_vnode_bytes();
-                output[index] = rows
-                    .get(&vnode)
-                    .expect("covered vnode")
-                    .get(&key)
-                    .map(&from_cached);
+                output[index] = rows.get(&vnode).expect("covered vnode").get(&key).cloned();
                 continue;
             }
             if self.below_pending_watermark(&key) {
@@ -1453,7 +1420,12 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
         let rows = self
             .state_store
-            .on_key_values(pending, |_, value| decode(value))
+            .on_key_values(pending, |_, value| {
+                self.row_serde
+                    .deserialize(value)
+                    .map(OwnedRow::new)
+                    .map_err(Into::into)
+            })
             .await?;
         for ((index, should_prune), row) in positions.into_iter().zip_eq_fast(rows) {
             if should_prune && row.is_some() {

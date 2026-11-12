@@ -13,21 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::config::storage::ReadBatchConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use tokio::sync::OnceCell;
 
 use super::{HummockResult, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
-/// Metadata shared by independent key reads in one `MultiGet`. This owner does not spawn
-/// work: dropping the batch drops its waiters and releases all retained handles. Ready
-/// retention uses the configured entry/byte budgets plus one oversized SST; active reads hold
-/// their own handles independently of this retention budget.
+/// Ready metadata handles shared by independent key reads in one `MultiGet`.
+/// Foyer owns loading and single-flight. The batch retains handles until it is dropped.
+/// Active reads can hold their own handles independently of the retention budget.
 pub(super) struct SstMetaBatch {
     config: ReadBatchConfig,
     inner: Mutex<Metadata>,
@@ -35,14 +32,9 @@ pub(super) struct SstMetaBatch {
 
 #[derive(Default)]
 struct Metadata {
-    entries: HashMap<HummockSstableObjectId, Entry>,
+    entries: HashMap<HummockSstableObjectId, TableHolder>,
     regular_bytes: usize,
-}
-
-enum Entry {
-    Ready(TableHolder),
-    Oversized(TableHolder),
-    Loading(Arc<OnceCell<TableHolder>>),
+    oversized: Option<TableHolder>,
 }
 
 impl SstMetaBatch {
@@ -62,64 +54,63 @@ impl SstMetaBatch {
         if !self.config.meta_reuse {
             return store.sstable(info, stats).await;
         }
-        let mut wait_timer = None;
-        let loading = {
-            let mut inner = self.inner.lock();
-            match inner.entries.entry(info.object_id) {
-                std::collections::hash_map::Entry::Occupied(entry) => match entry.get() {
-                    Entry::Ready(table) | Entry::Oversized(table) => {
-                        stats.cache_meta_batch_ready += 1;
-                        return Ok(table.clone());
-                    }
-                    Entry::Loading(loading) => {
-                        stats.cache_meta_batch_loading += 1;
-                        wait_timer =
-                            Some(store.read_metrics.meta_batch_wait_duration.start_timer());
-                        loading.clone()
-                    }
-                },
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    let loading = Arc::new(OnceCell::new());
-                    entry.insert(Entry::Loading(loading.clone()));
-                    loading
-                }
+        let object_id = info.object_id;
+        let max_entries = self.config.meta_max_entries.get();
+        let max_bytes = self.config.meta_max_bytes.get();
+        let (available_bytes, oversized_slot_free) = {
+            let inner = self.inner.lock();
+            let oversized = inner
+                .oversized
+                .as_ref()
+                .filter(|table| table.id == object_id);
+            if let Some(table) = inner.entries.get(&object_id).or(oversized) {
+                stats.cache_meta_batch_ready += 1;
+                return Ok(table.clone());
             }
+            (
+                (inner.entries.len() < max_entries).then_some(max_bytes - inner.regular_bytes),
+                inner.oversized.is_none(),
+            )
         };
-        // Only same-SST callers wait together, and only for metadata. Different SSTs and
-        // each key's data-block reads progress independently. No map lock crosses an await.
-        let table = loading
-            .get_or_try_init(|| async {
-                stats.cache_meta_batch_load += 1;
-                let table = store.sstable(info, stats).await?;
-                let mut inner = self.inner.lock();
-                let bytes = table.estimated_meta_cache_memory_weight();
-                // Keep one oversized SST in addition to the normal budget. Keys often
-                // check a small SST before a large one; retaining only the large SST would
-                // discard that useful small metadata. Never replace pending load cells.
-                if bytes > self.config.meta_max_bytes.get() {
+        let table = store.sstable(info, stats).await?;
+        // Foyer already weighed the decoded metadata when it created the entry.
+        let bytes = table.weight();
+        let oversized = bytes > max_bytes;
+        let can_retain = if oversized {
+            oversized_slot_free
+        } else {
+            available_bytes.is_some_and(|available| bytes <= available)
+        };
+        // Retained handles live until batch end, so capacity can only shrink.
+        if !can_retain {
+            stats.cache_meta_batch_budget_reject += 1;
+            return Ok(table);
+        }
+
+        // Other reads may have retained a handle or used the remaining budget during the fetch.
+        let mut inner = self.inner.lock();
+        if oversized {
+            // Keep the first oversized handle. Rotating this slot churns when keys
+            // visit multiple oversized SSTs in the same batch.
+            match &inner.oversized {
+                None => {
+                    inner.oversized = Some(table.clone());
                     stats.cache_meta_batch_oversized += 1;
-                    inner
-                        .entries
-                        .retain(|_, entry| !matches!(entry, Entry::Oversized(_)));
-                    inner
-                        .entries
-                        .insert(info.object_id, Entry::Oversized(table.clone()));
-                } else if inner.entries.len() <= self.config.meta_max_entries.get()
-                    && bytes <= self.config.meta_max_bytes.get() - inner.regular_bytes
-                {
-                    inner.regular_bytes += bytes;
-                    inner
-                        .entries
-                        .insert(info.object_id, Entry::Ready(table.clone()));
-                } else {
-                    stats.cache_meta_batch_budget_reject += 1;
-                    inner.entries.remove(&info.object_id);
+                    stats.cache_meta_batch_retained += 1;
                 }
-                Ok::<_, super::HummockError>(table)
-            })
-            .await?;
-        drop(wait_timer);
-        Ok(table.clone())
+                Some(entry) if entry.id != object_id => stats.cache_meta_batch_budget_reject += 1,
+                Some(_) => {}
+            }
+        } else if !inner.entries.contains_key(&object_id) {
+            if inner.entries.len() < max_entries && bytes <= max_bytes - inner.regular_bytes {
+                inner.regular_bytes += bytes;
+                inner.entries.insert(object_id, table.clone());
+                stats.cache_meta_batch_retained += 1;
+            } else {
+                stats.cache_meta_batch_budget_reject += 1;
+            }
+        }
+        Ok(table)
     }
 }
 
@@ -130,7 +121,7 @@ mod tests {
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_default_test_sstable};
 
     #[tokio::test]
-    async fn test_batch_metadata_shares_loading_and_survives_cancelled_waiter() {
+    async fn test_batch_metadata_retains_completed_foyer_fetch() {
         use futures::FutureExt;
         use tokio::sync::oneshot;
 
@@ -145,7 +136,7 @@ mod tests {
             store.clear_meta_cache().await.unwrap();
             let (release, released) = oneshot::channel();
             let value = SstableMetaCacheValue::from(Sstable::clone(&table));
-            // Hold an actual Foyer fetch pending, so the batch must join an in-flight load.
+            // Hold Foyer's producer pending. Both batch reads wait through Foyer.
             let mut fetch = Box::pin(store.meta_cache().get_or_fetch(
                 &info.object_id,
                 || async move {
@@ -184,7 +175,11 @@ mod tests {
             }
             fetch.await.unwrap();
             assert_eq!(first_stats.cache_meta_block_total, 1);
-            assert_eq!(second_stats.cache_meta_block_total, u64::from(cancel_first));
+            assert_eq!(second_stats.cache_meta_block_total, 1);
+            assert_eq!(
+                first_stats.cache_meta_batch_retained + second_stats.cache_meta_batch_retained,
+                1
+            );
             let mut reused = StoreLocalStatistic::default();
             batch.sstable(&store, &info, &mut reused).await.unwrap();
             assert_eq!(reused.cache_meta_block_total, 0);
@@ -223,6 +218,10 @@ mod tests {
 
         assert!(stats.cache_meta_batch_ready > 0);
         assert!(stats.cache_meta_batch_budget_reject > 0);
+        assert_eq!(
+            stats.cache_meta_batch_retained,
+            batch.config.meta_max_entries.get() as u64
+        );
         let disabled = SstMetaBatch::new(ReadBatchConfig {
             meta_reuse: false,
             ..batch.config
@@ -240,66 +239,43 @@ mod tests {
         assert_eq!(disabled_stats.cache_meta_batch_ready, 0);
         assert!(disabled.inner.lock().entries.is_empty());
 
-        // A large SST shares the batch with ordinary metadata. Replacing it must not
-        // discard useful small metadata or a concurrent load.
+        // One large SST can still be retained after the regular budget fills.
         let batch = SstMetaBatch::new(ReadBatchConfig {
             meta_reuse: true,
+            meta_max_entries: 1.try_into().unwrap(),
             meta_max_bytes: 65536.try_into().unwrap(),
             ..Default::default()
         });
-        let pending = Arc::new(OnceCell::new());
-        let pending_id = ((batch.config.meta_max_entries.get() + 3) as u64).into();
-        batch
-            .inner
-            .lock()
-            .entries
-            .insert(pending_id, Entry::Loading(pending.clone()));
         let mut stats = StoreLocalStatistic::default();
         batch.sstable(&store, &info, &mut stats).await.unwrap();
-        for id in [
-            batch.config.meta_max_entries.get() + 1,
-            batch.config.meta_max_entries.get() + 2,
-        ] {
+        let large_sstables = [1_u64, 2].map(|id| {
             let mut large_meta = table.meta.clone();
             large_meta.block_metas.reserve(
                 batch.config.meta_max_bytes.get() / std::mem::size_of::<super::super::BlockMeta>()
                     + 1,
             );
             let mut large_info = info.get_inner();
-            large_info.object_id = (id as u64).into();
+            large_info.object_id = id.into();
             let large_info: SstableInfo = large_info.into();
             store.insert_meta_cache(large_info.object_id, large_meta);
-            let before = stats.cache_meta_block_total;
-            batch
-                .sstable(&store, &large_info, &mut stats)
-                .await
-                .unwrap();
-            batch
-                .sstable(&store, &large_info, &mut stats)
-                .await
-                .unwrap();
-            assert_eq!(stats.cache_meta_block_total, before + 1);
-            // Both the small and large SST are reused when each key visits them in turn.
-            batch.sstable(&store, &info, &mut stats).await.unwrap();
-            batch
-                .sstable(&store, &large_info, &mut stats)
-                .await
-                .unwrap();
-            assert_eq!(stats.cache_meta_block_total, before + 1);
-            let inner = batch.inner.lock();
-            assert_eq!(inner.entries.len(), 3); // Normal, oversized, and pending.
-            assert!(inner.regular_bytes <= batch.config.meta_max_bytes.get());
+            large_info
+        });
+        let [first, second] = &large_sstables;
+        batch.sstable(&store, first, &mut stats).await.unwrap();
+        for _ in 0..3 {
+            // The second large SST falls back to Foyer without replacing the first.
             assert_eq!(
-                inner
-                    .entries
-                    .values()
-                    .filter(|entry| matches!(entry, Entry::Oversized(_)))
-                    .count(),
-                1
+                batch.sstable(&store, second, &mut stats).await.unwrap().id,
+                second.object_id
             );
-            assert!(
-                matches!(inner.entries.get(&pending_id), Some(Entry::Loading(cell)) if Arc::ptr_eq(cell, &pending))
-            );
+            let before = stats.cache_meta_block_total;
+            batch.sstable(&store, &info, &mut stats).await.unwrap();
+            batch.sstable(&store, first, &mut stats).await.unwrap();
+            assert_eq!(stats.cache_meta_block_total, before);
         }
+        assert_eq!(stats.cache_meta_block_total, 5);
+        assert_eq!(stats.cache_meta_batch_budget_reject, 3);
+        assert_eq!(stats.cache_meta_batch_oversized, 1);
+        assert_eq!(stats.cache_meta_batch_retained, 2);
     }
 }

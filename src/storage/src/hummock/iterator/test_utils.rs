@@ -38,7 +38,7 @@ use crate::hummock::test_utils::{
 };
 use crate::hummock::{
     HummockValue, RecentFilter, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreConfig, SstableStoreRef, TableHolder,
+    SstableMetaCacheValue, SstableStoreConfig, SstableStoreRef, TableHolder,
 };
 use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -65,6 +65,14 @@ pub async fn mock_sstable_store_with_read_batch(
 ) -> SstableStoreRef {
     let mut store = mock_sstable_store().await;
     Arc::get_mut(&mut store).unwrap().read_batch = config;
+    store
+}
+
+pub async fn mock_sstable_store_with_blockwise_prefetch(
+    config: risingwave_common::config::storage::BlockwisePrefetchConfig,
+) -> SstableStoreRef {
+    let mut store = mock_sstable_store().await;
+    Arc::get_mut(&mut store).unwrap().blockwise_prefetch = config;
     store
 }
 
@@ -99,6 +107,12 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
+        .with_weighter(
+            |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
+                std::mem::size_of::<HummockSstableObjectId>()
+                    + value.estimated_meta_cache_memory_weight()
+            },
+        )
         .storage()
         .build()
         .await
