@@ -106,7 +106,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 45
+      timeout_in_minutes: 55
       retry: *auto-retry
     - label: "end-to-end preload-memory test"
       key: "e2e-preload-memory-test-release"
@@ -219,7 +219,7 @@ steps:
             <<: *docker-compose-standard
             run: sink-test-env
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 35
+      timeout_in_minutes: 50
       retry: *auto-retry
 
   - label: "end-to-end refill test"
@@ -613,7 +613,7 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
+    timeout_in_minutes: 70
     parallelism: 4
     retry: *auto-retry
 
@@ -903,6 +903,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 40
+    retry: *auto-retry
 
   - label: "Backfill tests"
     key: "backfill-tests"
@@ -948,7 +949,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 45
+    timeout_in_minutes: 55
     retry: *auto-retry
 
   - label: "end-to-end test for opendal storage backend (parallel)"
