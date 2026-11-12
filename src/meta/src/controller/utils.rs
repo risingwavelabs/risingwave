@@ -2099,7 +2099,7 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
         })
         .ok()?
         .try_into()
-        .unwrap();
+        .ok()?;
     if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
         cdc_table_info
             .clone()
@@ -2728,6 +2728,18 @@ mod tests {
         assert_eq!(
             extract_external_table_name_from_definition(ddl2),
             Some("mydb.t2".into())
+        );
+    }
+
+    #[test]
+    fn test_extract_cdc_table_name_with_unexpected_statement_count() {
+        let ddl1 = "CREATE TABLE t1 () FROM pg_source TABLE 'public.t1'";
+        let ddl2 = "CREATE TABLE t2 () FROM pg_source TABLE 'public.t2'";
+
+        assert_eq!(extract_external_table_name_from_definition(""), None);
+        assert_eq!(
+            extract_external_table_name_from_definition(&format!("{ddl1}; {ddl2}")),
+            None
         );
     }
 }
