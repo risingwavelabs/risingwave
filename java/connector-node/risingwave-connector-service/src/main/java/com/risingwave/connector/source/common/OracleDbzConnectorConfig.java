@@ -20,7 +20,9 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamRequest;
 import io.debezium.heartbeat.DatabaseHeartbeatImpl;
+import java.util.Locale;
 import java.util.Properties;
+import java.util.Set;
 
 public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     public static final String PDB_NAME = "database.pdb.name";
@@ -28,6 +30,10 @@ public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     public static final String HEARTBEAT_ACTION_QUERY_KEY =
             DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
     public static final String DEBEZIUM_RAC_NODES = "debezium.rac.nodes";
+    public static final String CONNECTION_ADAPTER_KEY =
+            DBZ_PROPERTY_PREFIX + "database.connection.adapter";
+    public static final Set<String> SUPPORTED_CONNECTION_ADAPTERS =
+            Set.of("logminer", "logminer_unbuffered");
 
     OracleDbzConnectorConfig(GetEventStreamRequest request) {
         super(request);
@@ -56,6 +62,15 @@ public class OracleDbzConnectorConfig extends DbzConnectorConfig {
                     String.format(
                             "'%s' is generated internally; configure '%s' instead",
                             HEARTBEAT_ACTION_QUERY_KEY, HEARTBEAT_TABLE_NAME));
+        }
+        var adapter = userProps.get(CONNECTION_ADAPTER_KEY);
+        if (adapter != null
+                && !SUPPORTED_CONNECTION_ADAPTERS.contains(
+                        adapter.trim().toLowerCase(Locale.ROOT))) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'%s' must be 'logminer' or 'logminer_unbuffered', got '%s'",
+                            CONNECTION_ADAPTER_KEY, adapter));
         }
         try (var validator = new OracleValidator(this, tableSchema)) {
             validator.validateAll();

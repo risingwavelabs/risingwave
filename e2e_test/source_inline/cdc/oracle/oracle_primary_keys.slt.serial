@@ -128,8 +128,9 @@ statement ok
 CREATE TABLE oracle_pk_discovered (*) WITH (snapshot.batch_size = 1)
 FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
 
-# The declared key may use a different order without changing row identity.
-statement ok
+# The declared key must follow the column order of the index enforcing the Oracle primary key,
+# because backfill pages through that index.
+statement error (?s).*Primary key order mismatch.*
 CREATE TABLE oracle_pk_reversed (
     "TENANT_ID" INT,
     "ORDER_ID" INT,
@@ -141,13 +142,6 @@ FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
 
 query T rowsort retry 30 backoff 1s
 SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_discovered;
-----
-1 42 first
-1 43 sibling
-2 42 second
-
-query T rowsort retry 30 backoff 1s
-SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_reversed;
 ----
 1 42 first
 1 43 sibling
@@ -176,13 +170,6 @@ SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_normal_composite;
 
 query T rowsort retry 30 backoff 1s
 SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_discovered;
-----
-1 42 updated
-1 43 sibling
-3 42 inserted
-
-query T rowsort retry 30 backoff 1s
-SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_reversed;
 ----
 1 42 updated
 1 43 sibling
@@ -332,9 +319,6 @@ DROP TABLE oracle_pk_number_27_neg1;
 
 statement ok
 DROP TABLE oracle_pk_date;
-
-statement ok
-DROP TABLE oracle_pk_reversed;
 
 statement ok
 DROP TABLE oracle_pk_discovered;

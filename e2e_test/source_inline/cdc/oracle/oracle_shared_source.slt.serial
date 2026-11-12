@@ -24,6 +24,9 @@ DROP TABLE IF EXISTS oracle_shared_quoted_explicit;
 statement ok
 DROP SOURCE IF EXISTS oracle_shared_source CASCADE;
 
+statement ok
+DROP SOURCE IF EXISTS oracle_shared_buffered_source CASCADE;
+
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
 
@@ -272,6 +275,46 @@ DROP TABLE oracle_shared_quoted_explicit;
 
 statement ok
 DROP SOURCE oracle_shared_source CASCADE;
+
+# The LogMiner adapter is chosen per source. With 'logminer', Debezium buffers open transactions
+# in the connector instead of Oracle, and RisingWave still receives committed changes only.
+statement ok
+CREATE SOURCE oracle_shared_buffered_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    debezium.database.connection.adapter = 'logminer'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE oracle_shared_buffered_customers (*)
+FROM oracle_shared_buffered_source TABLE 'APP.CUSTOMERS';
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_buffered_customers;
+----
+1 customer-updated
+2 customer-inserted
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx, end_tx
+begin_tx("oracle_shared_buffered_dml", [
+    "UPDATE APP.CUSTOMERS SET NAME = 'customer-buffered' WHERE ID = 1",
+    "INSERT INTO APP.CUSTOMERS (ID, NAME) VALUES (3, 'customer-buffered-inserted')",
+])
+end_tx("oracle_shared_buffered_dml")
+PY
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_buffered_customers;
+----
+1 customer-buffered
+2 customer-inserted
+3 customer-buffered-inserted
+
+statement ok
+DROP SOURCE oracle_shared_buffered_source CASCADE;
 
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
