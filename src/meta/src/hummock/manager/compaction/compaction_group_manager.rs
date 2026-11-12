@@ -41,6 +41,7 @@ use super::CompactionGroupStatistic;
 use crate::hummock::compaction::compaction_config::{
     CompactionConfigBuilder, validate_compaction_config,
 };
+use crate::hummock::compaction::parse_compression_algorithm;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
@@ -728,7 +729,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                         target.compression_algorithm.len()
                     )));
                 };
-                algorithm.clone_from(&c.compression_algorithm);
+                let (canonical, _) = parse_compression_algorithm(&c.compression_algorithm)
+                    .map_err(Error::CompactionGroup)?;
+                *algorithm = canonical.to_owned();
             }
             MutableConfig::ResetCompressionAlgorithm(reset) => {
                 if *reset {
@@ -1055,6 +1058,37 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn test_update_compaction_config_compression_algorithm() {
+        let mut config = CompactionConfigBuilder::new().build();
+
+        for (level, name, expected) in [(0, "lz4", "Lz4"), (1, "ZSTD", "Zstd"), (2, "none", "None")]
+        {
+            super::update_compaction_config(
+                &mut config,
+                &[MutableConfig::CompressionAlgorithm(CompressionAlgorithm {
+                    level,
+                    compression_algorithm: name.to_owned(),
+                })],
+            )
+            .unwrap();
+            assert_eq!(config.compression_algorithm[level as usize], expected);
+        }
+
+        let before = config.compression_algorithm.clone();
+        assert!(
+            super::update_compaction_config(
+                &mut config,
+                &[MutableConfig::CompressionAlgorithm(CompressionAlgorithm {
+                    level: 3,
+                    compression_algorithm: "snappy".to_owned(),
+                })],
+            )
+            .is_err()
+        );
+        assert_eq!(config.compression_algorithm, before);
     }
 
     #[test]
