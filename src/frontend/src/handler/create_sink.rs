@@ -877,7 +877,8 @@ fn prepare_replace_sink(
         )
         .into());
     }
-    // Reject before planning: planning such a sink creates its Iceberg table.
+    // Reject before planning, so that this is the reason reported, whatever the planner would
+    // say about such a sink.
     ensure_not_iceberg_pk_index_sink(&handle_args.with_options)?;
     match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
         Some(value) if !value.eq_ignore_ascii_case("false") => {
@@ -937,7 +938,8 @@ fn ensure_not_iceberg_pk_index_sink(properties: &BTreeMap<String, String>) -> Re
         return Err(ErrorCode::NotSupported(
             "REPLACE SINK does not support Iceberg sinks with `enable_pk_index = 'true'`"
                 .to_owned(),
-            "the primary key index is built by the initial snapshot, drop and recreate the sink"
+            "such a sink keeps an index of the rows it has written, which a replacement sink \
+             would start without; drop and recreate the sink"
                 .to_owned(),
         )
         .into());
