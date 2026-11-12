@@ -47,6 +47,7 @@ pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 pub(crate) use self::refill::PinCacheDownloadError;
 use self::storage::PinCacheStorageState;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;

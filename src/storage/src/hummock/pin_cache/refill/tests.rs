@@ -34,7 +34,7 @@ async fn test_live_fs_upload_gc_protection_and_partial_remote_error_cleanup() {
     let object_id = HummockSstableObjectId::from(1001);
     pin_cache.register_objects([object_id]);
     let file = PinCacheFile {
-        path: "1001-0.sst".into(),
+        path: "1001.sst".into(),
         size: 8,
     };
     let final_path = file.path.clone();
@@ -97,12 +97,22 @@ async fn test_live_fs_upload_gc_protection_and_partial_remote_error_cleanup() {
         .upload("sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    // Leave the failed copy's bytes on disk while admitting the replacement.
+    assert!(matches!(
+        pin_cache.prepare_download(object_id, 8).await,
+        Err(super::PinCacheDownloadError::PathBusy)
+    ));
+    pin_cache.select_minor().delete().await.unwrap();
+    assert!(
+        local_store
+            .metadata(&final_path)
+            .await
+            .unwrap_err()
+            .is_object_not_found_error()
+    );
     download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 8)
         .await
         .unwrap();
     let published = pin_cache.get(object_id).unwrap();
-    pin_cache.select_minor().delete().await.unwrap();
     pin_cache
         .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
         .await

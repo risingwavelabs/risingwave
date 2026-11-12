@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
 };
+use thiserror_ext::AsReport;
 
 use super::{PinCache, PinCacheFile, PinCacheRefillToken};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -255,7 +256,10 @@ impl PinCache {
         tokio::spawn(prepared.run(remote_store, remote_path))
             .await
             .map_err(|error| {
-                ObjectError::internal(format!("owned test download stopped: {error}"))
+                ObjectError::internal(format!(
+                    "owned test download stopped: {}",
+                    error.as_report()
+                ))
             })?
     }
 

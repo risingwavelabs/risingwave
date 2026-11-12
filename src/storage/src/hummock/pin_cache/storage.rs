@@ -63,7 +63,7 @@ impl PinCache {
         file: &PinCacheFile,
     ) -> Result<(), PinCacheDownloadError> {
         let _gate = self.capacity_gate.lock().await;
-        let quiescent = {
+        let (quiescent, reserved_before_probe) = {
             let state = self.storage.lock();
             // Withdrawn files retain their path until readers drain and GC confirms deletion.
             if state.files.contains_key(&file.path)
@@ -72,7 +72,10 @@ impl PinCache {
             {
                 return Err(PinCacheDownloadError::PathBusy);
             }
-            state.uploads.is_empty()
+            (
+                state.uploads.is_empty(),
+                state.uploads.values().sum::<u64>(),
+            )
         };
         let available = self.available_space().await?;
         let mut state = self.storage.lock();
@@ -83,9 +86,12 @@ impl PinCache {
                 state.capacity_limit = Some(available.saturating_add(resident));
             }
             let used = resident.saturating_add(reserved);
-            if available < file.size
-                || used.saturating_add(file.size) > state.capacity_limit.unwrap()
-            {
+            let window_remaining = state.capacity_limit.unwrap().saturating_sub(used);
+            // A fresh sample can see bytes reclaimed since the window was calibrated.
+            // Charge all reservations from before the probe, including uploads that
+            // finished during it and whose writes might be absent from the sample.
+            let unreserved_free = available.saturating_sub(reserved_before_probe);
+            if file.size > available || file.size > window_remaining.max(unreserved_free) {
                 return Err(PinCacheDownloadError::CapacityRejected);
             }
         }
@@ -237,6 +243,36 @@ mod tests {
             Err(PinCacheDownloadError::CapacityRejected)
         ));
         drop(first);
+    }
+
+    #[tokio::test]
+    async fn test_gc_reclaims_admission_capacity_while_an_upload_is_reserved() {
+        use bytes::Bytes;
+
+        let store = in_memory_object_store();
+        let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
+        let old = cache.track_file("1001.sst".into(), 50);
+        store
+            .upload(&old.path, Bytes::from_static(&[0; 50]))
+            .await
+            .unwrap();
+        let free = Arc::new(AtomicU64::new(100));
+        cache.set_available_space_for_test({
+            let free = free.clone();
+            move || Ok(Some(free.load(Ordering::SeqCst)))
+        });
+        let pending = cache.prepare_download(1002.into(), 10).await.unwrap();
+
+        cache.enqueue_delete(old);
+        cache.select_minor().delete().await.unwrap();
+        free.store(150, Ordering::SeqCst);
+
+        let next = cache.prepare_download(1003.into(), 100).await.unwrap();
+        assert!(matches!(
+            cache.prepare_download(1004.into(), 41).await,
+            Err(PinCacheDownloadError::CapacityRejected)
+        ));
+        drop((pending, next));
     }
 
     #[tokio::test]

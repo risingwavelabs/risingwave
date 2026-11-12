@@ -418,17 +418,9 @@ async fn advance_gc(duration: Duration) {
 }
 
 async fn reject_copy(cache: &std::sync::Arc<PinCache>, size: u64) {
-    cache.register_objects([1003.into()]);
     assert!(matches!(
-        cache
-            .download(
-                1003.into(),
-                size,
-                in_memory_object_store(),
-                "missing".into()
-            )
-            .await,
-        Err(super::super::PinCacheDownloadError::CapacityRejected)
+        cache.prepare_download(1003.into(), size).await,
+        Err(PinCacheDownloadError::CapacityRejected)
     ));
 }
 
@@ -502,7 +494,6 @@ async fn test_gc_worker_coalesces_pressure_and_preserves_arrivals_during_full() 
         "an unsatisfied old hint must not become retry debt"
     );
     assert!(cache.storage.lock().uploads.is_empty());
-    assert!(cache.get(1003.into()).is_none());
 }
 
 #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
@@ -628,6 +619,11 @@ async fn test_gc_worker_periodic_scan_protects_uploads_and_readers() {
 
     drop(reader);
     cache.finish_upload(&upload.path);
+    // Let the worker reset its deadline after the previous delete before advancing
+    // a whole period. Jumping the simulated clock can overtake that reset.
+    #[cfg(madsim)]
+    tokio::time::sleep(periodic_interval + MINOR_GC_INTERVAL).await;
+    #[cfg(not(madsim))]
     advance_gc(periodic_interval).await;
     let (mut paths, resume) = next_full_scan(&mut scans).await;
     paths.sort();
