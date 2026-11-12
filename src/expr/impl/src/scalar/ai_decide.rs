@@ -576,7 +576,7 @@ mod tests {
 
     async fn call(expr: &AiDecide, url: &str) -> Result<StructValue> {
         expr.request(
-            JsonbVal::from(json!({"messages": ["收到退款了"]})).as_scalar_ref(),
+            JsonbVal::from(json!({"messages": ["I received the refund."]})).as_scalar_ref(),
             url,
             "test-model",
             "test-only-key",
@@ -589,16 +589,17 @@ mod tests {
         let server = server(Router::new().route("/evaluate", post(|headers: HeaderMap, Json(body): Json<Value>| async move {
             assert_eq!(headers["authorization"], "Bearer test-only-key");
             assert_eq!(body["model"], "test-model");
-            assert_eq!(body["state"]["messages"][0], "收到退款了");
-            assert_eq!(body["questions"]["q"]["instructions"], "已解决？");
+            assert_eq!(body["state"]["messages"][0], "I received the refund.");
+            assert_eq!(body["questions"]["q"]["instructions"], "Resolved?");
             Json(json!({"answers": {"q": {"type": "noul", "noul": 0.99}}, "unknown_metadata": [1, null, true]}))
         }))).await;
         let mut expr = expression(REQUEST_TIMEOUT);
-        expr.questions = JsonbVal::from(json!({"q": {"type": "noul", "instructions": "已解决？"}}));
+        expr.questions =
+            JsonbVal::from(json!({"q": {"type": "noul", "instructions": "Resolved?"}}));
         expr.children = [
             LiteralExpression::new(
                 DataType::Jsonb,
-                Some(JsonbVal::from(json!({"messages": ["收到退款了"]})).into()),
+                Some(JsonbVal::from(json!({"messages": ["I received the refund."]})).into()),
             )
             .boxed(),
             LiteralExpression::new(DataType::Varchar, Some(server.url.clone().into())).boxed(),
