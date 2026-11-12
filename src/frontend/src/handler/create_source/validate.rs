@@ -113,10 +113,13 @@ fn validate_pulsar_schema_options(
 
     if connector != PULSAR_CONNECTOR
         || format_encode.format != Format::Plain
-        || !matches!(format_encode.row_encode, Encode::Avro | Encode::Json)
+        || !matches!(
+            format_encode.row_encode,
+            Encode::Avro | Encode::Json | Encode::Protobuf
+        )
     {
         return Err(RwError::from(ProtocolError(format!(
-            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO or JSON"
+            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO, JSON or PROTOBUF"
         ))));
     }
 
@@ -240,8 +243,8 @@ mod tests {
     }
 
     #[test]
-    fn pulsar_schema_accepts_minimal_plain_avro_and_json_options() {
-        for encode in [Encode::Avro, Encode::Json] {
+    fn pulsar_schema_accepts_minimal_plain_avro_json_and_protobuf_options() {
+        for encode in [Encode::Avro, Encode::Json, Encode::Protobuf] {
             let format_encode = format_encode(
                 Format::Plain,
                 encode,
@@ -261,7 +264,9 @@ mod tests {
             (PULSAR_CONNECTOR, Format::Upsert, Encode::Avro),
             (KAFKA_CONNECTOR, Format::Plain, Encode::Json),
             (PULSAR_CONNECTOR, Format::Upsert, Encode::Json),
-            (PULSAR_CONNECTOR, Format::Plain, Encode::Protobuf),
+            (KAFKA_CONNECTOR, Format::Plain, Encode::Protobuf),
+            (PULSAR_CONNECTOR, Format::Upsert, Encode::Protobuf),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Bytes),
         ] {
             let format_encode = format_encode(
                 format,
@@ -271,7 +276,7 @@ mod tests {
             let error =
                 validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
             assert!(error.to_string().contains(
-                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO or JSON"
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO, JSON or PROTOBUF"
             ));
         }
     }
