@@ -22,6 +22,7 @@ mod schema_check;
 mod stream_node_metrics;
 mod trace;
 mod update_check;
+mod watermark_check;
 
 /// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
 pub struct WrapperExecutor {
@@ -40,7 +41,9 @@ impl WrapperExecutor {
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
         // Update check
-        let stream = update_check::update_check(info, stream);
+        let stream = update_check::update_check(info.clone(), stream);
+        // Watermark check
+        let stream = watermark_check::watermark_check(info, stream);
 
         stream
     }

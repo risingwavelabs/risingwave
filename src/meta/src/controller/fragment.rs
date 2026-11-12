@@ -1166,6 +1166,7 @@ impl CatalogController {
 
     pub async fn list_actor_info(
         &self,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
         let inner = self.inner.read().await;
 
@@ -1177,6 +1178,12 @@ impl CatalogController {
                 .column_as(object::Column::Oid, "job_id")
                 .column_as(object::Column::SchemaId, "schema_id")
                 .column_as(object::Column::ObjType, "type")
+                .filter(
+                    database_id
+                        // Unknown IDs outside the catalog's i32 range must not overflow.
+                        .map(|id| object::Column::DatabaseId.eq(i64::from(id.as_raw_id())))
+                        .unwrap_or_else(|| SimpleExpr::from(true)),
+                )
                 .into_tuple()
                 .all(&inner.db)
                 .await?;
@@ -1421,6 +1428,33 @@ impl CatalogController {
         }
 
         Ok(result)
+    }
+
+    /// The staging table of a refreshable table, read from the persisted stream nodes.
+    pub async fn get_refresh_staging_table_id(
+        &self,
+        job_id: JobId,
+    ) -> MetaResult<Option<risingwave_common::catalog::TableId>> {
+        let inner = self.inner.read().await;
+        let stream_nodes: Vec<(StreamNode,)> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::StreamNode)
+            .filter(fragment::Column::JobId.eq(job_id))
+            .filter(FragmentTypeMask::intersects(FragmentTypeFlag::Mview))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let mut staging_table_id = None;
+        for (stream_node,) in stream_nodes {
+            visit_stream_node_body(&stream_node.to_protobuf(), |body| {
+                if let NodeBody::Materialize(node) = body
+                    && let Some(table) = &node.staging_table
+                {
+                    staging_table_id = Some(table.id);
+                }
+            });
+        }
+        Ok(staging_table_id)
     }
 
     pub async fn list_sink_log_store_tables(&self) -> MetaResult<Vec<(SinkId, TableId)>> {

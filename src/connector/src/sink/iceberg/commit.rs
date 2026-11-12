@@ -253,14 +253,7 @@ pub struct IcebergSinkCommitter {
 impl IcebergSinkCommitter {
     fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
-        self.table
-            .metadata()
-            .snapshot_for_ref(&branch)
-            .map(|snapshot| IcebergCommittedSnapshot {
-                branch,
-                snapshot_id: snapshot.snapshot_id(),
-                timestamp_ms: snapshot.timestamp_ms(),
-            })
+        IcebergCommittedSnapshot::from_branch_head(self.table.metadata(), &branch)
     }
 
     fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
@@ -291,6 +284,7 @@ impl IcebergSinkCommitter {
             .send(IcebergSinkCompactionUpdate {
                 sink_id: self.sink_id,
                 force_compaction,
+                has_new_data: true,
                 observed_snapshot,
             })
             .is_err()
@@ -682,6 +676,7 @@ impl IcebergSinkCommitter {
             self.table.identifier(),
             expect_schema_id,
             expect_partition_spec_id,
+            None,
         )
         .await
         .map_err(SinkError::Iceberg)?;
@@ -727,6 +722,7 @@ impl IcebergSinkCommitter {
             table_ident.clone(),
             expect_schema_id,
             expect_partition_spec_id,
+            None,
             self.commit_retry_num as usize,
             retry_log_context,
             |table| {

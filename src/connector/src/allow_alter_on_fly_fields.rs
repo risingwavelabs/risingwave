@@ -106,50 +106,6 @@ mod sink_properties {
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use source_properties::*;
     let mut map = HashMap::new();
-    // CDC Properties - added for schema.change.failure.policy
-    map.try_insert(
-        std::any::type_name::<MysqlCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<PostgresCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "debezium.heartbeat.interval.ms".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<SqlServerCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-
-    map.try_insert(
-        std::any::type_name::<MongodbCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
     // KafkaProperties
     map.try_insert(
         std::any::type_name::<KafkaProperties>().to_owned(),
@@ -168,6 +124,17 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "properties.sasl.kerberos.service.name".to_owned(),
+            "properties.sasl.kerberos.keytab".to_owned(),
+            "properties.sasl.kerberos.principal".to_owned(),
+            "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned(),
             "properties.message.max.bytes".to_owned(),
             "properties.receive.message.max.bytes".to_owned(),
             "properties.statistics.interval.ms".to_owned(),
@@ -256,9 +223,12 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "enable_manifest_rewrite".to_owned(),
             "manifest_rewrite_target_size_bytes".to_owned(),
             "manifest_rewrite_min_count_to_merge".to_owned(),
+            "enable_orphan_file_cleanup".to_owned(),
+            "orphan_file_cleanup_min_age_millis".to_owned(),
             "compaction.max_snapshots_num".to_owned(),
             "compaction.small_files_threshold_mb".to_owned(),
             "compaction.delete_files_count_threshold".to_owned(),
+            "compaction.delete_ratio_percent".to_owned(),
             "compaction.trigger_snapshot_count".to_owned(),
             "compaction.target_file_size_mb".to_owned(),
             "compaction.type".to_owned(),
@@ -284,6 +254,17 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "properties.sasl.kerberos.service.name".to_owned(),
+            "properties.sasl.kerberos.keytab".to_owned(),
+            "properties.sasl.kerberos.principal".to_owned(),
+            "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned(),
             "properties.message.max.bytes".to_owned(),
             "properties.receive.message.max.bytes".to_owned(),
             "properties.statistics.interval.ms".to_owned(),
@@ -305,6 +286,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.message.timeout.ms".to_owned(),
             "properties.max.in.flight.requests.per.connection".to_owned(),
             "properties.request.required.acks".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // LanceDbConfig
+    map.try_insert(
+        std::any::type_name::<LanceDbConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // OpenSearchConfig
@@ -343,6 +331,10 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
             "starrocks.max_batch_size_bytes".to_owned(),
+            "starrocks.max_transaction_size_bytes".to_owned(),
+            "starrocks.ignore_json_size".to_owned(),
+            "starrocks.load_mem_limit".to_owned(),
+            "starrocks.transaction_timeout_seconds".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // TurbopufferConfig
@@ -385,6 +377,17 @@ pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSe
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "properties.sasl.kerberos.service.name".to_owned(),
+            "properties.sasl.kerberos.keytab".to_owned(),
+            "properties.sasl.kerberos.principal".to_owned(),
+            "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // Jdbc

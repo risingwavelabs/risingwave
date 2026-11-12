@@ -97,12 +97,12 @@ statement ok
 drop source upsert_source;
 
 # Will fail at the parser phase.
-statement error expected.*after ROW FORMAT
+statement error expected.*after FORMAT
 create source invalid_format with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092'
-) row format abc;
+) format abc encode abc;
 
 statement ok
 create table s (

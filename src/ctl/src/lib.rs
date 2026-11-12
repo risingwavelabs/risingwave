@@ -359,6 +359,14 @@ enum HummockCommands {
 enum RefillCommands {
     /// Collect table cache refill stats from compute nodes.
     Stats,
+    /// Warm up a Hummock-backed table in the streaming compute node caches.
+    WarmUp {
+        #[clap(long)]
+        table_id: TableId,
+        /// Maximum number of vnodes scanned concurrently on each compute node.
+        #[clap(long, default_value_t = 16)]
+        concurrency: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -638,6 +646,22 @@ pub enum ProfileCommands {
 /// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
 /// in an embedded manner.
 pub async fn start(opts: CliOpts, shutdown: CancellationToken) {
+    // Object-store benchmarks own cooperative shutdown, so they can write a
+    // partial report and clean up after Ctrl-C instead of being dropped here.
+    #[cfg(not(madsim))]
+    if matches!(
+        &opts.command,
+        Commands::Bench(BenchCommands::ObjectStore(_))
+    ) {
+        let Commands::Bench(BenchCommands::ObjectStore(args)) = opts.command else {
+            unreachable!()
+        };
+        if let Err(error) = cmd_impl::bench::object_store::run(args, shutdown).await {
+            eprintln!("Error: {}", error.as_report());
+            std::process::exit(1);
+        }
+        return;
+    }
     let context = CtlContext::default();
 
     tokio::select! {
@@ -949,6 +973,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::Refill(RefillCommands::Stats)) => {
             cmd_impl::hummock::refill_stats(context).await?
         }
+        Commands::Hummock(HummockCommands::Refill(RefillCommands::WarmUp {
+            table_id,
+            concurrency,
+        })) => cmd_impl::hummock::warm_up_table_cache(context, table_id, concurrency).await?,
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,

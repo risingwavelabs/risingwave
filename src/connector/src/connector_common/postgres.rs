@@ -167,7 +167,7 @@ pub async fn create_pg_client_from_properties(
     tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> ConnectorResult<PgClient> {
     let config = pg_connection_config_from_properties(props)?;
-    create_pg_client(&config, tcp_keepalive)
+    create_pg_client(&config, tcp_keepalive, None)
         .await
         .map_err(Into::into)
 }
@@ -564,6 +564,7 @@ impl std::str::FromStr for SslMode {
 pub async fn create_pg_client(
     config: &PgConnectionConfig,
     tcp_keepalive: Option<TcpKeepaliveConfig>,
+    application_name: Option<&str>,
 ) -> anyhow::Result<PgClient> {
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
@@ -572,6 +573,9 @@ pub async fn create_pg_client(
         .host(&config.host)
         .port(config.port)
         .dbname(&config.database);
+    if let Some(application_name) = application_name {
+        pg_config.application_name(application_name);
+    }
 
     // Configure TCP keepalive if provided
     if let Some(keepalive) = tcp_keepalive {
@@ -656,6 +660,13 @@ pub async fn create_pg_client(
     Ok(client)
 }
 
+pub fn postgres_point_type() -> DataType {
+    DataType::Struct(StructType::new(vec![
+        ("x", DataType::Float64),
+        ("y", DataType::Float64),
+    ]))
+}
+
 // Used for both source and sink connector
 pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
@@ -673,10 +684,7 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
         SeaType::Time(_) | SeaType::TimeWithTimeZone(_) => DataType::Time,
         SeaType::Interval(_) => DataType::Interval,
         SeaType::Boolean => DataType::Boolean,
-        SeaType::Point => DataType::Struct(StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
-        ])),
+        SeaType::Point => postgres_point_type(),
         SeaType::Uuid => DataType::Varchar,
         SeaType::Xml => DataType::Varchar,
         SeaType::Json => DataType::Jsonb,

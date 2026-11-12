@@ -162,6 +162,15 @@ WHERE content = 'Data';
 ----
 t
 
+# A streaming job can't read a fixed snapshot of an Iceberg source.
+statement error time travel in a streaming job
+CREATE MATERIALIZED VIEW iceberg_metadata_relations_time_travel_mv AS
+SELECT * FROM iceberg_metadata_relations_iceberg_source FOR SYSTEM_VERSION AS OF 1;
+
+statement error time travel in a streaming job
+CREATE MATERIALIZED VIEW iceberg_metadata_relations_time_travel_mv AS
+SELECT * FROM iceberg_metadata_relations_iceberg_source FOR SYSTEM_TIME AS OF '2222-12-10 11:48:06';
+
 # Resolve all relation kinds within one schema before moving to the next
 # search_path entry.
 statement ok

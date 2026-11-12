@@ -31,7 +31,7 @@ use risingwave_pb::catalog::Database;
 use risingwave_pb::common::{HostAddress, PbWorkerType, WorkerNode, worker_node};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::PbStreamNode;
-use risingwave_pb::stream_service::streaming_control_stream_request::{PbInitRequest, Request};
+use risingwave_pb::stream_service::streaming_control_stream_request::Request;
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -51,7 +51,8 @@ use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
-    BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
+    BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, RecoveryStatus,
+    Scheduled,
 };
 use crate::controller::scale::{LoadedFragment, LoadedFragmentContext, NoShuffleEnsemble};
 use crate::controller::utils::StreamingJobExtraInfo;
@@ -60,7 +61,7 @@ use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
 use crate::model::{FragmentDownstreamRelation, FragmentId};
 
 enum ContextRequest {
-    AbortAndMarkBlocked(RecoveryReason),
+    AbortAndMarkBlocked(RecoveryStatus),
     MarkReady,
     ReloadRuntimeInfo(oneshot::Sender<BarrierWorkerRuntimeInfoSnapshot>),
     NewControlStream(WorkerNode, oneshot::Sender<StreamingControlHandle>),
@@ -76,23 +77,33 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         pending().await
     }
 
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
-        recovery_reason: RecoveryReason,
-    ) {
-        assert_eq!(database_id, None);
+        recovery: crate::manager::sink_coordination::RecoveryStart,
+        recovery_reason: &RecoveryReason,
+    ) -> MetaResult<()> {
+        assert!(matches!(
+            recovery,
+            crate::manager::sink_coordination::RecoveryStart::Global
+        ));
         self.0
-            .send(ContextRequest::AbortAndMarkBlocked(recovery_reason))
+            .send(ContextRequest::AbortAndMarkBlocked(recovery_reason.into()))
             .unwrap();
+        Ok(())
     }
 
-    fn mark_ready(&self, options: MarkReadyOptions) {
-        let MarkReadyOptions::Global { blocked_databases } = options else {
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()> {
+        let MarkReadyOptions::Global { failed_databases } = options else {
             unreachable!()
         };
-        assert!(blocked_databases.is_empty());
+        assert!(failed_databases.is_empty());
+        assert!(running_job_ids.is_empty()); // Test jobs belong to the main graph.
         self.0.send(ContextRequest::MarkReady).unwrap();
+        Ok(())
     }
 
     async fn resolve_log_store_epoch<'a>(
@@ -115,11 +126,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unreachable!()
     }
 
-    async fn new_control_stream(
-        &self,
-        node: &WorkerNode,
-        _init_request: &PbInitRequest,
-    ) -> MetaResult<StreamingControlHandle> {
+    async fn new_control_stream(&self, node: &WorkerNode) -> MetaResult<StreamingControlHandle> {
         let (tx, rx) = oneshot::channel();
         self.0
             .send(ContextRequest::NewControlStream(node.clone(), tx))
@@ -162,9 +169,11 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn handle_refresh_finished_table_ids(
+    async fn handle_refresh_finished_actors(
         &self,
-        _refresh_finished_table_ids: Vec<JobId>,
+        _refresh_finished_actors: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor,
+        >,
     ) -> MetaResult<()> {
         unimplemented!()
     }
@@ -181,9 +190,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
 
     async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        _reports: Vec<
-            risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
-        >,
+        _metadata: Vec<crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata>,
     ) -> MetaResult<Vec<SinkId>> {
         unimplemented!()
     }
@@ -214,17 +221,29 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let (_request_tx, request_rx) = mpsc::unbounded_channel();
     let mut worker = GlobalBarrierWorker::new_inner(env, request_rx, context).await;
     let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let (initial_workers_tx, mut initial_workers_rx) = oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {
-        worker.recovery(false, RecoveryReason::Bootstrap).await;
+        worker
+            .recovery(false, RecoveryReason::Bootstrap(initial_workers_tx))
+            .await;
         Box::pin(worker.run_inner(shutdown_rx)).await
     });
 
     // bootstrap recovery
-    let ContextRequest::AbortAndMarkBlocked(RecoveryReason::Bootstrap) = rx.recv().await.unwrap()
+    let ContextRequest::AbortAndMarkBlocked(RecoveryStatus::Bootstrap) = rx.recv().await.unwrap()
     else {
         unreachable!()
     };
+    let ContextRequest::ReloadRuntimeInfo(tx) = rx.recv().await.unwrap() else {
+        unreachable!()
+    };
+    // A failed bootstrap attempt must retain the completion sender for the successful retry.
+    drop(tx);
+    assert!(matches!(
+        initial_workers_rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
     let ContextRequest::ReloadRuntimeInfo(tx) = rx.recv().await.unwrap() else {
         unreachable!()
     };
@@ -437,6 +456,17 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
 
     let (partial_graph_id, initial_epoch) =
         handle_initial_barrier(&mut request_rx1, &response_tx1, &worker1).await;
+    for _ in 0..10 {
+        yield_now().await;
+    }
+    assert!(matches!(
+        rx.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        initial_workers_rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
     assert_eq!(
         handle_initial_barrier(&mut request_rx2, &response_tx2, &worker2).await,
         (partial_graph_id, initial_epoch)
@@ -445,6 +475,10 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let ContextRequest::MarkReady = rx.recv().await.unwrap() else {
         unreachable!()
     };
+    assert_eq!(
+        initial_workers_rx.await.unwrap(),
+        HashMap::from([(worker1.id, worker1.clone()), (worker2.id, worker2.clone())])
+    );
 
     // correctly collect from worker1
     let Request::InjectBarrier(init_inject_request) =
@@ -493,7 +527,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     drop(response_tx2);
 
     // enter recovery
-    let ContextRequest::AbortAndMarkBlocked(RecoveryReason::Failover(_)) = rx.recv().await.unwrap()
+    let ContextRequest::AbortAndMarkBlocked(RecoveryStatus::Failover(_)) = rx.recv().await.unwrap()
     else {
         unreachable!()
     };

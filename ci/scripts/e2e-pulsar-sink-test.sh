@@ -21,6 +21,9 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+if [[ "$profile" == "ci-dev" ]]; then
+    export RUST_MIN_STACK=4194304
+fi
 sink_test_env_setup "$profile"
 
 echo "--- waiting until pulsar is healthy"

@@ -258,9 +258,10 @@ pub(crate) async fn sync_serving_table_vnode_mappings_to_hummock(
             )),
             ..Default::default()
         };
-        notification_manager
-            .notify_hummock_targeted_update(WorkerKey(host), Info::TableRefillRuntimeConfig(config))
-            .await;
+        notification_manager.notify_hummock_targeted_update(
+            WorkerKey(host),
+            Info::TableRefillRuntimeConfig(config),
+        );
     }
 }
 

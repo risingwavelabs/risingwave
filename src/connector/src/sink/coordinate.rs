@@ -21,7 +21,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::connector_service::SinkMetadata;
 use tracing::{info, warn};
 
@@ -58,12 +57,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
                 .sink_coordinate_client()
                 .await,
             param,
-            // Singleton actors do not carry a vnode bitmap. For sink coordination, the only
-            // writer owns the singleton fragment's sole vnode.
-            vnode_bitmap: writer_param
-                .vnode_bitmap
-                .clone()
-                .unwrap_or_else(|| Bitmap::singleton().clone()),
+            vnode_bitmap: writer_param.vnode_bitmap.clone(),
             commit_checkpoint_interval,
             sink_writer_metrics: SinkWriterMetrics::new(writer_param),
         })

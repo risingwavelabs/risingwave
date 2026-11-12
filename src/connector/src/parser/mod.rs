@@ -47,10 +47,7 @@ pub use self::postgres::{
     postgres_cell_to_scalar_impl, postgres_cell_to_scalar_impl_strict, postgres_row_to_owned_row,
     postgres_row_to_owned_row_with_strict_pk,
 };
-pub use self::sql_server::{
-    ScalarImplTiberiusWrapper, sql_server_row_to_owned_row,
-    sql_server_row_to_owned_row_with_strict_pk,
-};
+pub use self::sql_server::{ScalarImplTiberiusWrapper, SqlServerRowDecoder};
 pub use self::unified::Access;
 pub use self::unified::json::{
     BigintUnsignedHandlingMode, JsonAccess, TimeHandling, TimestampHandling, TimestamptzHandling,
@@ -269,8 +266,7 @@ impl<'a> MessageMeta<'a> {
                     CDC_TABLE_NAME_COLUMN_NAME,
                     "unexpected cdc meta column name"
                 );
-                // For CDC sources, extract_table_name() strips the database prefix:
-                cdc_meta.extract_table_name()
+                Some(cdc_meta.full_table_name.as_str().into())
             }
 
             // For other cases, return `None`.

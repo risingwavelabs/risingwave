@@ -116,6 +116,8 @@ pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
 pub const ENABLE_MANIFEST_REWRITE: &str = "enable_manifest_rewrite";
 pub const MANIFEST_REWRITE_TARGET_SIZE_BYTES: &str = "manifest_rewrite_target_size_bytes";
 pub const MANIFEST_REWRITE_MIN_COUNT_TO_MERGE: &str = "manifest_rewrite_min_count_to_merge";
+pub const ENABLE_ORPHAN_FILE_CLEANUP: &str = "enable_orphan_file_cleanup";
+pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS: &str = "orphan_file_cleanup_min_age_millis";
 pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
 
 pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
@@ -136,7 +138,10 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
 pub const ORDER_KEY: &str = "order_key";
 pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
+pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT: u64 = 7 * 24 * 60 * 60 * 1000;
+pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM: u64 = 24 * 60 * 60 * 1000;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
+pub const LEGACY_PK_INDEX_FILE_PATH: &str = "legacy_pk_index_file_path";
 
 pub const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
@@ -334,6 +339,13 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    /// For REST catalogs such as AWS Glue, derive a missing table location from the
+    /// namespace's `location` property. Defaults to false. An existing location
+    /// derived from `warehouse.path` takes precedence; a missing or empty namespace
+    /// location leaves server-side location assignment unchanged.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub default_table_location_from_namespace: bool,
+
     /// Whether it is `exactly_once`, the default is true.
     #[serde(default = "default_some_true")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -433,6 +445,23 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub manifest_rewrite_min_count_to_merge: Option<usize>,
 
+    /// Whether to periodically remove files that are unreachable from Iceberg metadata.
+    /// Cleanup runs on the global Iceberg orphan-file cleanup interval.
+    #[serde(
+        rename = "enable_orphan_file_cleanup",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub enable_orphan_file_cleanup: bool,
+
+    /// Minimum file age in milliseconds before an unreachable file may be removed.
+    /// Defaults to 7 days and must be at least 24 hours.
+    #[serde(rename = "orphan_file_cleanup_min_age_millis", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub orphan_file_cleanup_min_age_millis: Option<u64>,
+
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
     /// If unset, defaults to 1000 only when compaction is enabled
@@ -450,6 +479,12 @@ pub struct IcebergConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub delete_files_count_threshold: Option<usize>,
+
+    /// Minimum percentage of deleted physical rows for PK-index compaction.
+    #[serde(rename = "compaction.delete_ratio_percent", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub delete_ratio_percent: Option<u32>,
 
     #[serde(rename = "compaction.trigger_snapshot_count", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -499,6 +534,24 @@ pub struct IcebergConfig {
     #[with_option(iceberg_engine)]
     pub enable_pk_index: bool,
 
+    /// Whether the PK index of a pk-index sink stores full data file paths. Default is true.
+    /// When false, the sink writes every data file as `{data_location}/{uuid}.parquet` and the
+    /// PK index only stores the 16-byte uuid, from which the path is rebuilt. New pk-index sinks
+    /// are created with false; sinks created before this option existed keep the legacy layout.
+    /// It must not change after the sink is created.
+    ///
+    /// While it is false, the table's data location must never change: neither the
+    /// `write.data.path` or `write.folder-storage.path` table property nor the table location.
+    /// RisingWave never changes them, but it cannot stop other engines from doing so. After such
+    /// a change, uuids already in the PK index rebuild paths that do not exist, and the position
+    /// deletes written for those rows silently have no effect.
+    #[serde(
+        rename = "legacy_pk_index_file_path",
+        default = "default_true",
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub legacy_pk_index_file_path: bool,
+
     #[serde(flatten)]
     pub unknown_fields: std::collections::HashMap<String, String>,
 }
@@ -534,6 +587,11 @@ impl IcebergConfig {
             )));
         }
         Ok(())
+    }
+
+    /// Whether this is a pk-index sink whose PK index stores data file uuids instead of paths.
+    pub fn pk_index_stores_file_uuid(&self) -> bool {
+        self.enable_pk_index && !self.legacy_pk_index_file_path
     }
 
     pub(crate) fn validate_enable_pk_index(&self) -> Result<()> {
@@ -611,6 +669,12 @@ impl IcebergConfig {
         config.validate_enable_pk_index()?;
         config.validate_manifest_rewrite_format(config.format_version)?;
 
+        if config.default_table_location_from_namespace && !config.common.is_rest_catalog()? {
+            return Err(SinkError::Config(anyhow!(
+                "`default_table_location_from_namespace` is only supported for REST catalogs"
+            )));
+        }
+
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = iceberg_java_catalog_props_from_options(
             values
@@ -657,6 +721,15 @@ impl IcebergConfig {
             )));
         }
 
+        if config
+            .delete_ratio_percent
+            .is_some_and(|percent| !(1..=100).contains(&percent))
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.delete_ratio_percent` must be between 1 and 100"
+            )));
+        }
+
         if config.target_file_size_mb == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.target_file_size_mb` must be greater than 0"
@@ -687,6 +760,23 @@ impl IcebergConfig {
             )));
         }
 
+        if config
+            .orphan_file_cleanup_min_age_millis
+            .is_some_and(|min_age_millis| {
+                min_age_millis < ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM
+            })
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`orphan_file_cleanup_min_age_millis` must be at least {} (24 hours)",
+                ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM
+            )));
+        }
+
+        if config.enable_orphan_file_cleanup || config.orphan_file_cleanup_min_age_millis.is_some()
+        {
+            config.ensure_orphan_file_cleanup_supported()?;
+        }
+
         // Validate table identifier (e.g., database.name should not contain dots)
         config
             .table
@@ -710,6 +800,16 @@ impl IcebergConfig {
         self.common
             .resolve_catalog_kind()
             .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
+    pub fn ensure_orphan_file_cleanup_supported(&self) -> Result<()> {
+        if matches!(self.catalog_kind()?, IcebergCatalogKind::Storage) {
+            return Err(SinkError::Config(anyhow!(
+                "Iceberg orphan file cleanup is not supported for `catalog.type = 'storage'`"
+            )));
+        }
+
+        Ok(())
     }
 
     fn resolved_catalog_config(&self) -> Result<ResolvedIcebergCatalogConfig<'_>> {
@@ -801,6 +901,11 @@ impl IcebergConfig {
             .unwrap_or(MANIFEST_MIN_MERGE_COUNT_DEFAULT as usize)
     }
 
+    pub fn orphan_file_cleanup_min_age_millis(&self) -> u64 {
+        self.orphan_file_cleanup_min_age_millis
+            .unwrap_or(ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT)
+    }
+
     pub fn trigger_snapshot_count(&self) -> usize {
         self.trigger_snapshot_count.unwrap_or(usize::MAX)
     }
@@ -811,6 +916,10 @@ impl IcebergConfig {
 
     pub fn delete_files_count_threshold(&self) -> usize {
         self.delete_files_count_threshold.unwrap_or(256)
+    }
+
+    pub fn delete_ratio_percent(&self) -> u32 {
+        self.delete_ratio_percent.unwrap_or(30)
     }
 
     pub fn target_file_size_mb(&self) -> u64 {

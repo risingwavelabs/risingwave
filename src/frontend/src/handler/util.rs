@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::str::FromStr;
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -52,8 +53,8 @@ use tokio::time::{Duration, sleep};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
-use crate::session::{SessionImpl, current};
-use crate::{Binder, HashSet, TableCatalog};
+use crate::session::SessionImpl;
+use crate::{Binder, TableCatalog};
 
 pub fn ensure_local_fs_connector_allowed(session: &SessionImpl, connector: &str) -> RwResult<()> {
     let is_local_fs_connector = is_local_fs_connector(connector);
@@ -235,13 +236,6 @@ impl CompatibleFormatEncode {
     /// Convert `self` to [`FormatEncodeOptions`] and warn the user if the syntax is deprecated.
     pub fn into_v2_with_warning(self) -> FormatEncodeOptions {
         match self {
-            CompatibleFormatEncode::RowFormat(inner) => {
-                // TODO: should be warning
-                current::notice_to_user(
-                    "RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.",
-                );
-                inner.into_format_encode_v2()
-            }
             CompatibleFormatEncode::V2(inner) => inner,
         }
     }

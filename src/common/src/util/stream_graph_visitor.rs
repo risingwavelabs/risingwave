@@ -100,6 +100,23 @@ pub fn visit_fragment(fragment: &StreamFragment, f: impl FnMut(&NodeBody)) {
     visit_stream_node_body(fragment.node.as_ref().unwrap(), f)
 }
 
+/// Visit references to the Fetch task table used for job identity, not extra owned tables.
+pub fn visit_iceberg_completion_tables(
+    fragment: &mut StreamFragment,
+    mut f: impl FnMut(&mut risingwave_pb::plan_common::StorageTableDesc),
+) {
+    visit_fragment_mut(fragment, |body| {
+        if let NodeBody::Source(node) = body
+            && let Some(table) = node
+                .source_inner
+                .as_mut()
+                .and_then(|source| source.iceberg_fetch_state_table.as_mut())
+        {
+            f(table);
+        }
+    });
+}
+
 /// Visit the tables of a [`StreamNode`].
 pub fn visit_stream_node_tables_inner<F>(
     stream_node: &mut StreamNode,
@@ -258,6 +275,10 @@ pub fn visit_stream_node_tables_inner<F>(
                     node.intermediate_state_table,
                     "EowcOverWindowIntermediateState"
                 );
+                optional!(
+                    node.watermark_trigger_table,
+                    "EowcOverWindowWatermarkTrigger"
+                );
             }
 
             NodeBody::OverWindow(node) => {
@@ -285,6 +306,10 @@ pub fn visit_stream_node_tables_inner<F>(
 
             NodeBody::GapFill(node) => {
                 always!(node.state_table, "GapFillStateTable");
+            }
+
+            NodeBody::MatchRecognize(node) => {
+                always!(node.state_table, "MatchRecognizeStateTable");
             }
 
             // Note: add internal tables for new nodes here.
@@ -331,6 +356,7 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::LocalityProvider(node) => {
                 always!(node.state_table, "LocalityProviderState");
                 always!(node.progress_table, "LocalityProviderProgress");
+                optional!(node.sort_buffer_table, "LocalityProviderSortBuffer");
             }
 
             NodeBody::IcebergWithPkIndexWriter(node) => {

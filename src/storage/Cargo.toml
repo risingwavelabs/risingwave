@@ -22,6 +22,7 @@ arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
+bincode = "1"
 bytes = { version = "1", features = ["serde"] }
 derive_builder = "0.20"
 dyn-clone = "1.0.14"
@@ -34,7 +35,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
-iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "53410bea82ff2319196df43e7447ab2bb13da1d6" }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "6266b43366d0b1ff11ef24f690528134babfbf47" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -63,7 +64,7 @@ scopeguard = "1"
 serde = { workspace = true }
 serde_bytes = "0.11"
 sled = "0.34.7"
-spin = "0.10"
+spin = "0.12"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
 thiserror = { workspace = true }
@@ -73,7 +74,7 @@ tokio = { workspace = true, features = ["fs"] }
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"
-xorf = "0.12.0"
+xorf = "0.13.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
@@ -81,11 +82,11 @@ zstd = { version = "0.13", default-features = false }
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
+tikv-jemallocator = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
 [[bench]]
@@ -115,6 +116,21 @@ name = "bench_compactor"
 harness = false
 
 [[bench]]
+name = "bench_sstable_builder"
+harness = false
+required-features = ["test"]
+
+[[bench]]
+name = "bench_sstable_meta"
+harness = false
+required-features = ["test"]
+
+[[bench]]
+name = "bench_sstable_meta_size"
+harness = false
+required-features = ["test"]
+
+[[bench]]
 name = "bench_multi_builder"
 harness = false
 
@@ -125,6 +141,16 @@ harness = false
 [[bench]]
 name = "bench_table_watermarks"
 harness = false
+
+[[bench]]
+name = "bench_sstable_filter_restore"
+harness = false
+required-features = ["test"]
+
+[[bench]]
+name = "bench_sstable_decode"
+harness = false
+required-features = ["test"]
 
 [lints]
 workspace = true

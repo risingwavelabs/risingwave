@@ -54,6 +54,28 @@ pub async fn extract_json_table_schema(
     }
 }
 
+/// Map the latest Pulsar `JSON` schema of the source topic to a relational schema.
+///
+/// Pulsar stores `JSON` schemas as Avro record definitions, while payloads are plain JSON without
+/// a schema-registry header. JSON is self-describing, so only the latest schema is needed.
+pub async fn extract_pulsar_json_table_schema(
+    config: &PulsarSchemaConfig,
+    with_properties: &BTreeMap<String, String>,
+    format_encode_options: &mut BTreeMap<String, String>,
+) -> Result<Vec<ColumnCatalog>> {
+    try_consume_pulsar_schema_config_from_options(format_encode_options);
+    Ok(
+        fetch_pulsar_json_schema_and_map_to_columns(config, with_properties)
+            .await?
+            .into_iter()
+            .map(|col| ColumnCatalog {
+                column_desc: ColumnDesc::from_field_without_column_id(&col),
+                is_hidden: false,
+            })
+            .collect_vec(),
+    )
+}
+
 pub fn get_json_schema_location(
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {

@@ -241,12 +241,12 @@ select
 ----
 string string string
 
-# Variant objects require unique field names while RisingWave struct types do not.
+# Duplicate struct field names are rejected by the shared SQL type binder before conversion.
 
-statement error duplicate field name
+statement error struct field "a" specified more than once
 select to_variant(row(1, 'x')::struct<a int, a varchar>);
 
-statement error duplicate field name
+statement error struct field "a" specified more than once
 select to_variant(row(row(1, 'x')::struct<a int, a varchar>)::struct<s struct<a int, a varchar>>);
 
 statement ok
@@ -433,8 +433,9 @@ create function variant_arg_udf(variant) returns int as 'variant_arg_udf' using 
 statement error VARIANT is not supported in UDFs yet
 create function variant_ret_udf(int) returns variant as 'variant_ret_udf' using link 'http://localhost:8815';
 
-# Sinks cannot serialize VARIANT values with an external encoder yet: creation is
-# rejected unless the sink does not encode (blackhole, sink-into-table).
+# Most external encoders cannot serialize VARIANT values yet: creation is rejected
+# unless the sink does not encode (blackhole, sink-into-table). Iceberg is supported
+# separately through its native Parquet Variant layout.
 
 statement ok
 create table variant_sink_t (id int primary key, v variant, s struct<sv variant>);

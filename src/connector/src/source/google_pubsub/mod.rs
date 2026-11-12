@@ -15,10 +15,17 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use base64::prelude::*;
+use google_cloud_gax::conn::Environment;
+use google_cloud_pubsub::apiv1;
+use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use google_cloud_pubsub::client::google_cloud_auth::project;
+use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscriber::SubscriberConfig;
 use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::bail;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 
 pub mod enumerator;
@@ -32,6 +39,7 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
+use crate::connector_common::{DISABLE_DEFAULT_CREDENTIAL, resolve_pubsub_project_id};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
@@ -51,6 +59,11 @@ const DEFAULT_MAX_OUTSTANDING_BYTES: i64 = 1_000_000_000;
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
+    /// The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+    /// the credentials or Application Default Credentials.
+    #[serde(rename = "pubsub.project_id")]
+    pub project_id: Option<String>,
+
     /// Pub/Sub subscription to consume messages from.
     ///
     /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
@@ -66,7 +79,9 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    /// `credentials` is a JSON string containing the service account credentials.
+    /// `credentials` is a JSON string containing the service account credentials, optionally
+    /// base64-encoded. If omitted, the connector uses Google Application Default Credentials
+    /// (ADC) when allowed by the deployment environment.
     /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
@@ -147,6 +162,17 @@ impl crate::source::UnknownFields for PubsubProperties {
     }
 }
 
+fn parse_credentials(credentials: &str) -> ConnectorResult<CredentialsFile> {
+    // Before 3.1, the environment-based authentication path also accepted base64-encoded JSON.
+    // Preserve that behavior without modifying process-wide environment variables.
+    let credentials = if let Ok(decoded) = BASE64_STANDARD.decode(credentials) {
+        serde_json::from_slice(&decoded)
+    } else {
+        serde_json::from_str(credentials)
+    };
+    Ok(credentials.context("failed to parse Google Cloud Pub/Sub credentials")?)
+}
+
 impl PubsubProperties {
     pub(crate) fn subscriber_config(&self) -> ConnectorResult<SubscriberConfig> {
         let stream_ack_deadline_seconds = self
@@ -178,22 +204,59 @@ impl PubsubProperties {
         })
     }
 
-    pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
-        // initialize env
-        {
-            tracing::debug!("setting pubsub environment variables");
-            if let Some(emulator_host) = &self.emulator_host {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host) };
+    async fn client_environment(&self) -> ConnectorResult<(Environment, Option<String>)> {
+        if let Some(emulator_host) = &self.emulator_host {
+            return Ok((Environment::Emulator(emulator_host.clone()), None));
+        }
+
+        let auth_config = project::Config::default()
+            .with_audience(apiv1::conn_pool::AUDIENCE)
+            .with_scopes(&apiv1::conn_pool::SCOPES);
+        let (environment, detected_project_id) = if let Some(credentials) = &self.credentials {
+            let credentials = parse_credentials(credentials)?;
+            let provider = DefaultTokenSourceProvider::new_with_credentials(
+                auth_config,
+                Box::new(credentials),
+            )
+            .await
+            .context("failed to initialize Google Cloud Pub/Sub token source")?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
+        } else {
+            if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+                bail!(
+                    "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
+                );
             }
-            if let Some(credentials) = &self.credentials {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials) };
-            }
+
+            let provider = DefaultTokenSourceProvider::new(auth_config)
+                .await
+                .context(
+                    "failed to initialize Google Cloud Pub/Sub ADC; provide `pubsub.credentials`, configure ADC, or use `pubsub.emulator_host`",
+                )?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
 
-        // Validate config
-        let config = ClientConfig::default().with_auth().await?;
+        Ok((environment, detected_project_id))
+    }
+
+    pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
+        let (environment, detected_project_id) = self.client_environment().await?;
+
+        let project_id = resolve_pubsub_project_id(
+            self.project_id.as_deref(),
+            detected_project_id.as_deref(),
+            matches!(&environment, Environment::Emulator(_)),
+        )
+        .context(
+            "Google Cloud Pub/Sub project ID is unavailable; configure `pubsub.project_id` or provide credentials/ADC with a project ID",
+        )?;
+        let config = ClientConfig {
+            environment,
+            project_id: Some(project_id),
+            ..Default::default()
+        };
         let client = Client::new(config)
             .await
             .context("error initializing pubsub client")?;
@@ -207,6 +270,51 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    const TEST_CREDENTIALS: &str = r#"{
+        "type": "service_account",
+        "project_id": "test-project",
+        "client_email": "test@example.com",
+        "private_key": "test-key"
+    }"#;
+
+    fn assert_test_credentials(credentials: CredentialsFile) {
+        assert_eq!(credentials.tp, "service_account");
+        assert_eq!(credentials.project_id.as_deref(), Some("test-project"));
+        assert_eq!(
+            credentials.client_email.as_deref(),
+            Some("test@example.com")
+        );
+        assert_eq!(credentials.private_key.as_deref(), Some("test-key"));
+    }
+
+    #[test]
+    fn test_parse_credentials_json() {
+        assert_test_credentials(parse_credentials(TEST_CREDENTIALS).unwrap());
+    }
+
+    #[test]
+    fn test_parse_credentials_base64() {
+        assert_test_credentials(
+            parse_credentials(&BASE64_STANDARD.encode(TEST_CREDENTIALS)).unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_parse_credentials_invalid() {
+        for credentials in [
+            "not valid JSON".to_owned(),
+            BASE64_STANDARD.encode("not valid JSON"),
+            BASE64_STANDARD.encode([0xff, 0xfe]),
+        ] {
+            let error = parse_credentials(&credentials).err().unwrap();
+            assert!(
+                error
+                    .to_string()
+                    .contains("failed to parse Google Cloud Pub/Sub credentials")
+            );
+        }
+    }
 
     fn parse_pubsub_properties(extra: serde_json::Value) -> PubsubProperties {
         let mut value = json!({
@@ -269,5 +377,19 @@ mod tests {
                 .unwrap_err();
             assert!(error.to_string().contains(expected_error));
         }
+    }
+
+    #[tokio::test]
+    async fn test_emulator_takes_precedence_over_credentials() {
+        let properties = parse_pubsub_properties(json!({
+            "pubsub.credentials": "invalid credentials",
+        }));
+
+        let (environment, detected_project_id) = properties.client_environment().await.unwrap();
+        let Environment::Emulator(emulator_host) = environment else {
+            panic!("expected Pub/Sub emulator environment");
+        };
+        assert_eq!(emulator_host, "localhost:8900");
+        assert_eq!(detected_project_id, None);
     }
 }

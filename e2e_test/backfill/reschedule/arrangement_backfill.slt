@@ -1,0 +1,90 @@
+# Changing the backfill parallelism of a creating job while one backfill actor has finished and another
+# is still reading gives new actors finished vnodes and vnodes that have not started, with none in
+# progress. They must still forward the upstream rows of their finished vnodes.
+
+control substitution on
+
+statement ok
+set streaming_parallelism = 2;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set backfill_rate_limit = 1;
+
+# Arrangement backfill. All rows sit on vnode 200, so the scan actor without that vnode finishes at once.
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+create table t_ab (id int primary key, v int);
+
+statement ok
+insert into t_ab select k, 1 from generate_series(1, 50000) k where rw_vnode(256, k) = 200 order by 1 limit 20;
+
+statement ok
+flush;
+
+statement ok
+create materialized view m_ab as select id, v from t_ab;
+
+query T retry 30 backoff 1s
+select count(*) = 1 from rw_catalog.rw_internal_tables where job_id = (select id from rw_catalog.rw_materialized_views where name = 'm_ab') and name like '%streamscan%';
+----
+t
+
+let scan_progress
+select name from rw_catalog.rw_internal_tables where job_id = (select id from rw_catalog.rw_materialized_views where name = 'm_ab') and name like '%streamscan%'
+
+query T retry 120 backoff 1s
+select bool_or(backfill_finished) and bool_or(not backfill_finished) from ${scan_progress};
+----
+t
+
+statement ok
+alter materialized view m_ab set backfill_rate_limit = 0;
+
+statement ok
+alter materialized view m_ab set backfill_parallelism to 8;
+
+statement ok
+insert into t_ab select k, 1 from generate_series(100001, 101024) k;
+
+statement ok
+flush;
+
+statement ok
+alter materialized view m_ab set backfill_rate_limit = default;
+
+statement ok
+wait;
+
+query I
+select count(*) from (select id from t_ab except select id from m_ab) d;
+----
+0
+
+query I
+select count(*) from m_ab;
+----
+1044
+
+statement ok
+drop materialized view m_ab;
+
+statement ok
+drop table t_ab;
+
+statement ok
+set streaming_use_snapshot_backfill = default;
+
+statement ok
+set backfill_rate_limit = default;
+
+statement ok
+set background_ddl = default;
+
+statement ok
+set streaming_parallelism = default;

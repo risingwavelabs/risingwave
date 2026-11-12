@@ -46,10 +46,6 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         properties.subscriber_config()?;
 
-        if properties.credentials.is_none() && properties.emulator_host.is_none() {
-            bail!("credentials must be set if not using the pubsub emulator")
-        }
-
         let sub = properties.subscription_client().await?;
         if !sub
             .exists(None)

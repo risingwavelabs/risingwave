@@ -16,7 +16,6 @@ use anyhow::anyhow;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::iceberg::IcebergConfig;
-use risingwave_pb::id::SinkId;
 use risingwave_pb::stream_plan::CompactionResolverNode;
 use risingwave_storage::StateStore;
 
@@ -42,53 +41,34 @@ impl ExecutorBuilder for CompactionResolverExecutorBuilder {
             "compaction resolver executor should not have input"
         );
 
-        let sink_desc = node.sink_desc.as_ref().unwrap();
-        let sink_id: SinkId = sink_desc.get_id();
+        let sink_id = node.sink_id;
 
-        let properties_with_secret = LocalSecretManager::global().fill_secrets(
-            sink_desc.get_properties().clone(),
-            sink_desc.get_secret_refs().clone(),
-        )?;
+        let properties_with_secret = LocalSecretManager::global()
+            .fill_secrets(node.properties.clone(), node.secret_refs.clone())?;
         let iceberg_config = IcebergConfig::from_btreemap(properties_with_secret)
             .map_err(|err| StreamExecutorError::from((err, sink_id)))?;
 
-        // Primary-key column indices within the iceberg data-file row. The writer writes every input
-        // column to iceberg verbatim, so these indices (`SinkDesc.downstream_pk`) also index the
-        // data-file columns.
-        let pk_indices = sink_desc
-            .downstream_pk
+        let pk_indices = node
+            .pk_columns
             .iter()
-            .map(|&idx| idx as usize)
+            .map(|column| column.data_file_index as usize)
             .collect::<Vec<_>>();
         if pk_indices.is_empty() {
-            return Err(anyhow!("missing downstream pk in iceberg sink desc").into());
+            return Err(anyhow!("missing primary-key columns in compaction resolver").into());
         }
 
-        // The pk-index state table schema is `[pk.., file_path, position]`, so the first
-        // `pk_indices.len()` columns are the pk columns (in `downstream_pk` order). Derive the output
-        // chunk's pk column data types from them so `Writer_B` consumes a schema identical to the
-        // index key columns.
-        let pk_index_table = node.get_pk_index_table()?;
-        let pk_data_types = pk_index_table
-            .columns
+        let pk_data_types = node
+            .pk_columns
             .iter()
-            .take(pk_indices.len())
-            .map(|col| {
-                let column_desc = col
+            .map(|column| {
+                column
                     .column_desc
                     .as_ref()
-                    .ok_or_else(|| anyhow!("pk-index table column missing column_desc"))?;
-                Ok::<_, anyhow::Error>(ColumnDesc::from(column_desc).data_type)
+                    .map(ColumnDesc::from)
+                    .map(|column| column.data_type)
+                    .ok_or_else(|| anyhow!("compaction resolver PK column missing column_desc"))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        if pk_data_types.len() != pk_indices.len() {
-            return Err(anyhow!(
-                "pk-index table has {} columns but sink has {} pk columns",
-                pk_index_table.columns.len(),
-                pk_indices.len()
-            )
-            .into());
-        }
 
         let barrier_receiver = params
             .local_barrier_manager
@@ -97,17 +77,12 @@ impl ExecutorBuilder for CompactionResolverExecutorBuilder {
         let meta_client = params.env.meta_client().ok_or_else(|| {
             anyhow!("meta client is required for iceberg pk-index compaction resolver")
         })?;
-
         let exec = CompactionResolverExecutor::new(
             params.actor_context,
             sink_id,
-            node.compaction_task_id,
             iceberg_config,
             pk_indices,
             pk_data_types,
-            node.output_data_file_paths.clone(),
-            node.input_data_file_paths.clone(),
-            node.read_snapshot_id,
             params.config.developer.chunk_size,
             local_barrier_manager,
             barrier_receiver,

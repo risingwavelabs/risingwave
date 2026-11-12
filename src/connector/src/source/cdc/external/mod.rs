@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod mock_external_table;
+pub mod oracle;
 pub mod postgres;
 pub mod sql_server;
 
@@ -25,7 +26,7 @@ use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
@@ -39,7 +40,10 @@ use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::CdcSourceType;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
-    MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
+    MysqlExternalTable, MysqlExternalTableReader, MysqlOffset,
+};
+use crate::source::cdc::external::oracle::{
+    OracleExternalTable, OracleExternalTableReader, OracleOffset,
 };
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
@@ -48,37 +52,38 @@ use crate::source::cdc::external::sql_server::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExternalCdcTableType {
-    Undefined,
+    Unspecified,
     Mock,
-    MySql,
+    Mysql,
+    Mariadb,
     Postgres,
     SqlServer,
-    Citus,
-    Mongo,
+    Mongodb,
 }
 
 impl ExternalCdcTableType {
     pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
-            "mysql-cdc" => Self::MySql,
+            "mysql-cdc" => Self::Mysql,
+            "mariadb-cdc" => Self::Mariadb,
             "postgres-cdc" => Self::Postgres,
-            "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
-            "mongodb-cdc" => Self::Mongo,
-            _ => Self::Undefined,
+            "mongodb-cdc" => Self::Mongodb,
+            _ => Self::Unspecified,
         }
     }
 
-    pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySql | Self::Postgres | Self::SqlServer)
-    }
-
-    pub fn enable_transaction_metadata(&self) -> bool {
-        // In Debezium, transactional metadata cause delay of the newest events, as the `END` message is never sent unless a new transaction starts.
-        // So we only allow transactional metadata for MySQL and Postgres.
-        // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
-        matches!(self, Self::MySql | Self::Postgres)
+    pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
+        match self {
+            Self::Mysql | Self::Mariadb => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
+            Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
+            Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
+            Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
+            Self::Unspecified | Self::Mongodb => {
+                bail!("invalid external table type: {:?}", *self)
+            }
+        }
     }
 
     pub async fn create_table_reader(
@@ -87,21 +92,29 @@ impl ExternalCdcTableType {
         schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
-            Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(config, schema, pk_indices).await?,
+            Self::Mysql | Self::Mariadb => Ok(ExternalTableReaderImpl::Mysql(
+                MysqlExternalTableReader::new(config, schema, pk_indices).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(config, schema, pk_indices, schema_table_name)
-                    .await?,
+                PostgresExternalTableReader::new(
+                    config,
+                    schema,
+                    pk_indices,
+                    schema_table_name,
+                    table_id,
+                )
+                .await?,
             )),
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
-            // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
-            _ => bail!("invalid external table type: {:?}", *self),
+            Self::Unspecified | Self::Mongodb => {
+                bail!("invalid external table type: {:?}", *self)
+            }
         }
     }
 }
@@ -110,12 +123,11 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
     fn from(cdc_table_type: ExternalCdcTableType) -> Self {
         match cdc_table_type {
             ExternalCdcTableType::Postgres => Self::Postgres,
-            ExternalCdcTableType::MySql => Self::Mysql,
-            ExternalCdcTableType::SqlServer => Self::Sqlserver,
-
-            ExternalCdcTableType::Citus => Self::Citus,
-            ExternalCdcTableType::Mongo => Self::Mongo,
-            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => Self::Unspecified,
+            ExternalCdcTableType::Mysql => Self::Mysql,
+            ExternalCdcTableType::Mariadb => Self::Mariadb,
+            ExternalCdcTableType::SqlServer => Self::SqlServer,
+            ExternalCdcTableType::Mongodb => Self::Mongodb,
+            ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
         }
     }
 }
@@ -124,11 +136,11 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
     fn from(cdc_table_type: PbCdcTableType) -> Self {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
-            PbCdcTableType::Mysql => Self::MySql,
-            PbCdcTableType::Sqlserver => Self::SqlServer,
-            PbCdcTableType::Mongo => Self::Mongo,
-            PbCdcTableType::Citus => Self::Citus,
-            PbCdcTableType::Unspecified => Self::Undefined,
+            PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Mariadb => Self::Mariadb,
+            PbCdcTableType::SqlServer => Self::SqlServer,
+            PbCdcTableType::Mongodb => Self::Mongodb,
+            PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
 }
@@ -150,17 +162,19 @@ impl SchemaTableName {
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            ExternalCdcTableType::MySql => properties
+            ExternalCdcTableType::Mysql | ExternalCdcTableType::Mariadb => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
+            ExternalCdcTableType::Postgres => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
             ExternalCdcTableType::SqlServer => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
-            _ => {
+            ExternalCdcTableType::Unspecified
+            | ExternalCdcTableType::Mock
+            | ExternalCdcTableType::Mongodb => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
         };
@@ -174,9 +188,13 @@ impl SchemaTableName {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum CdcOffset {
-    MySql(MySqlOffset),
+    // The variant name is the JSON tag persisted in the CDC backfill state table,
+    // so keep the historical spelling for serde.
+    #[serde(rename = "MySql")]
+    Mysql(MysqlOffset),
     Postgres(PostgresOffset),
     SqlServer(SqlServerOffset),
+    Oracle(OracleOffset),
 }
 
 // Example debezium offset for Postgres:
@@ -268,9 +286,10 @@ pub struct CdcTableSnapshotSplitOption {
 }
 
 pub enum ExternalTableReaderImpl {
-    MySql(MySqlExternalTableReader),
+    Mysql(MysqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     SqlServer(SqlServerExternalTableReader),
+    Oracle(OracleExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
@@ -287,15 +306,19 @@ pub struct ExternalTableConfig {
     pub database: String,
     #[serde(rename = "schema.name", default = "Default::default")]
     pub schema: String,
+    /// The Oracle pluggable database name. This field is only used by the Oracle CDC connector.
+    #[serde(rename = "database.pdb.name")]
+    pub pdb_name: Option<String>,
     #[serde(rename = "table.name")]
     pub table: String,
-    /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
-    /// Choices include `disabled`, `preferred`, and `required`.
+    /// `ssl.mode` specifies the SSL/TLS encryption level for secure CDC connections.
+    /// Choices include `disabled`, `preferred`, `required`, `verify-ca`, and `verify-full`.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
     pub ssl_mode: SslMode,
 
+    /// Optional path to a trusted root CA certificate for verified SSL modes.
     #[serde(rename = "ssl.root.cert")]
     #[serde(alias = "debezium.database.sslrootcert")]
     pub ssl_root_cert: Option<String>,
@@ -346,9 +369,10 @@ impl ExternalTableConfig {
 impl ExternalTableReader for ExternalTableReaderImpl {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
+            ExternalTableReaderImpl::Mysql(mysql) => mysql.current_cdc_offset().await,
             ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
             ExternalTableReaderImpl::SqlServer(sql_server) => sql_server.current_cdc_offset().await,
+            ExternalTableReaderImpl::Oracle(oracle) => oracle.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
@@ -382,29 +406,33 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
-    /// For each given primary key column (by name), returns whether comparing the RisingWave
-    /// `i64` value needs upstream unsigned `BIGINT` semantics. Only MySQL `BIGINT UNSIGNED` can
-    /// overflow into a negative `i64`; other connectors are always false.
-    pub fn pk_column_unsigned_i64_compare_flags(
+    /// Recover comparison semantics for primary-key columns from the live reader.
+    pub fn pk_column_comparisons(
         &self,
         pk_names: &[String],
-    ) -> ConnectorResult<Vec<bool>> {
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.pk_column_unsigned_i64_compare_flags(pk_names)
+            ExternalTableReaderImpl::Mysql(mysql) => mysql.pk_column_comparisons(pk_names),
+            ExternalTableReaderImpl::Postgres(_)
+            | ExternalTableReaderImpl::SqlServer(_)
+            | ExternalTableReaderImpl::Oracle(_)
+            | ExternalTableReaderImpl::Mock(_) => {
+                Ok(vec![CdcKeyComparison::Native; pk_names.len()])
             }
-            _ => Ok(vec![false; pk_names.len()]),
         }
     }
 
     pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
-            ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),
+            ExternalTableReaderImpl::Mysql(_) => MysqlExternalTableReader::get_cdc_offset_parser(),
             ExternalTableReaderImpl::Postgres(_) => {
                 PostgresExternalTableReader::get_cdc_offset_parser()
             }
             ExternalTableReaderImpl::SqlServer(_) => {
                 SqlServerExternalTableReader::get_cdc_offset_parser()
+            }
+            ExternalTableReaderImpl::Oracle(_) => {
+                OracleExternalTableReader::get_cdc_offset_parser()
             }
             ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
         }
@@ -419,7 +447,7 @@ impl ExternalTableReaderImpl {
         limit: u32,
     ) {
         let stream = match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
+            ExternalTableReaderImpl::Mysql(mysql) => {
                 mysql.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
@@ -427,6 +455,9 @@ impl ExternalTableReaderImpl {
             }
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.snapshot_read(table_name, start_pk, primary_keys, limit)
+            }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys, limit)
@@ -444,9 +475,10 @@ impl ExternalTableReaderImpl {
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn get_parallel_cdc_splits_inner(&self, options: CdcTableSnapshotSplitOption) {
         let stream = match self {
-            ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Mysql(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Oracle(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
         };
         pin_mut!(stream);
@@ -466,7 +498,7 @@ impl ExternalTableReaderImpl {
         split_columns: Vec<Field>,
     ) {
         let stream = match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
+            ExternalTableReaderImpl::Mysql(mysql) => {
                 mysql.split_snapshot_read(table_name, left, right, split_columns)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
@@ -474,6 +506,9 @@ impl ExternalTableReaderImpl {
             }
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.split_snapshot_read(table_name, left, right, split_columns)
             }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.split_snapshot_read(table_name, left, right, split_columns)
@@ -490,17 +525,18 @@ impl ExternalTableReaderImpl {
 }
 
 pub enum ExternalTableImpl {
-    MySql(MySqlExternalTable),
+    Mysql(MysqlExternalTable),
     Postgres(PostgresExternalTable),
     SqlServer(SqlServerExternalTable),
+    Oracle(OracleExternalTable),
 }
 
 impl ExternalTableImpl {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let cdc_source_type = CdcSourceType::from(config.connector.as_str());
         match cdc_source_type {
-            CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
-                MySqlExternalTable::connect(config).await?,
+            CdcSourceType::Mysql | CdcSourceType::Mariadb => Ok(ExternalTableImpl::Mysql(
+                MysqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => {
                 let pg_conn = config.pg_connection_config()?;
@@ -518,25 +554,88 @@ impl ExternalTableImpl {
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),
-            _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
+            CdcSourceType::Oracle => Ok(ExternalTableImpl::Oracle(
+                OracleExternalTable::connect(config).await?,
+            )),
+            CdcSourceType::Mongodb | CdcSourceType::Unspecified => {
+                Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into())
+            }
         }
     }
 
     pub fn column_descs(&self) -> &Vec<ColumnDesc> {
         match self {
-            ExternalTableImpl::MySql(mysql) => mysql.column_descs(),
+            ExternalTableImpl::Mysql(mysql) => mysql.column_descs(),
             ExternalTableImpl::Postgres(postgres) => postgres.column_descs(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.column_descs(),
+            ExternalTableImpl::Oracle(oracle) => oracle.column_descs(),
         }
     }
 
     pub fn pk_names(&self) -> &Vec<String> {
         match self {
-            ExternalTableImpl::MySql(mysql) => mysql.pk_names(),
+            ExternalTableImpl::Mysql(mysql) => mysql.pk_names(),
             ExternalTableImpl::Postgres(postgres) => postgres.pk_names(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_names(),
+            ExternalTableImpl::Oracle(oracle) => oracle.pk_names(),
+        }
+    }
+
+    /// Return CDC backfill comparison semantics in the requested `pk_names` order.
+    /// Reuses metadata loaded by [`Self::connect`], without querying upstream again.
+    ///
+    /// MySQL `BIGINT UNSIGNED` keys use `UnsignedInt64` to preserve upstream ordering
+    /// when represented as signed `i64` values; other types use `Native`. MySQL names
+    /// are matched case-insensitively, and missing upstream PK names return an error.
+    /// PostgreSQL, SQL Server, and Oracle return `Native` for every requested name.
+    pub fn pk_column_comparisons(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        match self {
+            ExternalTableImpl::Mysql(mysql) => mysql.pk_column_comparisons(pk_names),
+            ExternalTableImpl::Postgres(_)
+            | ExternalTableImpl::SqlServer(_)
+            | ExternalTableImpl::Oracle(_) => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
+        }
+    }
+
+    /// Discover CDC backfill comparison semantics without loading the full table schema.
+    /// Used when SQL defines the columns explicitly, so there is no existing table
+    /// instance whose metadata can be reused via [`Self::pk_column_comparisons`].
+    ///
+    /// For MySQL, queries upstream PK names and types and returns the same comparison
+    /// modes in the requested `pk_names` order, with case-insensitive name matching and
+    /// an error for missing upstream PK names. Other connectors return `Native` for
+    /// every requested name without querying upstream.
+    pub async fn discover_pk_column_comparisons(
+        config: &ExternalTableConfig,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        match CdcSourceType::from(config.connector.as_str()) {
+            CdcSourceType::Mysql | CdcSourceType::Mariadb => {
+                MysqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
+            }
+            CdcSourceType::Postgres
+            | CdcSourceType::Mongodb
+            | CdcSourceType::SqlServer
+            | CdcSourceType::Oracle
+            | CdcSourceType::Unspecified => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
     }
 }
 
 pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cdc_offset_persisted_mysql_tag() {
+        let json = r#"{"MySql":{"filename":"binlog.000001","position":4}}"#;
+        let offset = CdcOffset::Mysql(MysqlOffset::new("binlog.000001".to_owned(), 4));
+        assert_eq!(serde_json::to_string(&offset).unwrap(), json);
+        assert_eq!(serde_json::from_str::<CdcOffset>(json).unwrap(), offset);
+    }
+}

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
@@ -49,6 +50,9 @@ mod iceberg_list_executor;
 pub use iceberg_list_executor::*;
 mod iceberg_fetch_executor;
 pub use iceberg_fetch_executor::*;
+mod iceberg_update;
+pub(crate) use iceberg_update::validate_update_state_table;
+pub use iceberg_update::{IcebergUpdateFetchExecutor, IcebergUpdateListExecutor};
 mod batch_source; // For refreshable batch source executors
 pub use batch_source::*;
 mod source_backfill_state_table;
@@ -60,6 +64,7 @@ use risingwave_common::util::retry::exponential_backoff;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_retry::strategy::jitter;
 
+use crate::common::rate_limit::rate_limited_pieces;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};
 
@@ -192,6 +197,28 @@ pub async fn source_reader_event_to_chunk_stream(stream: BoxSourceReaderEventStr
         match event? {
             SourceReaderEvent::DataChunk(chunk) => yield chunk,
             SourceReaderEvent::SplitProgress(_) => {}
+        }
+    }
+}
+
+/// Pace a file source reader with a limiter shared with its executor, so that a `Throttle`
+/// mutation also applies to the file that is already being read.
+#[try_stream(ok = Option<StreamChunk>, error = ConnectorError)]
+pub async fn apply_shared_rate_limit_to_file_source_reader(
+    stream: BoxStreamingFileSourceChunkStream,
+    limiter: Arc<RateLimiter>,
+) {
+    #[for_await]
+    for chunk in stream {
+        match chunk? {
+            Some(chunk) =>
+            {
+                #[for_await]
+                for piece in rate_limited_pieces(&limiter, chunk) {
+                    yield Some(piece);
+                }
+            }
+            None => yield None,
         }
     }
 }

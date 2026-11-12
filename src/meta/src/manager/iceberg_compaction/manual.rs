@@ -29,7 +29,12 @@ impl IcebergCompactionManager {
             .unwrap_or(IcebergReportTaskStatus::Unspecified);
         let result = match status {
             IcebergReportTaskStatus::Success => Ok(report.task_id),
-            IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
+            IcebergReportTaskStatus::Drained
+            | IcebergReportTaskStatus::Busy
+            | IcebergReportTaskStatus::BlockedCapacity
+            | IcebergReportTaskStatus::BlockedStatistics
+            | IcebergReportTaskStatus::Failed
+            | IcebergReportTaskStatus::Unspecified => {
                 let message = report
                     .error_message
                     .clone()
@@ -58,8 +63,11 @@ impl IcebergCompactionManager {
         }
 
         let waiter = self.start_manual_compaction(sink_id).await?;
-        let cleanup_guard = scopeguard::guard(sink_id, |sink_id| {
-            self.cancel_manual_compaction_waiter(sink_id)
+        // Drop this request's receiver before cleanup. A replacement request's
+        // live sender is never removed by an obsolete caller's cancellation.
+        let mut cleanup_guard = scopeguard::guard(Some(waiter), |waiter| {
+            drop(waiter);
+            self.cancel_closed_manual_compaction_waiter(sink_id);
         });
 
         tracing::info!(
@@ -67,7 +75,7 @@ impl IcebergCompactionManager {
             sink_id
         );
 
-        match waiter.await {
+        match cleanup_guard.as_mut().unwrap().await {
             Ok(result) => {
                 let _ = scopeguard::ScopeGuard::into_inner(cleanup_guard);
                 result
@@ -80,6 +88,17 @@ impl IcebergCompactionManager {
                 )
                 .into())
             }
+        }
+    }
+
+    pub(super) fn cancel_closed_manual_compaction_waiter(&self, sink_id: SinkId) {
+        let mut guard = self.inner.write();
+        if guard
+            .manual_compaction_waiters
+            .get(&sink_id)
+            .is_some_and(|sender| sender.is_closed())
+        {
+            guard.manual_compaction_waiters.remove(&sink_id);
         }
     }
 }

@@ -69,7 +69,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .collect_vec();
 
         let versioned = table_desc.versioned;
-        let vnodes = params.vnode_bitmap.clone().map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap.clone()));
 
         macro_rules! build_lookup {
             ($SD:ident) => {{

@@ -17,15 +17,15 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::{RawRwLock, RwLock};
+use parking_lot::{RawRwLockRecursive, RecursiveRwLock};
 use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::catalog::{
-    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
-    PbSubscription, PbTable, PbView,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
+    PbTable, PbView,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
@@ -48,20 +48,20 @@ use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
-pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
+pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLockRecursive, Catalog>;
 
 /// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
-pub struct CatalogReader(Arc<RwLock<Catalog>>);
+pub struct CatalogReader(Arc<RecursiveRwLock<Catalog>>);
 
 impl CatalogReader {
-    pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
+    pub fn new(inner: Arc<RecursiveRwLock<Catalog>>) -> Self {
         CatalogReader(inner)
     }
 
     pub fn read_guard(&self) -> CatalogReadGuard {
-        // Make this recursive so that one can get this guard in the same thread without fear.
-        self.0.read_arc_recursive()
+        // RecursiveRwLock allows nested read guards even while a writer is waiting.
+        self.0.read_arc()
     }
 }
 
@@ -369,7 +369,6 @@ impl CatalogWriter for CatalogWriterImpl {
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
-        let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
             .create_materialized_view(
@@ -381,9 +380,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 refresh_interval_sec,
             )
             .await?;
-        if matches!(create_type, PbCreateType::Foreground) {
-            self.wait_version(version).await?
-        }
+        self.wait_version(version).await?;
         Ok(())
     }
 

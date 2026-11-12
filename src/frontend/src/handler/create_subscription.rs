@@ -86,7 +86,7 @@ pub async fn handle_create_subscription(
         return Ok(resp);
     };
     let subscription_catalog = {
-        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
+        let context = Rc::new(OptimizerContext::from_handler_args(handle_args)?);
         create_subscription_catalog(&session, context, stmt)?
     };
 

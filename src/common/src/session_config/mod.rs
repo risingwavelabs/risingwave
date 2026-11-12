@@ -175,6 +175,16 @@ pub struct SessionConfig {
     #[parameter(default = VisibilityMode::default())]
     visibility_mode: VisibilityMode,
 
+    /// Read each serving node's latest locally committed data without waiting for a frontend epoch.
+    /// Each point lookup, range scan, lookup-join probe, and task may observe a different committed
+    /// epoch, even within one scan or statement. Statements in a transaction may also differ.
+    /// Each storage snapshot remains stable. Explicit historical reads and subscription snapshots
+    /// retain their existing semantics. Iceberg reads exclude pending log-store rows. Overrides
+    /// barrier reads. Enable only after all participating frontend and serving nodes support this
+    /// option.
+    #[parameter(default = false)]
+    batch_read_latest_committed: bool,
+
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
     #[parameter(default = IsolationLevel::default())]
     transaction_isolation: IsolationLevel,
@@ -521,6 +531,14 @@ pub struct SessionConfig {
     #[parameter(default = AUTO_LOCALITY_BACKFILL_MIN_SIZE)]
     auto_locality_backfill_min_size: u64,
 
+    /// Enable the sort buffer of locality providers for streaming queries created in this session.
+    /// When enabled, locality providers buffer and re-order amplified intermediate results (e.g.,
+    /// caused by join amplification) within an epoch to provide better locality for downstream
+    /// operators, with bounded memory usage. Only takes effect on streaming jobs planned with
+    /// locality providers (see `enable_locality_backfill`). Defaults to true.
+    #[parameter(default = true)]
+    enable_locality_sort_buffer: bool,
+
     /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
     /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.
     #[parameter(default = 30u32)]
@@ -729,6 +747,22 @@ mod test {
         test_param: i32,
         #[parameter(default = false, deprecated = "deprecated test notice")]
         deprecated_test_param: bool,
+    }
+
+    #[test]
+    fn test_batch_read_latest_committed() {
+        let mut config = SessionConfig::default();
+        assert!(!config.batch_read_latest_committed());
+        assert_eq!(config.get("batch_read_latest_committed").unwrap(), "false");
+        config
+            .set("batch_read_latest_committed", "true".to_owned(), &mut ())
+            .unwrap();
+        assert!(config.batch_read_latest_committed());
+        assert_eq!(config.get("batch_read_latest_committed").unwrap(), "true");
+        config
+            .reset("batch_read_latest_committed", &mut ())
+            .unwrap();
+        assert!(!config.batch_read_latest_committed());
     }
 
     #[test]

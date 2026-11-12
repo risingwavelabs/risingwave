@@ -60,7 +60,6 @@ pub enum Components {
     Lakekeeper,
     Hdfs,
     PrometheusAndGrafana,
-    Pubsub,
     Tracing,
     RustComponents,
     UseSystem,
@@ -74,6 +73,7 @@ pub enum Components {
     NoBacktrace,
     Udf,
     NoDefaultFeatures,
+    NoHeavyConnectors,
     Moat,
     DataFusion,
     Adbc,
@@ -86,7 +86,6 @@ impl Components {
             Self::Lakekeeper => "[Component] Apache Iceberg: Lakekeeper REST Catalog",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
-            Self::Pubsub => "[Component] Google Pubsub",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::UseSystem => "[Build] Use system RisingWave",
@@ -100,6 +99,7 @@ impl Components {
             Self::NoBacktrace => "[Runtime] Disable backtrace",
             Self::Udf => "[Build] Enable UDF",
             Self::NoDefaultFeatures => "[Build] Disable default features",
+            Self::NoHeavyConnectors => "[Build] Disable heavyweight connectors",
             Self::Moat => "[Component] Enable Moat",
             Self::DataFusion => "[Build] Enable DataFusion",
             Self::Adbc => "[Component] ADBC Snowflake Driver",
@@ -125,11 +125,6 @@ Required by Hummock state store."
             Self::PrometheusAndGrafana => {
                 "
 Required if you want to view metrics."
-            }
-            Self::Pubsub => {
-                "
-Required if you want to create source from Emulated Google Pub/sub.
-                "
             }
             Self::RustComponents => {
                 "
@@ -212,6 +207,11 @@ Add --no-default-features to build command.
 Currently, default features are: rw-static-link, all-connectors
 "
             }
+            Self::NoHeavyConnectors => {
+                "
+Exclude heavyweight connectors, such as LanceDB, to reduce build size.
+Other default connectors remain enabled unless default features are disabled."
+            }
             Self::Moat => {
                 "
 Enable Moat as distributed hybrid cache service."
@@ -236,7 +236,6 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             "ENABLE_LAKEKEEPER" => Some(Self::Lakekeeper),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
-            "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "USE_SYSTEM_RISINGWAVE" => Some(Self::UseSystem),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
@@ -250,6 +249,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
             "ENABLE_UDF" => Some(Self::Udf),
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
+            "DISABLE_HEAVY_CONNECTORS" => Some(Self::NoHeavyConnectors),
             "ENABLE_MOAT" => Some(Self::Moat),
             "ENABLE_DATAFUSION" => Some(Self::DataFusion),
             "ENABLE_ADBC" => Some(Self::Adbc),
@@ -263,7 +263,6 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             Self::Lakekeeper => "ENABLE_LAKEKEEPER",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
-            Self::Pubsub => "ENABLE_PUBSUB",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::UseSystem => "USE_SYSTEM_RISINGWAVE",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
@@ -277,6 +276,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             Self::NoBacktrace => "DISABLE_BACKTRACE",
             Self::Udf => "ENABLE_UDF",
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
+            Self::NoHeavyConnectors => "DISABLE_HEAVY_CONNECTORS",
             Self::Moat => "ENABLE_MOAT",
             Self::DataFusion => "ENABLE_DATAFUSION",
             Self::Adbc => "ENABLE_ADBC",
@@ -285,7 +285,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
     }
 
     pub fn default_enabled() -> &'static [Self] {
-        &[Self::RustComponents]
+        &[Self::RustComponents, Self::NoHeavyConnectors]
     }
 }
 

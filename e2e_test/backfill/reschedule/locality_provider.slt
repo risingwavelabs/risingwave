@@ -1,0 +1,103 @@
+# Changing the backfill parallelism of a creating job while one backfill actor has finished and another
+# is still reading gives new actors finished vnodes and vnodes that have not started, with none in
+# progress. They must still forward the upstream rows of their finished vnodes.
+
+control substitution on
+
+statement ok
+set streaming_parallelism = 2;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set backfill_rate_limit = 1;
+
+# All keys of the locality provider sit on vnode 200, while the scan spreads its rows. Snapshot
+# backfill only delivers upstream changes after the providers finish, so use arrangement backfill.
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+set enable_locality_backfill = true;
+
+statement ok
+set locality_backfill_mode = always;
+
+statement ok
+create table t_lp (id int primary key, k int);
+
+statement ok
+insert into t_lp select row_number() over (order by k), k from (select k from generate_series(1, 50000) k where rw_vnode(256, k) = 200 order by 1 limit 20) s;
+
+statement ok
+flush;
+
+statement ok
+create materialized view m_lp as select k, count(*) as c from t_lp group by k;
+
+query T retry 30 backoff 1s
+select count(*) = 1 from rw_catalog.rw_internal_tables where job_id = (select id from rw_catalog.rw_materialized_views where name = 'm_lp') and name like '%localityproviderprogress%';
+----
+t
+
+let provider_progress
+select name from rw_catalog.rw_internal_tables where job_id = (select id from rw_catalog.rw_materialized_views where name = 'm_lp') and name like '%localityproviderprogress%'
+
+query T retry 120 backoff 1s
+select bool_or(backfill_finished) and bool_or(not backfill_finished) from ${provider_progress};
+----
+t
+
+statement ok
+alter materialized view m_lp set backfill_rate_limit = 0;
+
+statement ok
+alter materialized view m_lp set backfill_parallelism to 8;
+
+statement ok
+insert into t_lp select k, k from generate_series(100001, 101024) k;
+
+statement ok
+flush;
+
+statement ok
+alter materialized view m_lp set backfill_rate_limit = default;
+
+statement ok
+wait;
+
+query I
+select count(*) from (select k, count(*) from t_lp group by k except select k, c from m_lp) d;
+----
+0
+
+query I
+select count(*) from m_lp;
+----
+1044
+
+statement ok
+drop materialized view m_lp;
+
+statement ok
+drop table t_lp;
+
+statement ok
+set streaming_use_snapshot_backfill = default;
+
+statement ok
+set enable_locality_backfill = default;
+
+statement ok
+set locality_backfill_mode = default;
+
+statement ok
+set backfill_rate_limit = default;
+
+statement ok
+set background_ddl = default;
+
+statement ok
+set streaming_parallelism = default;

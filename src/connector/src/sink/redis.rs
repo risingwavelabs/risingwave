@@ -95,6 +95,15 @@ impl RedisPipe {
         }
     }
 
+    /// Whether no command has been queued. Executing an empty pipeline fails on the client side
+    /// with `empty command`, so callers must not `query` in this case.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            RedisPipe::Cluster(pipe) => pipe.cmd_iter().next().is_none(),
+            RedisPipe::Single(pipe) => pipe.is_empty(),
+        }
+    }
+
     pub fn set(
         &mut self,
         k: RedisSinkPayloadWriterInput,
@@ -526,6 +535,13 @@ impl RedisSinkPayloadWriter {
     }
 
     pub async fn commit(&mut self) -> Result<()> {
+        // A chunk may have no visible rows left (e.g. all INSERT/DELETE pairs were cancelled out
+        // by inline compaction after a log store replay). Sending an empty pipeline makes the
+        // redis client fail with `empty command` and the sink would retry forever.
+        if self.pipe.is_empty() {
+            return Ok(());
+        }
+
         #[cfg(test)]
         {
             if self.conn.is_none() {
@@ -632,6 +648,27 @@ mod test {
     use super::*;
     use crate::sink::catalog::{SinkEncode, SinkFormat};
     use crate::sink::log_store::DeliveryFutureManager;
+
+    #[test]
+    fn test_pipe_is_empty() {
+        let mut pipe = RedisPipe::Single(redis::pipe());
+        assert!(pipe.is_empty());
+        pipe.set(
+            RedisSinkPayloadWriterInput::String("k".to_owned()),
+            RedisSinkPayloadWriterInput::String("v".to_owned()),
+        )
+        .unwrap();
+        assert!(!pipe.is_empty());
+        pipe.clear();
+        assert!(pipe.is_empty());
+
+        let mut cluster_pipe = RedisPipe::Cluster(redis::cluster::cluster_pipe());
+        assert!(cluster_pipe.is_empty());
+        cluster_pipe
+            .del(RedisSinkPayloadWriterInput::String("k".to_owned()))
+            .unwrap();
+        assert!(!cluster_pipe.is_empty());
+    }
 
     #[tokio::test]
     async fn test_write() {

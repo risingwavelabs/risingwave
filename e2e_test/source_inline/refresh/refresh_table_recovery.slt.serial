@@ -1,0 +1,60 @@
+# A refresh interrupted by recovery is abandoned and re-run once.
+
+include ./refresh_table_paused.slt.part
+
+statement ok
+recover;
+
+# The re-run is a newer cycle than the interrupted one, held by the limit of 0 that survived recovery.
+query TB retry 20 backoff 1s
+SELECT s.current_status, s.last_trigger_time > '${trigger_before}'
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_paused_t';
+----
+REFRESHING t
+
+# A second recovery abandons the re-run without starting another one.
+statement ok
+recover;
+
+# A throttle command only goes through once the cluster accepts commands again.
+statement ok retry 10 backoff 1s
+ALTER TABLE refresh_paused_t SET SOURCE_RATE_LIMIT TO DEFAULT;
+
+sleep 2s
+
+query TB
+SELECT s.current_status, s.last_success_time > s.last_trigger_time
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_paused_t';
+----
+IDLE f
+
+# The next cycle deletes every row the abandoned loads wrote.
+statement ok
+REFRESH TABLE refresh_paused_t;
+
+query TB retry 10 backoff 2s
+SELECT s.current_status, s.last_success_time > s.last_trigger_time
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_paused_t';
+----
+IDLE t
+
+statement ok
+FLUSH;
+
+query III
+SELECT min(id), max(id), count(*) FROM refresh_paused_t;
+----
+5001 6000 1000
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_paused_mv;
+----
+97 1000
+
+include ./drop_refresh_table_paused.slt.part

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{IGNORED_NOTIFICATION_VERSION, MetadataManager};
 use risingwave_meta_model::UserId;
 use risingwave_pb::user::alter_default_privilege_request::Operation;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -111,7 +111,8 @@ impl UserService for UserServiceImpl {
                 req.granted_by as _,
                 req.with_grant_option,
             )
-            .await?;
+            .await?
+            .unwrap_or(IGNORED_NOTIFICATION_VERSION);
 
         Ok(Response::new(GrantPrivilegeResponse {
             status: None,
@@ -136,7 +137,8 @@ impl UserService for UserServiceImpl {
                 req.revoke_grant_option,
                 req.cascade,
             )
-            .await?;
+            .await?
+            .unwrap_or(IGNORED_NOTIFICATION_VERSION);
 
         Ok(Response::new(RevokePrivilegeResponse {
             status: None,

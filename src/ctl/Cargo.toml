@@ -15,7 +15,7 @@ anyhow = "1"
 bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = "7"
+comfy-table = "8"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
@@ -38,9 +38,11 @@ rw-diagnose-tools = { git = "https://github.com/risingwavelabs/rw-diagnose-tools
 serde = { workspace = true }
 serde_json = "1"
 serde_yaml = "0.9.25"
-size = "0.5"
+size = "0.6"
+tempfile = "3"
 thiserror-ext = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+toml = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }

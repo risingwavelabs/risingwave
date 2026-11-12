@@ -55,8 +55,7 @@ impl ExecutorBuilder for IcebergWithPkIndexPositionDeleteMergerExecutorBuilder {
 
         let handler = PositionDeleteHandlerImpl::new(
             config,
-            params.actor_context.id,
-            params.vnode_bitmap.clone(),
+            Some(params.vnode_bitmap.clone()),
             sink_id,
             meta_client,
         );

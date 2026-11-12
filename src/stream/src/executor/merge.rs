@@ -62,7 +62,10 @@ impl MergeExecutorInput {
         }
     }
 
-    pub(crate) fn into_executor(self, barrier_rx: mpsc::UnboundedReceiver<Barrier>) -> Executor {
+    pub(crate) fn into_executor(self) -> Executor {
+        let barrier_rx = self
+            .local_barrier_manager
+            .subscribe_barrier(self.actor_context.id);
         let fragment_id = self.actor_context.fragment_id;
         let executor = match self.upstream {
             MergeExecutorUpstream::Singleton(input) => ReceiverExecutor::new(
@@ -87,6 +90,17 @@ impl MergeExecutorInput {
             .boxed(),
         };
         (self.info, executor).into()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match &self.upstream {
+            MergeExecutorUpstream::Singleton(_) => false,
+            MergeExecutorUpstream::Merge(inputs) => inputs.is_empty(),
+        }
+    }
+
+    pub(crate) fn upstream_fragment_id(&self) -> UpstreamFragmentId {
+        self.upstream_fragment_id
     }
 }
 
@@ -152,10 +166,9 @@ mod upstream {
         }
 
         fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>) {
-            assert_eq!(
-                to_remove,
-                &HashSet::from_iter([self.id()]),
-                "the removed upstream actor should be the same as the current input"
+            assert!(
+                to_remove.contains(&self.id()),
+                "the removed upstream actors should contain the current input"
             );
 
             // Replace the single input.

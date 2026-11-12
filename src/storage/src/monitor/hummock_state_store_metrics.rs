@@ -83,6 +83,7 @@ pub struct HummockStateStoreMetrics {
     pub uploader_per_table_imm_count: RelabeledGuardedIntGaugeVec,
 
     // memory
+    pub replicated_imm_size: UintGauge,
     pub per_table_imm_size: RelabeledGuardedIntGaugeVec,
     pub per_table_imm_count: RelabeledGuardedIntGaugeVec,
     pub mem_table_spill_counts: RelabeledGuardedIntCounterVec,
@@ -278,11 +279,13 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let vector_object_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
-            MetricLevel::Critical,
-            vector_object_request_counts,
-            metric_level,
-        );
+        let vector_object_request_counts =
+            RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+                MetricLevel::Info,
+                vector_object_request_counts,
+                metric_level,
+                1,
+            );
 
         let opts = histogram_opts!(
             "state_store_vector_request_stats",
@@ -296,10 +299,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let vector_request_stats = RelabeledGuardedHistogramVec::with_metric_level(
-            MetricLevel::Critical,
+        let vector_request_stats = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Info,
             vector_request_stats,
             metric_level,
+            1,
         );
 
         let vector_hnsw_graph_level_node_count = register_guarded_int_gauge_vec_with_registry!(
@@ -473,6 +477,15 @@ impl HummockStateStoreMetrics {
             uploader_per_table_imm_count,
             metric_level,
         );
+
+        let replicated_imm_size = UintGauge::new(
+            "state_store_replicated_imm_size",
+            "Total retained replicated immutable memtable size",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(replicated_imm_size.clone()))
+            .unwrap();
 
         let per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
             "state_store_per_table_imm_size",
@@ -650,6 +663,7 @@ impl HummockStateStoreMetrics {
             uploader_wait_poll_latency,
             uploader_per_table_imm_size,
             uploader_per_table_imm_count,
+            replicated_imm_size,
             per_table_imm_size,
             per_table_imm_count,
             mem_table_spill_counts,

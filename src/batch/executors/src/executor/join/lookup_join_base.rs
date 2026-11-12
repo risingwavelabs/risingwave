@@ -17,11 +17,13 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::FilterByBitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -123,11 +125,11 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
             ]
             .concat();
 
-            // We need to temporary variable to record heap size, since in each loop we
-            // will free build side hash map, and the subtraction is not executed automatically.
-            let mut tmp_heap_size = 0i64;
+            // This round's private context releases remaining charges on completion, errors, or
+            // cancellation, before the next round starts.
+            let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
 
-            let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
+            let mut build_side = Vec::new_in(mem_ctx.global_allocator());
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_side_input.execute() {
@@ -135,15 +137,14 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
                     let chunk_estimated_heap_size = build_chunk.estimated_heap_size() as i64;
-                    self.mem_ctx.add(chunk_estimated_heap_size);
-                    tmp_heap_size += chunk_estimated_heap_size;
                     build_side.push(build_chunk);
+                    mem_ctx.add_unchecked(chunk_estimated_heap_size);
                 }
             }
             let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
                 build_row_count,
                 PrecomputedBuildHasher,
-                self.mem_ctx.global_allocator(),
+                mem_ctx.global_allocator(),
             );
             let mut next_build_row_with_same_key =
                 ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
@@ -162,9 +163,8 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
                         let build_key_estimated_heap_size = build_key.estimated_heap_size() as i64;
-                        self.mem_ctx.add(build_key_estimated_heap_size);
-                        tmp_heap_size += build_key_estimated_heap_size;
                         next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                        mem_ctx.add_unchecked(build_key_estimated_heap_size);
                     }
                 }
             }
@@ -183,65 +183,27 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                 self.asof_desc.clone(),
             );
 
-            if let Some(cond) = self.condition.as_ref()
-                && !params.is_asof_join()
-            {
-                let stream = match self.join_type {
-                    JoinType::Inner => {
-                        HashJoinExecutor::do_inner_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftOuter => {
-                        HashJoinExecutor::do_left_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftSemi => {
-                        HashJoinExecutor::do_left_semi_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftAnti => {
-                        HashJoinExecutor::do_left_anti_join_with_non_equi_condition(params, cond)
-                    }
+            assert!(
+                !matches!(
+                    self.join_type,
                     JoinType::RightOuter
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti
-                    | JoinType::FullOuter
-                    | JoinType::AsOfInner
-                    | JoinType::AsOfLeftOuter => unimplemented!(),
-                };
-                // For non-equi join, we need an output chunk builder to align the output chunks.
-                let mut output_chunk_builder =
-                    DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-                #[for_await]
-                for chunk in stream {
-                    for output_chunk in
-                        output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
-                    {
-                        yield output_chunk
-                    }
-                }
-                if let Some(output_chunk) = output_chunk_builder.consume_all() {
-                    yield output_chunk
-                }
-            } else {
-                let stream = match self.join_type {
-                    JoinType::Inner | JoinType::AsOfInner => {
-                        HashJoinExecutor::do_inner_join(params)
-                    }
-                    JoinType::LeftOuter | JoinType::AsOfLeftOuter => {
-                        HashJoinExecutor::do_left_outer_join(params)
-                    }
-                    JoinType::LeftSemi => HashJoinExecutor::do_left_semi_anti_join::<false>(params),
-                    JoinType::LeftAnti => HashJoinExecutor::do_left_semi_anti_join::<true>(params),
-                    JoinType::RightOuter
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
-                };
-                #[for_await]
-                for chunk in stream {
-                    yield chunk?.project(&self.output_indices)
-                }
+                        | JoinType::RightSemi
+                        | JoinType::RightAnti
+                        | JoinType::FullOuter
+                ),
+                "lookup join does not support {:?}",
+                self.join_type
+            );
+            #[for_await]
+            for chunk in HashJoinExecutor::probe_and_project(
+                params,
+                self.join_type,
+                self.condition.as_ref(),
+                &self.output_indices,
+                self.schema.data_types(),
+            ) {
+                yield chunk?
             }
-
-            self.mem_ctx.add(-tmp_heap_size);
         }
     }
 }

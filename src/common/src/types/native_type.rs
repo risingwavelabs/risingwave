@@ -61,27 +61,3 @@ impl NativeType for F64 {
         output.write(&self.0.to_be_bytes()).map_err(Into::into)
     }
 }
-
-impl NativeType for u8 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output.write(&self.to_be_bytes()).map_err(Into::into)
-    }
-}
-
-impl NativeType for u16 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output.write(&self.to_be_bytes()).map_err(Into::into)
-    }
-}
-
-impl NativeType for u32 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output.write(&self.to_be_bytes()).map_err(Into::into)
-    }
-}
-
-impl NativeType for u64 {
-    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output.write(&self.to_be_bytes()).map_err(Into::into)
-    }
-}

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use educe::Educe;
+use num_traits::Zero;
 use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
@@ -323,6 +324,21 @@ impl RangeFrameOffset {
             offset,
             add_expr: None,
             sub_expr: None,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self.offset.as_scalar_ref_impl() {
+            ScalarRefImpl::Int16(val) => val == 0,
+            ScalarRefImpl::Int32(val) => val == 0,
+            ScalarRefImpl::Int64(val) => val == 0,
+            ScalarRefImpl::Float32(val) => val.is_zero(),
+            ScalarRefImpl::Float64(val) => val.is_zero(),
+            ScalarRefImpl::Decimal(val) => val.is_zero(),
+            ScalarRefImpl::Interval(val) => val.is_zero(),
+            _ => unreachable!(
+                "other order column data types are not supported and should be banned in frontend"
+            ),
         }
     }
 

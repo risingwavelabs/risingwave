@@ -38,9 +38,8 @@ def _(outer_panels: Panels):
                     "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
                     [
                         panels.target(
-                            '(sum(topk by (namespace, pod) (1, container_memory_working_set_bytes{namespace=~"$namespace",pod=~"$pod",container=~"$component"})) by (namespace, pod)) / (sum by(namespace, pod) (topk(1, kube_pod_container_resource_limits{namespace=~"$namespace", pod=~"$pod", container=~"$component", resource="memory", unit="byte"}) by (namespace, pod)))',
-                            "memory usage @ {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
+                            '(sum(topk by (namespace, pod) (1, container_memory_rss{namespace=~"$namespace",pod=~"$pod",container=~"$component"})) by (namespace, pod)) / (sum by(namespace, pod) (topk(1, kube_pod_container_resource_limits{namespace=~"$namespace", pod=~"$pod", container=~"$component", resource="memory", unit="byte"}) by (namespace, pod)))',
+                            "memory usage @ {{pod}}",
                         )
                     ],
                 ),

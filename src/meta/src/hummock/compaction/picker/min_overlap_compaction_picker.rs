@@ -54,13 +54,19 @@ impl MinOverlappingPicker {
         level_handlers: &[LevelHandler],
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut select_file_ranges = vec![];
+        // Both levels are ordered and non-overlapping, so overlap boundaries only
+        // move forward, including across pending source SSTs.
+        let mut previous_overlap = None;
         for (idx, sst) in select_tables.iter().enumerate() {
             if level_handlers[self.level].is_pending_compact(&sst.sst_id) {
                 continue;
             }
-            let mut overlap_info = self.overlap_strategy.create_overlap_info();
-            overlap_info.update(&sst.key_range);
-            let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
+            let overlap_files_range = self.overlap_strategy.check_overlap_range_with_hint(
+                &sst.key_range,
+                target_tables,
+                previous_overlap,
+            );
+            previous_overlap = Some(overlap_files_range.clone());
 
             if overlap_files_range.is_empty() {
                 return (vec![sst.clone()], vec![]);
@@ -170,6 +176,7 @@ impl CompactionPicker for MinOverlappingPicker {
 
 #[cfg(test)]
 pub mod tests {
+    use risingwave_hummock_sdk::key_range::KeyRangeCommon;
     use risingwave_hummock_sdk::level::Level;
 
     use super::*;
@@ -177,6 +184,167 @@ pub mod tests {
     use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_sublevels, generate_table,
     };
+
+    fn sized_table(id: u64, left: usize, right: usize, size: u64) -> SstableInfo {
+        let mut table =
+            crate::hummock::compaction::selector::tests::generate_table_impl(id, 1, left, right, 1);
+        table.sst_size = size;
+        // Fixed-width keys preserve byte ordering beyond the shared helper's five-digit range.
+        let key = |idx: usize| {
+            risingwave_hummock_sdk::key::FullKey::for_test(
+                1.into(),
+                (idx as u64).to_be_bytes(),
+                risingwave_common::util::epoch::test_epoch(1),
+            )
+            .encode()
+        };
+        table.key_range.left = key(left).into();
+        table.key_range.right = key(right).into();
+        table.into()
+    }
+
+    #[test]
+    fn test_overlap_hint_boundaries_and_sparse_queries() {
+        let strategy = RangeOverlapStrategy::default();
+        let targets: Vec<SstableInfo> = (0..512)
+            .map(|i| {
+                let mut table = (*sized_table(i as u64, i * 4, i * 4 + 2, 1)).clone();
+                table.key_range.right_exclusive = i % 2 == 0;
+                table.into()
+            })
+            .collect();
+        for targets in [targets.as_slice(), &[]] {
+            for exclusive in [false, true] {
+                let mut previous = None;
+                // Empty overlaps, touching endpoints, repeated bounds, large gaps,
+                // and exhaustion of the target slice all preserve exact indices.
+                for (left, right) in [
+                    (0, 1),
+                    (1, 2),
+                    (2, 3),
+                    (2, 3),
+                    (3, 4),
+                    (4, 6),
+                    (6, 8),
+                    (8, 16),
+                    (1000, 1002),
+                    (2046, 2048),
+                    (4096, 4097),
+                ] {
+                    let mut query = sized_table(1000, left, right, 1).key_range.clone();
+                    query.right_exclusive = exclusive;
+                    let mut info = strategy.create_overlap_info();
+                    info.update(&query);
+                    let expected = info.check_multiple_overlap(targets);
+                    let actual = strategy.check_overlap_range_with_hint(&query, targets, previous);
+                    assert_eq!(actual, expected);
+                    assert_eq!(
+                        strategy.check_overlap_range_with_hint(&query, targets, None),
+                        expected
+                    );
+                    previous = Some(actual);
+                }
+            }
+        }
+    }
+
+    // Run with cargo test --release -p risingwave_meta bench_min_overlap_leveled -- --ignored --nocapture --test-threads=1.
+    #[test]
+    #[ignore = "microbenchmark"]
+    fn bench_min_overlap_leveled() {
+        use std::hint::black_box;
+        use std::time::Duration;
+
+        let mut c = criterion::Criterion::default()
+            .sample_size(20)
+            .warm_up_time(Duration::from_millis(300))
+            .measurement_time(Duration::from_millis(600))
+            .without_plots();
+        let mib = 1024 * 1024_u64;
+        // Match the default min-overlap source-byte limit, including its pre-add check.
+        let limit = 256 * mib;
+        for (name, n, source_mib, target_mib, shift, varied, pending) in [
+            ("aligned_32m_10k", 10000_usize, 32, 32, 0, false, false),
+            ("staggered_32m_10k", 10000, 32, 32, 5, false, false),
+            ("staggered_32m_100k", 100000, 32, 32, 5, false, false),
+            ("staggered_32m_64m_10k", 10000, 32, 64, 5, false, false),
+            ("fragmented_1m_10k", 10000, 1, 1, 5, false, false),
+            ("varied_24_40m_10k", 10000, 32, 32, 5, true, false),
+            ("pending_32m_10k", 10000, 32, 32, 5, false, true),
+        ] {
+            // Width is proportional to bytes within each level; lower density is 10x.
+            let mut end = shift;
+            let source: Vec<_> = (0..n)
+                .map(|i| {
+                    let size = if varied {
+                        [24, 32, 40][i % 3]
+                    } else {
+                        source_mib
+                    };
+                    let start = end;
+                    end += (size * 100) as usize;
+                    sized_table(i as u64, start, end - 1, size * mib)
+                })
+                .collect();
+            let target_width = (target_mib * 10) as usize;
+            let target: Vec<_> = (0..end.div_ceil(target_width))
+                .map(|i| {
+                    sized_table(
+                        1000000 + i as u64,
+                        i * target_width,
+                        (i + 1) * target_width - 1,
+                        target_mib * mib,
+                    )
+                })
+                .collect();
+            for tables in [&source, &target] {
+                assert!(tables.windows(2).all(|pair| {
+                    pair[0]
+                        .key_range
+                        .compare_right_with(&pair[1].key_range.left)
+                        == std::cmp::Ordering::Less
+                }));
+            }
+            let strategy = Arc::new(RangeOverlapStrategy::default());
+            let ranges: Vec<_> = source
+                .iter()
+                .map(|sst| {
+                    let mut info = strategy.create_overlap_info();
+                    info.update(&sst.key_range);
+                    info.check_multiple_overlap(&target)
+                })
+                .collect();
+            assert!(ranges.iter().all(|r| !r.is_empty()));
+            // Adjacent source SSTs overlap different lower ranges in these leveled layouts.
+            assert!(ranges.windows(2).all(|pair| pair[0] != pair[1]));
+            let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+            if pending {
+                for i in (99..target.len()).step_by(100) {
+                    handlers[2].test_add_pending_sst(target[i].sst_id, 1);
+                }
+            }
+            let picker = MinOverlappingPicker::new(1, 2, limit, 0, strategy);
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            assert!(!selected.is_empty() && !overlapped.is_empty());
+            eprintln!(
+                "{name}: source={} target={} selected={} overlapped={}",
+                source.len(),
+                target.len(),
+                selected.len(),
+                overlapped.len()
+            );
+            c.bench_function(&format!("min_overlap_leveled/{name}"), |b| {
+                b.iter(|| {
+                    black_box(picker.pick_tables(
+                        black_box(&source),
+                        black_box(&target),
+                        black_box(&handlers),
+                    ))
+                })
+            });
+        }
+        c.final_summary();
+    }
 
     #[test]
     fn test_compact_l1() {

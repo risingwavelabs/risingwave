@@ -4,7 +4,6 @@ extend = [
     { path = "src/risedevtool/minio.toml" },
     { path = "src/risedevtool/lakekeeper.toml" },
     { path = "src/risedevtool/tempo.toml" },
-    { path = "src/risedevtool/gcloud-pubsub.toml" },
     { path = "src/risedevtool/connector.toml" },
     { path = "src/risedevtool/risedev-components.toml" },
     { path = "src/risedevtool/moat.toml" },
@@ -41,6 +40,7 @@ env_scripts = [
   is_udf_enabled = get_env ENABLE_UDF
   is_datafusion_enabled = get_env ENABLE_DATAFUSION
   is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
+  are_heavy_connectors_disabled = get_env DISABLE_HEAVY_CONNECTORS
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -72,6 +72,15 @@ env_scripts = [
 
   if ${is_default_features_disabled}
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features"
+  else
+    if ${are_heavy_connectors_disabled}
+      # Cargo cannot subtract a feature from the default bundle. Disable defaults,
+      # then restore rw-static-link and all connectors except heavyweight connectors.
+      # These linking features control different dependencies: rw-static-link enables
+      # static libz/lzma/sasl2, while rw-dynamic-link enables dynamic zstd.
+      # They can coexist in dev builds, so keep rw-static-link to preserve the defaults.
+      set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features --features rw-static-link,all-connectors-lite"
+    end
   end
 
   if ${is_hummock_trace}
@@ -952,6 +961,9 @@ condition = { env_set = [
     "USE_SYSTEM_RISINGWAVE",
 ], files_modified = { input = [
     "./java/connector-node/**/*",
+    "./java/debezium/**/*",
+    "./java/build-debezium.sh",
+    "./java/pom.xml",
 ], output = [
     "./java/connector-node/assembly/target/**/*",
 ] } }
@@ -971,6 +983,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
+./build-debezium.sh
 "${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust
 
 rm -rf ${PREFIX_BIN}/connector-node
@@ -1333,6 +1346,16 @@ script = """
 scripts/check/check-trailing-spaces.sh --fix
 """
 
+[tasks.check-unused-patches]
+private = true
+category = "RiseDev - Check"
+description = "Check that every [patch] entry is used"
+script = """
+#!/usr/bin/env bash
+
+scripts/check/check-unused-patches.py
+"""
+
 [tasks.check-fast]
 category = "RiseDev - Check"
 dependencies = [
@@ -1342,6 +1365,7 @@ dependencies = [
     "check-dep-sort",
     "check-fmt",
     "check-trailing-spaces",
+    "check-unused-patches",
     "check-typos",
     "check-machete",
 ]

@@ -23,7 +23,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
     Fields as ArrowFields, Schema as ArrowSchema,
 };
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::{DataType, MapType, StructType};
 
 use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
@@ -31,7 +31,8 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::iceberg::{
     CompactionType, DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM,
     ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
-    IcebergWriteMode, parse_order_key_exprs, validate_order_key_columns,
+    IcebergWriteMode, ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT, parse_order_key_exprs,
+    validate_order_key_columns, validate_row_lineage_column_names,
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -391,9 +392,12 @@ fn test_parse_iceberg_config() {
             enable_manifest_rewrite: false,
             manifest_rewrite_target_size_bytes: None,
             manifest_rewrite_min_count_to_merge: None,
+            enable_orphan_file_cleanup: false,
+            orphan_file_cleanup_min_age_millis: None,
             max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
+            delete_ratio_percent: None,
             trigger_snapshot_count: None,
             target_file_size_mb: None,
             compaction_type: None,
@@ -401,7 +405,9 @@ fn test_parse_iceberg_config() {
             write_parquet_max_row_group_rows: None,
             write_parquet_max_row_group_bytes: None,
             enable_pk_index: false,
+            legacy_pk_index_file_path: true,
             unknown_fields: Default::default(),
+            default_table_location_from_namespace: false,
         };
 
     assert_eq!(iceberg_config, expected_iceberg_config);
@@ -589,7 +595,8 @@ fn test_parse_compaction_config() {
         ("s3.access.key", "test"),
         ("s3.secret.key", "test"),
         ("s3.region", "us-east-1"),
-        ("catalog.type", "storage"),
+        ("catalog.type", "rest"),
+        ("catalog.uri", "http://127.0.0.1:8181"),
         ("catalog.name", "demo"),
         ("database.name", "test_db"),
         ("table.name", "test_table"),
@@ -606,6 +613,8 @@ fn test_parse_compaction_config() {
         ("enable_manifest_rewrite", "true"),
         ("manifest_rewrite_target_size_bytes", "16777216"),
         ("manifest_rewrite_min_count_to_merge", "12"),
+        ("enable_orphan_file_cleanup", "true"),
+        ("orphan_file_cleanup_min_age_millis", "172800000"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -628,6 +637,9 @@ fn test_parse_compaction_config() {
     assert_eq!(config.manifest_rewrite_min_count_to_merge, Some(12));
     assert_eq!(config.manifest_rewrite_target_size_bytes(), 16_777_216);
     assert_eq!(config.manifest_rewrite_min_count_to_merge(), 12);
+    assert!(config.enable_orphan_file_cleanup);
+    assert_eq!(config.orphan_file_cleanup_min_age_millis, Some(172_800_000));
+    assert_eq!(config.orphan_file_cleanup_min_age_millis(), 172_800_000);
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -652,6 +664,12 @@ fn test_parse_compaction_config() {
     assert!(!config.enable_manifest_rewrite);
     assert_eq!(config.manifest_rewrite_target_size_bytes, None);
     assert_eq!(config.manifest_rewrite_min_count_to_merge, None);
+    assert!(!config.enable_orphan_file_cleanup);
+    assert_eq!(config.orphan_file_cleanup_min_age_millis, None);
+    assert_eq!(
+        config.orphan_file_cleanup_min_age_millis(),
+        ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT
+    );
     assert_eq!(
         config.manifest_rewrite_target_size_bytes(),
         MANIFEST_TARGET_SIZE_BYTES_DEFAULT as u64
@@ -740,6 +758,59 @@ fn test_reject_zero_manifest_rewrite_settings() {
         assert!(
             err.to_string()
                 .contains(&format!("`{option}` must be greater than 0"))
+        );
+    }
+}
+
+#[test]
+fn test_reject_unsafe_orphan_file_cleanup_min_age() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("orphan_file_cleanup_min_age_millis", "86399999"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`orphan_file_cleanup_min_age_millis` must be at least 86400000")
+    );
+}
+
+#[test]
+fn test_reject_orphan_file_cleanup_for_storage_catalog() {
+    for (option, value) in [
+        ("enable_orphan_file_cleanup", "true"),
+        ("orphan_file_cleanup_min_age_millis", "172800000"),
+    ] {
+        let mut values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+        values.insert(option.to_owned(), value.to_owned());
+
+        let err = IcebergConfig::from_btreemap(values).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("orphan file cleanup is not supported for `catalog.type = 'storage'`")
         );
     }
 }
@@ -1024,6 +1095,65 @@ fn test_alter_allows_legacy_copy_on_write_compaction_type() {
 }
 
 #[test]
+fn test_alter_pk_index_maintenance_options() {
+    use crate::sink::Sink;
+    use crate::sink::iceberg::IcebergSink;
+
+    let mut values = iceberg_compaction_alter_config("merge-on-read", "full", true);
+    values.insert("enable_pk_index".to_owned(), "true".to_owned());
+    let alter_props = BTreeMap::from([
+        ("enable_compaction".to_owned(), "true".to_owned()),
+        ("commit_checkpoint_interval".to_owned(), "2".to_owned()),
+        (
+            "compaction.trigger_snapshot_count".to_owned(),
+            "2".to_owned(),
+        ),
+        ("compaction_interval_sec".to_owned(), "120".to_owned()),
+        ("enable_snapshot_expiration".to_owned(), "false".to_owned()),
+        ("enable_manifest_rewrite".to_owned(), "true".to_owned()),
+    ]);
+    values.extend(alter_props.clone());
+    IcebergSink::validate_alter_config_change(&values, &alter_props).unwrap();
+
+    for (key, value) in [
+        ("compaction.max_snapshots_num", "10"),
+        ("compaction.delete_files_count_threshold", "10"),
+        ("compaction.write_parquet_compression", "snappy"),
+        ("compaction.write_parquet_max_row_group_rows", "100"),
+        ("compaction.write_parquet_max_row_group_bytes", "1024"),
+    ] {
+        let alter_props = BTreeMap::from([(key.to_owned(), value.to_owned())]);
+        let mut changed = values.clone();
+        changed.extend(alter_props.clone());
+        let error = IcebergSink::validate_alter_config_change(&changed, &alter_props).unwrap_err();
+        assert!(error.to_string().contains(key), "{error}");
+        assert!(error.to_string().contains("not supported"), "{error}");
+    }
+}
+
+#[test]
+fn test_alter_pk_index_commit_checkpoint_interval() {
+    use crate::sink::Sink;
+    use crate::sink::iceberg::IcebergSink;
+
+    let mut values = iceberg_compaction_alter_config("merge-on-read", "full", false);
+    values.insert("enable_pk_index".to_owned(), "true".to_owned());
+    for value in ["1", "60", "120"] {
+        let alter_props =
+            BTreeMap::from([("commit_checkpoint_interval".to_owned(), value.to_owned())]);
+        values.extend(alter_props.clone());
+        IcebergSink::validate_alter_config_change(&values, &alter_props).unwrap();
+    }
+    for value in ["0", "-1", "invalid"] {
+        let alter_props =
+            BTreeMap::from([("commit_checkpoint_interval".to_owned(), value.to_owned())]);
+        let mut changed = values.clone();
+        changed.extend(alter_props.clone());
+        assert!(IcebergSink::validate_alter_config_change(&changed, &alter_props).is_err());
+    }
+}
+
+#[test]
 fn test_alter_merge_on_read_compaction_checks_explicit_type_license() {
     use crate::sink::Sink;
     use crate::sink::iceberg::IcebergSink;
@@ -1100,4 +1230,241 @@ fn test_iceberg_sink_upper_case_primary_key() {
         sink.upsert_primary_key_column_names,
         Some(vec!["Key".to_owned()])
     );
+}
+
+#[test]
+fn test_validate_row_lineage_column_names() {
+    let columns = |name: &str| {
+        vec![
+            ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named(name, ColumnId::new(2), DataType::Int64),
+        ]
+    };
+
+    for reserved in ["_row_id", "_last_updated_sequence_number"] {
+        let err =
+            validate_row_lineage_column_names(FormatVersion::V3, &columns(reserved)).unwrap_err();
+        assert!(
+            err.to_string().contains(reserved),
+            "unexpected error: {err}"
+        );
+        validate_row_lineage_column_names(FormatVersion::V2, &columns(reserved)).unwrap();
+    }
+    // The pk-index sink carries a pk-less upstream's hidden row id as the relation-qualified
+    // `<table>._row_id`, which does not collide with the lineage column.
+    validate_row_lineage_column_names(FormatVersion::V3, &columns("t._row_id")).unwrap();
+}
+
+// Iceberg tables require a native Tokio runtime, which madsim does not provide.
+#[cfg(not(madsim))]
+mod coordinator_recovery {
+    use std::collections::HashMap;
+
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        FormatVersion, NestedField, PrimitiveType, Schema as IcebergSchema, SortOrder,
+        TableMetadataBuilder, Type, UnboundPartitionSpec,
+    };
+    use iceberg::table::Table;
+    use iceberg::{NamespaceIdent, Runtime, TableIdent};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+    use risingwave_common::id::SinkId;
+    use risingwave_common::types::DataType;
+    use risingwave_pb::plan_common::PbField;
+    use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
+    use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
+    use thiserror_ext::AsReport;
+
+    use crate::connector_common::mock_catalog::{MockCatalog, MockTableGuard};
+    use crate::sink::boxed::BoxTwoPhaseCoordinator;
+    use crate::sink::catalog::SinkType;
+    use crate::sink::iceberg::{IcebergConfig, IcebergSink, create_and_validate_table_impl};
+    use crate::sink::{Sink, SinkCommitCoordinator, SinkParam};
+
+    const NAMESPACE: &str = "mock_namespace";
+
+    fn register_table(fields: &[(i32, &str, PrimitiveType)]) -> (String, MockTableGuard) {
+        let name = format!("coordinator_recovery_{}", uuid::Uuid::new_v4().simple());
+        let schema = IcebergSchema::builder()
+            .with_fields(fields.iter().map(|(id, field_name, ty)| {
+                NestedField::optional(*id, *field_name, Type::Primitive(ty.clone())).into()
+            }))
+            .build()
+            .unwrap();
+        let metadata = TableMetadataBuilder::new(
+            schema,
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            format!("memory://{name}"),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+        let table = Table::builder()
+            .identifier(TableIdent::new(
+                NamespaceIdent::new(NAMESPACE.to_owned()),
+                name.clone(),
+            ))
+            .file_io(FileIO::new_with_memory())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap();
+        let guard = MockCatalog::register(table);
+        (name, guard)
+    }
+
+    fn sink_param(table_name: &str, columns: &[(&str, DataType)]) -> SinkParam {
+        SinkParam {
+            sink_id: SinkId::from(1u32),
+            sink_name: "test_sink".to_owned(),
+            properties: [
+                ("connector", "iceberg"),
+                ("type", "append-only"),
+                ("catalog.type", "mock"),
+                ("database.name", NAMESPACE),
+                ("table.name", table_name),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect(),
+            columns: columns
+                .iter()
+                .enumerate()
+                .map(|(i, (name, ty))| {
+                    ColumnDesc::named(*name, ColumnId::new(i as i32 + 1), ty.clone())
+                })
+                .collect(),
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test_db".to_owned(),
+            sink_from_name: "test_table".to_owned(),
+        }
+    }
+
+    fn pb_fields(columns: &[(&str, DataType)]) -> Vec<PbField> {
+        columns
+            .iter()
+            .map(|(name, ty)| Field::with_name(ty.clone(), *name).to_prost())
+            .collect()
+    }
+
+    fn add_columns_change(
+        original: &[(&str, DataType)],
+        added: &[(&str, DataType)],
+    ) -> PbSinkSchemaChange {
+        PbSinkSchemaChange {
+            original_schema: pb_fields(original),
+            op: Some(PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                fields: pb_fields(added),
+            })),
+        }
+    }
+
+    async fn new_two_phase_coordinator(param: &SinkParam) -> BoxTwoPhaseCoordinator {
+        let sink = IcebergSink::try_from(param.clone()).unwrap();
+        match sink.new_coordinator(None).await.unwrap() {
+            SinkCommitCoordinator::TwoPhase(coordinator) => coordinator,
+            SinkCommitCoordinator::SinglePhase(_) => {
+                panic!("an exactly-once iceberg sink should use a two-phase coordinator")
+            }
+        }
+    }
+
+    /// After a sink schema change is persisted and the replace job is finished, recovery builds the
+    /// coordinator from writers that already have the new schema, while the Iceberg table may still
+    /// have the original schema. The coordinator must start so that it can commit the pending
+    /// change; writers keep rejecting the table until then.
+    #[tokio::test]
+    async fn test_coordinator_starts_before_pending_add_columns_is_committed() {
+        let original = [("id", DataType::Int32), ("v1", DataType::Int64)];
+        let added = [("v2", DataType::Varchar)];
+        let changed = [original.as_slice(), added.as_slice()].concat();
+        let (table_name, _table) = register_table(&[
+            (1, "id", PrimitiveType::Int),
+            (2, "v1", PrimitiveType::Long),
+        ]);
+        let param = sink_param(&table_name, &changed);
+        let config = IcebergConfig::from_btreemap(param.properties.clone()).unwrap();
+
+        let err = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("Schema length mismatch, risingwave is 3, and iceberg is 2"),
+            "unexpected error: {}",
+            err.as_report()
+        );
+
+        let schema_change = add_columns_change(&original, &added);
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        coordinator
+            .commit_schema_change(1, schema_change.clone())
+            .await
+            .unwrap();
+
+        let table = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap();
+        let schema_id = table.metadata().current_schema_id();
+        assert_eq!(
+            table.metadata().current_schema().as_struct().fields().len(),
+            3
+        );
+
+        // Recovery can replay the same pending change after it has reached Iceberg.
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        coordinator
+            .commit_schema_change(1, schema_change)
+            .await
+            .unwrap();
+        let table = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap();
+        assert_eq!(table.metadata().current_schema_id(), schema_id);
+    }
+
+    /// Starting the coordinator without validating the schema must not hide a table that was
+    /// changed outside RisingWave.
+    #[tokio::test]
+    async fn test_coordinator_start_keeps_external_schema_drift_visible() {
+        let columns = [("id", DataType::Int32), ("v1", DataType::Int64)];
+        let (table_name, _table) = register_table(&[(1, "id", PrimitiveType::Int)]);
+        let param = sink_param(&table_name, &columns);
+        let config = IcebergConfig::from_btreemap(param.properties.clone()).unwrap();
+
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        let err = coordinator
+            .commit_schema_change(
+                1,
+                add_columns_change(&columns, &[("v2", DataType::Varchar)]),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("cannot determine whether schema change is applied"),
+            "unexpected error: {}",
+            err.as_report()
+        );
+
+        let err = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("Schema length mismatch, risingwave is 2, and iceberg is 1"),
+            "unexpected error: {}",
+            err.as_report()
+        );
+    }
 }

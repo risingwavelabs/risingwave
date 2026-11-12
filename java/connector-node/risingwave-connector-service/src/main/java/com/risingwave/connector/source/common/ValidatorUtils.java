@@ -65,12 +65,15 @@ public final class ValidatorUtils {
         switch (sourceType) {
             case MYSQL:
                 return String.format("jdbc:mysql://%s:%s/%s", host, port, database);
+            case MARIADB:
+                return String.format("jdbc:mariadb://%s:%s/%s", host, port, database);
             case POSTGRES:
-            case CITUS:
                 return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
             case SQL_SERVER:
                 return String.format(
                         "jdbc:sqlserver://%s:%s;databaseName=%s", host, port, database);
+            case ORACLE:
+                return String.format("jdbc:oracle:thin:@//%s:%s/%s", host, port, database);
             default:
                 throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }

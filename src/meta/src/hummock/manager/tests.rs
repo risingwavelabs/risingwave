@@ -52,10 +52,13 @@ use risingwave_pb::hummock::{HummockPinnedVersion, PbLevelType, StateTableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use thiserror_ext::AsReport;
+use tokio::time::Instant;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
-use crate::controller::streaming_job::{IndependentJobChangeLogInfo, TableChangeLogTruncateInfo};
+use crate::controller::streaming_job::{
+    CommittedEpochTruncateJob, ProgressTableChangeLogSubscriber, TableChangeLogTruncateInfo,
+};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
@@ -91,7 +94,7 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
 }
 
-fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+pub(super) fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
     gen_sstable_info_impl(sst_id, table_ids, epoch).into()
 }
 
@@ -197,6 +200,15 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
 
 #[tokio::test]
 async fn test_truncate_table_change_log_persisted_and_in_memory() {
+    check_truncate_table_change_log_persisted_and_in_memory(false).await;
+}
+
+#[tokio::test]
+async fn test_iceberg_pk_index_table_change_log_retains_replay_anchor() {
+    check_truncate_table_change_log_persisted_and_in_memory(true).await;
+}
+
+async fn check_truncate_table_change_log_persisted_and_in_memory(is_iceberg_pk_index: bool) {
     let (env, hummock_manager, _, _) = setup_compute_env(80).await;
     let table_id = TableId::new(1);
     let state_table_id = TableId::new(2);
@@ -241,7 +253,11 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
         delta.state_table_info_delta.insert(
             state_table_id,
             risingwave_pb::hummock::StateTableInfoDelta {
-                committed_epoch: truncate_epoch,
+                committed_epoch: if is_iceberg_pk_index {
+                    committed_epoch + 1
+                } else {
+                    truncate_epoch
+                },
                 compaction_group_id: 1.into(),
             },
         );
@@ -260,15 +276,63 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
     .await
     .unwrap();
 
-    hummock_manager
-        .truncate_table_change_log(TableChangeLogTruncateInfo {
-            subscription_retention_seconds: HashMap::new(),
-            independent_jobs: vec![IndependentJobChangeLogInfo {
+    let truncate_info = || TableChangeLogTruncateInfo {
+        subscription_retention_seconds: if is_iceberg_pk_index {
+            HashMap::from([(table_id, 0)])
+        } else {
+            HashMap::new()
+        },
+        progress_table_subscribers: if is_iceberg_pk_index {
+            vec![ProgressTableChangeLogSubscriber {
+                subscriber_job_id: JobId::new(3),
+                upstream_table_id: table_id,
+                progress_table_id: state_table_id,
+            }]
+        } else {
+            vec![]
+        },
+        committed_epoch_truncate_jobs: if is_iceberg_pk_index {
+            vec![]
+        } else {
+            vec![CommittedEpochTruncateJob {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(table_id, Some(truncate_epoch))]),
-            }],
-        })
+            }]
+        },
+    };
+    if is_iceberg_pk_index {
+        // After recovery, missing checkpoint progress vetoes even a zero-retention subscription.
+        hummock_manager
+            .truncate_table_change_log(truncate_info())
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager.versioning.read().await.table_change_log[&table_id]
+                .epochs()
+                .collect_vec(),
+            vec![old_epoch, truncate_epoch, committed_epoch]
+        );
+        assert_eq!(
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .all(&env.meta_store_ref().conn)
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+        // Normal-input actors report the real upstream checkpoint at compaction Begin.
+        // Compaction End can commit a synthetic epoch without advancing that frontier.
+        hummock_manager.update_table_change_log_progress([
+            crate::hummock::CommittedTableChangeLogProgress {
+                upstream_table_id: table_id,
+                progress_table_id: state_table_id,
+                truncate_epoch: committed_epoch,
+            },
+        ]);
+    }
+    hummock_manager
+        .truncate_table_change_log(truncate_info())
         .await
         .unwrap();
 
@@ -282,27 +346,103 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
             .all(&env.meta_store_ref().conn)
             .await
             .unwrap();
+    let expected_epochs = if is_iceberg_pk_index {
+        vec![committed_epoch]
+    } else {
+        vec![truncate_epoch, committed_epoch]
+    };
     assert_eq!(
         persisted_epochs,
-        vec![
-            truncate_epoch as risingwave_meta_model::Epoch,
-            committed_epoch as risingwave_meta_model::Epoch,
-        ]
+        expected_epochs
+            .iter()
+            .map(|epoch| *epoch as risingwave_meta_model::Epoch)
+            .collect_vec()
     );
     let in_memory_epochs = hummock_manager.versioning.read().await.table_change_log[&table_id]
         .epochs()
         .collect_vec();
-    assert_eq!(in_memory_epochs, vec![truncate_epoch, committed_epoch]);
+    assert_eq!(in_memory_epochs, expected_epochs);
     assert_eq!(
         hummock_manager
             .gc_manager
             .try_take_may_delete_object_ids(1)
             .unwrap(),
-        HashSet::from([
-            HummockObjectId::Sstable(1.into()),
-            HummockObjectId::Sstable(2.into()),
-        ])
+        if is_iceberg_pk_index {
+            HashSet::from([
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::Sstable(2.into()),
+                HummockObjectId::Sstable(3.into()),
+                HummockObjectId::Sstable(4.into()),
+            ])
+        } else {
+            HashSet::from([
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::Sstable(2.into()),
+            ])
+        }
     );
+    if is_iceberg_pk_index {
+        let next_epoch = test_epoch(40_000);
+        let next_log = EpochNewChangeLog {
+            checkpoint_epoch: next_epoch,
+            non_checkpoint_epochs: vec![],
+            new_value: vec![],
+            old_value: vec![],
+        };
+        risingwave_meta_model::hummock_table_change_log::Entity::insert(
+            to_table_change_log_meta_store_model(table_id, &next_log),
+        )
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+        {
+            let mut versioning = hummock_manager.versioning.write().await;
+            let mut version = versioning.current_version.as_ref().clone();
+            let mut delta = version.version_delta_after();
+            delta.state_table_info_delta.insert(
+                table_id,
+                risingwave_pb::hummock::StateTableInfoDelta {
+                    committed_epoch: next_epoch,
+                    compaction_group_id: 1.into(),
+                },
+            );
+            version.apply_version_delta(&delta);
+            versioning.current_version = Arc::new(version);
+            let log = versioning.table_change_log.get_mut(&table_id).unwrap();
+            assert_eq!(log.next_epoch(committed_epoch), Ok(None));
+            log.add_change_log(next_log);
+            assert_eq!(log.next_epoch(committed_epoch), Ok(Some(next_epoch)));
+        }
+        // Missing reports after cache reset remain conservative until a new checkpoint commits.
+        hummock_manager.table_change_log_progress.write().clear();
+        hummock_manager
+            .truncate_table_change_log(truncate_info())
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager.versioning.read().await.table_change_log[&table_id]
+                .epochs()
+                .collect_vec(),
+            vec![committed_epoch, next_epoch]
+        );
+        hummock_manager.update_table_change_log_progress([
+            crate::hummock::CommittedTableChangeLogProgress {
+                upstream_table_id: table_id,
+                progress_table_id: state_table_id,
+                truncate_epoch: next_epoch,
+            },
+        ]);
+        hummock_manager
+            .truncate_table_change_log(truncate_info())
+            .await
+            .unwrap();
+        assert_eq!(
+            hummock_manager.versioning.read().await.table_change_log[&table_id]
+                .epochs()
+                .collect_vec(),
+            vec![next_epoch]
+        );
+    }
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,
@@ -325,7 +465,7 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
         .collect()
 }
 
-async fn setup_compute_env_with_meta_opts(
+pub(super) async fn setup_compute_env_with_meta_opts(
     port: i32,
     opts: MetaOpts,
 ) -> (
@@ -479,6 +619,7 @@ async fn test_hummock_compaction_task() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault,
                 &mut *default_compaction_selector(),
             )
@@ -516,7 +657,11 @@ async fn test_hummock_compaction_task() {
     let compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), table_id).await;
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -533,7 +678,11 @@ async fn test_hummock_compaction_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1085,7 +1234,11 @@ async fn test_print_compact_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1165,6 +1318,147 @@ async fn test_invalid_sst_id() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
+    let (_, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    register_table_ids_to_compaction_group(&hummock_manager, &[1, 2, 3], compaction_group_id).await;
+    let sst_ids = get_sst_ids(&hummock_manager, 3).await;
+    for (index, &sst_id) in sst_ids.iter().enumerate() {
+        let table_id = TableId::new(index as u32 + 1);
+        let epoch = test_epoch(index as u64 + 1);
+        let sst = SstableInfoInner {
+            object_id: sst_id.into(),
+            sst_id: sst_id.into(),
+            key_range: KeyRange::new(
+                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "a"), epoch)
+                    .encode()
+                    .into(),
+                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "z"), epoch)
+                    .encode()
+                    .into(),
+            ),
+            table_ids: vec![table_id],
+            file_size: 128,
+            sst_size: 128,
+            uncompressed_file_size: 128,
+            total_key_count: 1,
+            min_epoch: epoch,
+            max_epoch: epoch,
+            ..Default::default()
+        }
+        .into();
+        hummock_meta_client
+            .commit_epoch(
+                epoch,
+                SyncResult {
+                    uncommitted_ssts: to_local_sstable_info(&[sst]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let version = hummock_manager.get_current_version().await;
+    let sub_levels = &version
+        .get_compaction_group_levels(compaction_group_id)
+        .l0
+        .sub_levels;
+    assert_eq!(sub_levels.len(), 3);
+    let middle_task = hummock_manager
+        .manual_get_compact_task(
+            worker_id,
+            compaction_group_id,
+            ManualCompactionOption {
+                level: 0,
+                sst_ids: vec![sst_ids[1].into()],
+                exclusive: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(middle_task.target_sub_level_id, sub_levels[1].sub_level_id);
+
+    // Both requests expand their input to include the unhinted, pending middle sublevel.
+    let options = [
+        ManualCompactionOption {
+            level: 0,
+            sst_ids: vec![sst_ids[0].into(), sst_ids[2].into()],
+            exclusive: false,
+            ..Default::default()
+        },
+        ManualCompactionOption {
+            level: 0,
+            internal_table_id: HashSet::from([3.into()]),
+            exclusive: false,
+            ..Default::default()
+        },
+    ];
+    for option in &options {
+        let task = hummock_manager
+            .manual_get_compact_task(worker_id, compaction_group_id, option.clone())
+            .await
+            .unwrap();
+        assert!(
+            task.is_none(),
+            "selected the pending middle sublevel: {task:?}"
+        );
+    }
+    {
+        let compaction = hummock_manager.compaction.read().await;
+        assert_eq!(compaction.compact_task_assignment.len(), 1);
+        let pending = compaction.compaction_statuses[&compaction_group_id].level_handlers[0]
+            .compacting_files();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[&HummockSstableId::from(sst_ids[1])],
+            middle_task.task_id
+        );
+    }
+
+    assert!(
+        hummock_manager
+            .cancel_compact_task(middle_task.task_id, TaskStatus::ManualCanceled)
+            .await
+            .unwrap()
+    );
+    for option in options {
+        let to_l0 = !option.sst_ids.is_empty();
+        let task = hummock_manager
+            .manual_get_compact_task(worker_id, compaction_group_id, option)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.target_level == 0, to_l0);
+        // Once the reservation is released, keep the complete consecutive input interval.
+        assert_eq!(
+            task.read_input_ssts().map(|sst| sst.sst_id).collect_vec(),
+            sst_ids
+                .iter()
+                .rev()
+                .copied()
+                .map(HummockSstableId::from)
+                .collect_vec()
+        );
+        if task.target_level == 0 {
+            assert_eq!(task.target_sub_level_id, sub_levels[0].sub_level_id);
+        }
+        assert!(
+            hummock_manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+    }
 }
 
 #[tokio::test]
@@ -1317,6 +1611,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut *default_compaction_selector(),
             )
@@ -1352,6 +1647,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1390,6 +1686,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1452,6 +1749,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     assert!(
         hummock_manager
             .get_compact_task(
+                worker_id,
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut *default_compaction_selector(),
             )
@@ -1487,6 +1785,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault.into(),
             &mut *default_compaction_selector(),
         )
@@ -1699,6 +1998,7 @@ async fn test_version_stats() {
 
     let compact_task = hummock_manager
         .get_compact_task(
+            worker_id,
             StaticCompactionGroupId::StateDefault,
             &mut *default_compaction_selector(),
         )
@@ -1944,7 +2244,16 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
 
 #[tokio::test]
 async fn test_merge_compaction_group_removes_split_group_metrics() {
-    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    // Other managers may remove the same group labels from the global metrics concurrently.
+    let registry = Registry::new();
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let (_env, hummock_manager, _, worker_id) =
+        setup_compute_env_with_metric(80, config, Some(MetaMetrics::for_test(&registry))).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
         worker_id as _,
@@ -1992,7 +2301,11 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
     // task picking records compact task metrics for the split group.
     hummock_manager.create_version_checkpoint(0).await.unwrap();
     let compact_task = hummock_manager
-        .get_compact_task(right_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            right_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap();
     assert!(compact_task.is_some());
@@ -2174,7 +2487,11 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault;
     let task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -2212,6 +2529,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
 
     let task2 = hummock_manager
         .get_compact_task(
+            worker_id,
             left_compaction_group_id,
             &mut *default_compaction_selector(),
         )
@@ -2268,7 +2586,7 @@ async fn get_manual_compact_task(
     };
 
     hummock_manager_ref
-        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+        .manual_get_compact_task(1.into(), compaction_group_id, manual_compcation_option)
         .await
         .unwrap()
         .unwrap()
@@ -2330,7 +2648,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     };
     // 2. get compact task
     let compact_task = hummock_manager
-        .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+        .manual_get_compact_task(worker_id, compaction_group_id, manual_compcation_option)
         .await
         .unwrap()
         .unwrap();
@@ -2422,6 +2740,32 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
             .table_infos[1]
             .table_ids,
         [103].into_iter().map(Into::<TableId>::into).collect_vec()
+    );
+
+    // Merge in reverse argument order: SST concatenation must follow table order.
+    hummock_manager
+        .merge_compaction_group_for_test(
+            right_compaction_group_id,
+            left_compaction_group_id,
+            HashSet::from_iter((100..=103).map(TableId::new)),
+        )
+        .await
+        .unwrap();
+    let merged_version = hummock_manager.get_current_version().await;
+    assert!(
+        !merged_version
+            .levels
+            .contains_key(&right_compaction_group_id)
+    );
+    assert_eq!(
+        merged_version
+            .get_compaction_group_levels(left_compaction_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .iter()
+            .flat_map(|sst| sst.table_ids.iter().copied())
+            .collect_vec(),
+        (100..=103).map(TableId::new).collect_vec()
     );
 }
 
@@ -2731,7 +3075,7 @@ async fn test_partition_level() {
 
         global_sst_id += 1;
         if let Some(task) = hummock_manager
-            .get_compact_task(new_compaction_group_id, selector.as_mut())
+            .get_compact_task(worker_id, new_compaction_group_id, selector.as_mut())
             .await
             .unwrap()
         {
@@ -3011,7 +3355,11 @@ async fn test_merge_compaction_group_task_expired() {
 
     // for task pending
     let _task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            worker_id,
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -3054,6 +3402,7 @@ async fn test_merge_compaction_group_task_expired() {
 
     let task2 = hummock_manager
         .get_compact_task(
+            worker_id,
             right_compaction_group_id,
             &mut *default_compaction_selector(),
         )
@@ -3241,7 +3590,11 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
 
     let recovered_manager = build_hummock_manager_for_test_env(env).await;
     let compact_task = recovered_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            1.into(),
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .expect("dirty old-version SST should be picked for compaction");
@@ -3358,7 +3711,13 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .unwrap();
     let mv_stat = group_infos.iter().find(|g| g.group_id == mv_id).unwrap();
 
-    let throughput_manager = TableWriteThroughputStatisticManager::new(100);
+    let mut throughput_manager = TableWriteThroughputStatisticManager::new(240);
+    let now = Instant::now();
+    for age in (0..=240).rev() {
+        for table in [100, 200, 201, 202] {
+            throughput_manager.record_commit(table.into(), 0, now - Duration::from_secs(age));
+        }
+    }
     let created_tables: HashSet<TableId> =
         HashSet::from_iter(vec![100.into(), 200.into(), 201.into(), 202.into()]);
 
@@ -3367,8 +3726,9 @@ async fn test_try_merge_compaction_group_error_propagation() {
     let result = hummock_manager
         .try_merge_compaction_group(&throughput_manager, gx_stat, mv_stat, &created_tables)
         .await;
-    let err =
-        result.expect_err("try_merge_compaction_group must reject merged L0 SST count write stop");
+    let err = result
+        .err()
+        .expect("try_merge_compaction_group must reject merged L0 SST count write stop");
     assert!(
         err.as_report()
             .to_string()
@@ -3644,7 +4004,7 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
         .unwrap();
 
     let task = hummock_manager
-        .get_compact_task(cg_64, &mut *default_compaction_selector())
+        .get_compact_task(worker_id, cg_64, &mut *default_compaction_selector())
         .await
         .unwrap()
         .expect("should produce a compaction task");
@@ -3796,14 +4156,19 @@ async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
         .await
         .unwrap();
 
+    // Replace the empty-commit observation with the synthetic hot history for this test.
     hummock_manager
         .table_write_throughput_statistic_manager
         .write()
-        .add_table_throughput_with_ts(
-            200.into(),
-            opts.table_high_write_throughput_threshold + 1,
-            chrono::Utc::now().timestamp(),
-        );
+        .remove_table(200.into());
+    record_table_throughput(
+        &mut hummock_manager
+            .table_write_throughput_statistic_manager
+            .write(),
+        200.into(),
+        opts.table_high_write_throughput_threshold + 1,
+        Instant::now(),
+    );
 
     assert_eq!(
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
@@ -4132,6 +4497,26 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     insert_delta(&env, 3, 2).await;
     insert_version(&env, 4, None).await;
     insert_version(&env, 5, None).await;
+    for (candidates, expected) in [
+        (vec![], vec![]),
+        (vec![10], vec![]),
+        (vec![10, 9999], vec![9999]),
+    ] {
+        assert_eq!(
+            hummock_manager
+                .filter_out_objects_by_time_travel(
+                    candidates
+                        .into_iter()
+                        .map(|id| HummockObjectId::Sstable(id.into())),
+                )
+                .await
+                .unwrap(),
+            expected
+                .into_iter()
+                .map(|id| HummockObjectId::Sstable(id.into()))
+                .collect(),
+        );
+    }
     insert_epoch_mapping(&env, table_id, 100, 2).await;
     insert_epoch_mapping(&env, table_id, 150, 3).await;
     insert_epoch_mapping(&env, table_id, 175, 3).await;
@@ -4271,4 +4656,555 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
             .collect_vec(),
         vec![10]
     );
+}
+
+#[tokio::test]
+async fn test_huge_split_revalidates_snapshot() {
+    let (env, manager, _, _) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into()), (102, 2.into())])
+        .await
+        .unwrap();
+    let group = manager
+        .calculate_compaction_group_statistic()
+        .await
+        .into_iter()
+        .find(|group| group.group_id == 2)
+        .unwrap();
+    let limit = (group.compaction_group_config.max_estimated_group_size() as f64
+        * env.opts.split_group_size_ratio) as u64;
+    set_table_sizes(&manager, [100, 101, 102].map(|id| (id, limit * 6 / 10))).await;
+    let group = manager
+        .calculate_compaction_group_statistic()
+        .await
+        .into_iter()
+        .find(|group| group.group_id == 2)
+        .unwrap();
+    let stats = TableWriteThroughputStatisticManager::new(240);
+
+    // An old snapshot must not bypass a newer scheduling disable.
+    manager
+        .update_compaction_config(
+            &[group.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(true)],
+        )
+        .await
+        .unwrap();
+    let before = manager.get_current_version().await.id;
+    manager
+        .try_split_compaction_group(&stats, group.clone())
+        .await;
+    assert_eq!(
+        manager.get_current_version().await.id,
+        before,
+        "scheduling was disabled"
+    );
+
+    // The hot-table branch must enforce the same current disable as the size branch.
+    // Isolating the first table has a no-op first step; an interior table needs both steps.
+    for table in [100, 101] {
+        let mut hot = TableWriteThroughputStatisticManager::new(240);
+        record_table_throughput(&mut hot, table.into(), u64::MAX / 2, Instant::now());
+        manager
+            .try_split_compaction_group(&hot, group.clone())
+            .await;
+        assert_eq!(
+            manager.get_current_version().await.id,
+            before,
+            "hot splitting was disabled for table {table}"
+        );
+    }
+
+    // Re-enable scheduling, but shrink the group below the split threshold.
+    manager
+        .update_compaction_config(
+            &[group.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(false)],
+        )
+        .await
+        .unwrap();
+    set_table_sizes(&manager, [(100, 1), (101, 1), (102, 1)]).await;
+    let before = manager.get_current_version().await.id;
+    manager
+        .try_split_compaction_group(&stats, group.clone())
+        .await;
+    assert_eq!(
+        manager.get_current_version().await.id,
+        before,
+        "the group is no longer huge"
+    );
+
+    // Make it huge again with a different size distribution: refresh the split boundary too.
+    set_table_sizes(&manager, [(101, group.group_size)]).await;
+    manager.try_split_compaction_group(&stats, group).await;
+    let group_100 = get_compaction_group_id_by_table_id(manager.clone(), 100).await;
+    let group_101 = get_compaction_group_id_by_table_id(manager.clone(), 101).await;
+    let group_102 = get_compaction_group_id_by_table_id(manager.clone(), 102).await;
+    assert_eq!(
+        group_100, group_101,
+        "the small first table must stay with the large table"
+    );
+    assert_ne!(
+        group_101, group_102,
+        "the refreshed prefix must be split in this round"
+    );
+    // A manual operation remains available when automatic scheduling is disabled.
+    manager
+        .update_compaction_config(
+            &[group_100],
+            &[MutableConfig::DisableAutoGroupScheduling(true)],
+        )
+        .await
+        .unwrap();
+    manager
+        .move_state_tables_to_dedicated_compaction_group(group_100, &[100.into()], None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_split_refreshes_parent_and_child_groups() {
+    for (hot_tables, size_percent, expected_members) in [
+        (
+            &[100, 101, 102][..],
+            0,
+            vec![vec![100], vec![101], vec![102], vec![103]],
+        ),
+        (&[100][..], 40, vec![vec![100], vec![101, 102], vec![103]]),
+    ] {
+        let (env, manager, _, _) = setup_compute_env(80).await;
+        manager
+            .register_table_ids_for_test(&[
+                (100, 2.into()),
+                (101, 2.into()),
+                (102, 2.into()),
+                (103, 2.into()),
+            ])
+            .await
+            .unwrap();
+        {
+            let mut stats = manager.table_write_throughput_statistic_manager.write();
+            let now = Instant::now();
+            for &table in hot_tables {
+                for age in (2..=241).rev() {
+                    stats.record_commit(table.into(), 0, now - Duration::from_secs(age));
+                }
+                stats.record_commit(
+                    table.into(),
+                    env.opts.table_high_write_throughput_threshold + 1,
+                    now - Duration::from_secs(1),
+                );
+                stats.record_commit(table.into(), 0, now);
+            }
+        }
+        // A completed burst followed by observed zero must not cause a delayed hot split.
+        let before = manager.get_current_version().await.id;
+        manager.schedule_group_split_for_test().await;
+        assert_eq!(manager.get_current_version().await.id, before);
+
+        let group = manager
+            .calculate_compaction_group_statistic()
+            .await
+            .into_iter()
+            .find(|g| g.group_id == 2)
+            .unwrap();
+        let limit = (group.compaction_group_config.max_estimated_group_size() as f64
+            * env.opts.split_group_size_ratio) as u64;
+        set_table_sizes(
+            &manager,
+            [100, 101, 102, 103].map(|id| (id, limit * size_percent / 100)),
+        )
+        .await;
+        advance_time(Duration::from_secs(1)).await;
+        {
+            let mut stats = manager.table_write_throughput_statistic_manager.write();
+            let now = Instant::now();
+            // New heat must not be diluted by cold history. The last table's sample
+            // remains pending, so the scheduler must also see unclosed ingress.
+            for &table in hot_tables {
+                if Some(&table) == hot_tables.last() {
+                    stats.record_commit(table.into(), 0, now);
+                }
+                stats.record_commit(
+                    table.into(),
+                    env.opts.table_high_write_throughput_threshold + 1,
+                    now,
+                );
+            }
+        }
+        manager.schedule_group_split_for_test().await;
+        let groups = manager.calculate_compaction_group_statistic().await;
+        let members = groups
+            .iter()
+            .filter(|g| !g.table_statistic.is_empty())
+            .map(|g| {
+                assert!(g.group_size <= limit);
+                g.table_statistic
+                    .keys()
+                    .map(|id| id.as_raw_id())
+                    .collect_vec()
+            })
+            .sorted()
+            .collect_vec();
+        // Multiple hot tables must follow their current parent. With one hot table,
+        // the remaining 120%-sized child must also split during this round.
+        assert_eq!(members, expected_members);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_merge_batch_uses_accumulated_size() {
+    use risingwave_meta_model::{
+        CreateType, JobStatus, StreamingParallelism, object, streaming_job,
+    };
+    use sea_orm::{ActiveModelTrait, Set};
+    let registry = Registry::new();
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let (env, manager, _, worker_id) =
+        setup_compute_env_with_metric(80, config, Some(MetaMetrics::for_test(&registry))).await;
+    let conn = &env.meta_store_ref().conn;
+    for table in [100, 101, 102] {
+        object::ActiveModel {
+            oid: Set(table.into()),
+            obj_type: Set(object::ObjectType::Table),
+            owner_id: Set(1.into()),
+            initialized_at: Set(chrono::Utc::now().naive_utc()),
+            created_at: Set(chrono::Utc::now().naive_utc()),
+            ..Default::default()
+        }
+        .insert(conn)
+        .await
+        .unwrap();
+        streaming_job::ActiveModel {
+            job_id: Set(table.into()),
+            job_status: Set(JobStatus::Created),
+            create_type: Set(CreateType::Foreground),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            max_parallelism: Set(1),
+            is_serverless_backfill: Set(false),
+            ..Default::default()
+        }
+        .insert(conn)
+        .await
+        .unwrap();
+    }
+    manager
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into()), (102, 2.into())])
+        .await
+        .unwrap();
+    manager
+        .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+        .await
+        .unwrap();
+    let parent = get_compaction_group_id_by_table_id(manager.clone(), 101).await;
+    manager
+        .move_state_tables_to_dedicated_compaction_group(parent, &[101.into()], None)
+        .await
+        .unwrap();
+    let groups = manager.calculate_compaction_group_statistic().await;
+    assert_eq!(
+        groups
+            .iter()
+            .filter(|g| !g.table_statistic.is_empty())
+            .count(),
+        3
+    );
+    let limit = (groups[0].compaction_group_config.max_estimated_group_size() as f64
+        * env.opts.split_group_size_ratio) as u64;
+    set_table_sizes(&manager, [100, 101, 102].map(|id| (id, limit * 4 / 10))).await;
+    {
+        let now = Instant::now();
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        for table in [100, 101, 102] {
+            for age in (0..=env.opts.table_write_throughput_retention_seconds as u64).rev() {
+                let bytes = if age == 120 {
+                    env.opts.table_high_write_throughput_threshold + 1
+                } else {
+                    0
+                };
+                stats.record_commit(table.into(), bytes, now - Duration::from_secs(age));
+            }
+        }
+    }
+    // A past hotspot must still prevent merging after current ingress turns cold. The old
+    // majority-cold rule would merge here, despite the hot sample in the longer history.
+    let version_before = manager.get_current_version().await.id;
+    manager.schedule_group_merge_for_test().await;
+    assert_eq!(manager.get_current_version().await.id, version_before);
+    // Age out the history including its boundary bucket without depending on bucket width.
+    let cold_interval = 2 * env.opts.table_write_throughput_retention_seconds as u64 + 1;
+    advance_time(Duration::from_secs(cold_interval)).await;
+    {
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        for table in [100, 101, 102] {
+            stats.record_commit(table.into(), 0, Instant::now());
+        }
+    }
+    // The scheduler may wait for locks after taking its cold throughput snapshot.
+    // A successful hot commit in that gap must veto the merge at apply time.
+    let stale_stats = manager
+        .table_write_throughput_statistic_manager
+        .read()
+        .clone();
+    let groups = manager.calculate_compaction_group_statistic().await;
+    let created_tables = HashSet::from([100.into(), 101.into(), 102.into()]);
+    let left = groups
+        .iter()
+        .find(|g| g.table_statistic.contains_key(&TableId::new(100)))
+        .unwrap();
+    let right = groups
+        .iter()
+        .find(|g| g.table_statistic.contains_key(&TableId::new(101)))
+        .unwrap();
+    manager
+        .update_compaction_config(
+            &[left.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(true)],
+        )
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .try_merge_compaction_group(&stale_stats, left, right, &created_tables,)
+            .await
+            .is_err(),
+        "a scheduling snapshot must not override a newer disable-auto setting"
+    );
+    manager
+        .update_compaction_config(
+            &[left.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(false)],
+        )
+        .await
+        .unwrap();
+    // Current size can also change after the batch snapshot was built.
+    set_table_sizes(&manager, [(100, limit)]).await;
+    let error = manager
+        .try_merge_compaction_group(&stale_stats, left, right, &created_tables)
+        .await
+        .err()
+        .expect("the current merge policy must reject this stale snapshot");
+    assert!(error.to_string().contains("Cannot merge huge"));
+    set_table_sizes(&manager, [(100, limit * 4 / 10)]).await;
+    let mut sst = LocalSstableInfo::for_test(
+        generate_test_sstables_with_table_id(test_epoch(30), 100, get_sst_ids(&manager, 1).await)
+            .pop()
+            .unwrap(),
+    );
+    sst.table_stats.insert(
+        100.into(),
+        TableStats {
+            total_value_size: (env.opts.table_high_write_throughput_threshold * 2) as i64,
+            ..Default::default()
+        },
+    );
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            sst_to_context: HashMap::from([(sst.sst_info.object_id, worker_id as _)]),
+            sstables: vec![sst],
+            tables_to_commit: HashMap::from([(100.into(), test_epoch(30))]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .try_merge_compaction_group(&stale_stats, left, right, &created_tables,)
+            .await
+            .is_err(),
+        "a stale cold snapshot must not merge a newly hot table"
+    );
+    // Complete the burst sample, then observe another full cold history. All three groups
+    // must be eligible again so the batch still exercises the cumulative size cap.
+    for seconds in [1, cold_interval] {
+        advance_time(Duration::from_secs(seconds)).await;
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        for table in [100, 101, 102] {
+            stats.record_commit(table.into(), 0, Instant::now());
+        }
+    }
+    manager.schedule_group_merge_for_test().await;
+    let groups = manager.calculate_compaction_group_statistic().await;
+    let nonempty = groups
+        .iter()
+        .filter(|g| !g.table_statistic.is_empty())
+        .collect_vec();
+    assert_eq!(
+        nonempty.len(),
+        2,
+        "40 + 40 may merge, but adding the third 40 exceeds the limit"
+    );
+    assert!(nonempty.iter().all(|g| g.group_size <= limit));
+    let survivor = nonempty
+        .iter()
+        .find(|g| g.table_statistic.len() == 2)
+        .unwrap();
+    assert_eq!(
+        manager
+            .metrics
+            .merge_compaction_group_count
+            .with_label_values(&[&survivor.group_id.to_string()])
+            .get(),
+        1,
+        "one successful automatic merge must be counted once"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_empty_commits_observe_only_committed_tables() {
+    let (_, manager, _, worker_id) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+        .await
+        .unwrap();
+    let observation_start = Instant::now();
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            tables_to_commit: HashMap::from([(100.into(), test_epoch(30))]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // A first commit establishes a baseline. Table 101 has not committed at all.
+    assert_eq!(
+        manager
+            .table_write_throughput_statistic_manager
+            .read()
+            .latest_table_throughput(100.into()),
+        None
+    );
+    advance_time(Duration::from_secs(2)).await;
+    let sst =
+        generate_test_sstables_with_table_id(test_epoch(31), 100, get_sst_ids(&manager, 1).await)
+            .pop()
+            .unwrap();
+    let mut sst = LocalSstableInfo::for_test(sst);
+    sst.table_stats.insert(
+        100.into(),
+        TableStats {
+            total_key_size: 40,
+            total_value_size: 60,
+            ..Default::default()
+        },
+    );
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            sst_to_context: HashMap::from([(sst.sst_info.object_id, worker_id as _)]),
+            sstables: vec![sst],
+            tables_to_commit: HashMap::from([
+                (100.into(), test_epoch(31)),
+                (101.into(), test_epoch(31)),
+            ]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    {
+        let stats = manager.table_write_throughput_statistic_manager.read();
+        // Epochs are only 1 ms apart; neither epochs nor configured periods are the denominator.
+        // Simulated commit I/O can advance time too. The sample spans at least the
+        // explicit two seconds and at most the entire observation, including both commits.
+        let min_rate = (100.0 / observation_start.elapsed().as_secs_f64()) as u64;
+        let rate = stats.latest_table_throughput(100.into()).unwrap();
+        assert!((min_rate..=50).contains(&rate), "unexpected rate: {rate}");
+        assert_eq!(stats.latest_table_throughput(101.into()), None);
+    }
+    for epoch in 32..34 {
+        advance_time(Duration::from_secs(300)).await;
+        manager
+            .commit_epoch(super::commit_epoch::CommitEpochInfo {
+                tables_to_commit: HashMap::from([
+                    (100.into(), test_epoch(epoch)),
+                    (101.into(), test_epoch(epoch)),
+                ]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+    }
+    advance_time(Duration::from_secs(299)).await;
+    {
+        let stats = manager.table_write_throughput_statistic_manager.read();
+        for table in [100, 101] {
+            assert_eq!(
+                stats.max_write_throughput(table.into(), Instant::now()),
+                Some(0)
+            );
+        }
+    }
+
+    // Queue commit before unregister on versioning. Unregister must not clear the
+    // history early and then let the in-flight commit recreate it after deletion.
+    let versioning = manager.versioning.write().await;
+    let commit = manager.commit_epoch(super::commit_epoch::CommitEpochInfo {
+        tables_to_commit: HashMap::from([(100.into(), test_epoch(34))]),
+        ..Default::default()
+    });
+    let unregister = manager.unregister_table_ids([100.into()]);
+    tokio::pin!(commit, unregister);
+    assert!(futures::poll!(commit.as_mut()).is_pending());
+    assert!(futures::poll!(unregister.as_mut()).is_pending());
+    drop(versioning);
+    let (committed, unregistered) = tokio::join!(commit, unregister);
+    committed.unwrap();
+    unregistered.unwrap();
+    // Reverse the ordering too: a later commit may contain a dropped table's SST.
+    // Version correction discards it, and statistics must not recreate its history.
+    let mut late_sst = LocalSstableInfo::for_test(
+        generate_test_sstables_with_table_id(test_epoch(35), 100, get_sst_ids(&manager, 1).await)
+            .pop()
+            .unwrap(),
+    );
+    late_sst.table_stats.insert(
+        100.into(),
+        TableStats {
+            total_value_size: 100,
+            ..Default::default()
+        },
+    );
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            sst_to_context: HashMap::from([(late_sst.sst_info.object_id, worker_id as _)]),
+            sstables: vec![late_sst],
+            tables_to_commit: HashMap::from([(101.into(), test_epoch(35))]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // Probe the resulting snapshot through its public API: a new observation must
+    // establish a baseline, rather than resume a deleted table's old history.
+    let mut stats = manager
+        .table_write_throughput_statistic_manager
+        .read()
+        .clone();
+    advance_time(Duration::from_secs(1)).await;
+    stats.record_commit(100.into(), 100, Instant::now());
+    assert_eq!(stats.latest_table_throughput(100.into()), None);
+}
+
+async fn set_table_sizes(manager: &HummockManager, sizes: impl IntoIterator<Item = (u32, u64)>) {
+    let mut versioning = manager.versioning.write().await;
+    for (table, size) in sizes {
+        versioning
+            .version_stats
+            .table_stats
+            .entry(table.into())
+            .or_default()
+            .total_value_size = size as i64;
+    }
+}
+
+fn record_table_throughput(
+    stats: &mut TableWriteThroughputStatisticManager,
+    table: TableId,
+    throughput: u64,
+    now: Instant,
+) {
+    stats.record_commit(table, 0, now - Duration::from_secs(1));
+    stats.record_commit(table, throughput, now);
 }

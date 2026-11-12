@@ -54,6 +54,15 @@ use crate::rpc::metrics::MetaMetrics;
 static EMPTY_IN_PROGRESS_COMPACTION_VIEW: LazyLock<InProgressCompactionView> =
     LazyLock::new(InProgressCompactionView::default);
 
+/// Advance virtual time without sleeping; Tokio tests must start with time paused.
+#[cfg(test)]
+pub(crate) async fn advance_time(duration: Duration) {
+    #[cfg(not(madsim))]
+    tokio::time::advance(duration).await;
+    #[cfg(madsim)]
+    tokio::time::advance(duration);
+}
+
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
         .map(|sst| LocalSstableInfo::for_test(sst.clone()))
@@ -100,7 +109,11 @@ pub async fn add_test_tables(
     )
     .await;
     let mut compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .get_compact_task(
+            1.into(),
+            compaction_group_id,
+            &mut *default_compaction_selector(),
+        )
         .await
         .unwrap()
         .unwrap();

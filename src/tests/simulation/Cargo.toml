@@ -21,11 +21,11 @@ indexmap = { workspace = true }
 itertools = { workspace = true }
 madsim = { workspace = true }
 maplit = "1"
+parquet = { workspace = true }
 paste = "1"
 pin-project = "1.1"
 pretty_assertions = "1"
-rand = { workspace = true }
-rand_chacha = { version = "0.9" }
+rand = { version = "0.10", features = ["chacha"] }
 rdkafka = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_batch_executors = { workspace = true }

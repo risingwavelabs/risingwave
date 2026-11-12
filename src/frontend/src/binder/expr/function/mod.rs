@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
+use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -38,8 +39,9 @@ use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef, TableFunction,
-    TableFunctionType, UserDefinedFunction, expr_impl_to_string_fn,
+    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef,
+    MSSQL_QUERY_ARG_COUNT, TableFunction, TableFunctionType, UserDefinedFunction,
+    expr_impl_to_string_fn,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -84,31 +86,73 @@ macro_rules! reject_syntax {
 }
 
 impl Binder {
-    fn bind_postgres_or_mysql_query_args(
+    /// Validate and resolve the args for the external-database `_query`
+    /// table-valued functions (`postgres_query`, `mysql_query`, and
+    /// `mssql_query`).
+    ///
+    /// Two calling forms are supported:
+    /// * **Inline form** (`inline_arg_len` args): each argument is cast to
+    ///   `varchar` and returned verbatim. The caller picks `inline_arg_len`
+    ///   because the per-connector inline signature differs (`postgres` /
+    ///   `mysql` = 6 args; `sqlserver` = 8 args to carry `encrypt` /
+    ///   `trust_cert`).
+    /// * **Source-reference form** (2 args: `cdc_source_name, query`): the
+    ///   named source's connection parameters and secrets are resolved,
+    ///   expanded into the inline shape, and the per-connector TLS flags
+    ///   are appended. **Crucially, this path enforces `AclMode::Select` on
+    ///   the source before the secrets are expanded.** Without this check,
+    ///   a non-owner caller could use
+    ///   `mssql_query('my_source', 'SELECT ...')` to query the external
+    ///   database using the source's elevated credentials.
+    fn bind_external_db_query_args(
         &self,
         schema_name: Option<&str>,
         args: Vec<ExprImpl>,
+        inline_arg_len: usize,
         expected_connector_name: &str,
     ) -> Result<Vec<ExprImpl>> {
         match args.len() {
-            INLINE_QUERY_ARG_LEN => {
-                let mut cast_args = Vec::with_capacity(INLINE_QUERY_ARG_LEN);
+            n if n == inline_arg_len => {
+                let mut cast_args = Vec::with_capacity(n);
                 for arg in args {
                     cast_args.push(arg.cast_implicit(&DataType::Varchar)?);
                 }
                 Ok(cast_args)
             }
             CDC_SOURCE_QUERY_ARG_LEN => {
-                let source_name = expr_impl_to_string_fn(&args[0])?;
+                use thiserror_ext::AsReport as _;
+
+                use crate::catalog::root_catalog::SchemaPath;
+
+                let schema_path = self.bind_schema_path(schema_name);
+                let raw_source_name = expr_impl_to_string_fn(&args[0])?;
+                // Accept `schema.source` and quoted identifiers, matching every other SQL surface.
+                // Historical behavior fed the whole string (dot included) into the catalog lookup,
+                // so a qualified name could never match and an unqualified name only searched the
+                // session `search_path` — which broke sources created in non-default schemas.
+                let object_name = Parser::parse_object_name_str(&raw_source_name).map_err(|e| {
+                    ErrorCode::BindError(format!(
+                        "invalid source name `{}`: {}",
+                        raw_source_name,
+                        e.to_report_string(),
+                    ))
+                })?;
+                let (explicit_schema, source_name) =
+                    Binder::resolve_schema_qualified_name(&self.db_name, &object_name)?;
+                let source_schema_path = match explicit_schema.as_deref() {
+                    Some(schema) => SchemaPath::Name(schema),
+                    None => schema_path,
+                };
                 let source_catalog = self
                     .catalog
-                    .get_source_by_name(
-                        &self.db_name,
-                        self.bind_schema_path(schema_name),
-                        &source_name,
-                    )?
+                    .get_source_by_name(&self.db_name, source_schema_path, &source_name)?
                     .0;
 
+                // Enforce the source's SELECT privilege *before* expanding
+                // secrets or doing schema discovery, so a non-owner caller
+                // cannot read the external database using a source they
+                // have no grant on. Same ordering as the inline-form arg
+                // cast above: refuse early, leak nothing.
                 self.check_privilege(
                     ObjectCheckItem::new(
                         source_catalog.owner,
@@ -119,12 +163,20 @@ impl Binder {
                     source_catalog.database_id,
                 )?;
 
+                if source_catalog.is_cdc_table_source() {
+                    return Err(ErrorCode::BindError(
+                        "mysql_query and postgres_query only accept shared CDC sources, not CDC table sources"
+                            .to_owned(),
+                    )
+                    .into());
+                }
+
                 if !source_catalog
                     .connector_name()
                     .eq_ignore_ascii_case(expected_connector_name)
                 {
                     return Err(ErrorCode::BindError(format!(
-                        "TVF function only accepts `mysql-cdc` and `postgres-cdc` source. Expected: {}, but got: {}",
+                        "TVF function only accepts `mysql-cdc`, `postgres-cdc` and `sqlserver-cdc` source. Expected: {}, but got: {}",
                         expected_connector_name,
                         source_catalog.connector_name()
                     ))
@@ -154,11 +206,41 @@ impl Binder {
                             .cloned()
                             .unwrap_or_default(),
                     ));
+                } else if expected_connector_name.eq_ignore_ascii_case("sqlserver-cdc") {
+                    // The CDC source is the source of truth for whether the
+                    // SQL Server connection requires TLS. Normalize the
+                    // source property to the public TVF's string argument;
+                    // `TableFunction::new_mssql_query` parses it once and
+                    // carries a boolean through the internal plan.
+                    let encrypt = secret_resolved
+                        .get("database.encrypt")
+                        .map(|v| v.eq_ignore_ascii_case("true").to_string())
+                        .unwrap_or_else(|| "false".to_owned());
+                    args_vec.push(ExprImpl::literal_varchar(encrypt));
+                    // The CDC implementation sets `trust_cert`
+                    // unconditionally (see
+                    // `connector::sink::sqlserver::SqlServerClient::new`),
+                    // so the source-reference form mirrors that.
+                    args_vec.push(ExprImpl::literal_varchar("true".to_owned()));
                 }
 
                 Ok(args_vec)
             }
-            _ => Err(ErrorCode::BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into()),
+            _ => {
+                let func_name = match expected_connector_name.to_ascii_lowercase().as_str() {
+                    "postgres-cdc" => "postgres_query",
+                    "mysql-cdc" => "mysql_query",
+                    "sqlserver-cdc" => "mssql_query",
+                    _ => "external _query",
+                };
+                Err(ErrorCode::BindError(format!(
+                    "{func_name} function accepts either 2 arguments: \
+                     (cdc_source_name varchar, query varchar) or {inline_arg_len} arguments \
+                     for the inline form (see mssql_query / postgres_query / mysql_query \
+                     documentation)"
+                ))
+                .into())
+            }
         }
     }
 
@@ -475,7 +557,12 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
                 let args = self
-                    .bind_postgres_or_mysql_query_args(schema_name.as_deref(), args, "postgres-cdc")
+                    .bind_external_db_query_args(
+                        schema_name.as_deref(),
+                        args,
+                        INLINE_QUERY_ARG_LEN,
+                        "postgres-cdc",
+                    )
                     .context("postgres_query error")?;
                 return Ok(TableFunction::new_postgres_query(args)
                     .context("postgres_query error")?
@@ -489,10 +576,39 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
                 let args = self
-                    .bind_postgres_or_mysql_query_args(schema_name.as_deref(), args, "mysql-cdc")
+                    .bind_external_db_query_args(
+                        schema_name.as_deref(),
+                        args,
+                        INLINE_QUERY_ARG_LEN,
+                        "mysql-cdc",
+                    )
                     .context("mysql_query error")?;
                 return Ok(TableFunction::new_mysql_query(args)
                     .context("mysql_query error")?
+                    .into());
+            }
+            // `mssql_query` table function (enterprise feature)
+            if func_name.eq("mssql_query") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+
+                // Reuse the SQL Server CDC source entitlement instead of
+                // introducing a separate license gate for this query surface.
+                Feature::SqlServerCdcSource.check_available()?;
+
+                let args = self
+                    .bind_external_db_query_args(
+                        schema_name.as_deref(),
+                        args,
+                        MSSQL_QUERY_ARG_COUNT,
+                        "sqlserver-cdc",
+                    )
+                    .context("mssql_query error")?;
+                return Ok(TableFunction::new_mssql_query(args)
+                    .context("mssql_query error")?
                     .into());
             }
             // `internal_backfill_progress` table function

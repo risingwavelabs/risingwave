@@ -98,3 +98,32 @@
     from t;
   expected_outputs:
     - eowc_stream_dist_plan
+- id: top n ordered by watermark column in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select tm, foo from (select * from t order by tm limit 10);
+  expected_outputs:
+    - eowc_stream_plan
+- id: top n ordered by watermark column desc cannot run in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select tm, foo from (select * from t order by tm desc limit 10);
+  expected_outputs:
+    - eowc_stream_error
+- id: group top n with watermark on the second group key column in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select foo, window_start, bar from (
+      select *, row_number() over (partition by foo, window_start order by bar) as rn
+      from tumble(t, tm, interval '1 hour')
+    ) where rn <= 1;
+  expected_outputs:
+    - eowc_stream_plan
+- id: group top n ordered by watermark column in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select foo, tm, bar from (
+      select *, row_number() over (partition by foo order by tm) as rn from t
+    ) where rn <= 1;
+  expected_outputs:
+    - eowc_stream_plan

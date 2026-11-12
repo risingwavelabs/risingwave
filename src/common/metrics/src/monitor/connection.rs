@@ -431,11 +431,12 @@ pub struct TcpConfig {
     pub keepalive_duration: Option<Duration>,
 }
 
-#[expect(clippy::derivable_impls)]
 impl Default for TcpConfig {
     fn default() -> Self {
         Self {
-            tcp_nodelay: false,
+            // Without it, Nagle's algorithm holds the DATA frame of a small gRPC request until the
+            // peer's delayed ACK, adding about 40ms to the request.
+            tcp_nodelay: true,
             keepalive_duration: None,
         }
     }
@@ -796,9 +797,10 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
         self.reader_count_guard.dec();
     }
 
+    #[allow(rw::temporary_guarded_metric)]
     fn on_read_err(&mut self, err: &Error) {
-        // No need to store the value returned from `with_guarded_label_values`
-        // because it is reporting a single error.
+        // This is intentionally an ephemeral event counter. Collection exports
+        // the dropped label once before removing it.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
             .with_guarded_label_values(&[
@@ -827,9 +829,10 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
         self.writer_count_guard.dec();
     }
 
+    #[allow(rw::temporary_guarded_metric)]
     fn on_write_err(&mut self, err: &Error) {
-        // No need to store the value returned from `with_guarded_label_values`
-        // because it is reporting a single error.
+        // This is intentionally an ephemeral event counter. Collection exports
+        // the dropped label once before removing it.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
             .with_guarded_label_values(&[

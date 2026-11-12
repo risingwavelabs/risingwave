@@ -63,6 +63,20 @@ pub trait OverlapStrategy: Send + Sync {
             .collect_vec()
     }
 
+    /// Find overlaps in ordered, non-overlapping `others`.
+    /// `previous` may contain the preceding query's result on the same `others`;
+    /// both query boundaries must be nondecreasing. Strategies may ignore the hint.
+    fn check_overlap_range_with_hint(
+        &self,
+        range: &KeyRange,
+        others: &[SstableInfo],
+        _previous: Option<Range<usize>>,
+    ) -> Range<usize> {
+        let mut info = self.create_overlap_info();
+        info.update(range);
+        info.check_multiple_overlap(others)
+    }
+
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo>;
 }
 
@@ -142,6 +156,31 @@ impl OverlapStrategy for RangeOverlapStrategy {
         check_table_overlap(&a.key_range, b)
     }
 
+    fn check_overlap_range_with_hint(
+        &self,
+        range: &KeyRange,
+        others: &[SstableInfo],
+        previous: Option<Range<usize>>,
+    ) -> Range<usize> {
+        let before = |table: &SstableInfo| {
+            table.key_range.compare_right_with(&range.left) == cmp::Ordering::Less
+        };
+        let overlaps = |table: &SstableInfo| {
+            range.compare_right_with(&table.key_range.left) != cmp::Ordering::Less
+        };
+        if let Some(previous) = previous {
+            let begin = previous.start + partition_point_forward(&others[previous.start..], before);
+            let end = previous.end.max(begin);
+            let end = end + partition_point_forward(&others[end..], overlaps);
+            begin..end
+        } else {
+            // A first query near the end of a large level still costs O(log M).
+            let begin = others.partition_point(before);
+            let end = begin + others[begin..].partition_point(overlaps);
+            begin..end
+        }
+    }
+
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
         Box::<RangeOverlapInfo>::default()
     }
@@ -149,4 +188,20 @@ impl OverlapStrategy for RangeOverlapStrategy {
 
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     key_range.sstable_overlap(&table.key_range)
+}
+
+// Bracket the boundary exponentially, then binary-search the bracket. Starting
+// at the previous boundary costs O(1 + log(1 + advancement)), without linearly
+// scanning irrelevant SSTs when source ranges are sparse.
+fn partition_point_forward<T>(items: &[T], mut pred: impl FnMut(&T) -> bool) -> usize {
+    if items.is_empty() || !pred(&items[0]) {
+        return 0;
+    }
+    let mut lo = 1;
+    let mut hi = 2.min(items.len());
+    while hi < items.len() && pred(&items[hi - 1]) {
+        lo = hi;
+        hi = hi.saturating_mul(2).min(items.len());
+    }
+    lo + items[lo..hi].partition_point(pred)
 }

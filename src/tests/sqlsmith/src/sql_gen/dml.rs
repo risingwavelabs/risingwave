@@ -14,7 +14,7 @@
 
 use anyhow::{Result, bail};
 use itertools::Itertools;
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Expr::BinaryOp;
 use risingwave_sqlparser::ast::{

@@ -29,7 +29,7 @@ use futures::stream::{BoxStream, empty, select_all};
 use futures::{FutureExt, StreamExt, TryFuture, stream};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use rand::{Rng, rng as thread_rng};
+use rand::{RngExt as _, rng as thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row;
@@ -997,6 +997,14 @@ impl SimulationTestSource {
 }
 
 pub async fn start_sink_test_cluster() -> Result<Cluster> {
+    start_sink_test_cluster_inner(false).await
+}
+
+pub async fn start_sink_test_cluster_with_iceberg_compactor() -> Result<Cluster> {
+    start_sink_test_cluster_inner(true).await
+}
+
+async fn start_sink_test_cluster_inner(enable_iceberg_compactor: bool) -> Result<Cluster> {
     let config_path = {
         let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
         file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
@@ -1010,6 +1018,7 @@ pub async fn start_sink_test_cluster() -> Result<Cluster> {
         compute_nodes: 3,
         meta_nodes: 1,
         compactor_nodes: 1,
+        iceberg_compactor_nodes: usize::from(enable_iceberg_compactor),
         compute_node_cores: 2,
         ..Default::default()
     })
