@@ -185,6 +185,11 @@ GcsProperties:
     default: Default::default
 IcebergProperties:
   fields:
+  - name: streaming_updates
+    field_type: bool
+    comments: Opt in to Insert/Delete ingestion of RisingWave PK-index sink output.
+    required: false
+    default: Default::default
   - name: catalog.type
     field_type: String
     required: false
@@ -531,11 +536,6 @@ KafkaProperties:
   - name: properties.sasl.kerberos.principal
     field_type: String
     comments: Client's Kerberos principal name under SASL/GSSAPI.
-    required: false
-    allow_alter_on_fly: true
-  - name: properties.sasl.kerberos.kinit.cmd
-    field_type: String
-    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
     required: false
     allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin
@@ -894,14 +894,43 @@ MqttProperties:
   - name: clean_start
     field_type: bool
     comments: |-
-      `clean_start = true` removes all the state from queues & instructs the broker
-      to clean all the client state when client disconnects.
+      Whether to start a new session when connecting (MQTT v5 Clean Start). Defaults to `false`.
 
-      When set `false`, broker will hold the client state and performs pending
-      operations on the client when reconnection with same `client_id`
-      happens. Local queue state is also held to retransmit packets after reconnection.
+      `clean_start = true` makes the broker discard any existing session for the client id when
+      connecting. `clean_start = false` resumes the session the broker still holds for the same
+      client id, if any, including its subscriptions and any messages queued for it.
+
+      This flag only applies when connecting. How long the broker keeps a session after a
+      disconnect is controlled by `session_expiry_interval`. If that is not set, the session ends
+      when the connection closes, so `clean_start = false` alone does not resume anything after a
+      reconnect. Conversely, `clean_start = true` with `session_expiry_interval = 60` still keeps
+      the new session for 60 seconds after a disconnect.
     required: false
     default: Default::default
+  - name: keep_alive_secs
+    field_type: u16
+    comments: |-
+      The keep alive interval in seconds. The client sends a ping to the broker if no other
+      packet is exchanged within this interval, and the broker may close the connection after
+      1.5 times this interval without receiving any packet from the client. Must be between 5
+      and 65535. Defaults to 10.
+
+      Consider a larger value if the source can be backpressured for a long time, since no
+      ping is sent while the source is not consuming messages.
+    required: false
+    default: Default::default
+  - name: session_expiry_interval
+    field_type: u32
+    comments: |-
+      The session expiry interval in seconds sent to the broker on connect (MQTT v5).
+      If not set, the broker treats it as 0 and discards the session as soon as the connection
+      is closed.
+
+      Set it together with `clean_start = false` to let the broker keep the session, including
+      subscriptions and queued messages, across reconnects with the same client id. Note that
+      the client id contains the actor id, so a session is not resumed after the job is
+      rescheduled.
+    required: false
   - name: inflight_messages
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100

@@ -69,12 +69,14 @@ pub struct KinesisReaderConfig {
         rename = "kinesis.reader.eof_retry_interval_ms",
         default = "kinesis_reader_default_eof_retry_interval_ms"
     )]
+    #[serde_as(as = "DisplayFromStr")]
     pub eof_retry_interval_ms: u64,
 
     #[serde(
         rename = "kinesis.reader.error_retry_interval_ms",
         default = "kinesis_reader_default_error_retry_interval_ms"
     )]
+    #[serde_as(as = "DisplayFromStr")]
     pub error_retry_interval_ms: u64,
 }
 
@@ -152,6 +154,8 @@ mod test {
         };
 
         assert_eq!(kinesis_props.common.sdk_connect_timeout_ms, 10000);
+        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 1000);
+        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 200);
 
         let with_options = btreemap! {
             "connector".to_owned() => "kinesis".to_owned(),
@@ -162,6 +166,8 @@ mod test {
             "aws.credentials.access_key_id".to_owned() => "access_key".to_owned(),
             "aws.credentials.secret_access_key".to_owned() => "secret_key".to_owned(),
             "kinesis.sdk.connect_timeout_ms".to_owned() => "20000".to_owned(),
+            "kinesis.reader.eof_retry_interval_ms".to_owned() => "5000".to_owned(),
+            "kinesis.reader.error_retry_interval_ms".to_owned() => "1000".to_owned(),
         };
         let connector_props = ConnectorProperties::extract(
             WithOptionsSecResolved::without_secrets(with_options),
@@ -173,5 +179,7 @@ mod test {
         };
 
         assert_eq!(kinesis_props.common.sdk_connect_timeout_ms, 20000);
+        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 5000);
+        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 1000);
     }
 }

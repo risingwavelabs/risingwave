@@ -78,11 +78,17 @@ scheduling and maintenance options, including activation without new writes.
 It also reattaches a table with existing snapshots and verifies that reconciliation
 finishes without new ingestion after the independent job becomes ready.
 Alter the table, not its internal sink. Online changes to `commit_checkpoint_interval`
-and `compaction.write_parquet_*` are currently rejected for PK-index sinks because
+update the Meta-side checkpoint pacing while preserving pending epochs.
+`compaction.write_parquet_*` changes are still rejected for PK-index sinks because
 their running writers do not reload these options.
 The ordinary-sink knobs `compaction.max_snapshots_num` and
 `compaction.delete_files_count_threshold` are also rejected by this ALTER path;
 PK-index compaction uses `compaction.delete_ratio_percent` for delete selection.
+
+PK-index jobs now honor their configured commit interval, including after recovery.
+Existing sinks with the frontend default of 60 therefore change from committing every
+checkpoint to every 60 checkpoints after upgrade. Set `commit_checkpoint_interval = 1`
+to retain the previous commit frequency.
 
 These tests only need MinIO and the connector libs. Start with fresh RiseDev data,
 as the profile uses an in-memory meta store:

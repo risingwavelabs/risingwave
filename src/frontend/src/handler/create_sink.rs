@@ -219,9 +219,9 @@ pub async fn gen_sink_plan(
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
 
     let context = if let Some(explain_options) = explain_options {
-        OptimizerContext::new(handler_args.clone(), explain_options)
+        OptimizerContext::new(handler_args.clone(), explain_options)?
     } else {
-        OptimizerContext::from_handler_args(handler_args.clone())
+        OptimizerContext::from_handler_args(handler_args.clone())?
     };
     let is_auto_schema_change = resolved_with_options
         .get(AUTO_SCHEMA_CHANGE_KEY)
@@ -997,10 +997,15 @@ pub(crate) fn derive_default_column_project_for_sink(
         .map(|(i, c)| (c.name(), i))
         .collect::<BTreeMap<_, _>>();
 
+    // Without a column list, the sink's columns go to the table's DML columns by position, skipping
+    // generated columns.
+    let mut dml_idx = 0;
     for (idx, column) in columns.iter().enumerate() {
         if !column.can_dml() {
             continue;
         }
+        let sink_col_pos = dml_idx;
+        dml_idx += 1;
 
         let default_col_expr =
             || -> ExprImpl { rewrite_now_to_proctime(default_column_exprs[idx].clone()) };
@@ -1019,8 +1024,8 @@ pub(crate) fn derive_default_column_project_for_sink(
                 exprs.push(default_col_expr());
             }
         } else {
-            if idx < sink_visible_col_idxes.len() {
-                exprs.push(sink_col_expr(sink_visible_col_idxes[idx])?);
+            if sink_col_pos < sink_visible_col_idxes.len() {
+                exprs.push(sink_col_expr(sink_visible_col_idxes[sink_col_pos])?);
             } else {
                 exprs.push(default_col_expr());
             };

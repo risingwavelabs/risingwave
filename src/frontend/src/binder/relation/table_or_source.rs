@@ -37,9 +37,11 @@ use crate::binder::{BindFor, Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableType};
+use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{CatalogError, CatalogResult, DatabaseId, IndexCatalog, TableId};
+use crate::catalog::{
+    CatalogError, CatalogResult, DatabaseId, IndexCatalog, RelationKind, TableId,
+};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::privilege::ObjectCheckItem;
@@ -300,6 +302,26 @@ impl Binder {
         Ok(ret)
     }
 
+    /// Returns the error for a name that doesn't resolve to anything queryable. Sinks and
+    /// subscriptions share the namespace of relations but can't be queried. Only the current
+    /// database is inspected, so the error doesn't reveal objects in other databases.
+    fn relation_not_found_error(
+        &self,
+        db_name: &str,
+        schema_name: Option<&str>,
+        relation_name: &str,
+        not_found: CatalogError,
+    ) -> RwError {
+        if db_name == self.db_name
+            && let Some(kind @ (RelationKind::Sink | RelationKind::Subscription)) = self
+                .catalog
+                .relation_kind(db_name, self.bind_schema_path(schema_name), relation_name)
+        {
+            return kind.cannot_query_error(relation_name).into();
+        }
+        not_found.into()
+    }
+
     fn resolve_iceberg_metadata_relation(
         &mut self,
         db_name: &str,
@@ -307,15 +329,20 @@ impl Binder {
         relation_name: &str,
         as_of: Option<&AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
-        let Some((base_name, suffix)) = relation_name.rsplit_once('$') else {
-            return Err(CatalogError::not_found("table or source", relation_name).into());
+        let metadata_relation = relation_name
+            .rsplit_once('$')
+            .filter(|(base_name, _)| !base_name.is_empty())
+            .and_then(|(base_name, suffix)| {
+                Some((base_name, IcebergMetadataTableType::from_suffix(suffix)?))
+            });
+        let Some((base_name, metadata_type)) = metadata_relation else {
+            return Err(self.relation_not_found_error(
+                db_name,
+                schema_name,
+                relation_name,
+                CatalogError::not_found("table or source", relation_name),
+            ));
         };
-        let Some(metadata_type) = IcebergMetadataTableType::from_suffix(suffix) else {
-            return Err(CatalogError::not_found("table or source", relation_name).into());
-        };
-        if base_name.is_empty() {
-            return Err(CatalogError::not_found("table or source", relation_name).into());
-        }
 
         if metadata_type == IcebergMetadataTableType::Snapshots && as_of.is_some() {
             return Err(ErrorCode::BindError(
@@ -360,9 +387,12 @@ impl Binder {
                         }))
                 })?
             else {
-                return Err(
-                    CatalogError::not_found("Iceberg table, source, or sink", base_name).into(),
-                );
+                return Err(self.relation_not_found_error(
+                    db_name,
+                    schema_name,
+                    relation_name,
+                    CatalogError::not_found("Iceberg table, source, or sink", base_name),
+                ));
             };
             (base_relation, Some(resolved_schema_name.to_owned()))
         };
@@ -564,6 +594,7 @@ impl Binder {
         as_of: Option<&AsOf>,
         is_temporary: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
+        source_catalog.validate_iceberg_update_source()?;
         debug_assert_column_ids_distinct(&source_catalog.columns);
         if !is_temporary {
             self.check_privilege(
@@ -607,8 +638,14 @@ impl Binder {
             )?;
         }
 
-        let ast = Parser::parse_sql(&view_catalog.sql)
-            .expect("a view's sql should be parsed successfully");
+        // The error leaves out the SQL and the parser's message, which quotes it, as they can have
+        // secrets.
+        let ast = Parser::parse_sql(&view_catalog.sql).map_err(|_| {
+            ErrorCode::BindError(format!(
+                "failed to parse the stored definition of view {}",
+                view_catalog.name
+            ))
+        })?;
         let Statement::Query(query) = Itertools::exactly_one(ast.into_iter())
             .expect("a view should contain only one statement")
         else {
@@ -703,28 +740,33 @@ impl Binder {
         })
     }
 
-    pub(crate) fn check_for_dml(table: &TableCatalog, is_insert: bool) -> Result<()> {
-        let table_name = &table.name;
-        match table.table_type() {
-            TableType::Table => {}
-            TableType::Index | TableType::VectorIndex => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change index \"{table_name}\""
-                ))
-                .into());
+    /// Binds the target table of `INSERT`, `UPDATE` or `DELETE`.
+    pub(crate) fn bind_table_for_dml(
+        &mut self,
+        schema_name: Option<&str>,
+        table_name: &str,
+        is_insert: bool,
+    ) -> Result<BoundBaseTable> {
+        let table = self.bind_table(schema_name, table_name).map_err(|e| {
+            let schema_path = self.bind_schema_path(schema_name);
+            match self
+                .catalog
+                .relation_kind(&self.db_name, schema_path, table_name)
+            {
+                Some(kind) if kind != RelationKind::Table => {
+                    kind.cannot_change_error(table_name).into()
+                }
+                _ => e,
             }
-            TableType::MaterializedView => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change materialized view \"{table_name}\""
-                ))
-                .into());
-            }
-            TableType::Internal => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change internal table \"{table_name}\""
-                ))
-                .into());
-            }
+        })?;
+        Self::check_for_dml(&table.table_catalog, is_insert)?;
+        Ok(table)
+    }
+
+    fn check_for_dml(table: &TableCatalog, is_insert: bool) -> Result<()> {
+        let kind = RelationKind::from(table.table_type());
+        if kind != RelationKind::Table {
+            return Err(kind.cannot_change_error(&table.name).into());
         }
 
         if table.append_only && !is_insert {
@@ -735,5 +777,36 @@ impl Binder {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DEFAULT_SUPER_USER_ID, SYS_CATALOG_START_ID};
+
+    use super::*;
+    use crate::binder::test_utils::mock_binder;
+
+    #[tokio::test]
+    async fn test_view_with_unparsable_sql() {
+        let view = ViewCatalog {
+            // A system view skips the privilege check.
+            id: (SYS_CATALOG_START_ID as u32).into(),
+            name: "v".to_owned(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
+            owner: DEFAULT_SUPER_USER_ID,
+            properties: Default::default(),
+            sql: "SELECT 'secret' FROM".to_owned(),
+            columns: vec![],
+            created_at_epoch: None,
+            created_at_cluster_version: None,
+        };
+        let error = mock_binder()
+            .resolve_view_relation(&view)
+            .unwrap_err()
+            .to_report_string();
+        assert!(error.contains("view v"), "{error}");
+        assert!(!error.contains("secret"), "{error}");
     }
 }

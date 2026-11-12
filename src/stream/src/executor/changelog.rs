@@ -26,6 +26,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::row_id::ChangelogRowIdGenerator;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 use crate::common::change_buffer::InconsistencyBehavior;
@@ -45,7 +46,7 @@ pub struct ChangeLogExecutor {
 
 impl Execute for ChangeLogExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        if matches!(self.mode, ChangeLogMode::Keyed) {
+        if matches!(self.mode, ChangeLogMode::Keyed { .. }) {
             self.execute_keyed().boxed()
         } else {
             self.execute_normal().boxed()
@@ -132,13 +133,26 @@ impl ChangeLogExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_keyed(mut self) {
-        let compaction_keys = self
-            .stream_keys
-            .iter()
-            .chain(&self.distribution_keys)
-            .copied()
-            .unique()
-            .collect_vec();
+        let ChangeLogMode::Keyed {
+            additional_key_columns,
+        } = &self.mode
+        else {
+            unreachable!("keyed execution requires keyed mode");
+        };
+        let input_kind = self.input.stream_kind();
+        let compaction_keys = if input_kind == StreamKind::Upsert {
+            // Upsert deletes only guarantee the stream key columns. The planner requires
+            // the declared KEY to be a subset of these columns before repartitioning.
+            self.stream_keys.clone()
+        } else {
+            self.stream_keys
+                .iter()
+                .chain(&self.distribution_keys)
+                .chain(additional_key_columns)
+                .copied()
+                .unique()
+                .collect_vec()
+        };
         let mut builder = StreamChunkBuilder::new(
             self.ctx.config.developer.chunk_size,
             self.output_data_types(),
@@ -155,6 +169,7 @@ impl ChangeLogExecutor {
                     let chunks = StreamChunkCompactor::new(
                         compaction_keys.clone(),
                         std::mem::take(&mut chunk_buffer),
+                        input_kind,
                     )
                     .into_compacted_chunks_inline::<RETRACT>(InconsistencyBehavior::Warn);
 
@@ -234,7 +249,7 @@ impl ChangeLogExecutor {
 #[derive(Debug)]
 pub enum ChangeLogMode {
     Normal,
-    Keyed,
+    Keyed { additional_key_columns: Vec<usize> },
 }
 
 impl Debug for ChangeLogExecutor {
@@ -255,6 +270,232 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Barrier};
+
+    #[tokio::test]
+    async fn test_keyed_changelog_upsert_retains_delete() {
+        use crate::executor::ExecutorInfo;
+
+        let source = Executor::new(
+            ExecutorInfo {
+                stream_kind: StreamKind::Upsert,
+                ..ExecutorInfo::for_test(
+                    Schema::new(vec![Field::unnamed(DataType::Int64); 2]),
+                    vec![0],
+                    "MockSource".to_owned(),
+                    0,
+                )
+            },
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 10")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 20")),
+                Message::Chunk(StreamChunk::from_pretty("I I\n- 1 .")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+            ])
+            .stop_on_finish(false)
+            .boxed(),
+        );
+        let mut output = ChangeLogExecutor::new(
+            ActorContext::for_test(1),
+            source,
+            true,
+            VirtualNode::COUNT_FOR_TEST,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ChangeLogMode::Keyed {
+                additional_key_columns: vec![],
+            },
+            vec![0],
+            vec![0],
+        )
+        .boxed()
+        .execute();
+
+        let mut epochs = Vec::new();
+        let mut events = Vec::new();
+        while let Some(message) = output.next().await {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert);
+                        events.push(row.project(&[0, 1, 2]).into_owned_row());
+                    }
+                }
+                Message::Barrier(_) => epochs.push(std::mem::take(&mut events)),
+                Message::Watermark(_) => panic!("unexpected watermark"),
+            }
+        }
+        assert_eq!(
+            epochs,
+            vec![
+                vec![],
+                vec![OwnedRow::new(vec![
+                    Some(1_i64.into()),
+                    Some(10_i64.into()),
+                    Some(Op::Insert.to_i16().into())
+                ])],
+                vec![OwnedRow::new(vec![
+                    Some(1_i64.into()),
+                    None,
+                    Some(Op::Delete.to_i16().into())
+                ])],
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_keyed_changelog_upsert_subset_key_preserves_distinct_changes() {
+        use crate::executor::ExecutorInfo;
+
+        // The stream key is (tenant, id), while KEY(tenant) co-locates different rows.
+        let source = Executor::new(
+            ExecutorInfo {
+                stream_kind: StreamKind::Upsert,
+                ..ExecutorInfo::for_test(
+                    Schema::new(vec![Field::unnamed(DataType::Int64); 3]),
+                    vec![0, 1],
+                    "MockSource".to_owned(),
+                    0,
+                )
+            },
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n+ 1 10 100")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n+ 1 20 200\n+ 1 10 101")),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n- 1 10 .")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n- 1 20 .")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+            ])
+            .stop_on_finish(false)
+            .boxed(),
+        );
+        let mut output = ChangeLogExecutor::new(
+            ActorContext::for_test(1),
+            source,
+            true,
+            VirtualNode::COUNT_FOR_TEST,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ChangeLogMode::Keyed {
+                additional_key_columns: vec![],
+            },
+            vec![0],
+            vec![0, 1],
+        )
+        .boxed()
+        .execute();
+
+        let mut epochs = Vec::new();
+        let mut events = Vec::new();
+        let mut previous_id = None;
+        while let Some(message) = output.next().await {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert);
+                        let Some(ScalarRefImpl::Serial(id)) = row.datum_at(4) else {
+                            panic!("expected a non-null changelog event ID");
+                        };
+                        if let Some(previous_id) = previous_id {
+                            assert!(previous_id < id);
+                        }
+                        previous_id = Some(id);
+                        events.push(row.project(&[0, 1, 2, 3]).into_owned_row());
+                    }
+                }
+                Message::Barrier(_) => epochs.push(std::mem::take(&mut events)),
+                Message::Watermark(_) => panic!("unexpected watermark"),
+            }
+        }
+
+        // Both stream identities survive even though they share the declared KEY. The
+        // terminal delete is retained and precedes the insert, including in event-ID order.
+        let expected = [
+            "I I I",
+            "I I I\n+ 1 10 100",
+            "I I I\n- 1 10 .\n+ 1 20 200",
+            "I I I\n- 1 20 .",
+        ]
+        .map(|chunk| {
+            StreamChunk::from_pretty(chunk)
+                .rows()
+                .map(|(op, row)| {
+                    row.chain(OwnedRow::new(vec![Some(op.to_i16().into())]))
+                        .into_owned_row()
+                })
+                .collect_vec()
+        });
+        assert_eq!(epochs, expected);
+    }
+
+    #[tokio::test]
+    async fn test_keyed_changelog_compacts_with_additional_key_columns() {
+        for (additional_key_columns, expected_ops) in [
+            (vec![], [Op::Insert, Op::UpdateDelete, Op::UpdateInsert]),
+            (vec![1], [Op::Insert, Op::Delete, Op::Insert]),
+        ] {
+            let source = MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n+ 10 100 7")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\nU- 10 100 7\nU+ 10 200 7")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+            ])
+            .stop_on_finish(false)
+            .into_executor(
+                Schema::new(vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ]),
+                vec![2],
+            );
+
+            let mut output = ChangeLogExecutor::new(
+                ActorContext::for_test(1),
+                source,
+                true,
+                VirtualNode::COUNT_FOR_TEST,
+                Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+                ChangeLogMode::Keyed {
+                    additional_key_columns,
+                },
+                vec![0],
+                vec![2],
+            )
+            .boxed()
+            .execute();
+
+            let mut events = Vec::new();
+            while let Some(message) = output.next().await {
+                match message.unwrap() {
+                    Message::Chunk(chunk) => {
+                        for (op, row) in chunk.rows() {
+                            assert_eq!(op, Op::Insert, "changelog output must be append-only");
+                            let Some(ScalarRefImpl::Int64(key)) = row.datum_at(1) else {
+                                panic!("expected a non-null changelog key");
+                            };
+                            let Some(ScalarRefImpl::Int16(change_op)) = row.datum_at(3) else {
+                                panic!("expected a non-null changelog operation");
+                            };
+                            events.push((key, change_op));
+                        }
+                    }
+                    Message::Barrier(_) => {}
+                    Message::Watermark(_) => panic!("unexpected watermark"),
+                }
+            }
+
+            assert_eq!(
+                events,
+                [100, 100, 200]
+                    .into_iter()
+                    .zip_eq(expected_ops.map(Op::to_i16))
+                    .collect_vec()
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_keyed_changelog_reorders_replacement() {
@@ -282,7 +523,9 @@ mod tests {
             true,
             VirtualNode::COUNT_FOR_TEST,
             Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
-            ChangeLogMode::Keyed,
+            ChangeLogMode::Keyed {
+                additional_key_columns: vec![],
+            },
             vec![0],
             vec![0, 1, 2],
         )
@@ -371,7 +614,9 @@ mod tests {
             true,
             VirtualNode::COUNT_FOR_TEST,
             Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
-            ChangeLogMode::Keyed,
+            ChangeLogMode::Keyed {
+                additional_key_columns: vec![],
+            },
             vec![0],
             vec![2],
         )

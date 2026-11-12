@@ -318,10 +318,15 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                     );
 
                     for (op, row) in ops.iter().zip_eq_debug(chunk.rows()) {
+                        // A `U-`/`U+` pair can match many arrangement rows, which would be
+                        // emitted as `U-` x N followed by `U+` x N. Downstream expects every
+                        // `U-` to be directly followed by its `U+`, so emit plain `-`/`+`
+                        // instead, as the hash join does.
+                        let op = op.normalize_update();
                         for matched_row in self.lookup_one_row(&row, &metrics).await? {
                             tracing::debug!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
+                            if let Some(chunk) = builder.append_row(op, row, &matched_row) {
                                 yield Message::Chunk(chunk);
                             }
                         }

@@ -60,7 +60,7 @@ pub async fn handle_create_view(
         let dependent_relations = binder.included_relations().clone();
         let dependent_secrets = binder.included_secrets().clone();
 
-        let context = OptimizerContext::from_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args)?;
         let logical = Planner::new_for_batch_dql(context.into())
             .plan(BoundStatement::Query(bound_query.into()))?;
         let schema = logical.schema();

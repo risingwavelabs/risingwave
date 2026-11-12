@@ -23,7 +23,9 @@ use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch, batch_query_epoch};
+use risingwave_pb::common::{
+    BatchQueryCommittedEpoch, BatchQueryEpoch, BatchQueryLatestCommittedEpoch, batch_query_epoch,
+};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
@@ -43,6 +45,11 @@ pub enum ReadSnapshot {
 
     ReadUncommitted,
 
+    /// Resolve a committed snapshot for each storage read at the serving node.
+    LatestCommitted {
+        hummock_version_id: HummockVersionId,
+    },
+
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
     /// Currently it's only used for querying meta snapshot backup.
@@ -61,6 +68,13 @@ impl ReadSnapshot {
                     BatchQueryCommittedEpoch {
                         epoch: snapshot.batch_query_epoch(read_storage_tables)?.0,
                         hummock_version_id: snapshot.value.id,
+                    },
+                )),
+            },
+            ReadSnapshot::LatestCommitted { hummock_version_id } => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::LatestCommitted(
+                    BatchQueryLatestCommittedEpoch {
+                        hummock_version_id: *hummock_version_id,
                     },
                 )),
             },
@@ -137,7 +151,7 @@ impl ReadSnapshot {
                 .max_table_committed_epoch()
                 .map(Epoch)
                 .unwrap_or_else(Epoch::now),
-            ReadSnapshot::ReadUncommitted => Epoch::now(),
+            ReadSnapshot::ReadUncommitted | ReadSnapshot::LatestCommitted { .. } => Epoch::now(),
             ReadSnapshot::Other(epoch) => *epoch,
         };
         InlineNowProcTime::new(epoch)
@@ -357,6 +371,104 @@ mod tests {
 
     use super::*;
     use crate::test_utils::MockFrontendMetaClient;
+
+    #[test]
+    fn test_latest_committed_inlines_wall_clock() {
+        use crate::expr::{ExprRewriter, Now};
+
+        let before = Epoch::now().as_scalar();
+        let value = ReadSnapshot::LatestCommitted {
+            hummock_version_id: 123.into(),
+        }
+        .inline_now_proc_time()
+        .rewrite_now(Now);
+        let after = Epoch::now().as_scalar();
+        let value = value.as_literal().unwrap().get_data().as_ref().unwrap();
+        assert!(before.as_timestamptz() <= value.as_timestamptz());
+        assert!(value.as_timestamptz() <= after.as_timestamptz());
+    }
+
+    #[tokio::test]
+    async fn test_latest_committed_epoch_propagation() {
+        use risingwave_pb::batch_plan::{
+            DistributedLookupJoinNode, LocalLookupJoinNode, LogRowSeqScanNode, RowSeqScanNode,
+            VectorIndexNearestNode,
+        };
+
+        let mut query = crate::scheduler::distributed::tests::create_query().await;
+        let historical = BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::TimeTravel(123)),
+        };
+        // Include every epoch-bearing read node, at both stage roots and nested children.
+        let nodes = [
+            NodeBody::RowSeqScan(RowSeqScanNode {
+                table_desc: Some(Default::default()),
+                ..Default::default()
+            }),
+            NodeBody::LocalLookupJoin(LocalLookupJoinNode {
+                inner_side_table_desc: Some(Default::default()),
+                ..Default::default()
+            }),
+            NodeBody::DistributedLookupJoin(DistributedLookupJoinNode {
+                inner_side_table_desc: Some(Default::default()),
+                ..Default::default()
+            }),
+            NodeBody::VectorIndexNearest(VectorIndexNearestNode {
+                reader_desc: Some(Default::default()),
+                ..Default::default()
+            }),
+            NodeBody::RowSeqScan(RowSeqScanNode {
+                table_desc: Some(Default::default()),
+                query_epoch: Some(historical),
+                ..Default::default()
+            }),
+            NodeBody::LogRowSeqScan(LogRowSeqScanNode {
+                old_epoch: Some(historical),
+                new_epoch: Some(historical),
+                ..Default::default()
+            }),
+        ];
+        for stage in query.stage_graph.stages.values_mut() {
+            let template = stage.root.clone();
+            stage.root.children = nodes
+                .iter()
+                .map(|node| ExecutionPlanNode {
+                    node: node.clone(),
+                    children: vec![],
+                    ..template.clone()
+                })
+                .collect();
+        }
+        let snapshot = ReadSnapshot::LatestCommitted {
+            hummock_version_id: 123.into(),
+        };
+        assert!(!snapshot.support_barrier_read());
+        snapshot.fill_batch_query_epoch(&mut query).unwrap();
+        let latest = Some(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::LatestCommitted(
+                BatchQueryLatestCommittedEpoch {
+                    hummock_version_id: 123.into(),
+                },
+            )),
+        });
+        for stage in query.stage_graph.stages.values() {
+            for (i, child) in stage.root.children.iter().enumerate() {
+                let epoch = match &child.node {
+                    NodeBody::RowSeqScan(scan) => scan.query_epoch,
+                    NodeBody::LocalLookupJoin(join) => join.query_epoch,
+                    NodeBody::DistributedLookupJoin(join) => join.query_epoch,
+                    NodeBody::VectorIndexNearest(vector) => vector.query_epoch,
+                    NodeBody::LogRowSeqScan(log) => {
+                        assert_eq!(log.old_epoch, Some(historical));
+                        assert_eq!(log.new_epoch, Some(historical));
+                        continue;
+                    }
+                    _ => unreachable!(),
+                };
+                assert_eq!(epoch, if i == 4 { Some(historical) } else { latest });
+            }
+        }
+    }
 
     /// Verifies that an already-available seek epoch is observed immediately without waiting for
     /// another version-update notification.

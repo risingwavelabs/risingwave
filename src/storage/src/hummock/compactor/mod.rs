@@ -416,6 +416,14 @@ pub fn start_iceberg_compactor(
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
 
+    let max_plan_parallelism = iceberg_compaction_max_plan_parallelism(
+        worker_num,
+        compactor_context
+            .storage_opts
+            .iceberg_compaction_task_parallelism_ratio,
+        max_task_parallelism,
+    );
+
     let max_pull_task_count = std::cmp::min(
         max_task_parallelism,
         compactor_context
@@ -664,7 +672,7 @@ pub fn start_iceberg_compactor(
                                 }
                                 // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_task_execution
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
-                                    .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
+                                    .max_parallelism(max_plan_parallelism)
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
                                     .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
@@ -1426,7 +1434,17 @@ pub fn start_shared_compactor(
                                     shutdown.lock().unwrap().remove(&task_id);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
-                                            compact_task: Some(PbCompactTask::from(&compact_task)),
+                                            // Keep the existing wire format, but only send the task fields consumed by the proxy.
+                                            compact_task: Some(PbCompactTask {
+                                                task_id: compact_task.task_id,
+                                                task_status: compact_task.task_status.into(),
+                                                sorted_output_ssts: compact_task
+                                                    .sorted_output_ssts
+                                                    .iter()
+                                                    .map(|sst| sst.into())
+                                                    .collect(),
+                                                ..Default::default()
+                                            }),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                             object_timestamps,
                                     })),
@@ -1638,6 +1656,16 @@ fn schedule_queued_tasks(
     }
 }
 
+/// The task queue rejects any plan whose parallelism exceeds `max_task_parallelism`, so planning
+/// above it would make every plan with more input files than that impossible to run.
+fn iceberg_compaction_max_plan_parallelism(
+    worker_num: usize,
+    task_parallelism_ratio: f32,
+    max_task_parallelism: u32,
+) -> u32 {
+    ((worker_num as f32 * task_parallelism_ratio) as u32).min(max_task_parallelism)
+}
+
 fn is_cancelled_iceberg_compaction_error(error: &crate::hummock::HummockError) -> bool {
     matches!(
         error.inner(),
@@ -1769,6 +1797,14 @@ fn handle_meta_task_pulling(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_iceberg_compaction_max_plan_parallelism_fits_worker_capacity() {
+        // Default ratio 4.0 with default multiplier 3.0 on 8 workers.
+        assert_eq!(iceberg_compaction_max_plan_parallelism(8, 4.0, 24), 24);
+        assert_eq!(iceberg_compaction_max_plan_parallelism(8, 2.0, 24), 16);
+        assert_eq!(iceberg_compaction_max_plan_parallelism(8, 1.0, 8), 8);
+    }
 
     #[test]
     fn test_cancel_iceberg_task_removes_waiting_plans_and_tracker() {

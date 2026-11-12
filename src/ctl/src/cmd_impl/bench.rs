@@ -32,8 +32,14 @@ use super::table::{get_table_catalog, make_state_table};
 use crate::CtlContext;
 use crate::common::HummockServiceOpts;
 
+#[cfg(not(madsim))]
+pub mod object_store;
+
 #[derive(Subcommand)]
 pub enum BenchCommands {
+    /// Benchmark S3-compatible storage without connecting to Meta.
+    #[cfg(not(madsim))]
+    ObjectStore(object_store::ObjectStoreArgs),
     /// benchmark scan state table
     Scan {
         /// name of the materialized view to operate on
@@ -80,16 +86,20 @@ impl InterestedMetrics {
 }
 
 pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
-    let meta = context.meta_client().await?;
     let next_cnt = Arc::new(AtomicU64::new(0));
     let iter_cnt = Arc::new(AtomicU64::new(0));
     match cmd {
+        #[cfg(not(madsim))]
+        BenchCommands::ObjectStore(args) => {
+            object_store::run(args, Default::default()).await?;
+        }
         BenchCommands::Scan {
             mv_name,
             threads,
             data_dir,
             use_new_object_prefix_strategy,
         } => {
+            let meta = context.meta_client().await?;
             let (hummock, metrics) = context
                 .hummock_store_with_metrics(HummockServiceOpts::from_env(
                     data_dir,

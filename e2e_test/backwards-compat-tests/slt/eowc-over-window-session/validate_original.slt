@@ -1,0 +1,9 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Only the session of bar 1 followed by a later row is closed.
+query TIIII rowsort retry 11 backoff 1s
+SELECT * FROM eowc_session_mv;
+----
+2024-01-01 10:00:00 1 1 2 NULL
+2024-01-01 10:01:00 2 1 2 1

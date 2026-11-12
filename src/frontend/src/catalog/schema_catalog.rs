@@ -17,7 +17,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{
+    FunctionId, IndexId, ObjectId, StreamJobStatus, TableId, is_system_schema,
+};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
@@ -37,7 +39,9 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
+use crate::catalog::{
+    ConnectionId, DatabaseId, RelationKind, SchemaId, SecretId, SinkId, SourceId, ViewId,
+};
 use crate::expr::{Expr, ExprImpl, infer_type_name, infer_type_with_sigmap};
 use crate::user::user_catalog::UserCatalog;
 use crate::user::{UserId, has_access_to_object};
@@ -938,6 +942,30 @@ impl SchemaCatalog {
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {
         self.system_table_by_name.get(table_name)
+    }
+
+    /// Returns what `name` refers to in this schema, including relations still being created.
+    pub fn relation_kind(&self, name: &str) -> Option<RelationKind> {
+        if is_system_schema(&self.name()) {
+            return (self.get_system_table_by_name(name).is_some()
+                || self.get_view_by_name(name).is_some())
+            .then_some(RelationKind::SystemCatalog);
+        }
+        // Tables go first: a table with a connector and an index each own another object of the
+        // same name.
+        if let Some(table) = self.get_any_table_by_name(name) {
+            Some(table.table_type().into())
+        } else if self.get_source_by_name(name).is_some() {
+            Some(RelationKind::Source)
+        } else if self.get_any_sink_by_name(name).is_some() {
+            Some(RelationKind::Sink)
+        } else if self.get_view_by_name(name).is_some() {
+            Some(RelationKind::View)
+        } else if self.get_subscription_by_name(name).is_some() {
+            Some(RelationKind::Subscription)
+        } else {
+            None
+        }
     }
 
     pub fn get_table_name_by_id(&self, table_id: TableId) -> Option<String> {

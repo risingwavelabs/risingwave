@@ -258,6 +258,7 @@ enable_explain_analyze_stats = true
 snapshot_iter_rebuild_interval_secs = 600
 iceberg_list_interval_sec = 10
 iceberg_fetch_batch_size = 1024
+iceberg_update_ordered_max_tasks = 16
 iceberg_sink_positional_delete_cache_size = 1024
 iceberg_sink_write_parquet_max_row_group_rows = 100000
 iceberg_pk_index_sink_lookup_concurrency = 64
@@ -446,6 +447,8 @@ skip_inheritance_filter = false
 set_atomic_write_dir = false
 req_concurrency_limit = 0
 http_concurrent_limit = 0
+opendal_streaming_read_chunk_size = 0
+opendal_streaming_read_chunk_concurrency = 1
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
@@ -473,6 +476,7 @@ list_retry_attempts = 3
 
 [storage.object_store.s3]
 keepalive_ms = 600000
+http_client_rotation_interval_ms = ""
 recv_buffer_size = 2097152
 send_buffer_size = ""
 nodelay = true
