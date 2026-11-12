@@ -22,6 +22,7 @@ import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.connector.source.common.CdcSourceFactory;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -40,9 +41,10 @@ public class JniDbzSourceHandler {
     private final DbzCdcEngineRunner runner;
     private final CdcSourceChannel channel;
 
-    public JniDbzSourceHandler(CdcSource source, CdcSourceChannel channel) {
+    public JniDbzSourceHandler(
+            CdcSource source, DbzConnectorConfig config, CdcSourceChannel channel) {
         this.source = source;
-        this.runner = DbzCdcEngineRunner.create(source, channel);
+        this.runner = DbzCdcEngineRunner.create(source, config, channel);
         this.channel = channel;
     }
 
@@ -67,7 +69,8 @@ public class JniDbzSourceHandler {
                             request.getSnapshotDone(),
                             request.getIsSourceJob());
             source.prepareUpstream();
-            JniDbzSourceHandler handler = new JniDbzSourceHandler(source, channel);
+            var config = CdcSourceFactory.createConfig(source);
+            JniDbzSourceHandler handler = new JniDbzSourceHandler(source, config, channel);
             handler.start();
         } catch (Throwable t) {
             LOG.error("runJniDbzSourceThread throws an exception.", t);

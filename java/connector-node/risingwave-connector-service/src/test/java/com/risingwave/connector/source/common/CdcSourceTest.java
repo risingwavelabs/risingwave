@@ -84,6 +84,20 @@ public class CdcSourceTest {
                 postgresSource().waitForStreamingRunning("startup_timeout_test", 0, () -> true));
     }
 
+    @Test
+    public void offsetCommitOnCheckpointFollowsTheReaderProperty() {
+        var key = "cdc.source.needs.offset.commit.on.checkpoint";
+        assertTrue(
+                CdcSourceFactory.createSource(
+                                SourceTypeE.POSTGRES, 1, null, Map.of(key, "true"), false, false)
+                        .needsOffsetCommitOnCheckpoint());
+        assertFalse(
+                CdcSourceFactory.createSource(
+                                SourceTypeE.POSTGRES, 1, null, Map.of(key, "false"), false, false)
+                        .needsOffsetCommitOnCheckpoint());
+        assertFalse(postgresSource().needsOffsetCommitOnCheckpoint());
+    }
+
     public interface StreamingMetricsMBean {
         boolean isConnected();
     }

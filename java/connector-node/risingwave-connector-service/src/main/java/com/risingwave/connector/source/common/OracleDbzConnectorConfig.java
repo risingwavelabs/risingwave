@@ -25,7 +25,7 @@ public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     public static final String HEARTBEAT_ACTION_QUERY_KEY =
             DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
 
-    public OracleDbzConnectorConfig(CdcSource source) {
+    OracleDbzConnectorConfig(CdcSource source) {
         super(source);
     }
 

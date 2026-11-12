@@ -52,4 +52,28 @@ public final class CdcSourceFactory {
                 throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }
     }
+
+    /**
+     * Builds the Debezium configuration of {@code source}. Validation calls it only after the WITH
+     * options have been checked, because building the configuration parses them.
+     */
+    public static DbzConnectorConfig createConfig(CdcSource source) {
+        switch (source.getSourceType()) {
+            case MYSQL:
+                return new MysqlDbzConnectorConfig(source);
+            case MARIADB:
+                return new MariadbDbzConnectorConfig(source);
+            case POSTGRES:
+                return new PostgresDbzConnectorConfig(source);
+            case MONGODB:
+                return new MongodbDbzConnectorConfig(source);
+            case SQL_SERVER:
+                return new SqlServerDbzConnectorConfig(source);
+            case ORACLE:
+                return new OracleDbzConnectorConfig(source);
+            default:
+                throw ValidatorUtils.invalidArgument(
+                        "Unknown source type: " + source.getSourceType());
+        }
+    }
 }

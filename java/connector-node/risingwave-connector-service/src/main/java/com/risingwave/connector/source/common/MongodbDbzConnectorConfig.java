@@ -45,7 +45,7 @@ public class MongodbDbzConnectorConfig extends DbzConnectorConfig {
                     DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.DATABASE_EXCLUDE_LIST.name(),
                     DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.FILTERS_MATCH_MODE.name());
 
-    public MongodbDbzConnectorConfig(CdcSource source) {
+    MongodbDbzConnectorConfig(CdcSource source) {
         super(source);
     }
 

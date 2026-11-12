@@ -20,6 +20,7 @@ import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
 import com.risingwave.connector.source.common.CdcSource;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
@@ -34,10 +35,13 @@ public class DbzCdcEngine implements Runnable {
     private final long id;
 
     /** If config is not valid will throw exceptions */
-    public DbzCdcEngine(CdcSource source, DebeziumEngine.CompletionCallback completionCallback) {
-        var config = source.getConfig().getResolvedDebeziumProps();
-        var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
-        var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
+    public DbzCdcEngine(
+            CdcSource source,
+            DbzConnectorConfig config,
+            DebeziumEngine.CompletionCallback completionCallback) {
+        var dbzProps = config.getResolvedDebeziumProps();
+        var heartbeatTopicPrefix = dbzProps.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
+        var topicPrefix = dbzProps.getProperty(TOPIC_PREFIX.name());
         var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
                 new DbzChangeEventConsumer(
@@ -52,7 +56,7 @@ public class DbzCdcEngine implements Runnable {
         this.changeEventConsumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
-                        .using(config)
+                        .using(dbzProps)
                         .using(completionCallback)
                         .notifying(consumer)
                         .build();

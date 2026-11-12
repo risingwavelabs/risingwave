@@ -21,7 +21,7 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.Map;
 
 public class MongodbCdcSource extends CdcSource {
-    public MongodbCdcSource(
+    MongodbCdcSource(
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
@@ -36,30 +36,15 @@ public class MongodbCdcSource extends CdcSource {
     }
 
     @Override
-    public boolean needsOffsetCommitOnCheckpoint() {
-        return false;
-    }
-
-    @Override
-    public boolean needsToWaitForStreamingRunning() {
-        return false;
-    }
-
-    @Override
     public void validate(TableSchema tableSchema, boolean isBackfillTable) throws Exception {
         var userProps = getUserProps();
-        SourceValidator.validateHeartbeatInterval(userProps);
-        SourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
-        SourceValidator.validateQueueMemoryRatio(userProps);
-        SourceValidator.ensurePropNotBlank(userProps, MongodbDbzConnectorConfig.MONGO_URL);
-        SourceValidator.ensurePropNotBlank(userProps, MongodbDbzConnectorConfig.COLLECTION_NAME);
-        try (var validator = new MongoDbValidator(userProps, getSourceId())) {
+        CdcSourceValidator.validateHeartbeatInterval(userProps);
+        CdcSourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
+        CdcSourceValidator.validateQueueMemoryRatio(userProps);
+        CdcSourceValidator.ensurePropNotBlank(userProps, MongodbDbzConnectorConfig.MONGO_URL);
+        CdcSourceValidator.ensurePropNotBlank(userProps, MongodbDbzConnectorConfig.COLLECTION_NAME);
+        try (var validator = new MongoDbValidator(userProps, CdcSourceFactory.createConfig(this))) {
             validator.validateAll();
         }
-    }
-
-    @Override
-    protected DbzConnectorConfig createConfig() {
-        return new MongodbDbzConnectorConfig(this);
     }
 }

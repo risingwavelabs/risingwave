@@ -23,7 +23,7 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
 public class SqlServerCdcSource extends CdcSource {
-    public SqlServerCdcSource(
+    SqlServerCdcSource(
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
@@ -42,31 +42,16 @@ public class SqlServerCdcSource extends CdcSource {
     }
 
     @Override
-    public boolean needsOffsetCommitOnCheckpoint() {
-        return false;
-    }
-
-    @Override
-    public boolean needsToWaitForStreamingRunning() {
-        return true;
-    }
-
-    @Override
     public void validate(TableSchema tableSchema, boolean isBackfillTable) throws Exception {
         var userProps = getUserProps();
-        SourceValidator.validateHeartbeatInterval(userProps);
-        SourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
-        SourceValidator.validateQueueMemoryRatio(userProps);
-        SourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
-        SourceValidator.ensurePropNotBlank(userProps, DbzConnectorConfig.SCHEMA_NAME);
+        CdcSourceValidator.validateHeartbeatInterval(userProps);
+        CdcSourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
+        CdcSourceValidator.validateQueueMemoryRatio(userProps);
+        CdcSourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
+        CdcSourceValidator.ensurePropNotBlank(userProps, DbzConnectorConfig.SCHEMA_NAME);
         try (var validator = new SqlServerValidator(userProps, tableSchema, isCdcSourceJob())) {
             validator.validateAll();
         }
-    }
-
-    @Override
-    protected DbzConnectorConfig createConfig() {
-        return new SqlServerDbzConnectorConfig(this);
     }
 
     @Override

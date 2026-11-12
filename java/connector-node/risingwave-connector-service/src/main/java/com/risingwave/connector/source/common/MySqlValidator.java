@@ -26,7 +26,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
 
-public class MySqlValidator extends SourceValidator implements AutoCloseable {
+public class MySqlValidator extends CdcSourceValidator implements AutoCloseable {
     private static final String REPLICATION_CLIENT = "REPLICATION CLIENT";
     private static final String BINLOG_MONITOR = "BINLOG MONITOR";
     private final Map<String, String> userProps;

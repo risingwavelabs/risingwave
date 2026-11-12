@@ -33,8 +33,9 @@ public abstract class SourceHandlerFactory {
             Map<String, String> userProps,
             boolean snapshotDone,
             boolean isCdcSourceJob) {
-        return new DbzSourceHandler(
+        var cdcSource =
                 CdcSourceFactory.createSource(
-                        source, sourceId, startOffset, userProps, snapshotDone, isCdcSourceJob));
+                        source, sourceId, startOffset, userProps, snapshotDone, isCdcSourceJob);
+        return new DbzSourceHandler(cdcSource, CdcSourceFactory.createConfig(cdcSource));
     }
 }

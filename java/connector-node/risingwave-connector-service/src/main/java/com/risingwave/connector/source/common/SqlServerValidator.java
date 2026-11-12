@@ -27,7 +27,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SqlServerValidator extends SourceValidator implements AutoCloseable {
+public class SqlServerValidator extends CdcSourceValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(SqlServerValidator.class);
     private static final int CDC_TABLE_TYPE =
             Catalog.Table.CdcTableType.CDC_TABLE_TYPE_SQL_SERVER.getNumber();

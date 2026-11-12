@@ -64,6 +64,8 @@ pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_i
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
+pub const CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY: &str =
+    "cdc.source.needs.offset.commit.on.checkpoint";
 pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
@@ -104,7 +106,8 @@ pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
     /// initial CDC offset.
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = false;
     /// When true, the consumed offset is committed back to the upstream database on each
-    /// checkpoint via a JNI call.
+    /// checkpoint via a JNI call. The CDC reader passes the flag to the Java engine, which then
+    /// holds back Debezium's acknowledgement of each record until that commit.
     const NEEDS_OFFSET_COMMIT_ON_CHECKPOINT: bool = false;
     /// When true, the Debezium JSON parser accepts a numeric value that arrives as a JSON string,
     /// such as `"42"` for an integer column or `"123.45"` for a decimal column, and converts it to

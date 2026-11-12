@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 public class PostgresCdcSource extends CdcSource {
     private static final Logger LOG = LoggerFactory.getLogger(PostgresCdcSource.class);
 
-    public PostgresCdcSource(
+    PostgresCdcSource(
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
@@ -130,26 +130,16 @@ public class PostgresCdcSource extends CdcSource {
     }
 
     @Override
-    public boolean needsOffsetCommitOnCheckpoint() {
-        return true;
-    }
-
-    @Override
-    public boolean needsToWaitForStreamingRunning() {
-        return true;
-    }
-
-    @Override
     public void validate(TableSchema tableSchema, boolean isBackfillTable) throws Exception {
         var userProps = getUserProps();
-        SourceValidator.validateHeartbeatInterval(userProps);
-        SourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
-        SourceValidator.validateQueueMemoryRatio(userProps);
-        SourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
-        SourceValidator.ensurePropNotBlank(userProps, DbzConnectorConfig.SCHEMA_NAME);
-        SourceValidator.ensurePropNotBlank(userProps, PostgresDbzConnectorConfig.SLOT_NAME);
-        SourceValidator.ensurePropNotBlank(userProps, PostgresDbzConnectorConfig.PUB_NAME);
-        SourceValidator.ensurePropNotBlank(userProps, PostgresDbzConnectorConfig.PUB_CREATE);
+        CdcSourceValidator.validateHeartbeatInterval(userProps);
+        CdcSourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
+        CdcSourceValidator.validateQueueMemoryRatio(userProps);
+        CdcSourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
+        CdcSourceValidator.ensurePropNotBlank(userProps, DbzConnectorConfig.SCHEMA_NAME);
+        CdcSourceValidator.ensurePropNotBlank(userProps, PostgresDbzConnectorConfig.SLOT_NAME);
+        CdcSourceValidator.ensurePropNotBlank(userProps, PostgresDbzConnectorConfig.PUB_NAME);
+        CdcSourceValidator.ensurePropNotBlank(userProps, PostgresDbzConnectorConfig.PUB_CREATE);
         try (var validator = new PostgresValidator(userProps, tableSchema, isCdcSourceJob())) {
             validator.validateAll();
         }
@@ -158,11 +148,6 @@ public class PostgresCdcSource extends CdcSource {
     @Override
     public void prepareUpstream() throws SQLException {
         createPublication(getUserProps());
-    }
-
-    @Override
-    protected DbzConnectorConfig createConfig() {
-        return new PostgresDbzConnectorConfig(this);
     }
 
     private static String quoteIdentifier(String identifier) {

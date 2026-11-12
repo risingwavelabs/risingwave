@@ -27,7 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-public class OracleValidator extends SourceValidator implements AutoCloseable {
+public class OracleValidator extends CdcSourceValidator implements AutoCloseable {
     private static final Set<String> REQUIRED_PRIVILEGES =
             Set.of(
                     "CREATE SESSION",

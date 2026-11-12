@@ -25,10 +25,14 @@ use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResp
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
+use crate::dispatch_cdc_source_type;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
-use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
+use crate::source::cdc::{
+    CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY, CdcProperties, CdcSourceRuntimeFlags, CdcSourceType,
+    CdcSourceTypeTrait, DebeziumCdcSplit,
+};
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
     into_chunk_stream,
@@ -68,7 +72,17 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
-        let properties = conn_props.properties.clone();
+        let mut properties = conn_props.properties.clone();
+        properties.insert(
+            CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY.to_owned(),
+            dispatch_cdc_source_type!(
+                T::source_type(),
+                S,
+                S::NEEDS_OFFSET_COMMIT_ON_CHECKPOINT,
+                false
+            )
+            .to_string(),
+        );
 
         let source_id = split.split_id() as u64;
         let source_type = conn_props.get_source_type_pb();

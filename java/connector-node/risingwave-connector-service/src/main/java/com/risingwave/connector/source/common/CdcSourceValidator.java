@@ -20,7 +20,7 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 
-public abstract class SourceValidator implements AutoCloseable {
+public abstract class CdcSourceValidator implements AutoCloseable {
 
     public static void ensureRequiredProps(Map<String, String> props, boolean isCdcSourceJob) {
         ensurePropNotBlank(props, DbzConnectorConfig.HOST);

@@ -72,6 +72,18 @@ public abstract class DbzConnectorConfig {
         this.snapshotDone = source.isSnapshotDone();
         this.isCdcSourceJob = source.isCdcSourceJob();
         this.isBackfillSource = source.isBackfillSource();
+        LOG.info(
+                "Building the Debezium config: source={}, sourceId={}, startOffset={},"
+                        + " snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={},"
+                        + " waitStreamingStartTimeout={}, needsOffsetCommitOnCheckpoint={}",
+                source.getSourceType(),
+                sourceId,
+                startOffset,
+                snapshotDone,
+                isBackfillSource,
+                isCdcSourceJob,
+                source.getWaitStreamingStartTimeout(),
+                source.needsOffsetCommitOnCheckpoint());
 
         var substitutionProps = new HashMap<>(userProps);
         substitutionProps.put("source.id", Long.toString(sourceId));

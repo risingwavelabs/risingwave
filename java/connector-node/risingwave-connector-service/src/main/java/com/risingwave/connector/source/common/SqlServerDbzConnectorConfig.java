@@ -22,7 +22,7 @@ import java.util.Properties;
 public class SqlServerDbzConnectorConfig extends DbzConnectorConfig {
     public static final String ENCRYPT = "database.encrypt";
 
-    public SqlServerDbzConnectorConfig(CdcSource source) {
+    SqlServerDbzConnectorConfig(CdcSource source) {
         super(source);
     }
 

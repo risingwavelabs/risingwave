@@ -21,7 +21,7 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.Map;
 
 public class MysqlCdcSource extends CdcSource {
-    public MysqlCdcSource(
+    MysqlCdcSource(
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
@@ -36,23 +36,13 @@ public class MysqlCdcSource extends CdcSource {
     }
 
     @Override
-    public boolean needsOffsetCommitOnCheckpoint() {
-        return false;
-    }
-
-    @Override
-    public boolean needsToWaitForStreamingRunning() {
-        return true;
-    }
-
-    @Override
     public void validate(TableSchema tableSchema, boolean isBackfillTable) throws Exception {
         var userProps = getUserProps();
-        SourceValidator.validateHeartbeatInterval(userProps);
-        SourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
-        SourceValidator.validateQueueMemoryRatio(userProps);
-        SourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
-        SourceValidator.ensurePropNotBlank(userProps, MysqlDbzConnectorConfig.SERVER_ID);
+        CdcSourceValidator.validateHeartbeatInterval(userProps);
+        CdcSourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
+        CdcSourceValidator.validateQueueMemoryRatio(userProps);
+        CdcSourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
+        CdcSourceValidator.ensurePropNotBlank(userProps, MysqlDbzConnectorConfig.SERVER_ID);
         try (var validator =
                 new MySqlValidator(
                         getSourceType(),
@@ -62,10 +52,5 @@ public class MysqlCdcSource extends CdcSource {
                         isBackfillTable)) {
             validator.validateAll();
         }
-    }
-
-    @Override
-    protected DbzConnectorConfig createConfig() {
-        return new MysqlDbzConnectorConfig(this);
     }
 }

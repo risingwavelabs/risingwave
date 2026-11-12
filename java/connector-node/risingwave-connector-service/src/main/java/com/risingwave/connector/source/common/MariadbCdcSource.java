@@ -20,7 +20,7 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.Map;
 
 public class MariadbCdcSource extends MysqlCdcSource {
-    public MariadbCdcSource(
+    MariadbCdcSource(
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
@@ -32,10 +32,5 @@ public class MariadbCdcSource extends MysqlCdcSource {
     @Override
     public SourceTypeE getSourceType() {
         return SourceTypeE.MARIADB;
-    }
-
-    @Override
-    protected DbzConnectorConfig createConfig() {
-        return new MariadbDbzConnectorConfig(this);
     }
 }

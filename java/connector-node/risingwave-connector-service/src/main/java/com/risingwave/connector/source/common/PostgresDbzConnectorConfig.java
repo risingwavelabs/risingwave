@@ -27,7 +27,7 @@ public class PostgresDbzConnectorConfig extends DbzConnectorConfig {
     public static final String IS_AWS_RDS = "postgres.is.aws.rds";
     public static final String TEST_ONLY_FORCE_RDS = "test.only.force.rds";
 
-    public PostgresDbzConnectorConfig(CdcSource source) {
+    PostgresDbzConnectorConfig(CdcSource source) {
         super(source);
     }
 

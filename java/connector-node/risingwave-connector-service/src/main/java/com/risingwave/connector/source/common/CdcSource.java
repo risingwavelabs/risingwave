@@ -41,6 +41,8 @@ public abstract class CdcSource {
             "cdc.source.wait.streaming.start.timeout";
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+    private static final String NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY =
+            "cdc.source.needs.offset.commit.on.checkpoint";
 
     private final long sourceId;
     private final String startOffset;
@@ -49,7 +51,7 @@ public abstract class CdcSource {
     private final boolean isCdcSourceJob;
     private final boolean isBackfillSource;
     private final int waitStreamingStartTimeout;
-    private DbzConnectorConfig config;
+    private final boolean needsOffsetCommitOnCheckpoint;
 
     protected CdcSource(
             long sourceId,
@@ -66,6 +68,8 @@ public abstract class CdcSource {
         this.waitStreamingStartTimeout =
                 Integer.parseInt(
                         userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "60"));
+        this.needsOffsetCommitOnCheckpoint =
+                Boolean.parseBoolean(userProps.get(NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY));
     }
 
     public abstract SourceTypeE getSourceType();
@@ -75,17 +79,13 @@ public abstract class CdcSource {
      * needed when the acknowledged offset is committed back to the upstream database, where it lets
      * the database discard the change log before the offset.
      */
-    public abstract boolean needsOffsetCommitOnCheckpoint();
-
-    /**
-     * Whether a backfill source waits until Debezium reports its streaming source as connected
-     * before it starts serving events.
-     */
-    public abstract boolean needsToWaitForStreamingRunning();
+    public boolean needsOffsetCommitOnCheckpoint() {
+        return needsOffsetCommitOnCheckpoint;
+    }
 
     /**
      * Checks the WITH options of the connector and then the upstream database through the
-     * connector's {@link SourceValidator}, as {@code CREATE SOURCE} and {@code CREATE TABLE} do
+     * connector's {@link CdcSourceValidator}, as {@code CREATE SOURCE} and {@code CREATE TABLE} do
      * before accepting the statement.
      */
     public abstract void validate(TableSchema tableSchema, boolean isBackfillTable)
@@ -124,28 +124,6 @@ public abstract class CdcSource {
     }
 
     /**
-     * Returns the Debezium configuration of the source. It is built on first use, so that
-     * validation can check the WITH options before anything is derived from them.
-     */
-    public synchronized DbzConnectorConfig getConfig() {
-        if (config == null) {
-            LOG.info(
-                    "Building the Debezium config: source={}, sourceId={}, startOffset={},"
-                            + " snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={},"
-                            + " waitStreamingStartTimeout={}",
-                    getSourceType(),
-                    sourceId,
-                    startOffset,
-                    snapshotDone,
-                    isBackfillSource,
-                    isCdcSourceJob,
-                    waitStreamingStartTimeout);
-            config = createConfig();
-        }
-        return config;
-    }
-
-    /**
      * Prepares the upstream database before the Debezium engine starts, such as creating the
      * objects the engine reads from.
      */
@@ -157,17 +135,12 @@ public abstract class CdcSource {
     }
 
     /**
-     * Waits until Debezium reports the streaming source of {@code dbServerName} as connected, if
-     * the connector needs the wait. Returns false when the wait is cancelled or times out.
+     * Waits until Debezium reports the streaming source of {@code dbServerName} as connected.
+     * Returns false when the wait is cancelled or times out.
      */
     public boolean waitForStreamingRunning(
             String dbServerName, int waitStreamingStartTimeout, BooleanSupplier shouldContinue)
             throws InterruptedException {
-        if (!needsToWaitForStreamingRunning()) {
-            LOG.info(
-                    "Streaming source of {} does not report readiness, skip waiting", dbServerName);
-            return true;
-        }
         LOG.info("Waiting for streaming source of {} to start", dbServerName);
         int pollCount = 0;
         while (true) {
@@ -192,8 +165,6 @@ public abstract class CdcSource {
             pollCount++;
         }
     }
-
-    protected abstract DbzConnectorConfig createConfig();
 
     /** Returns the JMX name under which Debezium registers the streaming metrics of the source. */
     protected ObjectName getStreamingMetricsObjectName(String dbServerName)

@@ -24,7 +24,7 @@ public class MysqlDbzConnectorConfig extends DbzConnectorConfig {
     public static final String SERVER_ID = "server.id";
     public static final String SSL_MODE = "ssl.mode";
 
-    public MysqlDbzConnectorConfig(CdcSource source) {
+    MysqlDbzConnectorConfig(CdcSource source) {
         super(source);
     }
 

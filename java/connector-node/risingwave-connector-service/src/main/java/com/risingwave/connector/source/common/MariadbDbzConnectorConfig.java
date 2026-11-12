@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Properties;
 
 public class MariadbDbzConnectorConfig extends MysqlDbzConnectorConfig {
-    public MariadbDbzConnectorConfig(CdcSource source) {
+    MariadbDbzConnectorConfig(CdcSource source) {
         super(source);
     }
 

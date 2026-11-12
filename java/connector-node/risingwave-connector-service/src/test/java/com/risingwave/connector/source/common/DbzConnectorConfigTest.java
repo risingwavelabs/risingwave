@@ -19,12 +19,20 @@ package com.risingwave.connector.source.common;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
 import io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource;
 import java.util.HashMap;
+import java.util.Map;
 import org.junit.Test;
 
 public class DbzConnectorConfigTest {
+    private static DbzConnectorConfig createConfig(
+            SourceTypeE sourceType, long sourceId, Map<String, String> userProps) {
+        return CdcSourceFactory.createConfig(
+                CdcSourceFactory.createSource(sourceType, sourceId, null, userProps, false, false));
+    }
+
     @Test
     public void usesConstructorSourceIdForTopicPrefix() {
         var userProps = new HashMap<String, String>();
@@ -32,7 +40,7 @@ public class DbzConnectorConfigTest {
         userProps.put("collection.name", "test.users");
         userProps.put("source.id", "user-supplied-value");
 
-        var config = new MongodbCdcSource(42, null, userProps, false, false).getConfig();
+        var config = createConfig(SourceTypeE.MONGODB, 42, userProps);
 
         assertEquals("RW_CDC_42", config.getResolvedDebeziumProps().getProperty("topic.prefix"));
     }
@@ -49,7 +57,7 @@ public class DbzConnectorConfigTest {
         userProps.put("server.id", "4102");
         userProps.put("ssl.mode", "required");
 
-        var config = new MariadbCdcSource(43, null, userProps, false, false).getConfig();
+        var config = createConfig(SourceTypeE.MARIADB, 43, userProps);
 
         assertEquals(
                 "io.debezium.connector.mariadb.MariaDbConnector",
@@ -65,7 +73,7 @@ public class DbzConnectorConfigTest {
         var userProps = new HashMap<String, String>();
         for (var mode : new String[] {"disabled", "required", "verify-ca", "verify-full"}) {
             userProps.put("debezium.database.sslmode", mode);
-            var config = new MariadbCdcSource(43, null, userProps, false, false).getConfig();
+            var config = createConfig(SourceTypeE.MARIADB, 43, userProps);
             assertEquals(
                     MariadbDbzConnectorConfig.normalizeSslMode(mode),
                     config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
@@ -75,12 +83,12 @@ public class DbzConnectorConfigTest {
     @Test
     public void prefersCanonicalMariaDbSslModeAndDefaultsToDisabled() {
         var userProps = new HashMap<String, String>();
-        var config = new MariadbCdcSource(43, null, userProps, false, false).getConfig();
+        var config = createConfig(SourceTypeE.MARIADB, 43, userProps);
         assertEquals("disable", config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
 
         userProps.put("debezium.database.sslmode", "disabled");
         userProps.put("ssl.mode", "verify-full");
-        config = new MariadbCdcSource(43, null, userProps, false, false).getConfig();
+        config = createConfig(SourceTypeE.MARIADB, 43, userProps);
         assertEquals(
                 "verify-full", config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
     }
@@ -91,7 +99,7 @@ public class DbzConnectorConfigTest {
         userProps.put("debezium.database.sslmode", "preferred");
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new MariadbCdcSource(43, null, userProps, false, false).getConfig());
+                () -> createConfig(SourceTypeE.MARIADB, 43, userProps));
     }
 
     @Test
@@ -112,13 +120,13 @@ public class DbzConnectorConfigTest {
         var userProps = new HashMap<String, String>();
         userProps.put("ssl.mode", "verify-full");
         userProps.put("debezium.database.sslrootcert", "/etc/mariadb/legacy-ca.pem");
-        var config = new MariadbCdcSource(44, null, userProps, false, false).getConfig();
+        var config = createConfig(SourceTypeE.MARIADB, 44, userProps);
         assertEquals(
                 "/etc/mariadb/legacy-ca.pem",
                 config.getResolvedDebeziumProps().getProperty("driver.serverSslCert"));
 
         userProps.put("ssl.root.cert", "/etc/mariadb/ca.pem");
-        config = new MariadbCdcSource(44, null, userProps, false, false).getConfig();
+        config = createConfig(SourceTypeE.MARIADB, 44, userProps);
         assertEquals(
                 "/etc/mariadb/ca.pem",
                 config.getResolvedDebeziumProps().getProperty("driver.serverSslCert"));

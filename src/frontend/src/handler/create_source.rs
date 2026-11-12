@@ -53,9 +53,10 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CdcSourceDdlValidator, CdcSourceRuntimeFlags,
+    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY,
+    CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CdcSourceDdlValidator, CdcSourceRuntimeFlags,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -813,10 +814,33 @@ pub fn bind_connector_props(
         ))));
     }
     if with_properties.is_cdc_connector() {
-        if with_properties.contains_key(CDC_TRANSACTIONAL_KEY) {
+        if with_properties.contains_key(CDC_TRANSACTIONAL_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_TRANSACTIONAL_KEY)
+        {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
                 "'{}' cannot be set: RisingWave enables transaction metadata itself for the connectors that support it",
                 CDC_TRANSACTIONAL_KEY
+            ))));
+        }
+        if with_properties.contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave sets it itself for the connectors that commit offsets to the upstream database",
+                CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY
+            ))));
+        }
+        if with_properties
+            .secret_ref()
+            .contains_key(AUTO_SCHEMA_CHANGE_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "'{}' cannot be provided as a SECRET; use a plaintext 'true' or 'false'",
+                AUTO_SCHEMA_CHANGE_KEY
             ))));
         }
         if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)

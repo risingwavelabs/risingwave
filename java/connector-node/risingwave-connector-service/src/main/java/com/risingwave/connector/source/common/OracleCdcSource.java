@@ -21,7 +21,7 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.Map;
 
 public class OracleCdcSource extends CdcSource {
-    public OracleCdcSource(
+    OracleCdcSource(
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
@@ -40,25 +40,15 @@ public class OracleCdcSource extends CdcSource {
     }
 
     @Override
-    public boolean needsOffsetCommitOnCheckpoint() {
-        return false;
-    }
-
-    @Override
-    public boolean needsToWaitForStreamingRunning() {
-        return false;
-    }
-
-    @Override
     public void validate(TableSchema tableSchema, boolean isBackfillTable) throws Exception {
         var userProps = getUserProps();
-        SourceValidator.validateHeartbeatInterval(userProps);
-        SourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
-        SourceValidator.validateQueueMemoryRatio(userProps);
-        SourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
-        SourceValidator.ensurePropNotBlank(userProps, OracleDbzConnectorConfig.PDB_NAME);
-        SourceValidator.ensurePropNotBlank(userProps, DbzConnectorConfig.SCHEMA_NAME);
-        SourceValidator.ensurePropNotBlank(
+        CdcSourceValidator.validateHeartbeatInterval(userProps);
+        CdcSourceValidator.validateHeartbeatTableAutoInitialize(userProps, getSourceType());
+        CdcSourceValidator.validateQueueMemoryRatio(userProps);
+        CdcSourceValidator.ensureRequiredProps(userProps, isCdcSourceJob());
+        CdcSourceValidator.ensurePropNotBlank(userProps, OracleDbzConnectorConfig.PDB_NAME);
+        CdcSourceValidator.ensurePropNotBlank(userProps, DbzConnectorConfig.SCHEMA_NAME);
+        CdcSourceValidator.ensurePropNotBlank(
                 userProps, OracleDbzConnectorConfig.HEARTBEAT_TABLE_NAME);
         if (userProps.containsKey(OracleDbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY)) {
             throw ValidatorUtils.invalidArgument(
@@ -70,10 +60,5 @@ public class OracleCdcSource extends CdcSource {
         try (var validator = new OracleValidator(userProps, tableSchema, isCdcSourceJob())) {
             validator.validateAll();
         }
-    }
-
-    @Override
-    protected DbzConnectorConfig createConfig() {
-        return new OracleDbzConnectorConfig(this);
     }
 }
