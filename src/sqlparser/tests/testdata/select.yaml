@@ -242,13 +242,13 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: Some(Value(Number("1"))), offset: None, fetch: None })'
 - input: SELECT * FROM t OFFSET 1
   formatted_sql: SELECT * FROM t OFFSET 1
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: Some("1"), fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: Some(Value(Number("1"))), fetch: None })'
 - input: SELECT * FROM t LIMIT 1 OFFSET 2
   formatted_sql: SELECT * FROM t LIMIT 1 OFFSET 2
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: Some(Value(Number("1"))), offset: Some("2"), fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: Some(Value(Number("1"))), offset: Some(Value(Number("2"))), fetch: None })'
 - input: SELECT * FROM t OFFSET 2 LIMIT 1
   formatted_sql: SELECT * FROM t LIMIT 1 OFFSET 2
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: Some(Value(Number("1"))), offset: Some("2"), fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard(None)], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "t", quote_style: None }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: Some(Value(Number("1"))), offset: Some(Value(Number("2"))), fetch: None })'
 - input: SELECT * FROM t LIMIT 1 LIMIT 2
   error_msg: |-
     sql parser error: expected end of statement, found: LIMIT
