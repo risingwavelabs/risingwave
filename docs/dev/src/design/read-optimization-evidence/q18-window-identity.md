@@ -66,3 +66,22 @@ The source checkpoint is the first five-second scrape at 13,652,430 source
 rows. It contains some overlapping downstream work. The 464.659-second
 traced run is diagnostic and its wall time is unsuitable for comparison
 with untraced runs. [Structured results, trace identities and example](./q18-window-identity.json).
+
+## Source scan read path
+
+The source snapshot scan requests Range prefetch. The LocalityProvider
+snapshot requests Blockwise under the Q64 config. Both paths ran in this
+query and both could send eligible reads to the scheduler.
+
+Joining physical GETs to all their logical members by request ID matched
+44,006 successful scheduled GETs through the source checkpoint. Of the
+41,230 GETs at most 64 KiB, 41,124 consisted exclusively of per-block reads
+under `StreamScan`. The phase cutoff uses the before-scrape file time plus
+60.503 seconds and matches the phase scheduler success counter.
+The source tables also reported 1,757 Range prefetch operations covering
+12,715 blocks by that checkpoint.
+
+The trace identifies where the small requests were created. It does not
+record whether an individual source per-block read followed clipping to
+the last block of an SST iterator or the Range prefetch memory-budget
+fallback. Both paths use the same block-read trace.
