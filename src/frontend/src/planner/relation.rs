@@ -24,7 +24,7 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_CODE_VERSION_STRIDE, ROW_OP_COLUMN_NAME, encode_epoch,
+    EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, encode_epoch,
 };
 use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
@@ -971,23 +971,10 @@ source: {:?}",
             return Ok(None);
         }
 
-        // The row op column also encodes the log-store schema version.
-        let base_row_op: ExprImpl = FunctionCall::new(
-            ExprType::Modulus,
-            vec![
-                InputRef::new(row_op_idx, DataType::Int16).into(),
-                Literal::new(
-                    Some(ScalarImpl::Int16(ROW_OP_CODE_VERSION_STRIDE)),
-                    DataType::Int16,
-                )
-                .into(),
-            ],
-        )?
-        .into();
         let row_op_predicate: ExprImpl = FunctionCall::new(
             ExprType::Equal,
             vec![
-                base_row_op,
+                InputRef::new(row_op_idx, DataType::Int16).into(),
                 Literal::new(Some(ScalarImpl::Int16(INSERT_OP_CODE)), DataType::Int16).into(),
             ],
         )?

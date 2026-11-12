@@ -842,8 +842,8 @@ impl StreamSink {
         Ok(downstream_pk_indices)
     }
 
-    /// The table schema is: | epoch | seq id | row op | sink columns |
-    /// Pk is: | epoch | seq id |
+    /// The table schema is: | epoch | seq id | vnode | row op | sink columns | schema version |
+    /// Pk is: | epoch | seq id | vnode |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }

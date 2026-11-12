@@ -2256,6 +2256,12 @@ mod tests {
         extra_column_count: usize,
     ) -> Table {
         let mut table = gen_test_log_store_table(pk_info);
+        for (column, (name, _)) in table.columns[..pk_info.predefined_column_len()]
+            .iter_mut()
+            .zip_eq(pk_info.predefined_columns)
+        {
+            column.column_desc.as_mut().unwrap().name = (*name).to_owned();
+        }
         for _ in 0..extra_column_count {
             let column_id = table.columns.len() as i32;
             table.columns.push(
@@ -2267,6 +2273,15 @@ mod tests {
                 .to_protobuf(),
             );
         }
+        let column_id = table.columns.len() as i32;
+        table.columns.push(
+            ColumnCatalog::hidden(ColumnDesc::named(
+                risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME,
+                ColumnId::new(column_id),
+                DataType::Int64,
+            ))
+            .to_protobuf(),
+        );
         table.value_indices = (0..table.columns.len() as i32).collect();
         table
     }
@@ -2278,6 +2293,7 @@ mod tests {
             original_schema: table
                 .columns
                 .iter()
+                .filter(|col| !col.is_hidden)
                 .map(|col| {
                     let column_desc = col.column_desc.as_ref().unwrap();
                     PbField {
@@ -2289,7 +2305,17 @@ mod tests {
             op: Some(PbSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
                 fields: vec![PbField {
                     data_type: Some(DataType::Int32.to_protobuf()),
-                    name: format!("extra_{}", table.columns.len()),
+                    name: format!(
+                        "extra_{}",
+                        table
+                            .columns
+                            .iter()
+                            .filter(|col| {
+                                col.column_desc.as_ref().unwrap().name
+                            != risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME
+                            })
+                            .count()
+                    ),
                 }],
             })),
         }
@@ -2348,6 +2374,121 @@ mod tests {
             table: table.clone(),
             schema_change: schema_change.clone(),
         }
+    }
+
+    async fn check_log_store_batch_read(legacy: bool) {
+        use futures::TryStreamExt;
+        use risingwave_common::constants::log_store::encode_epoch;
+        use risingwave_common::row::Row;
+        use risingwave_hummock_sdk::HummockReadEpoch;
+        use risingwave_storage::store::PrefetchOptions;
+        use risingwave_storage::table::batch_table::BatchTableInner;
+
+        let test_env = prepare_hummock_test_env().await;
+        let mut table = table_with_extra_columns(&KV_LOG_STORE_V2_INFO, 0);
+        table.distribution_key.clear();
+        let mut write_table = table.clone();
+        if legacy {
+            write_table.columns.pop();
+            write_table.value_indices.pop();
+        }
+        test_env.register_table(write_table.clone()).await;
+        let read_version = LogStoreReadSchemaVersion::default();
+        let version = if legacy { 0 } else { 4096 };
+        let (_reader, mut writer) = versioned_factory(
+            test_env.storage.clone(),
+            &write_table,
+            version,
+            vec![],
+            &read_version,
+        )
+        .build()
+        .await;
+        let epoch = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(TEST_TABLE_ID)
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch), false)
+            .await
+            .unwrap();
+        let chunk = gen_versioned_chunk(0, 0);
+        writer.write_chunk(chunk.clone()).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch.next_epoch(), true)
+            .await
+            .unwrap();
+        test_env.commit_epoch(epoch).await;
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        let columns: Vec<ColumnDesc> = table
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        // Exercise the same BasicSerde selection and projection used by pending-log batch scans.
+        let output_ids = columns[3..].iter().map(|col| col.column_id).collect();
+        let batch_table = BatchTableInner::for_test_with_partial_columns(
+            test_env.storage.clone(),
+            TEST_TABLE_ID,
+            columns,
+            output_ids,
+            KV_LOG_STORE_V2_INFO.pk_orderings.to_vec(),
+            vec![0, 1, 2],
+            table
+                .value_indices
+                .iter()
+                .map(|idx| *idx as usize)
+                .collect(),
+        );
+        let row = batch_table
+            .get_row(
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(encode_epoch(epoch))),
+                    Some(ScalarImpl::Int32(0)),
+                    Some(ScalarImpl::Int16(0)),
+                ]),
+                HummockReadEpoch::Committed(epoch),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let mut expected = chunk
+            .rows()
+            .next()
+            .unwrap()
+            .1
+            .to_owned_row()
+            .into_inner()
+            .to_vec();
+        expected.insert(0, Some(ScalarImpl::Int16(1)));
+        expected.push(Some(ScalarImpl::Int64(version.into())));
+        assert_eq!(row, OwnedRow::new(expected));
+        let rows: Vec<_> = batch_table
+            .batch_iter(
+                HummockReadEpoch::Committed(epoch),
+                false,
+                PrefetchOptions::default(),
+            )
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(rows.contains(&row));
+        assert_eq!(rows.len(), chunk.cardinality() + 1);
+    }
+
+    #[tokio::test]
+    async fn test_log_store_batch_read_explicit_and_legacy_versions() {
+        Box::pin(check_log_store_batch_read(false)).await;
+        Box::pin(check_log_store_batch_read(true)).await;
     }
 
     /// Flush a checkpoint barrier that carries a schema change and stops the actor. The flush must
@@ -2444,7 +2585,10 @@ mod tests {
         use ExpectedItem::*;
         let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
-        let table_v0 = table_with_extra_columns(pk_info, 0);
+        // A pre-upgrade log store has no explicit version column or value header.
+        let mut table_v0 = table_with_extra_columns(pk_info, 0);
+        table_v0.columns.pop();
+        table_v0.value_indices.pop();
         let table_v1 = table_with_extra_columns(pk_info, 1);
         test_env.register_table(table_v0.clone()).await;
         let schema_change = add_column_schema_change(&table_v0);

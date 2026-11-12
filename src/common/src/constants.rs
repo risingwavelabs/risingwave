@@ -40,20 +40,13 @@ pub mod log_store {
     pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
     pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
     pub const VNODE_COLUMN_NAME: &str = "kv_log_store_vnode";
+    pub const SCHEMA_VERSION_COLUMN_NAME: &str = "_rw_log_store_schema_version";
 
     pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
     pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;
     pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
     pub const VNODE_COLUMN_TYPE: DataType = DataType::Int16;
     pub const INSERT_OP_CODE: i16 = 1;
-
-    /// The row op column stores `base_op_code + encoded_schema_version * ROW_OP_CODE_VERSION_STRIDE`,
-    /// where base op codes are in `1..ROW_OP_CODE_VERSION_STRIDE`. Rows of schema version 0 keep
-    /// the original op codes.
-    pub const ROW_OP_CODE_VERSION_STRIDE: i16 = 8;
-
-    /// Schema versions are stored modulo this value so that the encoded op code fits in `i16`.
-    pub const ROW_OP_CODE_VERSION_MODULUS: u32 = (i16::MAX / ROW_OP_CODE_VERSION_STRIDE) as u32 + 1;
 
     /// Encode an unsigned RisingWave epoch so that its signed integer ordering is preserved in
     /// the log-store primary key.

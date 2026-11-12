@@ -20,12 +20,16 @@ use either::for_both;
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::constants::log_store::{
+    EPOCH_COLUMN_NAME, ROW_OP_COLUMN_NAME, SCHEMA_VERSION_COLUMN_NAME,
+};
 use risingwave_common::row::{OwnedRow, RowDeserializer as BasicDeserializer};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::{
     ColumnAwareSerde, Deserializer, Serializer,
 };
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
+use risingwave_common::util::value_encoding::log_store::LogStoreHeader;
 use risingwave_common::util::value_encoding::{
     BasicSerde, BasicSerializer, DatumFromProtoExt, EitherSerde, ValueRowDeserializer,
     ValueRowSerdeKind, ValueRowSerializer,
@@ -56,14 +60,34 @@ impl ValueRowSerdeNew for EitherSerde {
 
 impl ValueRowSerdeNew for BasicSerde {
     fn new(value_indices: Arc<[usize]>, table_columns: Arc<[ColumnDesc]>) -> BasicSerde {
+        let version_column = (table_columns
+            .first()
+            .is_some_and(|col| col.name == EPOCH_COLUMN_NAME)
+            && table_columns
+                .iter()
+                .any(|col| col.name == ROW_OP_COLUMN_NAME))
+        .then(|| {
+            table_columns
+                .iter()
+                .position(|col| col.name == SCHEMA_VERSION_COLUMN_NAME)
+        })
+        .flatten();
+        let log_store_header = version_column.map(|column| {
+            assert_eq!(table_columns[column].data_type, DataType::Int64);
+            LogStoreHeader {
+                version_index: value_indices.iter().position(|idx| *idx == column),
+            }
+        });
         BasicSerde {
             serializer: BasicSerializer {},
             deserializer: BasicDeserializer::new(
                 value_indices
                     .iter()
+                    .filter(|idx| Some(**idx) != version_column)
                     .map(|idx| table_columns[*idx].data_type.clone())
                     .collect_vec(),
             ),
+            log_store_header,
         }
     }
 }
@@ -152,6 +176,47 @@ mod tests {
     use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 
     use super::*;
+
+    #[test]
+    fn test_log_store_explicit_version_and_legacy_values() {
+        let columns: Arc<[ColumnDesc]> = [
+            (EPOCH_COLUMN_NAME, DataType::Int64),
+            (ROW_OP_COLUMN_NAME, DataType::Int16),
+            ("payload", DataType::Int32),
+            (SCHEMA_VERSION_COLUMN_NAME, DataType::Int64),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(id, (name, ty))| ColumnDesc::named(name, ColumnId::new(id as i32), ty))
+        .collect();
+        let serde = BasicSerde::new(Arc::from([0, 1, 2, 3]), columns.clone());
+        let row = OwnedRow::new(vec![
+            Some(Int64(-42)),
+            Some(Int16(1)),
+            Some(Int32(123)),
+            Some(Int64(u32::MAX.into())),
+        ]);
+        let bytes = serde.serialize(&row);
+        assert_eq!(&bytes[..5], &[2, 255, 255, 255, 255]);
+        assert_eq!(
+            serde.deserialize(&bytes).unwrap(),
+            row.clone().into_inner().to_vec()
+        );
+
+        // A batch scan may omit the version column but must still strip the header.
+        let payload_serde = BasicSerde::new(Arc::from([0, 1, 2]), columns);
+        assert_eq!(
+            payload_serde.deserialize(&bytes).unwrap(),
+            row.clone().into_inner()[..3]
+        );
+
+        let legacy_row = OwnedRow::new(row.into_inner()[..3].to_vec());
+        let legacy_bytes = BasicSerializer.serialize(&legacy_row);
+        assert_eq!(legacy_bytes, bytes[5..]);
+        let mut expected = legacy_row.into_inner().to_vec();
+        expected.push(Some(Int64(0)));
+        assert_eq!(serde.deserialize(&legacy_bytes).unwrap(), expected);
+    }
 
     #[test]
     fn test_row_encoding() {

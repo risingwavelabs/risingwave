@@ -22,9 +22,10 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnId, Field, FragmentTypeFlag, FragmentTypeMask,
-    TableId, generate_internal_table_name_with_type,
+    CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnDesc, ColumnId, Field, FragmentTypeFlag,
+    FragmentTypeMask, TableId, generate_internal_table_name_with_type,
 };
+use risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::id::JobId;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -528,6 +529,32 @@ fn rewrite_log_store_table(
     extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
         format!("{}_{}", upstream_table_name, name)
     });
+    if let Some(index) = log_store_table
+        .columns
+        .iter()
+        .position(|col| col.column_desc.as_ref().unwrap().name == SCHEMA_VERSION_COLUMN_NAME)
+    {
+        // Keep the explicit version column after the payload without changing any column IDs.
+        let version = log_store_table.columns.remove(index);
+        log_store_table.columns.push(version);
+    } else {
+        // Upgrade legacy log stores on their first schema change. Their retained rows remain v0.
+        let column_id = log_store_table
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().column_id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        log_store_table.columns.push(
+            ColumnCatalog::hidden(ColumnDesc::named(
+                SCHEMA_VERSION_COLUMN_NAME,
+                ColumnId::new(column_id),
+                risingwave_common::types::DataType::Int64,
+            ))
+            .to_protobuf(),
+        );
+    }
     log_store_table.value_indices = (0..log_store_table.columns.len() as i32).collect();
 }
 
@@ -753,11 +780,6 @@ fn rewrite_project_node(
     Ok(())
 }
 
-/// All retained schemas must have distinct encoded row op versions. Never discard a schema merely
-/// to make room: a failed sink may still have unread rows of that version.
-const MAX_SINK_LOG_STORE_SCHEMA_HISTORY: usize =
-    risingwave_common::constants::log_store::ROW_OP_CODE_VERSION_MODULUS as usize - 1;
-
 fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
     columns
         .iter()
@@ -902,12 +924,6 @@ pub fn rewrite_refresh_schema_sink_fragment(
             )),
         };
         let history = &mut sink_node_body.log_store_schema_history;
-        if history.len() >= MAX_SINK_LOG_STORE_SCHEMA_HISTORY {
-            return Err(anyhow!(
-                "sink log store schema history is full; cannot discard schemas with potentially unread rows"
-            )
-            .into());
-        }
         history.push(history_entry);
         sink_node_body.log_store_schema_version = sink_node_body
             .log_store_schema_version
@@ -2867,6 +2883,16 @@ mod tests {
         );
 
         let new_log_store_table = new_log_store_table.expect("log store table should be updated");
+        let version_column = new_log_store_table.columns.last().unwrap();
+        assert!(version_column.is_hidden);
+        assert_eq!(
+            version_column.column_desc.as_ref().unwrap().name,
+            SCHEMA_VERSION_COLUMN_NAME
+        );
+        assert_eq!(
+            version_column.column_desc.as_ref().unwrap().column_type,
+            Some(risingwave_common::types::DataType::Int64.to_protobuf())
+        );
         assert!(
             new_log_store_table.columns.iter().all(|col| !col
                 .column_desc
@@ -2880,12 +2906,8 @@ mod tests {
             (0..new_log_store_table.columns.len() as i32).collect::<Vec<_>>()
         );
 
-        // Reaching the encoded version limit must reject another change, never evict schemas
-        // whose rows may still be retained by a failing sink.
-        for history_len in [
-            MAX_SINK_LOG_STORE_SCHEMA_HISTORY - 1,
-            MAX_SINK_LOG_STORE_SCHEMA_HISTORY,
-        ] {
+        // Explicit versions can cross the old row-op encoding limit without evicting history.
+        for history_len in [4095, 4096] {
             let mut fragment = original_fragment.clone();
             let PbNodeBody::Sink(body) = fragment.nodes.node_body.as_mut().unwrap() else {
                 unreachable!()
@@ -2907,21 +2929,33 @@ mod tests {
                 7.into(),
                 id_gen_manager,
             );
-            if history_len == MAX_SINK_LOG_STORE_SCHEMA_HISTORY {
-                assert!(result.unwrap_err().to_string().contains("history is full"));
-            } else {
-                let (rewritten, _, _) = result.unwrap();
-                let PbNodeBody::Sink(body) = rewritten.nodes.node_body.as_ref().unwrap() else {
-                    unreachable!()
-                };
-                assert_eq!(
-                    body.log_store_schema_history.len(),
-                    MAX_SINK_LOG_STORE_SCHEMA_HISTORY
-                );
-                assert_eq!(body.log_store_schema_history.first().unwrap().version, 0);
-                assert_eq!(body.log_store_schema_version, history_len as u32 + 1);
-            }
+            let (rewritten, _, _) = result.unwrap();
+            let PbNodeBody::Sink(body) = rewritten.nodes.node_body.as_ref().unwrap() else {
+                unreachable!()
+            };
+            assert_eq!(body.log_store_schema_history.len(), history_len + 1);
+            assert_eq!(body.log_store_schema_history.first().unwrap().version, 0);
+            assert_eq!(body.log_store_schema_version, history_len as u32 + 1);
         }
+        let mut fragment = original_fragment.clone();
+        let PbNodeBody::Sink(body) = fragment.nodes.node_body.as_mut().unwrap() else {
+            unreachable!()
+        };
+        body.log_store_schema_version = u32::MAX;
+        let err = rewrite_refresh_schema_sink_fragment(
+            &fragment,
+            &sink,
+            &[],
+            std::slice::from_ref(&removed_column),
+            &upstream_table,
+            7.into(),
+            id_gen_manager,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("too many log store schema versions")
+        );
     }
 
     #[test]

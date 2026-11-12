@@ -180,7 +180,12 @@ fn resolve_pk_info(
     input_schema: &Schema,
     log_store_table: &Table,
 ) -> StreamResult<&'static KvLogStorePkInfo> {
-    let predefined_column_len = log_store_table.columns.len() - input_schema.fields.len();
+    let payload_end = log_store_table.columns.len()
+        - usize::from(log_store_table.columns.last().is_some_and(|col| {
+            col.column_desc.as_ref().unwrap().name
+                == risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME
+        }));
+    let predefined_column_len = payload_end - input_schema.fields.len();
 
     #[expect(deprecated)]
     let info = match predefined_column_len {
@@ -199,7 +204,7 @@ fn resolve_pk_info(
         )),
     }?;
     validate_payload_schema(
-        &log_store_table.columns[predefined_column_len..],
+        &log_store_table.columns[predefined_column_len..payload_end],
         input_schema,
     )?;
     Ok(info)
@@ -524,6 +529,44 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_pk_info_with_explicit_version() {
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+        use risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME;
+
+        #[expect(deprecated)]
+        let pk_infos: [&'static KvLogStorePkInfo; 2] = [
+            &crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO,
+            &KV_LOG_STORE_V2_INFO,
+        ];
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Varchar),
+        ]);
+        for info in pk_infos {
+            let mut table =
+                crate::common::log_store_impl::kv_log_store::test_utils::gen_test_log_store_table(
+                    info,
+                );
+            assert!(std::ptr::eq(
+                resolve_pk_info(&schema, &table).unwrap(),
+                info
+            ));
+            table.columns.push(
+                ColumnCatalog::hidden(ColumnDesc::named(
+                    SCHEMA_VERSION_COLUMN_NAME,
+                    ColumnId::new(table.columns.len() as i32),
+                    DataType::Int64,
+                ))
+                .to_protobuf(),
+            );
+            assert!(std::ptr::eq(
+                resolve_pk_info(&schema, &table).unwrap(),
+                info
+            ));
+        }
+    }
 
     #[test]
     fn test_parse_jdbc_url() {

@@ -82,8 +82,8 @@ CDC_PGHOST=127.0.0.1 CDC_PGPORT=15432 python3 e2e_test/iceberg/cdc_schema_change
 ```
 
 Schema-change recovery currently retains all historical log schemas without
-garbage collection. The row-op encoding allows 4095 schema changes per sink;
-further changes fail rather than discard schemas that may still have unread rows.
+garbage collection. Log rows carry an explicit `u32` schema-version header,
+independent of the row operation. Legacy rows without the header are version 0.
 While an Iceberg managed table's downstream schema is catching up, reads use
 committed Iceberg data only and temporarily omit pending log rows.
 
