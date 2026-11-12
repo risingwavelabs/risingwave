@@ -17,7 +17,7 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.proto.Data.DataType.TypeName;
+import com.risingwave.connector.source.common.OracleExternalTable.ColumnInfo;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -273,43 +273,19 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
                                 + columnName
                                 + "' not found in the upstream database.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
             }
-            if (!isDataTypeCompatible(columnInfo, tableSchema.getColumnType(columnName))) {
+            var declaredType = tableSchema.getColumnType(columnName);
+            if (OracleExternalTable.oracleTypeToRisingWaveType(columnInfo).getTypeName()
+                    != declaredType) {
                 throw ValidatorUtils.invalidArgument(
                         "Incompatible data type of column '"
                                 + columnName
                                 + "': Oracle type "
                                 + columnInfo.dataType()
                                 + " cannot be declared as "
-                                + tableSchema.getColumnType(columnName));
+                                + declaredType);
             }
         }
     }
-
-    private static boolean isDataTypeCompatible(ColumnInfo columnInfo, TypeName typeName)
-            throws SQLException {
-        return validateCdcSourceColumnType(
-                columnInfo.dataType(), columnInfo.precision(), columnInfo.scale(), typeName);
-    }
-
-    /**
-     * Returns whether an Oracle column can be declared with the given RisingWave type: only the
-     * type that {@code CREATE TABLE (*)} derives for it is accepted. Throws for Oracle types that
-     * are not supported at all.
-     *
-     * <p>Unlike the other connectors, this does not call {@code
-     * Binding.validateCdcSourceColumnType}. The Oracle connector does not use a Rust driver: it
-     * discovers schemas and reads snapshots over JDBC, so the Oracle-to-RisingWave type mapping
-     * lives in Java in {@link OracleExternalTable#oracleTypeToRisingWaveType}, which this reuses.
-     */
-    private static boolean validateCdcSourceColumnType(
-            String dataType, Integer precision, Integer scale, TypeName typeName)
-            throws SQLException {
-        return OracleExternalTable.oracleTypeToRisingWaveType(dataType, precision, scale)
-                        .getTypeName()
-                == typeName;
-    }
-
-    private record ColumnInfo(String dataType, Integer precision, Integer scale) {}
 
     private void validateTablePrimaryKey() throws SQLException {
         var pkFields =
