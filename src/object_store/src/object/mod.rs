@@ -93,6 +93,12 @@ pub trait ObjectStore: Send + Sync {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader>;
 
+    /// Local uploads whose caller retains physical execution through completion. FS avoids
+    /// cancellable I/O wrappers and background position writes so failure cleanup is ordered.
+    async fn streaming_upload_owned(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        self.streaming_upload(path).await
+    }
+
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
@@ -305,6 +311,15 @@ impl ObjectStoreImpl {
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<ObjectStreamingUploader> {
         Ok(enum_map!(self, |store| {
             store.streaming_upload(path).await?
+        }))
+    }
+
+    pub async fn streaming_upload_owned(
+        &self,
+        path: &str,
+    ) -> ObjectResult<ObjectStreamingUploader> {
+        Ok(enum_map!(self, |store| {
+            store.streaming_upload_owned(path).await?
         }))
     }
 
@@ -640,6 +655,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         &self,
         path: &str,
     ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
+        self.streaming_upload_mode(path, false).await
+    }
+
+    pub async fn streaming_upload_owned(
+        &self,
+        path: &str,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
+        self.streaming_upload_mode(path, true).await
+    }
+
+    async fn streaming_upload_mode(
+        &self,
+        path: &str,
+        owned: bool,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
         let operation_type = OperationType::StreamingUploadInit;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
@@ -649,11 +679,15 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
-        let res = self
-            .inner
-            .streaming_upload(path)
-            .instrument_await(operation_type_str.verbose())
-            .await;
+        let res = async {
+            if owned {
+                self.inner.streaming_upload_owned(path).await
+            } else {
+                self.inner.streaming_upload(path).await
+            }
+        }
+        .instrument_await(operation_type_str.verbose())
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 

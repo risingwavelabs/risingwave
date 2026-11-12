@@ -47,6 +47,7 @@ pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use self::refill::PinCacheDownloadError;
 use self::storage::PinCacheStorageState;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
@@ -138,7 +139,11 @@ pub(crate) struct PinCache {
     // Leaf lock: never acquire a shard lock or perform I/O while holding it.
     // Upload protection and physical file ownership share this lock.
     storage: Mutex<PinCacheStorageState>,
-    next_path_id: AtomicU64,
+    // Serializes capacity probes/admission with GC path claims and deletion acknowledgment.
+    capacity_gate: tokio::sync::Mutex<()>,
+    gc_pressure_bytes: AtomicU64,
+    #[cfg(test)]
+    test_hooks: test_utils::PinCacheTestHooks,
 }
 
 /// Admission captured before queuing a refill. Its identity is private to the issuing cache.
@@ -216,7 +221,10 @@ impl PinCache {
             shards: (0..shard_num)
                 .map(|_| RwLock::new(PinCacheShard::default()))
                 .collect(),
-            next_path_id: AtomicU64::new(rand::random()),
+            capacity_gate: tokio::sync::Mutex::new(()),
+            gc_pressure_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            test_hooks: test_utils::PinCacheTestHooks::default(),
         };
         let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
         for &id in expected_sizes.keys() {
@@ -237,6 +245,25 @@ impl PinCache {
         metrics.published_bytes.set(metric_bytes(recovered.bytes));
         metrics.recovery_ready.set(1);
         Ok(Arc::new(pin_cache))
+    }
+
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        #[cfg(test)]
+        {
+            let probe = self.test_hooks.space_probe.lock().clone();
+            if let Some(probe) = probe {
+                let result = probe();
+                let observer = self.test_hooks.space_pause.lock().clone();
+                if let Some(observer) = observer {
+                    let (resume, paused) = tokio::sync::oneshot::channel();
+                    if observer.send(resume).is_ok() {
+                        let _ = paused.await;
+                    }
+                }
+                return result;
+            }
+        }
+        self.store.available_space().await
     }
 
     pub(crate) fn get(

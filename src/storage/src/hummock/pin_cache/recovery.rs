@@ -31,8 +31,14 @@ impl PinCache {
         if path.contains('/') {
             return None;
         }
-        let (object_id, path_id) = path.strip_suffix(".sst")?.split_once('-')?;
-        path_id.parse::<u64>().ok()?;
+        let stem = path.strip_suffix(".sst")?;
+        // Recover files written by the earlier per-copy path layout as well.
+        let object_id = if let Some((object_id, suffix)) = stem.split_once('-') {
+            suffix.parse::<u64>().ok()?;
+            object_id
+        } else {
+            stem
+        };
         object_id.parse::<u64>().ok().map(Into::into)
     }
 

@@ -68,11 +68,21 @@ async fn test_read_and_unregister_lifecycle() {
     let old_file = Arc::downgrade(&old_read.file);
     pin_cache.unregister_objects([object_id]);
     assert!(!pin_cache.is_registered(object_id));
-    assert!(pin_cache.prepare_refill(object_id).is_none());
     assert!(pin_cache.get(object_id).is_none());
     assert_eq!(old_read.read(..).await.unwrap(), original);
 
     pin_cache.register_objects([object_id]);
+    assert!(matches!(
+        pin_cache
+            .prepare_download(object_id, original.len() as u64)
+            .await,
+        Err(super::PinCacheDownloadError::PathBusy)
+    ));
+    assert!(pin_cache.get(object_id).is_none());
+    assert_eq!(old_read.read(..).await.unwrap(), original);
+    drop(old_read);
+    pin_cache.select_minor().delete().await.unwrap();
+    assert!(old_file.upgrade().is_none());
     download_and_publish_for_test(
         &pin_cache,
         remote_store.clone(),
@@ -83,15 +93,7 @@ async fn test_read_and_unregister_lifecycle() {
     .await
     .unwrap();
     let current = pin_cache.get(object_id).unwrap();
-    assert!(!Arc::ptr_eq(&old_read.file, &current.file));
-    assert_eq!(current.read(..).await.unwrap(), original);
-    // Unregistering and registering the same object does not redirect an existing reader.
-    assert_eq!(old_read.read(..).await.unwrap(), original);
-    old_read.invalidate();
-    assert!(pin_cache.get(object_id).is_some());
-    drop(old_read);
-    pin_cache.select_minor().delete().await.unwrap();
-    assert!(old_file.upgrade().is_none());
+    assert_eq!(current.file.path, "1001.sst");
     assert_eq!(current.read(..).await.unwrap(), original);
 }
 
@@ -207,39 +209,8 @@ async fn test_disk_space_rejection_precedes_local_io() {
     assert!(cache.storage.lock().uploads.is_empty());
 }
 
-#[tokio::test]
-async fn test_read_failure_only_invalidates_selected_publication() {
-    let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
-        .await
-        .unwrap();
-    let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.register_objects([object_id]);
-    remote_store
-        .upload("sst", Bytes::from_static(b"complete"))
-        .await
-        .unwrap();
-    download_and_publish_for_test(&pin_cache, remote_store.clone(), "sst".into(), object_id, 8)
-        .await
-        .unwrap();
-    let old = pin_cache.get(object_id).unwrap();
-    pin_cache.store.delete(&old.file.path).await.unwrap();
-    assert!(old.read(..).await.is_err());
-    assert!(pin_cache.get(object_id).is_none());
-
-    download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id, 8)
-        .await
-        .unwrap();
-    // This handle stays on the old path and must not remove the new route.
-    assert!(old.read(..).await.is_err());
-    assert_eq!(
-        pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-        Bytes::from_static(b"complete")
-    );
-}
-
 #[cfg(not(madsim))]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
     config.storage.cache.pin_cache_shard_num = 3;
@@ -345,6 +316,10 @@ async fn test_object_membership_across_shards() {
 
 #[test]
 fn test_parse_finalized_object_path() {
+    assert_eq!(
+        PinCache::parse_object_id("1001.sst"),
+        Some(HummockSstableObjectId::from(1001))
+    );
     assert_eq!(
         PinCache::parse_object_id("1001-42.sst"),
         Some(HummockSstableObjectId::from(1001))
@@ -493,9 +468,11 @@ async fn test_recovery_rejects_failed_short_download() {
         .try_collect()
         .await
         .unwrap();
-    assert!(files.iter().any(|file| file.key.starts_with("1001-")
-        && file.key.ends_with(".sst")
-        && file.total_size == 4));
+    assert!(
+        files
+            .iter()
+            .any(|file| file.key == "1001.sst" && file.total_size == 4)
+    );
     // No GC runs between the failed download and recovery.
     drop(cache);
     let recovered = PinCache::new(local, 1, [(1001.into(), 8), (1002.into(), 8)])
@@ -539,4 +516,58 @@ async fn test_disk_space_query_failure_does_not_start_local_io() {
     );
     assert!(cache.storage.lock().uploads.is_empty());
     assert!(cache.get(1001.into()).is_none());
+}
+
+#[tokio::test]
+async fn test_withdrawn_reader_keeps_its_byte_charge_until_minor_deletes() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let remote = in_memory_object_store();
+    remote
+        .upload("sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    let cache = PinCache::new(in_memory_object_store(), 1, [])
+        .await
+        .unwrap();
+    cache.register_objects([1001.into(), 1002.into(), 1003.into()]);
+    let free = Arc::new(AtomicU64::new(16));
+    cache.set_available_space_for_test({
+        let free = free.clone();
+        move || Ok(Some(free.load(Ordering::SeqCst)))
+    });
+    download_and_publish_for_test(&cache, remote, "sst".into(), 1001.into(), 8)
+        .await
+        .unwrap();
+    free.store(8, Ordering::SeqCst);
+    // Keep a16-byte window open:8 resident bytes plus an8-byte pending reservation.
+    let pending = cache.prepare_download(1002.into(), 8).await.unwrap();
+    assert_eq!(cache.storage.lock().capacity_limit, Some(16));
+    let reader = cache.get(1001.into()).unwrap();
+    cache.unregister_objects([1001.into()]);
+    cache.select_minor().delete().await.unwrap();
+    assert_eq!(
+        cache
+            .storage
+            .lock()
+            .files
+            .values()
+            .map(|f| f.size)
+            .sum::<u64>(),
+        8
+    );
+    assert!(matches!(
+        cache.prepare_download(1003.into(), 1).await,
+        Err(super::PinCacheDownloadError::CapacityRejected)
+    ));
+    assert_eq!(
+        reader.read(..).await.unwrap(),
+        Bytes::from_static(b"complete")
+    );
+    drop(reader);
+    cache.select_minor().delete().await.unwrap();
+    assert!(cache.storage.lock().files.is_empty());
+    drop(pending);
+    free.store(16, Ordering::SeqCst);
+    drop(cache.prepare_download(1003.into(), 16).await.unwrap());
 }

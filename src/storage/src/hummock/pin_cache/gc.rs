@@ -13,14 +13,18 @@
 // limitations under the License.
 
 //! Minor/full file selection and batched deletion. Storage owns physical file lifetimes.
-//! No timer, wakeup policy or background task lives here. Run passes only after recovery.
+//! The storage owner starts GC after recovery and aborts its worker on shutdown.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::Ordering;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::TryStreamExt;
 use risingwave_object_store::object::{ObjectMetadata, ObjectResult};
+use thiserror_ext::AsReport;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use super::{PinCache, PinCacheFile};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -30,6 +34,9 @@ mod tests;
 
 // Match Hummock GC's maximum number of paths per delete request.
 const DELETE_BATCH_SIZE: usize = 1000;
+const MINOR_GC_INTERVAL: Duration = Duration::from_secs(1);
+const FULL_GC_COOLDOWN: Duration = Duration::from_secs(30);
+const FULL_GC_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// One lease per physical path. Unknown garbage is owned only by this selection; dropping it
 /// leaves cleanup to the next scan. Tracked objects stay in the keeper until deletion succeeds.
@@ -37,37 +44,199 @@ pub(super) struct PinCacheGcSelection {
     // Keep the storage state and read index alive for the entire selection and deletion.
     cache: Arc<PinCache>,
     files: Vec<Arc<PinCacheFile>>,
+    failed_uploads: Vec<String>,
 }
 
 impl PinCacheGcSelection {
+    /// Keep the path claims and physical delete alive even if the GC worker is stopped.
+    async fn delete_owned(self) -> ObjectResult<()> {
+        if self.files.is_empty() && self.failed_uploads.is_empty() {
+            return Ok(());
+        }
+        tokio::spawn(self.delete())
+            .await
+            .expect("pin cache GC deletion task")
+    }
+
     /// Delete either selection in batches, forgetting each confirmed batch.
     pub(super) async fn delete(self) -> ObjectResult<()> {
         let mut paths = Vec::with_capacity(DELETE_BATCH_SIZE);
+        let mut orphan_targets = HashSet::new();
         for batch in self.files.chunks(DELETE_BATCH_SIZE) {
-            paths.extend(batch.iter().map(|file| file.path.clone()));
-            self.cache
-                .store
-                .delete_objects(&paths)
-                .await
-                .inspect_err(|_| {
-                    GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
-                })?;
-            // Acknowledge this batch before the next await so cancellation cannot lose its
-            // file removal. Failed or unconfirmed batches stay tracked for a later pass.
             {
+                let _gate = self.cache.capacity_gate.lock().await;
                 let mut state = self.cache.storage.lock();
-                for path in &paths {
-                    state.remove_file(path);
+                // Recheck stale selections and claim orphan targets before admission can
+                // reserve them. Tracked files already keep their paths in the keeper.
+                for file in batch {
+                    let path = file.path.as_str();
+                    if let Some(current) = state.files.get(path) {
+                        if !Arc::ptr_eq(current, file) {
+                            continue;
+                        }
+                    } else {
+                        let target = upload_target(path).unwrap_or(path);
+                        if state.uploads.contains_key(target)
+                            || state.deleting_orphans.contains(target)
+                        {
+                            continue;
+                        }
+                        orphan_targets.insert(target);
+                    }
+                    paths.push(file.path.clone());
+                }
+                state
+                    .deleting_orphans
+                    .extend(orphan_targets.iter().map(|&target| target.to_owned()));
+            }
+            if paths.is_empty() {
+                continue;
+            }
+            let result = self.delete_batch(&paths).await;
+            {
+                let _gate = self.cache.capacity_gate.lock().await;
+                let mut state = self.cache.storage.lock();
+                // Only a confirmed deletion releases a tracked file's capacity charge.
+                if result.is_ok() {
+                    for path in &paths {
+                        state.remove_file(path);
+                    }
+                }
+                // A returned error may leave an orphan on disk for the next full scan,
+                // but the unlink has settled and can no longer race a new upload.
+                for target in orphan_targets.drain() {
+                    state.deleting_orphans.remove(target);
                 }
             }
+            result?;
             paths.clear();
             tokio::task::yield_now().await;
         }
+        if !self.failed_uploads.is_empty() {
+            let targets: HashSet<_> = self.failed_uploads.iter().map(String::as_str).collect();
+            paths.extend(self.failed_uploads.iter().cloned());
+            let mut listed = self
+                .cache
+                .store
+                .list("atomic_write_dir/", None, None)
+                .await?;
+            while let Some(metadata) = listed.try_next().await? {
+                if upload_target(&metadata.key).is_some_and(|target| targets.contains(target)) {
+                    paths.push(metadata.key);
+                }
+            }
+            // The failed upload's reservation keeps its target unavailable during cleanup.
+            for batch in paths.chunks(DELETE_BATCH_SIZE) {
+                self.delete_batch(batch).await?;
+            }
+            let _gate = self.cache.capacity_gate.lock().await;
+            let mut state = self.cache.storage.lock();
+            for target in &self.failed_uploads {
+                state.failed_uploads.remove(target);
+                state.uploads.remove(target);
+            }
+        }
         Ok(())
+    }
+
+    async fn delete_batch(&self, paths: &[String]) -> ObjectResult<()> {
+        #[cfg(test)]
+        {
+            let observer = self.cache.test_hooks.delete_pause.lock().clone();
+            if let Some(observer) = observer {
+                let (resume, paused) = tokio::sync::oneshot::channel();
+                if observer.send(resume).is_ok() {
+                    let _ = paused.await;
+                }
+            }
+        }
+        self.cache
+            .store
+            .delete_objects(paths)
+            .await
+            .inspect_err(|_| GLOBAL_PIN_CACHE_METRICS.gc_failures.inc())
     }
 }
 
 impl PinCache {
+    /// Discover startup and runtime garbage in one storage-owned worker.
+    /// Pressure hints can advance the next full scan after minor GC and a space recheck.
+    pub(crate) fn start_gc(self: &Arc<Self>) -> JoinHandle<()> {
+        let cache = self.clone();
+        tokio::spawn(async move {
+            cache.run_full_gc().await;
+            let now = Instant::now();
+            let mut next_pressure_check = now + FULL_GC_COOLDOWN;
+            let mut next_periodic_full = now + FULL_GC_INTERVAL;
+            let mut interval = tokio::time::interval(MINOR_GC_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if let Err(error) = cache.select_minor().delete_owned().await {
+                    tracing::warn!(error = %error.as_report(), "Pin cache minor GC failed");
+                }
+
+                let now = Instant::now();
+                let periodic = now >= next_periodic_full;
+                if !periodic && now < next_pressure_check {
+                    continue;
+                }
+                // Take one batch before doing I/O so arrivals during a recheck or scan stay
+                // pending. This is a cleanup hint for attempts that have already ended.
+                let required_bytes = cache.gc_pressure_bytes.swap(0, Ordering::Relaxed);
+                if !periodic {
+                    if required_bytes == 0 {
+                        continue;
+                    }
+                    match cache.available_space().await {
+                        Ok(Some(available_bytes)) if available_bytes < required_bytes => {}
+                        Ok(_) => continue,
+                        Err(error) => {
+                            tracing::warn!(error = %error.as_report(), "Pin cache GC space check failed");
+                            next_pressure_check = Instant::now() + FULL_GC_COOLDOWN;
+                            continue;
+                        }
+                    }
+                }
+                cache.run_full_gc().await;
+                // Full attempts share the same cooldown, even on failure or zero reclaim.
+                let now = Instant::now();
+                next_pressure_check = now + FULL_GC_COOLDOWN;
+                next_periodic_full = now + FULL_GC_INTERVAL;
+            }
+        })
+    }
+
+    async fn run_full_gc(self: &Arc<Self>) {
+        // Fix the age cutoff before the asynchronous listing starts.
+        let selection = match self.select_full(SystemTime::now()).await {
+            Ok(selection) => selection,
+            Err(error) => {
+                GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
+                tracing::warn!(error = %error.as_report(), "Pin cache full GC listing failed");
+                return;
+            }
+        };
+        #[cfg(test)]
+        {
+            let observer = self.test_hooks.full_scan.lock().clone();
+            if let Some(observer) = observer {
+                let (resume, paused) = tokio::sync::oneshot::channel();
+                let paths = selection
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect();
+                if observer.send((paths, resume)).is_ok() {
+                    let _ = paused.await;
+                }
+            }
+        }
+        if let Err(error) = selection.delete_owned().await {
+            tracing::warn!(error = %error.as_report(), "Pin cache full GC failed");
+        }
+    }
+
     /// Only inspect explicitly discarded files, without scanning all files or listing storage.
     /// Files still held by readers remain pending for a later pass.
     pub(super) fn select_minor(self: &Arc<Self>) -> PinCacheGcSelection {
@@ -81,9 +250,11 @@ impl PinCache {
                 .cloned()
                 .collect()
         };
+        let failed_uploads = self.storage.lock().failed_uploads.iter().cloned().collect();
         PinCacheGcSelection {
             cache: self.clone(),
             files,
+            failed_uploads,
         }
     }
 
@@ -94,8 +265,8 @@ impl PinCache {
         self: &Arc<Self>,
         modified_before: SystemTime,
     ) -> ObjectResult<PinCacheGcSelection> {
-        // Claim keeper-only leases under the storage lock. There are no external Weak
-        // references, and physical paths are never reused.
+        // Claim keeper-only leases under the storage lock. A tracked path cannot be
+        // reused until GC releases its storage record.
         let unreferenced: Vec<_> = self
             .storage
             .lock()
@@ -118,6 +289,7 @@ impl PinCache {
             .as_secs_f64();
         let old_enough = |metadata: &ObjectMetadata| metadata.last_modified < cutoff;
         let mut files = Vec::new();
+        let _capacity_gate = self.capacity_gate.lock().await;
         for file in unreferenced {
             match inventory.remove(&file.path) {
                 Some(metadata) if old_enough(&metadata) => files.push(file),
@@ -133,8 +305,8 @@ impl PinCache {
                 continue;
             }
             let state = self.storage.lock();
-            if state.uploads.contains(&path)
-                || upload_target(&path).is_some_and(|target| state.uploads.contains(target))
+            if state.uploads.contains_key(&path)
+                || upload_target(&path).is_some_and(|target| state.uploads.contains_key(target))
             {
                 continue;
             }
@@ -153,6 +325,7 @@ impl PinCache {
         Ok(PinCacheGcSelection {
             cache: self.clone(),
             files,
+            failed_uploads: Vec::new(),
         })
     }
 }
