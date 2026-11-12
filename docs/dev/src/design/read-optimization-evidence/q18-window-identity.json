@@ -186,6 +186,34 @@
       "LocalityProvider": 770
     },
     "split_causes": {},
+    "staged_read_outcomes": {
+      "window_complete: 14 staged": {
+        "gets_1": 12,
+        "packets_1": 12,
+        "staged_reads": 168,
+        "windows": 12
+      },
+      "window_complete: 15 staged": {
+        "gets_1": 177,
+        "packets_1": 177,
+        "staged_reads": 2655,
+        "windows": 177
+      },
+      "window_complete: 16 staged": {
+        "gets_1": 770,
+        "packets_1": 770,
+        "staged_reads": 12320,
+        "windows": 770
+      },
+      "window_timeout": {
+        "gets_1": 37,
+        "gets_2": 3,
+        "gets_3": 1,
+        "packets_1": 41,
+        "staged_reads": 431,
+        "windows": 41
+      }
+    },
     "window_counts": {
       "complete_staged_14": 12,
       "complete_staged_15": 177,

@@ -23,6 +23,7 @@ def members(line):
 
 def analyze(path, blocks, byte_cap):
     windows = []
+    reserved_windows = []
     packets = {}
     submissions = {}
     completed = set()
@@ -43,6 +44,7 @@ def analyze(path, blocks, byte_cap):
                 reason = re.search(r'reason="(\w+)"', line)[1]
                 reserved = len(ids) + int(re.search(r"released_permits=(\d+)", line)[1])
                 if reserved == blocks:
+                    reserved_windows.append((reason, ids))
                     counts[f"reserved_{blocks}_{reason}"] += 1
                     if reason == "window_complete":
                         counts[f"complete_staged_{len(ids)}"] += 1
@@ -142,8 +144,22 @@ def analyze(path, blocks, byte_cap):
                 for group in ordered_groups
             ],
         })
+    staged_outcomes = {}
+    successful_without_fallback = successful - fallback
+    for reason, ids in reserved_windows:
+        outcome = f"{reason}: {len(ids)} staged" if reason == "window_complete" else reason
+        stats = staged_outcomes.setdefault(outcome, Counter())
+        stats["windows"] += 1
+        stats["staged_reads"] += len(ids)
+        if not all(r in packets and physical.get(r) in successful_without_fallback for r in ids):
+            stats["unlinked_windows"] += 1
+            continue
+        stats[f"packets_{len({packets[r] for r in ids})}"] += 1
+        stats[f"gets_{len({physical[r] for r in ids})}"] += 1
+
     return {
         "window_counts": counts,
+        "staged_read_outcomes": staged_outcomes,
         "matched_full_cold_by_executor": executors,
         "full_cold_distribution": distributions,
         "split_causes": causes,

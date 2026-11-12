@@ -26,6 +26,17 @@ and 41 hit the preparation deadline. These counts cover reservations that
 started a preparation driver. The fully ready cohort requires 16 staged
 outer reads and completed preparation.
 
+The 189 completed reservations with fewer staged reads still entered the
+scheduler as one packet per window and used one successful GET per window.
+Across these windows, 201 selected block slots had no staged outer read.
+The trace does not assign each missing slot a Foyer outcome or exclude a
+later ordinary read for that slot.
+
+All 41 timed-out reservations submitted the reads already staged in one
+packet each. Of those staged reads, 37 windows used one GET, three used two,
+and one used three. These counts exclude late reads that can enter the
+scheduler individually after the deadline.
+
 ## The observed admission split
 
 The only admission split in the full-run metrics was a three-block
