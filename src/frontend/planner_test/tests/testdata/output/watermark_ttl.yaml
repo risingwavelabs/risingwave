@@ -107,3 +107,42 @@
   stream_plan: |-
     StreamMaterialize { columns: [v, t._row_id(hidden), t.proc_time(hidden)], stream_key: [t._row_id, t.proc_time], pk_columns: [t._row_id, t.proc_time], pk_conflict: NoCheck, watermark_columns: [t.proc_time(hidden)] }
     └─StreamTableScan { table: t, columns: [t.v, t._row_id, t.proc_time], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id, t.proc_time], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: watermark ttl on refreshable table with ttl column outside pk
+  sql: |
+    explain create table t (
+      id int primary key,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) with (
+      connector = 's3',
+      match_pattern = 'planner/*.csv',
+      s3.region_name = 'custom',
+      s3.bucket_name = 'hummock001',
+      s3.credentials.access = 'hummockadmin',
+      s3.credentials.secret = 'hummockadmin',
+      s3.endpoint_url = 'http://127.0.0.1:9301',
+      refresh_mode = 'FULL_RELOAD'
+    ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+  planner_error: |-
+    Not supported: Watermark `WITH TTL` is not supported on refreshable tables (`refresh_mode = 'FULL_RELOAD'`).
+    HINT: Remove `WITH TTL` from the watermark definition, or create the table without `refresh_mode = 'FULL_RELOAD'`.
+- id: watermark ttl on refreshable table with ttl column in pk
+  sql: |
+    explain create table t (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl,
+      primary key (id, ts)
+    ) with (
+      connector = 's3',
+      match_pattern = 'planner/*.csv',
+      s3.region_name = 'custom',
+      s3.bucket_name = 'hummock001',
+      s3.credentials.access = 'hummockadmin',
+      s3.credentials.secret = 'hummockadmin',
+      s3.endpoint_url = 'http://127.0.0.1:9301',
+      refresh_mode = 'FULL_RELOAD'
+    ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+  planner_error: |-
+    Not supported: Watermark `WITH TTL` is not supported on refreshable tables (`refresh_mode = 'FULL_RELOAD'`).
+    HINT: Remove `WITH TTL` from the watermark definition, or create the table without `refresh_mode = 'FULL_RELOAD'`.

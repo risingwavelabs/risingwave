@@ -1147,6 +1147,18 @@ impl LogicalPlanRoot {
             .into());
         }
 
+        // TTL watermarks are not supported on refreshable tables yet: the staging table only
+        // keeps pk columns and the refresh merge does not expire rows by watermark.
+        if refreshable && !ttl_watermark_indices.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "Watermark `WITH TTL` is not supported on refreshable tables (`refresh_mode = 'FULL_RELOAD'`)."
+                    .to_owned(),
+                "Remove `WITH TTL` from the watermark definition, or create the table without `refresh_mode = 'FULL_RELOAD'`."
+                    .to_owned(),
+            )
+            .into());
+        }
+
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
