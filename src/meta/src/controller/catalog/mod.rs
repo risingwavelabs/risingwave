@@ -30,7 +30,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
 };
-use risingwave_common::config::streaming::CacheRefillPolicy;
+use risingwave_common::config::streaming::{
+    CacheRefillPolicy, STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH, is_cache_refill_config,
+};
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::current_cluster_version;
 use risingwave_common::id::JobId;
@@ -113,8 +115,6 @@ pub type Catalog = (
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
-const STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH: &str = "streaming.developer.cache_refill_policy";
-
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
     pub(crate) env: MetaSrvEnv,
@@ -166,31 +166,63 @@ pub(crate) struct CleanedDirtyStreamingJobs {
     pub(crate) sink_ids: Vec<SinkId>,
 }
 
-fn explicit_cache_refill_policy(config_override: &str) -> MetaResult<Option<CacheRefillPolicy>> {
+#[derive(Default)]
+struct ExplicitTableCacheRefillConfig {
+    policy: Option<CacheRefillPolicy>,
+    table_policies: HashMap<TableId, CacheRefillPolicy>,
+}
+
+fn cache_refill_policy_table_id(raw_table_id: &str) -> MetaResult<TableId> {
+    let table_id = raw_table_id.parse::<u32>().map_err(|_| {
+        MetaError::invalid_parameter(format!("invalid cache refill table id {raw_table_id}"))
+    })?;
+    if table_id > i32::MAX as u32 || table_id.to_string() != raw_table_id {
+        return Err(MetaError::invalid_parameter(format!(
+            "cache refill table id {raw_table_id} is out of range or not canonical"
+        )));
+    }
+    Ok(TableId::new(table_id))
+}
+
+fn explicit_table_cache_refill_config(
+    config_override: &str,
+) -> MetaResult<ExplicitTableCacheRefillConfig> {
     if config_override.trim().is_empty() {
-        return Ok(None);
+        return Ok(ExplicitTableCacheRefillConfig::default());
     }
 
     let table: toml::Table =
         toml::from_str(config_override).context("invalid streaming job config override")?;
-    let has_explicit_policy = table
+    let Some(developer) = table
         .get("streaming")
         .and_then(toml::Value::as_table)
         .and_then(|table| table.get("developer"))
         .and_then(toml::Value::as_table)
-        .is_some_and(|table| table.contains_key("cache_refill_policy"));
-    if !has_explicit_policy {
-        return Ok(None);
+    else {
+        return Ok(ExplicitTableCacheRefillConfig::default());
+    };
+    let has_explicit_policy = developer.contains_key("cache_refill_policy");
+    let has_table_policies = developer.contains_key("cache_refill_policy_overrides");
+    if !has_explicit_policy && !has_table_policies {
+        return Ok(ExplicitTableCacheRefillConfig::default());
     }
 
     let merged = merge_streaming_config_section(&StreamingConfig::default(), config_override)
         .context("invalid streaming job config override")?
         .context("empty streaming job config override")?;
-    Ok(Some(merged.developer.cache_refill_policy))
+    Ok(ExplicitTableCacheRefillConfig {
+        policy: has_explicit_policy.then_some(merged.developer.cache_refill_policy),
+        table_policies: merged
+            .developer
+            .cache_refill_policy_overrides
+            .into_iter()
+            .map(|(id, policy)| Ok((cache_refill_policy_table_id(&id)?, policy)))
+            .collect::<MetaResult<_>>()?,
+    })
 }
 
 impl CatalogControllerInner {
-    pub(crate) async fn table_cache_refill_policies_snapshot_if_job_has_explicit_policy(
+    pub(crate) async fn table_cache_refill_policies_snapshot_if_job_has_explicit_config(
         &self,
         job_id: JobId,
     ) -> MetaResult<Option<PbTableCacheRefillPolicies>> {
@@ -202,7 +234,8 @@ impl CatalogControllerInner {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
-        if explicit_cache_refill_policy(&config_override.unwrap_or_default())?.is_none() {
+        let config = explicit_table_cache_refill_config(&config_override.unwrap_or_default())?;
+        if config.policy.is_none() && config.table_policies.is_empty() {
             return Ok(None);
         }
 
@@ -228,19 +261,18 @@ impl CatalogControllerInner {
             .into_tuple::<(JobId, Option<String>)>()
             .all(&self.db)
             .await?;
-        let mut policies_by_job = HashMap::new();
+        let mut configs_by_job = HashMap::new();
         for (job_id, config_override) in job_configs {
-            if let Some(policy) =
-                explicit_cache_refill_policy(&config_override.unwrap_or_default())?
-            {
-                policies_by_job.insert(job_id, policy);
+            let config = explicit_table_cache_refill_config(&config_override.unwrap_or_default())?;
+            if config.policy.is_some() || !config.table_policies.is_empty() {
+                configs_by_job.insert(job_id, config);
             }
         }
-        if policies_by_job.is_empty() {
+        if configs_by_job.is_empty() {
             return Ok(PbTableCacheRefillPolicies::default());
         }
 
-        let result_table_ids = policies_by_job
+        let result_table_ids = configs_by_job
             .keys()
             .map(|job_id| job_id.as_mv_table_id())
             .collect_vec();
@@ -252,7 +284,7 @@ impl CatalogControllerInner {
             .filter(
                 table::Column::TableType
                     .eq(TableType::Internal)
-                    .and(table::Column::BelongsToJobId.is_in(policies_by_job.keys().copied()))
+                    .and(table::Column::BelongsToJobId.is_in(configs_by_job.keys().copied()))
                     .or(table::Column::TableId.is_in(result_table_ids)),
             )
             .into_tuple()
@@ -262,26 +294,34 @@ impl CatalogControllerInner {
         let mut table_policies = Vec::new();
         let mut internal_table_policies = Vec::new();
         for (table_id, table_type, belongs_to_job_id) in tables {
-            if table_type == TableType::Internal {
-                let Some(policy) =
-                    belongs_to_job_id.and_then(|job_id| policies_by_job.get(&job_id))
-                else {
+            let job_id = if table_type == TableType::Internal {
+                let Some(job_id) = belongs_to_job_id else {
                     continue;
                 };
-                internal_table_policies.push(PbTableCacheRefillPolicy {
-                    table_id: table_id.as_raw_id(),
-                    policy: policy.to_protobuf() as i32,
-                });
-                continue;
-            }
-
-            let Some(policy) = policies_by_job.get(&table_id.as_job_id()) else {
+                job_id
+            } else {
+                table_id.as_job_id()
+            };
+            let Some(config) = configs_by_job.get(&job_id) else {
                 continue;
             };
-            table_policies.push(PbTableCacheRefillPolicy {
+            let policy = config
+                .table_policies
+                .get(&table_id)
+                .copied()
+                .or(config.policy);
+            let Some(policy) = policy else {
+                continue;
+            };
+            let policy = PbTableCacheRefillPolicy {
                 table_id: table_id.as_raw_id(),
                 policy: policy.to_protobuf() as i32,
-            });
+            };
+            if table_type == TableType::Internal {
+                internal_table_policies.push(policy);
+            } else {
+                table_policies.push(policy);
+            }
         }
         table_policies.sort_unstable_by_key(|policy| policy.table_id);
         internal_table_policies.sort_unstable_by_key(|policy| policy.table_id);
@@ -304,7 +344,7 @@ impl CatalogController {
         job_id: JobId,
     ) -> MetaResult<()> {
         if let Some(policies) = inner
-            .table_cache_refill_policies_snapshot_if_job_has_explicit_policy(job_id)
+            .table_cache_refill_policies_snapshot_if_job_has_explicit_config(job_id)
             .await?
         {
             self.env.notification_manager().notify_hummock(

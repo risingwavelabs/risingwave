@@ -16,7 +16,7 @@
 //! The event handler is the sole writer. Foyer captures immutable task snapshots;
 //! Pin reads current ownership under a guard when admitting asynchronous work.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -24,6 +24,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_pb::id::TableId;
+use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
+use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 
 /// Lock order: metadata, Pin pending queue, executor/cache locks. Never hold across I/O or await.
 pub(crate) type SharedTableCacheMetadata = Arc<RwLock<TableCacheMetadata>>;
@@ -37,7 +39,6 @@ pub(crate) struct TableCacheMetadata {
     pub streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     /// Complete worker-specific serving mapping received from Meta.
     pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
-    pinned_table_ids: HashSet<TableId>,
 }
 
 impl TableCacheMetadata {
@@ -48,7 +49,6 @@ impl TableCacheMetadata {
             table_cache_refill_policies: HashMap::new(),
             streaming_table_vnode_mapping: HashMap::new(),
             serving_table_vnode_mapping: HashMap::new(),
-            pinned_table_ids: HashSet::new(),
         }
     }
 
@@ -76,22 +76,23 @@ impl TableCacheMetadata {
     }
 
     pub(crate) fn is_pinned(&self, table: &TableId) -> bool {
-        self.pinned_table_ids.contains(table)
+        self.policy(table) == CacheRefillPolicy::Pin
     }
 
-    pub(crate) fn pinned_tables(&self) -> &HashSet<TableId> {
-        &self.pinned_table_ids
+    pub(crate) fn policy(&self, table: &TableId) -> CacheRefillPolicy {
+        self.table_cache_refill_policies
+            .get(table)
+            .copied()
+            .unwrap_or(self.default_policy)
     }
 
-    /// Replaces policy metadata and returns the previous Pin table set.
+    /// Replaces policy metadata and returns the previous overrides.
     /// Consumers decide whether the change invalidates their work.
     pub(crate) fn replace_policy_snapshot(
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
-        pinned: HashSet<TableId>,
-    ) -> HashSet<TableId> {
-        self.table_cache_refill_policies = policies;
-        std::mem::replace(&mut self.pinned_table_ids, pinned)
+    ) -> HashMap<TableId, CacheRefillPolicy> {
+        std::mem::replace(&mut self.table_cache_refill_policies, policies)
     }
 
     /// Returns the replaced mapping without interpreting the ownership change.
@@ -114,4 +115,22 @@ impl TableCacheMetadata {
             self.streaming_table_vnode_mapping.remove(&table)
         }
     }
+}
+
+pub(crate) fn table_cache_refill_policy_from_protobuf(
+    pb_policy: &PbTableCacheRefillPolicy,
+) -> Option<(TableId, CacheRefillPolicy)> {
+    let table_id = TableId::from(pb_policy.table_id);
+    let policy = match PbCacheRefillPolicy::try_from(pb_policy.policy) {
+        Ok(policy) => CacheRefillPolicy::from_protobuf(policy)?,
+        Err(_) => {
+            tracing::warn!(
+                table_id = pb_policy.table_id,
+                policy = pb_policy.policy,
+                "ignore unknown table cache refill policy"
+            );
+            return None;
+        }
+    };
+    Some((table_id, policy))
 }
