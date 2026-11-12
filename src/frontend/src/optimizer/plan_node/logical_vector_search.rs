@@ -408,6 +408,13 @@ impl LogicalVectorSearch {
                         non_covered_table_cols_idx.push(*table_col_idx);
                     }
                 }
+                // Columns not covered by the index are read by looking up the primary table with
+                // its primary key, which this index may not store.
+                if !non_covered_table_cols_idx.is_empty()
+                    && index.primary_key_idx_in_info_columns.is_none()
+                {
+                    continue;
+                }
                 return Some((
                     index,
                     covered_table_cols_idx,
@@ -554,6 +561,10 @@ impl ToBatch for LogicalVectorSearch {
                     let on_condition = Condition {
                         conjunctions: index
                             .primary_key_idx_in_info_columns
+                            .as_ref()
+                            .expect(
+                                "an index without the primary key is resolved only when covering",
+                            )
                             .iter()
                             .zip_eq_debug(0..scan.table().pk().len())
                             .map(|(pk_idx_in_info_columns, pk_idx)| {

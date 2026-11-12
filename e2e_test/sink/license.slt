@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+CREATE SECRET turbopuffer_license_api_key WITH (backend = 'meta') AS 'test-api-key';
+
+statement ok
 ALTER SYSTEM SET license_key TO '';
 
 statement ok
@@ -9,6 +12,32 @@ flush;
 
 statement ok
 CREATE TABLE t (k INT);
+
+statement error feature TurbopufferSink is not available based on your license
+CREATE SINK turbopuffer_sink
+FROM t
+WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'license-test',
+    api_key = secret turbopuffer_license_api_key,
+    primary_key = 'k',
+    type = 'upsert'
+);
+
+# License validation must happen before configuration validation or Google authentication.
+statement error feature FirestoreSink is not available based on your license
+CREATE SINK firestore_sink
+FROM t
+WITH (
+    connector = 'firestore',
+    type = 'append-only',
+    force_append_only = 'true',
+    firestore.project_id = 'license-test',
+    firestore.collection = 'documents',
+    firestore.document_id_column = 'k',
+    firestore.max_batch_size = '0'
+);
 
 statement error feature SinkSinceTimestamp is not available based on your license
 CREATE SINK since_timestamp_sink
@@ -140,6 +169,35 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 statement ok
 flush;
 
+statement ok
+CREATE SINK turbopuffer_sink
+FROM t
+WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'license-test',
+    api_key = secret turbopuffer_license_api_key,
+    primary_key = 'k',
+    type = 'upsert'
+);
+
+statement ok
+DROP SINK turbopuffer_sink;
+
+# An authorized sink reaches configuration validation without Google credentials.
+statement error firestore.max_batch_size must be between 1 and 500
+CREATE SINK firestore_sink
+FROM t
+WITH (
+    connector = 'firestore',
+    type = 'append-only',
+    force_append_only = 'true',
+    firestore.project_id = 'license-test',
+    firestore.collection = 'documents',
+    firestore.document_id_column = 'k',
+    firestore.max_batch_size = '0'
+);
+
 statement error
 CREATE SINK dynamodb_sink
 FROM
@@ -244,3 +302,6 @@ Caused by these errors (recent errors listed first):
 
 statement ok
 DROP TABLE t;
+
+statement ok
+DROP SECRET turbopuffer_license_api_key;

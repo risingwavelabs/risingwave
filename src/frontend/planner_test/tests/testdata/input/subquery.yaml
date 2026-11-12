@@ -281,6 +281,73 @@
     select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
   expected_outputs:
     - optimizer_error
+- name: a range predicate on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk > t1.a) from t1;
+  expected_outputs:
+    - optimizer_error
+- name: a disjunction on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1 or pk = 2);
+  expected_outputs:
+    - batch_plan
+- name: an equality between the primary key and another column does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = v);
+  expected_outputs:
+    - batch_plan
+- name: a correlated equality on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: an equality on a primary key cast to decimal bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1.5);
+  expected_outputs:
+    - batch_plan
+- name: an equality on a primary key widened to bigint bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a BIGINT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where pk::bigint = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a row equality on every primary key column bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT, b INT);
+    CREATE TABLE t2(a INT, b INT, v INT, PRIMARY KEY(a, b));
+    select t1.a, (select v from t2 where (t2.a, t2.b) = (t1.a, t1.b)) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a row equality with a constant on every primary key column bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(a INT, b INT, v INT, PRIMARY KEY(a, b));
+    select (select v from t2 where (a, b) = (1, 2));
+  expected_outputs:
+    - batch_plan
+- name: a single-item IN list on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk in (2));
+  expected_outputs:
+    - batch_plan
+- name: a boolean primary key used as a predicate bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk BOOLEAN PRIMARY KEY, v INT);
+    select (select v from t2 where pk), (select v from t2 where not pk);
+  expected_outputs:
+    - batch_plan
 
 - name: test grouping sets subquery 1
   sql: |
@@ -313,6 +380,21 @@
     SELECT generate_series(1, (select 1));
   expected_outputs:
     - batch_plan
+- name: an ambiguous correlated reference does not resolve to an outer query column
+  sql: |
+    create table a (a1 int);
+    create table b (b1 int);
+    select (select count(*) from (select 100 as a1) t1, (select 200 as a1) t2 where exists (select 1 from b where b1 > a1)) from a;
+  expected_outputs:
+    - binder_error
+- name: correlated reference to a column merged by FULL JOIN USING
+  sql: |
+    create table t1 (x int);
+    create table t2 (x int);
+    create table t3 (y int);
+    select x from t1 full join t2 using (x) where exists (select 1 from t3 where y = x);
+  expected_outputs:
+    - logical_plan
 - name: array subquery
   sql: |
     select Array(select 1 union select 2);
@@ -358,3 +440,26 @@
     ORDER BY con1.conname;
   expected_outputs:
     - batch_plan
+# https://github.com/risingwavelabs/risingwave/issues/26395
+- name: correlated column in multi-row VALUES returns an error instead of panicking
+  sql: |
+    create table t(a int, b int, c int);
+    select * from t where t.a in (select * from (values (t.b), (t.c)) v);
+  expected_outputs:
+    - batch_error
+    - stream_error
+# https://github.com/risingwavelabs/risingwave/issues/24357
+- name: subquery left in SQL table function arguments returns an error instead of panicking
+  sql: |
+    create function my_tf(n int) returns table (sq int) language sql as $$ select v * v from generate_series(1, n) as g(v) $$;
+    select * from my_tf(3);
+  expected_outputs:
+    - batch_error
+    - stream_error
+- name: subquery in a lambda body returns an error instead of panicking
+  sql: |
+    create table t(a int[]);
+    select array_transform(a, |x| (select 1)) from t;
+  expected_outputs:
+    - batch_error
+    - stream_error

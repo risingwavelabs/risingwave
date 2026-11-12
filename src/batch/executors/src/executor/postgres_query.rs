@@ -123,7 +123,7 @@ impl PostgresQueryExecutor {
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("postgres_query_executor: started");
 
-        let client = create_pg_client(&self.config, None).await?;
+        let client = create_pg_client(&self.config, None, None).await?;
 
         let params: &[&str] = &[];
         let row_stream = client

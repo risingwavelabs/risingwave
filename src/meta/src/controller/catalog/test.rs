@@ -14,16 +14,19 @@
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::subscription::SubscriptionState;
-    use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
+    use risingwave_pb::catalog::{PbSinkType, PbTable, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+    use risingwave_pb::plan_common::ExternalTableDesc;
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{PbStreamNode, StreamScanNode, StreamScanType};
     use tokio::sync::{mpsc, oneshot};
@@ -188,6 +191,130 @@ mod tests {
         .insert(txn)
         .await?;
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_iceberg_update_fragment_throttle_is_not_persisted() -> MetaResult<()> {
+        use risingwave_pb::common::ThrottleType;
+        use risingwave_pb::stream_plan::{
+            SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
+        };
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, _, _) = insert_test_streaming_job(&txn, "iceberg_updates", true, None).await?;
+        let fragment_id = FragmentId::new(100);
+        insert_test_fragment(&txn, fragment_id, job_id, TableIdArray::default()).await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let properties = std::collections::BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("streaming_updates".to_owned(), "true".to_owned()),
+        ]);
+        let legacy_source = PbStreamNode {
+            node_body: Some(PbNodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource::default()),
+            }))),
+            ..Default::default()
+        };
+        for body in [
+            PbNodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource {
+                    with_properties: properties.clone(),
+                    ..Default::default()
+                }),
+            })),
+            PbNodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
+                node_inner: Some(StreamFsFetch {
+                    with_properties: properties.clone(),
+                    ..Default::default()
+                }),
+            })),
+        ] {
+            // Ordinary nodes before and after the update node must not mask rejection.
+            let original = PbStreamNode {
+                node_body: Some(PbNodeBody::Union(Default::default())),
+                input: vec![
+                    legacy_source.clone(),
+                    PbStreamNode {
+                        node_body: Some(body),
+                        ..Default::default()
+                    },
+                    legacy_source.clone(),
+                ],
+                ..Default::default()
+            };
+            fragment::ActiveModel {
+                fragment_id: Set(fragment_id),
+                stream_node: Set(StreamNode::from(&original)),
+                ..Default::default()
+            }
+            .update(&mgr.inner.read().await.db)
+            .await?;
+            for rate_limit in [None, Some(0), Some(100)] {
+                let error = mgr
+                    .update_fragment_rate_limit_by_fragment_id(
+                        fragment_id,
+                        ThrottleType::Source,
+                        rate_limit,
+                    )
+                    .await
+                    .expect_err("update sources cannot be throttled");
+                assert!(error.to_string().contains("streaming_updates"));
+                let persisted = risingwave_meta_model::prelude::Fragment::find_by_id(fragment_id)
+                    .one(&mgr.inner.read().await.db)
+                    .await?
+                    .unwrap();
+                assert_eq!(persisted.stream_node.to_protobuf(), original);
+            }
+        }
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            stream_node: Set(StreamNode::from(&legacy_source)),
+            ..Default::default()
+        }
+        .update(&mgr.inner.read().await.db)
+        .await?;
+        let updated = mgr
+            .update_fragment_rate_limit_by_fragment_id(fragment_id, ThrottleType::Source, Some(100))
+            .await?;
+        let Some(PbNodeBody::Source(source)) = updated.node_body else {
+            unreachable!()
+        };
+        assert_eq!(source.source_inner.unwrap().rate_limit, Some(100));
+
+        // The source-ID API must also roll back its catalog update on rejection.
+        mgr.create_source(
+            PbSource {
+                schema_id: TEST_SCHEMA_ID,
+                database_id: TEST_DATABASE_ID,
+                name: "iceberg_update_source".to_owned(),
+                owner: TEST_OWNER_ID as _,
+                with_properties: properties,
+                info: Some(StreamSourceInfo::default()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        let source = Source::find()
+            .filter(source::Column::Name.eq("iceberg_update_source"))
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let error = mgr
+            .update_source_rate_limit_by_source_id(source.source_id, Some(100))
+            .await
+            .expect_err("source-ID throttling must also fail");
+        assert!(error.to_string().contains("streaming_updates"));
+        let persisted = Source::find_by_id(source.source_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(persisted, source);
         Ok(())
     }
 
@@ -1974,6 +2101,9 @@ mod tests {
             arg_types,
             return_type: Some(test_data_type.clone()),
             language: "python".to_owned(),
+            always_retry_on_network_error: true,
+            unsafe_skip_materializing_exprs: true,
+            is_immutable: true,
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
             )),
@@ -1996,6 +2126,9 @@ mod tests {
         assert_eq!(function.return_type.to_protobuf(), test_data_type);
         assert_eq!(function.arg_types.to_protobuf().len(), 1);
         assert_eq!(function.language, "python");
+        assert!(function.always_retry_on_network_error);
+        assert!(function.unsafe_skip_materializing_exprs);
+        assert!(function.is_immutable);
 
         mgr.create_schema(PbSchema {
             database_id: TEST_DATABASE_ID,
@@ -2039,6 +2172,77 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_create_cdc_table_source_dependency() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (shared_source_id, _) = mgr
+            .create_source(
+                PbSource {
+                    schema_id: TEST_SCHEMA_ID,
+                    database_id: TEST_DATABASE_ID,
+                    name: "shared_cdc".to_owned(),
+                    owner: TEST_OWNER_ID,
+                    info: Some(StreamSourceInfo {
+                        cdc_source_job: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+
+        let (table_source_id, _) = mgr
+            .create_source(
+                PbSource {
+                    schema_id: TEST_SCHEMA_ID,
+                    database_id: TEST_DATABASE_ID,
+                    name: "orders_cdc".to_owned(),
+                    owner: TEST_OWNER_ID,
+                    info: Some(StreamSourceInfo {
+                        external_table: Some(ExternalTableDesc {
+                            source_id: shared_source_id,
+                            table_name: "mydb.orders".to_owned(),
+                            connect_properties: BTreeMap::from([(
+                                "hostname".to_owned(),
+                                "mysql-host".to_owned(),
+                            )]),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+
+        let table_source = Source::find_by_id(table_source_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let external_table = table_source
+            .source_info
+            .unwrap()
+            .to_protobuf()
+            .external_table
+            .unwrap();
+        assert_eq!(external_table.source_id, shared_source_id);
+        assert_eq!(external_table.table_id, table_source_id.as_cdc_table_id());
+        // Connect properties are only used to validate the descriptor, never persisted.
+        assert!(external_table.connect_properties.is_empty());
+        assert!(external_table.secret_refs.is_empty());
+
+        let dependency_count = ObjectDependency::find()
+            .filter(object_dependency::Column::Oid.eq(shared_source_id.as_object_id()))
+            .filter(object_dependency::Column::UsedBy.eq(table_source_id.as_object_id()))
+            .count(&mgr.inner.read().await.db)
+            .await?;
+        assert_eq!(dependency_count, 1);
 
         Ok(())
     }
@@ -2125,6 +2329,89 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_object_rejects_source_without_its_table() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let mut job = crate::manager::StreamingJob::Table(
+            Some(PbSource {
+                name: "t".to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                info: Some(StreamSourceInfo::default()),
+                ..Default::default()
+            }),
+            PbTable {
+                name: "t".to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                table_type: PbTableType::Table as _,
+                handle_pk_conflict_behavior:
+                    risingwave_pb::catalog::PbHandleConflictBehavior::NoCheck as _,
+                fragment_id: FragmentId::placeholder(),
+                ..Default::default()
+            },
+            risingwave_pb::ddl_service::TableJobType::General,
+        );
+        mgr.create_job_catalog(
+            &mut job,
+            &crate::model::StreamContext::default(),
+            &None,
+            1,
+            HashSet::new(),
+            risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(true),
+            &None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let crate::manager::StreamingJob::Table(Some(source), _, _) = job else {
+            unreachable!()
+        };
+
+        let err = mgr
+            .drop_object(ObjectType::Source, source.id, DropMode::Restrict)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("use DROP TABLE"), "{err}");
+
+        // The source may be in another schema than its table.
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "other_schema".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let other_schema: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("other_schema"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        Object::update_many()
+            .col_expr(object::Column::SchemaId, other_schema.into())
+            .col_expr(
+                object::Column::BelongToOid,
+                other_schema.as_object_id().into(),
+            )
+            .filter(object::Column::Oid.eq(source.id.as_object_id()))
+            .exec(&mgr.inner.read().await.db)
+            .await?;
+        let err = mgr
+            .drop_object(ObjectType::Schema, other_schema, DropMode::Cascade)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("use DROP TABLE"), "{err}");
 
         Ok(())
     }
@@ -2731,6 +3018,62 @@ mod tests {
         }
         .insert(&txn)
         .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(103)),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            state_table_ids: Set(vec![TableId::new(9999)].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        let (iceberg_job_id, _, progress_table_id) =
+            insert_test_streaming_job(&txn, "iceberg_v3_sink", false, None).await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(101)),
+            job_id: Set(iceberg_job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::IcebergWithPkIndexWriter as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::IcebergWithPkIndexWriter(Default::default())),
+                ..Default::default()
+            })),
+            state_table_ids: Set(Default::default()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(102)),
+            job_id: Set(iceberg_job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::SnapshotBackfillStreamScan as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                    table_id: upstream_table_id,
+                    stream_scan_type: StreamScanType::SnapshotBackfill as i32,
+                    state_table: Some(PbTable {
+                        id: progress_table_id,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            })),
+            state_table_ids: Set(vec![progress_table_id].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
         txn.commit().await?;
         drop(inner);
 
@@ -2739,17 +3082,22 @@ mod tests {
             truncate_info.subscription_retention_seconds,
             HashMap::from([(upstream_table_id, 123)])
         );
-        assert_eq!(truncate_info.independent_jobs.len(), 1);
-        let independent_job = &truncate_info.independent_jobs[0];
-        assert_eq!(independent_job.job_id, job_id);
+        assert_eq!(truncate_info.committed_epoch_truncate_jobs.len(), 1);
+        let committed_epoch_truncate_job = &truncate_info.committed_epoch_truncate_jobs[0];
+        assert_eq!(committed_epoch_truncate_job.job_id, job_id);
         assert_eq!(
-            independent_job.state_table_ids,
+            committed_epoch_truncate_job.state_table_ids,
             HashSet::from([state_table_id])
         );
         assert_eq!(
-            independent_job.upstream_table_snapshot_epochs,
+            committed_epoch_truncate_job.upstream_table_snapshot_epochs,
             HashMap::from([(upstream_table_id, None)])
         );
+        assert_eq!(truncate_info.progress_table_subscribers.len(), 1);
+        let progress_subscriber = truncate_info.progress_table_subscribers.first().unwrap();
+        assert_eq!(progress_subscriber.subscriber_job_id, iceberg_job_id);
+        assert_eq!(progress_subscriber.upstream_table_id, upstream_table_id);
+        assert_eq!(progress_subscriber.progress_table_id, progress_table_id);
 
         Ok(())
     }

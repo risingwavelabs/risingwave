@@ -437,12 +437,24 @@ pub mod default {
             1024
         }
 
+        pub fn iceberg_update_ordered_max_tasks() -> u64 {
+            16
+        }
+
         pub fn iceberg_sink_positional_delete_cache_size() -> usize {
             1024
         }
 
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
+        }
+
+        pub fn iceberg_pk_index_sink_lookup_concurrency() -> usize {
+            64
+        }
+
+        pub fn iceberg_pk_index_sink_max_batch_rows() -> usize {
+            4096
         }
 
         pub fn materialize_force_overwrite_on_no_check() -> bool {
@@ -479,6 +491,14 @@ pub mod default {
 
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn enable_locality_sort_buffer() -> bool {
+            true
+        }
+
+        pub fn locality_sort_buffer_activate_threshold() -> u64 {
+            65536
         }
 
         pub fn cache_refill_policy() -> CacheRefillPolicy {
@@ -532,6 +552,19 @@ pub mod tests {
         let expected = rw_config_to_markdown();
         let actual = expect_test::expect_file!["../../../config/docs.md"];
         actual.assert_eq(&expected);
+    }
+
+    #[test]
+    fn test_sql_option_redaction_allowlist_config() {
+        let config: RwConfig = toml::from_str("").unwrap();
+        assert_eq!(config.batch.redact_sql_option_allowlist, ["primary_key"]);
+
+        let config: RwConfig = toml::from_str("[batch]\nredact_sql_option_allowlist = []").unwrap();
+        assert!(config.batch.redact_sql_option_allowlist.is_empty());
+
+        let config: RwConfig =
+            toml::from_str("[batch]\nredact_sql_option_allowlist = ['partition_key']").unwrap();
+        assert_eq!(config.batch.redact_sql_option_allowlist, ["partition_key"]);
     }
 
     #[test]
@@ -660,6 +693,58 @@ pub mod tests {
         {
             item_doc.default = format!("{}", value);
         }
+    }
+
+    #[test]
+    fn test_opendal_chunked_streaming_read_config() {
+        let config: ObjectStoreConfig = toml::from_str("").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 1);
+
+        let config: ObjectStoreConfig = toml::from_str(
+            "opendal_streaming_read_chunk_size = 1024\nopendal_streaming_read_chunk_concurrency = 4",
+        )
+        .unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 1024);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 4);
+
+        let config: ObjectStoreConfig =
+            toml::from_str("opendal_streaming_read_chunk_size = 0").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+    }
+
+    #[test]
+    fn test_http_client_rotation_config() {
+        for (input, expected) in [
+            ("", None),
+            ("http_client_rotation_interval_ms = \"\"", None),
+            ("http_client_rotation_interval_ms = 60000", Some(60000)),
+        ] {
+            let config: RwConfig =
+                toml::from_str(&format!("[storage.object_store.s3]\n{input}")).unwrap();
+            assert_eq!(
+                config
+                    .storage
+                    .object_store
+                    .s3
+                    .http_client_rotation_interval_ms,
+                expected
+            );
+            let roundtrip: RwConfig = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(
+                roundtrip
+                    .storage
+                    .object_store
+                    .s3
+                    .http_client_rotation_interval_ms,
+                expected
+            );
+        }
+        let error = toml::from_str::<RwConfig>(
+            "[storage.object_store.s3]\nhttp_client_rotation_interval_ms = 0",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must be greater than 0"));
     }
 
     #[test]

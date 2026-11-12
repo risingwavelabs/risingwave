@@ -180,14 +180,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    #[ignore]
+    #[ignore = "manual UI check: only prints the error/backtrace for human inspection"]
     fn executor_error_ui_test_1() {
         // For this test, ensure that we have only one backtrace from error when panic.
         func_return_error().unwrap();
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "manual UI check: only prints the error/backtrace for human inspection"]
     fn executor_error_ui_test_2() {
         // For this test, ensure that we have only one backtrace from error when panic.
         func_return_error().map_err(|e| println!("{:?}", e)).ok();

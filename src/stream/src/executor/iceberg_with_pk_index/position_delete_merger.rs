@@ -346,10 +346,13 @@ mod tests {
 
     fn compaction_barrier(epoch: u64, sink_id: SinkId, phase: Phase) -> Barrier {
         Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
-            crate::executor::IcebergPkIndexCompactionContext {
+            risingwave_pb::stream_plan::IcebergPkIndexCompactionContext {
                 sink_id,
                 task_id: 7.into(),
                 phase: phase as i32,
+                resolver_task_input: (phase == Phase::Begin).then_some(
+                    risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::ResolverTaskInput::default(),
+                ),
             },
         )
     }

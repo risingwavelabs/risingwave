@@ -39,7 +39,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
 
-        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
 
         let prost_condition = node.get_condition()?;
         let comparator = prost_condition.get_function_type()?;

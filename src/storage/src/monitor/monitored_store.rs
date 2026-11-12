@@ -165,6 +165,10 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredTableStateStore<S> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
+    fn read_epoch(&self) -> Option<u64> {
+        self.inner.read_epoch()
+    }
+
     fn iter(
         &self,
         key_range: TableKeyRange,

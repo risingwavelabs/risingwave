@@ -15,6 +15,7 @@
 mod context_impl;
 pub(crate) mod recovery;
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -25,8 +26,7 @@ use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
-    PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -36,47 +36,48 @@ use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot, BatchRefreshInfo,
-    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, IndependentStreamingJobType,
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
-use crate::manager::sink_coordination::SinkCoordinatorManager;
+use crate::manager::iceberg_pk_index_sink::{
+    IcebergPkIndexPreCommitMetadata, IcebergPkIndexSinkManager,
+};
+use crate::manager::sink_coordination::{RecoveryStart, SinkCoordinatorManager};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 #[derive(Debug)]
-pub(super) struct CreateSnapshotBackfillJobCommandInfo {
+pub(super) struct CreateIndependentStreamingJobCommandInfo {
     pub info: CreateStreamingJobCommandInfo,
     pub snapshot_backfill_info: SnapshotBackfillInfo,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     pub resolved_split_assignment: SplitAssignment,
-    /// If set, this is a batch refresh job rather than a regular snapshot backfill.
-    pub refresh_interval_sec: Option<u64>,
+    pub kind: IndependentStreamingJobType,
 }
 
-impl CreateSnapshotBackfillJobCommandInfo {
+impl CreateIndependentStreamingJobCommandInfo {
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
-        let job_type = if let Some(refresh_interval_sec) = self.refresh_interval_sec {
-            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
-                snapshot_backfill_info: self.snapshot_backfill_info,
-                refresh_interval_sec,
-            })
-        } else {
-            CreateStreamingJobType::SnapshotBackfill {
-                snapshot_backfill_info: self.snapshot_backfill_info,
-                // `since_epoch` is only used before job creation barriers are injected, and
-                // post-collect snapshot backfill does not go through that path.
-                since_epoch: None,
+        let kind = match self.kind {
+            IndependentStreamingJobType::SnapshotBackfill { .. } => {
+                IndependentStreamingJobType::SnapshotBackfill {
+                    // `since_epoch` is only used before job creation barriers are injected, and
+                    // post-collect snapshot backfill does not go through that path.
+                    since_epoch: None,
+                }
             }
+            kind @ IndependentStreamingJobType::BatchRefresh { .. } => kind,
+            IndependentStreamingJobType::IcebergV3 => IndependentStreamingJobType::IcebergV3,
         };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,
-            job_type,
+            job_type: CreateStreamingJobType::Independent {
+                snapshot_backfill_info: self.snapshot_backfill_info,
+                kind,
+            },
             cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
             resolved_split_assignment: self.resolved_split_assignment,
             replace_sink: None,
@@ -91,12 +92,16 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
 
     async fn next_scheduled(&self) -> Scheduled;
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
-        recovery_reason: RecoveryReason,
-    );
-    fn mark_ready(&self, options: MarkReadyOptions);
+        recovery: RecoveryStart,
+        recovery_reason: &RecoveryReason,
+    ) -> MetaResult<()>;
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()>;
     fn resolve_log_store_epoch<'a>(
         &'a self,
         upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
@@ -152,9 +157,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    fn handle_refresh_finished_table_ids(
+    fn handle_refresh_finished_actors(
         &self,
-        refresh_finished_table_job_ids: Vec<JobId>,
+        refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     /// Load the trigger context for a batch refresh job: fragment metadata, job model,
@@ -168,7 +173,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
 
     fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        metadata: Vec<IcebergPkIndexPreCommitMetadata>,
     ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
 
     fn commit_iceberg_pk_index_sink_metadata(
@@ -200,16 +205,11 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     pub(super) env: MetaSrvEnv,
 
-    /// Barrier scheduler for scheduling load finish commands
-    barrier_scheduler: BarrierScheduler,
-
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
     sink_manager: SinkCoordinatorManager,
 
     pub(super) iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
-
-    pub(super) iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -223,11 +223,9 @@ impl GlobalBarrierWorkerContextImpl {
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
-        barrier_scheduler: BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -238,11 +236,9 @@ impl GlobalBarrierWorkerContextImpl {
             source_manager,
             _scale_controller: scale_controller,
             env,
-            barrier_scheduler,
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
-            iceberg_compaction_manager,
         }
     }
 

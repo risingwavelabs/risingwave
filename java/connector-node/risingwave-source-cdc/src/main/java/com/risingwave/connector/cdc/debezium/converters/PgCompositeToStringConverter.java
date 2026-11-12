@@ -93,7 +93,19 @@ public class PgCompositeToStringConverter
     }
 
     private static boolean isDebeziumNativeExtensionArray(RelationalColumn column) {
-        return isPostgresArrayOf(column, "geometry") || isPostgresArrayOf(column, "geography");
+        return isPostgresArrayOf(column, "hstore")
+                || isPostgresArrayOf(column, "citext")
+                || isPostgresArrayOf(column, "ltree")
+                // contrib without debezium support
+                || isPostgresArrayOf(column, "cube")
+                || isPostgresArrayOf(column, "seg")
+                // PostGIS
+                || isPostgresArrayOf(column, "geometry")
+                || isPostgresArrayOf(column, "geography")
+                // pgvector
+                || isPostgresArrayOf(column, "vector")
+                || isPostgresArrayOf(column, "halfvec")
+                || isPostgresArrayOf(column, "sparsevec");
     }
 
     private static boolean isPostgresArrayOf(RelationalColumn column, String elementTypeName) {

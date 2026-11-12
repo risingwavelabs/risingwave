@@ -16,15 +16,17 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Database;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
 
-use self::notifier::Notifier;
 use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, SubscriptionId};
+use crate::notification::Notifier;
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -37,7 +39,6 @@ pub(super) mod context;
 mod edge_builder;
 mod info;
 mod manager;
-mod notifier;
 mod partial_graph;
 mod progress;
 mod rpc;
@@ -52,10 +53,11 @@ pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 use risingwave_common::id::JobId;
 use risingwave_pb::ddl_service::PbBackfillType;
 
+pub use self::checkpoint::snapshot_backfill_max_pending_barrier_num;
 pub use self::command::{
-    BarrierKind, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget, SinceEpochInfo,
-    SnapshotBackfillInfo,
+    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    IcebergPkIndexCompactionOverwrite, IndependentStreamingJobType, ReplaceStreamJobPlan,
+    Reschedule, ReschedulePlan, ResumeBackfillTarget, SinceEpochInfo, SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
@@ -70,11 +72,28 @@ use crate::stream::cdc::CdcTableSnapshotSplits;
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
     /// After bootstrap.
-    Bootstrap,
+    Bootstrap(Sender<HashMap<WorkerId, WorkerNode>>),
     /// After failure.
     Failover(MetaError),
     /// Manually triggered
     Adhoc,
+}
+
+/// Recovery state exposed by the barrier manager, without completion notifiers.
+enum RecoveryStatus {
+    Bootstrap,
+    Failover(MetaError),
+    Adhoc,
+}
+
+impl From<&RecoveryReason> for RecoveryStatus {
+    fn from(reason: &RecoveryReason) -> Self {
+        match reason {
+            RecoveryReason::Bootstrap(_) => Self::Bootstrap,
+            RecoveryReason::Failover(err) => Self::Failover(err.clone()),
+            RecoveryReason::Adhoc => Self::Adhoc,
+        }
+    }
 }
 
 /// Status of barrier manager.
@@ -82,7 +101,7 @@ enum BarrierManagerStatus {
     /// Barrier manager is starting.
     Starting,
     /// Barrier manager is under recovery.
-    Recovering(RecoveryReason),
+    Recovering(RecoveryStatus),
     /// Barrier manager is running.
     Running,
 }
@@ -100,8 +119,8 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
         match status {
             BarrierManagerStatus::Starting => Self::StatusStarting,
             BarrierManagerStatus::Recovering(reason) => match reason {
-                RecoveryReason::Bootstrap => Self::StatusStarting,
-                RecoveryReason::Failover(_) | RecoveryReason::Adhoc => Self::StatusRecovering,
+                RecoveryStatus::Bootstrap => Self::StatusStarting,
+                RecoveryStatus::Failover(_) | RecoveryStatus::Adhoc => Self::StatusRecovering,
             },
             BarrierManagerStatus::Running => Self::StatusRunning,
         }

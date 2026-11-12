@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 use rand::distr::{Alphanumeric, SampleString};
 use rand::rngs::SmallRng;
-use rand::{RngCore, SeedableRng, rng as thread_rng};
+use rand::{Rng as _, SeedableRng, rng as thread_rng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 

@@ -29,6 +29,7 @@ user batch_enable_sort_agg
 user batch_expr_strict_mode
 user batch_hnsw_ef_search
 user batch_parallelism
+user batch_read_latest_committed
 user bypass_cluster_limits
 user bytea_output
 user cdc_source_wait_streaming_start_timeout
@@ -44,6 +45,7 @@ user enable_datafusion_engine
 user enable_index_selection
 user enable_join_ordering
 user enable_locality_backfill
+user enable_locality_sort_buffer
 user enable_mv_selection
 user enable_serverless_backfill
 user enable_share_plan

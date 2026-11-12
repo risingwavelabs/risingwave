@@ -13,7 +13,9 @@ ignored = []
 [features]
 default = []
 test = []
-all-sinks = [
+all-sinks = ["all-sinks-lite", "all-sinks-heavy"]
+all-sinks-heavy = ["sink-lancedb"]
+all-sinks-lite = [
     "sink-bigquery",
     "sink-deltalake",
     "sink-google_pubsub",
@@ -29,9 +31,10 @@ sink-bigquery = [
     "dep:google-cloud-googleapis",
 ]
 sink-deltalake = ["dep:deltalake"]
+sink-lancedb = ["dep:lancedb", "dep:lance", "dep:lance-table"]
 # TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
 sink-google_pubsub = ["dep:google-cloud-googleapis"]
-sink-clickhouse = ["dep:clickhouse"]
+sink-clickhouse = ["dep:clickhouse", "dep:clickhouse-types"]
 sink-doris = []
 sink-starrocks = []
 
@@ -41,6 +44,7 @@ adbc_core = { workspace = true, optional = true }
 adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
+arrow-58-ipc = { package = "arrow-ipc", version = "58" }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
 async-nats = { version = "0.49", features = ["websockets"] }
@@ -56,7 +60,7 @@ aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-types = { workspace = true }
-aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
+aws-smithy-types-convert = { version = "0.61.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
 base64 = "0.23"
 byteorder = "1"
@@ -65,19 +69,22 @@ cfg-if = "1"
 cfg-or-panic = "0.2"
 chrono = { workspace = true, features = ["clock", "std"] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "dad4c6dd8a40aaeaa7534abf38155219f6fd73b5", features = [
     "time",
     "rustls-tls",
 ], optional = true }
+clickhouse-types = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "dad4c6dd8a40aaeaa7534abf38155219f6fd73b5", optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
-duration-str = "0.18.0"
+duration-str = "0.21.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.7"
+firestore = "0.47"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+gcloud-sdk = { version = "0.28", features = ["google-firestore-admin-v1"] }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [
@@ -96,13 +103,14 @@ iceberg-storage-opendal = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 jni = { workspace = true }
+jsonbb = { workspace = true }
+lance = { workspace = true, optional = true }
+lance-table = { workspace = true, optional = true }
+lancedb = { workspace = true, optional = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.5.1"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.35", default-features = false, features = [
-    "chrono",
-] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = { workspace = true, features = [
@@ -120,7 +128,7 @@ parking_lot = { workspace = true }
 parquet = { version = "58", features = ["async"] }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
-phf = { version = "0.13", features = ["macros"] }
+phf = { version = "0.14", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
@@ -139,6 +147,10 @@ rdkafka = { workspace = true, features = [
     "ssl",
     "gssapi",
     "zstd",
+    # Keep both: `curl` enables librdkafka's OIDC client, while `curl-static`
+    # avoids adding a system libcurl dependency to release binaries.
+    "curl",
+    "curl-static",
 ] }
 redis = { workspace = true, features = [
     "aio",
@@ -173,7 +185,7 @@ sea-schema = { version = "0.16", default-features = false, features = [
 serde = { workspace = true, features = ["rc"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.17.0", features = ["hints"] }
+simd-json = { version = "0.18.1", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
 strum = "0.28"
@@ -212,10 +224,15 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+axum = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true }
 expect-test = "1"
 fs-err = "3"
+lance = { workspace = true }
+lance-table = { workspace = true }
+lancedb = { workspace = true }
+mysql_async = { workspace = true, features = ["binlog"] }
 paste = "1"
 pretty_assertions = "1"
 proc-macro2 = "1.0"
@@ -225,8 +242,10 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
+tonic-prost = "0.14"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
+typetag = "0.2"
 walkdir = "2"
 
 [[bench]]

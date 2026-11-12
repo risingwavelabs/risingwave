@@ -1389,7 +1389,7 @@ mod tests {
                 actor_id,
                 dispatcher_id: broadcast_dispatcher_id,
                 added_downstream_actor_id: vec![new],
-                removed_downstream_actor_id: vec![old],
+                removed_downstream_actor_id: vec![old, old_simple],
                 hash_mapping: Default::default(),
             }]
         };

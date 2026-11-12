@@ -1,0 +1,161 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE source (
+    class_id BIGINT,
+    description VARCHAR,
+    free_usage BOOLEAN
+);
+
+statement ok
+CREATE MATERIALIZED VIEW grouped_classes AS
+SELECT class_id, description, free_usage, COUNT(*) AS n
+FROM source
+GROUP BY class_id, description, free_usage;
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS
+WITH changes AS CHANGELOG FROM grouped_classes KEY (class_id)
+SELECT class_id, description, free_usage,
+       changelog_op AS __op, CAST(_changelog_row_id AS BIGINT) AS __row_id
+FROM changes;
+
+# The business key may include columns that change, while distribution remains on class_id.
+statement ok
+CREATE MATERIALIZED VIEW distributed_mv AS
+WITH changes AS CHANGELOG FROM grouped_classes
+KEY (class_id, description) DISTRIBUTED BY (class_id)
+SELECT class_id, description, free_usage,
+       changelog_op AS __op, CAST(_changelog_row_id AS BIGINT) AS __row_id
+FROM changes;
+
+statement error Changelog DISTRIBUTED BY columns "description", "free_usage" are not included in KEY
+CREATE MATERIALIZED VIEW invalid_distribution AS
+WITH changes AS CHANGELOG FROM grouped_classes
+KEY (class_id) DISTRIBUTED BY (description, free_usage)
+SELECT * FROM changes;
+
+statement ok
+INSERT INTO source VALUES (42, 'Beginner', false), (43, 'Basic', false);
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Beginner 0 1
+43 Basic 0 1
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM distributed_mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Beginner 0 1
+43 Basic 0 1
+
+statement ok
+UPDATE source
+SET description = 'Advanced', free_usage = true WHERE class_id = 42;
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Advanced 1 1
+43 Basic 0 1
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM distributed_mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Advanced 1 1
+43 Basic 0 1
+
+statement ok
+DELETE FROM source WHERE class_id = 42;
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Advanced 1 2
+43 Basic 0 1
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM distributed_mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Advanced 1 2
+43 Basic 0 1
+
+statement ok
+DROP MATERIALIZED VIEW distributed_mv;
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP MATERIALIZED VIEW grouped_classes;
+
+statement ok
+DROP TABLE source;
+
+# A declared key column outside the distribution key must still participate in compaction.
+statement ok
+CREATE TABLE business_key_input (id INT PRIMARY KEY, tenant INT, business_key INT);
+
+statement ok
+CREATE MATERIALIZED VIEW business_key_log AS
+WITH changes AS CHANGELOG FROM business_key_input
+KEY (tenant, business_key) DISTRIBUTED BY (tenant)
+SELECT business_key, changelog_op FROM changes;
+
+statement ok
+INSERT INTO business_key_input VALUES (1, 10, 100);
+
+statement ok
+UPDATE business_key_input SET business_key = 200 WHERE id = 1;
+
+# These are different declared keys, so the old key is deleted and the new key is inserted.
+query II rowsort
+SELECT business_key, changelog_op FROM business_key_log;
+----
+100 1
+100 2
+200 1
+
+statement ok
+DROP MATERIALIZED VIEW business_key_log;
+
+statement ok
+DROP TABLE business_key_input;

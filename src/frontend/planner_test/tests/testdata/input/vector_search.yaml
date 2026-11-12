@@ -279,3 +279,23 @@
   expected_outputs:
     - batch_plan
     - stream_error
+- id: create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    create table da (id int, tag varchar, v vector(3)) append only;
+    create materialized view dma as select * from da order by tag;
+    create index via on dma using hnsw (v) include (id) with (distance_type = 'l2');
+  expected_outputs: []
+- name: vector index that does not store the primary key of an ORDER BY mv serves covered queries
+  before:
+    - create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    select id from dma order by v <-> '[1, 2, 3]' limit 5;
+  expected_outputs:
+    - batch_plan
+- name: vector index that does not store the primary key of an ORDER BY mv is not used to look up the mv
+  before:
+    - create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    select id, tag from dma order by v <-> '[1, 2, 3]' limit 5;
+  expected_outputs:
+    - batch_plan

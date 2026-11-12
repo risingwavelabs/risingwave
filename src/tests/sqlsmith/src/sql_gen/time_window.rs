@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::Rng;
 use rand::prelude::IndexedRandom;
+use rand::{Rng, RngExt as _};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor,

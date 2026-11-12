@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![recursion_limit = "256"]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_try_insert)]
@@ -37,6 +38,7 @@ pub mod error;
 pub mod hummock;
 pub mod manager;
 pub mod model;
+mod notification;
 pub mod rpc;
 pub mod serving;
 pub mod stream;

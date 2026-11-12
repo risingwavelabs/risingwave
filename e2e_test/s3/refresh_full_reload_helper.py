@@ -55,9 +55,17 @@ def setup_updated(minio_client: Minio) -> None:
     upload_csv(minio_client, f"{PREFIX}/part-2.csv", "3,carol\n")
 
 
+def setup_parquet(minio_client: Minio) -> None:
+    cleanup(minio_client)
+    fixture = os.path.join(os.path.dirname(__file__), "refresh_full_reload_rate_limit.parquet")
+    minio_client.fput_object(BUCKET, f"{PREFIX}/rows.parquet", fixture)
+
+
 def main() -> None:
     if len(sys.argv) != 2:
-        raise ValueError("expected one command: cleanup, setup-initial, or setup-updated")
+        raise ValueError(
+            "expected one command: cleanup, setup-initial, setup-updated, or setup-parquet"
+        )
 
     minio_client = client()
     command = sys.argv[1]
@@ -67,6 +75,8 @@ def main() -> None:
         setup_initial(minio_client)
     elif command == "setup-updated":
         setup_updated(minio_client)
+    elif command == "setup-parquet":
+        setup_parquet(minio_client)
     else:
         raise ValueError(f"unknown command: {command}")
 

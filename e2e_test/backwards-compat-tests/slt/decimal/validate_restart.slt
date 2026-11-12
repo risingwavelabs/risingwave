@@ -1,0 +1,119 @@
+# Rerun original validation after upgrade
+query II
+SELECT count(*), sum(v) FROM decimal_pk;
+----
+2012 2201078
+
+# Point lookups compute the vnode from the hash of the literal. Several literals use a different
+# scale from the stored key.
+query RI
+SELECT k, v FROM decimal_pk
+WHERE k IN (
+    0.00, 1.50, -1.500, 1000, 123456789.9876543210, 0.0000000000000000000000000001,
+    7.9228162514264337593543950335, 79228162514264337593543950335,
+    -79228162514264337593543950335, 'NaN', 'Infinity', '-Infinity',
+    1000000.125, 1000125.0, 1000250
+)
+ORDER BY v;
+----
+0 1
+1.5 2
+-1.5 3
+1000.00 4
+123456789.987654321 5
+0.0000000000000000000000000001 6
+7.9228162514264337593543950335 7
+79228162514264337593543950335 8
+-79228162514264337593543950335 9
+NaN 10
+Infinity 11
+-Infinity 12
+1000000.125 101
+1000125 1100
+1000250 2100
+
+query III
+SELECT count(*), sum(cnt), sum(total) FROM decimal_agg;
+----
+40 2000 2001000
+
+query I
+SELECT count(*) FROM (
+    SELECT g, count(*) AS cnt, sum(v) AS total FROM decimal_src GROUP BY g
+    EXCEPT
+    SELECT g, cnt, total FROM decimal_agg
+) AS diff;
+----
+0
+
+# Test DML after upgrade. Each statement only reaches the existing rows if the new version
+# computes the same vnode for an equal decimal key.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Upserts with an equal key in a different scale overwrite the existing rows.
+statement ok
+INSERT INTO decimal_pk VALUES (1.50, 20), ('NaN', 100), (1000, 40);
+
+statement ok
+INSERT INTO decimal_pk SELECT (i::DECIMAL / 8 + 1000000) * 1.00, i + 200 FROM generate_series(1, 2000) AS s(i);
+
+query II
+SELECT count(*), sum(v) FROM decimal_pk;
+----
+2012 2401222
+
+statement ok
+DELETE FROM decimal_pk WHERE k IN (0.0, -1.5, 79228162514264337593543950335, 'Infinity');
+
+statement ok
+DELETE FROM decimal_pk WHERE k > 1000000 AND k <= 1000125;
+
+query II
+SELECT count(*), sum(v) FROM decimal_pk;
+----
+1008 1700699
+
+query RI
+SELECT k, v FROM decimal_pk
+WHERE k IN (
+    0.00, 1.50, -1.500, 1000, 123456789.9876543210, 0.0000000000000000000000000001,
+    7.9228162514264337593543950335, 79228162514264337593543950335,
+    -79228162514264337593543950335, 'NaN', 'Infinity', '-Infinity',
+    1000000.125, 1000125.0, 1000125.125, 1000250
+)
+ORDER BY v;
+----
+123456789.987654321 5
+0.0000000000000000000000000001 6
+7.9228162514264337593543950335 7
+-79228162514264337593543950335 9
+-Infinity 12
+1.50 20
+1000 40
+NaN 100
+1000125.12500 1201
+1000250.00 2200
+
+# Updates of existing groups, with group keys in a different scale, must reach the existing
+# aggregation states instead of creating duplicate groups.
+statement ok
+INSERT INTO decimal_src SELECT (i % 40)::DECIMAL / 8 * 1.00, i FROM generate_series(2001, 2400) AS s(i);
+
+statement ok
+DELETE FROM decimal_src WHERE v <= 400;
+
+query IIII
+SELECT count(*), count(DISTINCT g), sum(cnt), sum(total) FROM decimal_agg;
+----
+40 40 2000 2801000
+
+query I
+SELECT count(*) FROM (
+    SELECT g, count(*) AS cnt, sum(v) AS total FROM decimal_src GROUP BY g
+    EXCEPT
+    SELECT g, cnt, total FROM decimal_agg
+) AS diff;
+----
+0

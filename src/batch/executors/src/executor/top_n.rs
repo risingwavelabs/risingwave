@@ -16,9 +16,11 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::{MemcmpEncoded, encode_chunk};
@@ -198,6 +200,32 @@ impl TopNHeap {
     }
 
     /// Returns the elements in the range `[offset, offset+limit)`.
+    ///
+    /// # Warning
+    ///
+    /// `deallocate` only subtracts the backing-storage size. The elements may already have been
+    /// dropped, so it cannot determine the size of their separately allocated memory. Those charges
+    /// need separate cleanup, either explicitly or through a private memory context. A future
+    /// redesign should make this handling automatic.
+    ///
+    /// In this executor example, the heap is charged directly to a new private `mem_ctx`. Skipped
+    /// and consumed elements stay charged until the context is dropped on normal return, errors,
+    /// or cancellation, even though the elements themselves are dropped earlier.
+    ///
+    /// ```rust,ignore
+    /// let mem_ctx = MemoryContext::new(Some(parent), TrAdderAtomic::new(0));
+    /// let mut heap = TopNHeap::new(3, 1, false, mem_ctx.clone());
+    /// for elem in input_elements {
+    ///     heap.push(elem);
+    /// }
+    /// for elem in heap.dump() {
+    ///     let output = chunk_builder.append_one_row(elem.row());
+    ///     drop(elem);
+    ///     if let Some(output) = output {
+    ///         yield output;
+    ///     }
+    /// }
+    /// ```
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
         self.heap
             .into_sorted_vec()
@@ -252,12 +280,9 @@ impl TopNExecutor {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut heap = TopNHeap::new(
-            self.limit,
-            self.offset,
-            self.with_ties,
-            self.mem_ctx.clone(),
-        );
+        // Keep payload charges until this execution exits, including errors and cancellation.
+        let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
+        let mut heap = TopNHeap::new(self.limit, self.offset, self.with_ties, mem_ctx.clone());
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -274,9 +299,11 @@ impl TopNExecutor {
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        for HeapElem { row, .. } in heap.dump() {
-            if let Some(spilled) = chunk_builder.append_one_row(row) {
-                yield spilled
+        for elem in heap.dump() {
+            let output = chunk_builder.append_one_row(elem.row());
+            drop(elem);
+            if let Some(output) = output {
+                yield output
             }
         }
         if let Some(spilled) = chunk_builder.consume_all() {

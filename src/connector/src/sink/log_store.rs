@@ -27,7 +27,7 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+use risingwave_common::metrics::{LabelGuardedIntCounter, RelabeledAggregatedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_rate_limit::{RateLimit, RateLimiter};
@@ -380,7 +380,7 @@ pub struct MonitoredLogReader<R: LogReader> {
 }
 
 pub struct LogReaderMetrics {
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
+    pub log_store_latest_read_epoch: RelabeledAggregatedIntGauge,
     pub log_store_read_rows: LabelGuardedIntCounter,
     pub log_store_read_bytes: LabelGuardedIntCounter,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter,
@@ -709,8 +709,8 @@ pub struct MonitoredLogWriter<W: LogWriter> {
 
 pub struct LogWriterMetrics {
     // Labels: [actor_id, sink_id, sink_name]
-    pub log_store_first_write_epoch: LabelGuardedIntGauge,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
+    pub log_store_first_write_epoch: RelabeledAggregatedIntGauge,
+    pub log_store_latest_write_epoch: RelabeledAggregatedIntGauge,
     pub log_store_write_rows: LabelGuardedIntCounter,
 }
 

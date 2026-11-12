@@ -63,7 +63,7 @@ async fn nexmark_source_inner(watermark: bool) -> Result<()> {
         () => {
             for table in tables {
                 let parallelism = {
-                    use rand::{Rng, rng as thread_rng};
+                    use rand::{RngExt as _, rng as thread_rng};
                     let rng = &mut thread_rng();
                     let parallelism = rng.random_range(1..=total_cores);
                     parallelism

@@ -1,0 +1,48 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use crate::OracleConfig;
+use crate::task::docker_service::{DockerService, DockerServiceConfig};
+
+impl DockerServiceConfig for OracleConfig {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    fn is_user_managed(&self) -> bool {
+        self.user_managed
+    }
+
+    fn image(&self) -> String {
+        self.image.clone()
+    }
+
+    fn envs(&self) -> Vec<(String, String)> {
+        vec![
+            ("ORACLE_PWD".to_owned(), self.password.clone()),
+            ("ENABLE_ARCHIVELOG".to_owned(), "true".to_owned()),
+        ]
+    }
+
+    fn ports(&self) -> Vec<(String, String)> {
+        vec![(format!("{}:{}", self.address, self.port), "1521".to_owned())]
+    }
+
+    fn data_path(&self) -> Option<String> {
+        self.persist_data.then(|| "/opt/oracle/oradata".to_owned())
+    }
+}
+
+/// Docker-backed Oracle Database Free service.
+pub type OracleService = DockerService<OracleConfig>;

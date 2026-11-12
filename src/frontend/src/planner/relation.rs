@@ -20,8 +20,8 @@ use iceberg::spec::{Operation, TableMetadata};
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH, RISINGWAVE_ICEBERG_ROW_ID,
-    ROW_ID_COLUMN_NAME, Schema,
+    CdcTableDesc, ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::constants::log_store::{
     EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, encode_epoch,
@@ -29,31 +29,35 @@ use risingwave_common::constants::log_store::{
 use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_sqlparser::ast::AsOf;
 use thiserror_ext::AsReport;
 
 use crate::TableCatalog;
 use crate::binder::{
-    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundShare,
-    BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction,
-    Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundMatchRecognize,
+    BoundShare, BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::handler::cdc::derive_connect_properties_for_cdc_table;
 use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
-    LogicalIcebergMetadataScan, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
-    LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalUnion,
-    LogicalValues,
+    LogicalApply, LogicalCdcScan, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
+    LogicalIcebergMetadataScan, LogicalJoin, LogicalMatchRecognize, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalUnion, LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
+use crate::scheduler::ReadSnapshot;
 use crate::utils::{ColIndexMapping, Condition};
 
 const ERROR_WINDOW_SIZE_ARG: &str =
@@ -78,6 +82,7 @@ impl Planner {
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
             Relation::GapFill(bound_gap_fill) => self.plan_gap_fill(*bound_gap_fill),
+            Relation::MatchRecognize(mr) => self.plan_match_recognize(*mr),
         }
     }
 
@@ -103,8 +108,37 @@ impl Planner {
         Ok(LogicalIcebergMetadataScan::new(core).into())
     }
 
+    /// Rejects time travel in a streaming job. A streaming job keeps following its upstream, so it
+    /// can't read a fixed snapshot, and its plan would silently read the latest data instead.
+    /// `FOR SYSTEM_TIME AS OF PROCTIME()` stays allowed: it marks the lookup side of a temporal join.
+    fn check_no_time_travel_in_stream(&self, as_of: Option<&AsOf>) -> Result<()> {
+        let is_stream = matches!(
+            self.plan_for(),
+            PlanFor::Stream | PlanFor::StreamIcebergEngineInternal
+        );
+        let is_time_travel = matches!(
+            as_of,
+            Some(
+                AsOf::ProcessTimeWithInterval(_)
+                    | AsOf::TimestampNum(_)
+                    | AsOf::TimestampString(_)
+                    | AsOf::VersionNum(_)
+                    | AsOf::VersionString(_)
+            )
+        );
+        if is_stream && is_time_travel {
+            return Err(ErrorCode::NotSupported(
+                "time travel in a streaming job".to_owned(),
+                "`FOR SYSTEM_TIME AS OF` and `FOR SYSTEM_VERSION AS OF` are only supported in batch queries. Remove the clause, or use `FOR SYSTEM_TIME AS OF PROCTIME()` for a temporal join.".to_owned(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
+        self.check_no_time_travel_in_stream(as_of.as_ref())?;
         let scan = LogicalScan::from_base_table(base_table, self.ctx(), as_of.clone());
 
         match base_table.table_catalog.engine {
@@ -112,6 +146,7 @@ impl Planner {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
+                    | Some(AsOf::ProcessTimeBroadcast)
                     | Some(AsOf::TimestampNum(_))
                     | Some(AsOf::TimestampString(_))
                     | Some(AsOf::ProcessTimeWithInterval(_)) => {}
@@ -171,7 +206,9 @@ impl Planner {
             | Some(AsOf::VersionNum(_))
             | Some(AsOf::TimestampString(_))
             | Some(AsOf::TimestampNum(_)) => {}
-            Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            Some(AsOf::ProcessTime)
+            | Some(AsOf::ProcessTimeBroadcast)
+            | Some(AsOf::ProcessTimeWithInterval(_)) => {
                 bail_not_implemented!("As Of ProcessTime() is not supported yet.")
             }
             Some(AsOf::VersionString(_)) => {
@@ -297,11 +334,15 @@ impl Planner {
         // Pin Hummock before loading the latest Iceberg snapshot. If a sink commit races with
         // planning, this ordering guarantees that the Iceberg snapshot plus the filtered log
         // store still represents a coherent prefix of the table.
-        let read_pending_log_store =
-            matches!(self.plan_for(), PlanFor::BatchDql) && is_append_only && as_of.is_none();
-        if read_pending_log_store {
-            drop(self.ctx().session_ctx().pinned_snapshot());
-        }
+        // Unpinned reads can resolve after the sink has committed and truncated the log store,
+        // leaving a gap after the Iceberg snapshot. Use Iceberg alone for those reads.
+        let read_pending_log_store = matches!(self.plan_for(), PlanFor::BatchDql)
+            && is_append_only
+            && as_of.is_none()
+            && matches!(
+                self.ctx().session_ctx().pinned_snapshot(),
+                ReadSnapshot::FrontendPinned { .. }
+            );
 
         let mut logical_iceberg_intermediate_scan = self.plan_iceberg_intermediate_scan(
             &logical_source,
@@ -341,19 +382,63 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        if source.is_shareable_cdc_connector() {
+        if source.catalog.is_cdc_table_source() {
+            if !matches!(self.plan_for(), PlanFor::Stream) {
+                return Err(ErrorCode::NotSupported(
+                    "batch queries on CDC table sources are not supported".to_owned(),
+                    "Create a materialized view to consume the CDC table source".to_owned(),
+                )
+                .into());
+            }
+            if source.as_of.is_some() {
+                return Err(ErrorCode::NotSupported(
+                    "AS OF on CDC table sources is not supported".to_owned(),
+                    "Remove the AS OF clause".to_owned(),
+                )
+                .into());
+            }
+
+            let catalog_desc = source
+                .catalog
+                .info
+                .external_table
+                .as_ref()
+                .expect("checked by is_cdc_table_source");
+            let desc = CdcTableDesc::from_protobuf(catalog_desc)?;
+            let upstream_source = {
+                let session = self.ctx.session_ctx();
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                catalog_reader
+                    .get_source_by_id_with_db(&session.database(), desc.source_id)?
+                    .clone()
+            };
+            let desc = resolve_current_cdc_table_desc(desc, &upstream_source.with_properties)?;
+            let scan = LogicalCdcScan::create(
+                source.catalog.name.clone(),
+                Rc::new(desc),
+                self.ctx(),
+                CdcScanOptions {
+                    disable_backfill: true,
+                    ..Default::default()
+                },
+            );
+            Ok(scan.into())
+        } else if source.is_shareable_cdc_connector() {
             Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_owned(),
             )
             .into())
         } else {
             let as_of = source.as_of.clone();
+            self.check_no_time_travel_in_stream(as_of.as_ref())?;
             match as_of {
                 None
                 | Some(AsOf::VersionNum(_))
                 | Some(AsOf::TimestampString(_))
                 | Some(AsOf::TimestampNum(_)) => {}
-                Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                Some(AsOf::ProcessTime)
+                | Some(AsOf::ProcessTimeBroadcast)
+                | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
                 Some(AsOf::VersionString(_)) => {
@@ -433,7 +518,7 @@ source: {:?}",
         let correlated_id = self.ctx.next_correlated_id();
         let correlated_indices = join
             .right
-            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+            .collect_correlated_indices_by_scope_and_assign_id(join.left_scope, correlated_id);
         let left = self.plan_relation(join.left)?;
         let right = self.plan_relation(join.right)?;
 
@@ -519,9 +604,14 @@ source: {:?}",
                     Some(result) => Ok(result.clone()),
                 }
             }
-            BoundShareInput::ChangeLog(relation) => {
+            BoundShareInput::ChangeLog {
+                relation,
+                key_indices,
+                distribution_key_indices,
+            } => {
                 let id = share.share_id;
-                let result = self.plan_changelog(relation)?;
+                let result =
+                    self.plan_changelog(relation, key_indices, distribution_key_indices)?;
                 let logical_share = LogicalShare::create(result);
                 self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
@@ -541,6 +631,23 @@ source: {:?}",
             gap_fill.interval,
             gap_fill.fill_strategies,
             gap_fill.partition_by_cols,
+        )
+        .into())
+    }
+
+    pub(super) fn plan_match_recognize(&mut self, mr: BoundMatchRecognize) -> Result<PlanRef> {
+        let input = self.plan_relation(mr.input)?;
+        Ok(LogicalMatchRecognize::new(
+            input,
+            mr.partition_by,
+            mr.order_by,
+            mr.measures,
+            mr.rows_per_match,
+            mr.after_match_skip,
+            mr.pattern,
+            mr.defines,
+            mr.within,
+            mr.within_deadline,
         )
         .into())
     }
@@ -931,29 +1038,41 @@ source: {:?}",
     }
 }
 
-/// Find the latest known RisingWave commit boundary. Iceberg compaction produces `replace`
-/// snapshots without changing table contents, so the marker is inherited across a chain of those
-/// snapshots. We deliberately stop at any other unmarked operation: an external or legacy append
-/// cannot be assigned a safe log-store boundary.
+/// Find the latest known RisingWave commit boundary. A `replace` snapshot never changes table
+/// contents, so its boundary is always its parent's. Any marker on it is ignored: compaction copies
+/// the marker of the snapshot it planned against, but commits on top of the latest head, so a sink
+/// commit that lands in between makes the copied marker stale. We deliberately stop at any other
+/// unmarked operation: an external or legacy append cannot be assigned a safe log-store boundary.
 fn risingwave_iceberg_commit_epoch(metadata: &TableMetadata, snapshot_id: i64) -> Option<u64> {
     let mut snapshot = metadata.snapshot_by_id(snapshot_id)?;
-    loop {
-        if let Some(epoch) = snapshot
-            .summary()
-            .additional_properties
-            .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH)
-        {
-            return epoch.parse().ok();
-        }
-        if snapshot.summary().operation != Operation::Replace {
-            return None;
-        }
+    while snapshot.summary().operation == Operation::Replace {
         snapshot = metadata.snapshot_by_id(snapshot.parent_snapshot_id()?)?;
     }
+    snapshot
+        .summary()
+        .additional_properties
+        .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH)?
+        .parse()
+        .ok()
+}
+
+fn resolve_current_cdc_table_desc(
+    mut desc: CdcTableDesc,
+    upstream_properties: &WithOptionsSecResolved,
+) -> Result<CdcTableDesc> {
+    let (current_properties, external_table_name) =
+        derive_connect_properties_for_cdc_table(upstream_properties, desc.external_table_name)?;
+    let (connect_properties, secret_refs) = current_properties.into_parts();
+    desc.external_table_name = external_table_name;
+    desc.connect_properties = connect_properties;
+    desc.secret_refs = secret_refs;
+    Ok(desc)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use iceberg::spec::{
         FormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema as IcebergSchema, Snapshot,
         SortOrder, Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
@@ -985,6 +1104,30 @@ mod tests {
             external_append,
         ]);
         assert_eq!(risingwave_iceberg_commit_epoch(&metadata, 3), None);
+
+        // Compaction planned at epoch 41 but committed after the sink commit of epoch 42, so the
+        // marker it copied from the planned snapshot is stale.
+        let metadata = metadata_with_current(vec![
+            snapshot(
+                1,
+                None,
+                Operation::Append,
+                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "41".to_owned())]),
+            ),
+            snapshot(
+                2,
+                Some(1),
+                Operation::Append,
+                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "42".to_owned())]),
+            ),
+            snapshot(
+                3,
+                Some(2),
+                Operation::Replace,
+                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "41".to_owned())]),
+            ),
+        ]);
+        assert_eq!(risingwave_iceberg_commit_epoch(&metadata, 3), Some(42));
     }
 
     fn metadata_with_current(mut snapshots: Vec<Snapshot>) -> TableMetadata {
@@ -1032,5 +1175,31 @@ mod tests {
             })
             .with_schema_id(0)
             .build()
+    }
+
+    #[test]
+    fn test_resolve_current_cdc_table_desc_replaces_stale_properties() {
+        let desc = CdcTableDesc {
+            external_table_name: "risedev.orders".to_owned(),
+            connect_properties: BTreeMap::from([("hostname".to_owned(), "old-host".to_owned())]),
+            ..Default::default()
+        };
+        let upstream_properties = WithOptionsSecResolved::new(
+            BTreeMap::from([
+                ("connector".to_owned(), "mysql-cdc".to_owned()),
+                ("database.name".to_owned(), "risedev".to_owned()),
+                ("hostname".to_owned(), "new-host".to_owned()),
+            ]),
+            BTreeMap::new(),
+        );
+
+        let desc = resolve_current_cdc_table_desc(desc, &upstream_properties).unwrap();
+
+        assert_eq!(desc.connect_properties.get("hostname").unwrap(), "new-host");
+        assert_eq!(desc.connect_properties.get("table.name").unwrap(), "orders");
+        assert_eq!(
+            desc.connect_properties.get("database.name").unwrap(),
+            "risedev"
+        );
     }
 }

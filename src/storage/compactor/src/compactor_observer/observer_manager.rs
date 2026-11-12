@@ -48,7 +48,7 @@ impl ObserverState for CompactorObserverNode {
                     };
                 }
                 assert!(
-                    resp.version > self.version,
+                    resp.version >= self.version,
                     "resp version={:?}, current version={:?}",
                     resp.version,
                     self.version

@@ -171,18 +171,21 @@ message CdcMessage {
   // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
 
-  // The CDC source type of this message. This is required to disambiguate the parsing logic for
-  // `full_table_name` (e.g. `db.table` in MySQL vs `schema.table` in Postgres/SQL Server).
-  SourceType source_type = 8;
+  // Deprecated: SourceType source_type = 8;
+  reserved "source_type";
+  reserved 8;
 }
 
 enum SourceType {
   UNSPECIFIED = 0;
   MYSQL = 1;
   POSTGRES = 2;
-  CITUS = 3;
+  reserved 3;
+  reserved "CITUS"; // removed connector
   MONGODB = 4;
   SQL_SERVER = 5;
+  ORACLE = 6;
+  MARIADB = 7;
 }
 
 message GetEventStreamRequest {
@@ -217,12 +220,36 @@ message ValidateSourceResponse {
   ValidationError error = 1;
 }
 
+// Internal request/response types used by the embedded JVM Oracle snapshot reader.
+// Oracle JDBC lives in the connector JVM, so Rust exchanges catalog and row data with it over
+// JNI using these protobuf messages rather than introducing an Oracle native-client dependency.
+message OracleConnectionProperties {
+  map<string, string> properties = 1;
+}
+
+message OracleSnapshotReadRequest {
+  string schema_name = 1;
+  string table_name = 2;
+  TableSchema table_schema = 3;
+  repeated string primary_keys = 4;
+}
+
+message OracleSnapshotReadResponse {
+  // A complete Arrow IPC stream holding the schema and one record batch of the snapshot.
+  bytes arrow_ipc = 1;
+}
+
 service ConnectorService {
   rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
   rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+  // Served over JNI by the embedded JVM. Besides the request, Java receives process-local handles as
+  // separate JNI arguments: the connection pool, the start-key row pointer (0 to read from the start
+  // of the table; otherwise the exclusive lower bound, read through `SingletonRow`), the response
+  // channel pointer, and the cancel handle. The read runs until the end of the table or a cancel.
+  rpc OracleSnapshotRead(OracleSnapshotReadRequest) returns (stream OracleSnapshotReadResponse);
 }
 
 message CoordinateRequest {

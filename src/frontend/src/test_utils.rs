@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use futures_async_stream::for_await;
-use parking_lot::RwLock;
+use parking_lot::{RecursiveRwLock, RwLock};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{SessionId, SessionManager, UserAuthenticator};
@@ -50,8 +50,9 @@ use risingwave_pb::common::{PbObjectType, WorkerNode};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
-    DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
+    DdlProgress, PbTableJobType, RemoveIcebergTableOrphanFilesResponse, TableJobType,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -257,7 +258,7 @@ pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
 }
 
 pub struct MockCatalogWriter {
-    catalog: Arc<RwLock<Catalog>>,
+    catalog: Arc<RecursiveRwLock<Catalog>>,
     id: AtomicU32,
     table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
     schema_id_to_database_id: RwLock<HashMap<SchemaId, DatabaseId>>,
@@ -457,8 +458,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_function(&self, _function: PbFunction) -> Result<()> {
-        unreachable!()
+    async fn create_function(&self, mut function: PbFunction) -> Result<()> {
+        function.id = self.gen_id();
+        self.catalog.write().create_function(&function);
+        Ok(())
     }
 
     async fn create_connection(
@@ -870,7 +873,7 @@ impl CatalogWriter for MockCatalogWriter {
 
 impl MockCatalogWriter {
     pub fn new(
-        catalog: Arc<RwLock<Catalog>>,
+        catalog: Arc<RecursiveRwLock<Catalog>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         catalog.write().create_database(&PbDatabase {
@@ -1074,7 +1077,7 @@ impl MockCatalogWriter {
 
 pub struct MockUserInfoWriter {
     id: AtomicU32,
-    user_info: Arc<RwLock<UserInfoManager>>,
+    user_info: Arc<RecursiveRwLock<UserInfoManager>>,
 }
 
 #[async_trait::async_trait]
@@ -1174,7 +1177,7 @@ impl UserInfoWriter for MockUserInfoWriter {
 }
 
 impl MockUserInfoWriter {
-    pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
+    pub fn new(user_info: Arc<RecursiveRwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_owned(),
@@ -1491,6 +1494,16 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn remove_iceberg_table_orphan_files(
+        &self,
+        _sink_id: SinkId,
+    ) -> RpcResult<RemoveIcebergTableOrphanFilesResponse> {
+        Ok(RemoveIcebergTableOrphanFilesResponse {
+            status: None,
+            orphan_file_count: 0,
+        })
     }
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {

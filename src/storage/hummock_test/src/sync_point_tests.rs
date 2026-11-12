@@ -203,6 +203,79 @@ async fn test_syncpoints_object_id_manager() {
     }
 }
 
+#[tokio::test]
+#[cfg(feature = "sync_point")]
+#[serial]
+async fn test_syncpoints_object_id_manager_leader_cancellation() {
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref,
+        worker_id as _,
+    ));
+
+    for pause in [
+        "MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH",
+        "MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE",
+    ] {
+        for follower_count in [0, 3] {
+            sync_point::reset();
+            let object_id_manager = Arc::new(ObjectIdManager::new(hummock_meta_client.clone(), 5));
+            sync_point::hook(pause, || async {
+                sync_point::on("MAP_NEXT_SST_OBJECT_ID.LEADER_PAUSED").await;
+                futures::future::pending::<()>().await;
+            });
+            let pause_cleanup = SyncPointActionGuard(pause);
+
+            let leader_task = tokio::spawn({
+                let object_id_manager = object_id_manager.clone();
+                async move { object_id_manager.get_new_sst_object_id().await }
+            });
+            sync_point::wait_timeout(
+                "MAP_NEXT_SST_OBJECT_ID.LEADER_PAUSED",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap();
+
+            let mut follower_tasks = vec![];
+            for _ in 0..follower_count {
+                follower_tasks.push(tokio::spawn({
+                    let object_id_manager = object_id_manager.clone();
+                    async move { object_id_manager.get_new_sst_object_id().await.unwrap() }
+                }));
+                sync_point::wait_timeout(
+                    "MAP_NEXT_SST_OBJECT_ID.AS_FOLLOWER",
+                    Duration::from_secs(10),
+                )
+                .await
+                .unwrap();
+            }
+
+            // Allow a replacement leader to fetch, then cancel the suspended leader.
+            drop(pause_cleanup);
+            leader_task.abort();
+            assert!(leader_task.await.unwrap_err().is_cancelled());
+
+            // Existing followers must wake, and later callers must also be able to refill.
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut ids = vec![];
+                for follower_task in follower_tasks {
+                    ids.push(follower_task.await.unwrap());
+                }
+                for _ in 0..10 {
+                    ids.push(object_id_manager.get_new_sst_object_id().await.unwrap());
+                }
+                ids.sort_unstable();
+                ids.dedup();
+                assert_eq!(ids.len(), follower_count + 10);
+            })
+            .await
+            .expect("object ID allocation stalled after leader cancellation");
+        }
+    }
+}
+
 #[cfg(all(feature = "sync_point", feature = "failpoints"))]
 #[tokio::test]
 #[serial]
@@ -280,6 +353,7 @@ pub async fn compact_once(
     // 2. get compact task
     let mut compact_task = hummock_manager_ref
         .manual_get_compact_task(
+            1.into(),
             StaticCompactionGroupId::StateDefault,
             manual_compcation_option,
         )

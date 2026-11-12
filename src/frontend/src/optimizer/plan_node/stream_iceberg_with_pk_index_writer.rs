@@ -18,9 +18,12 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
+use risingwave_connector::sink::iceberg::LEGACY_PK_INDEX_FILE_PATH;
+use risingwave_pb::stream_plan::compaction_resolver_node::PkColumn;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{
-    DispatcherType, IcebergWithPkIndexWriterNode, MergeNode, PbStreamNode,
+    CompactionResolverNode, DispatchStrategy, DispatcherType, ExchangeNode,
+    IcebergWithPkIndexWriterNode, PbDispatchOutputMapping, PbStreamNode,
 };
 
 use super::stream::prelude::*;
@@ -28,7 +31,8 @@ use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
+    StreamPlanRef as PlanRef,
 };
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, WatermarkColumns,
@@ -85,6 +89,20 @@ fn output_schema() -> Schema {
     ])
 }
 
+/// The PK index column locating the data file of a row. Sinks without the legacy file path layout
+/// store the 16-byte data file uuid instead of the full path (see `PkIndexDataFileLocator`).
+fn data_file_field(sink_desc: &SinkDesc) -> Field {
+    let legacy = sink_desc
+        .properties
+        .get(LEGACY_PK_INDEX_FILE_PATH)
+        .is_none_or(|v| !v.eq_ignore_ascii_case("false"));
+    if legacy {
+        Field::with_name(DataType::Varchar, "file_path")
+    } else {
+        Field::with_name(DataType::Bytea, "file_uuid")
+    }
+}
+
 /// Schema of the transient compaction resolver output consumed by the writer's right input.
 fn resolver_output_schema(sink_desc: &SinkDesc) -> Result<Schema> {
     let downstream_pk = sink_desc
@@ -95,7 +113,7 @@ fn resolver_output_schema(sink_desc: &SinkDesc) -> Result<Schema> {
         .iter()
         .map(|&idx| Field::from(&sink_desc.columns[idx].column_desc))
         .collect();
-    fields.push(Field::with_name(DataType::Varchar, "file_path"));
+    fields.push(data_file_field(sink_desc));
     fields.push(Field::with_name(DataType::Int64, "position"));
     Ok(Schema::new(fields))
 }
@@ -110,7 +128,7 @@ fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
     for &idx in downstream_pk {
         builder.add_column(&Field::from(&sink_desc.columns[idx].column_desc));
     }
-    builder.add_column(&Field::with_name(DataType::Varchar, "file_path"));
+    builder.add_column(&data_file_field(sink_desc));
     builder.add_column(&Field::with_name(DataType::Int64, "position"));
 
     for idx in 0..downstream_pk.len() {
@@ -168,14 +186,15 @@ impl StreamNode for StreamIcebergWithPkIndexWriter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         unreachable!(
             "iceberg pk-index writer cannot be converted into a prost body -- call \
-             `adhoc_to_stream_prost` instead, since it declares a dormant second input."
+             `adhoc_to_stream_prost` instead, since it declares a compaction resolver input."
         )
     }
 }
 
 impl StreamIcebergWithPkIndexWriter {
-    /// Serializes the writer with its normal upstream and a dormant compaction-resolver edge.
-    /// The resolver is dynamically attached to the second input by a later task.
+    /// Serializes the writer with its normal upstream and a task-independent compaction resolver.
+    /// The exchange makes the resolver a separate fragment whose actors can remain inactive until
+    /// meta attaches them to the writer for a compaction task.
     pub fn adhoc_to_stream_prost(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -183,34 +202,82 @@ impl StreamIcebergWithPkIndexWriter {
         let pk_index_table = self
             .pk_index_table
             .clone()
-            .with_id(state.gen_table_id_wrapped());
+            .with_id(state.gen_table_id_wrapped())
+            .to_internal_table_prost();
         let resolver_fields = resolver_output_schema(&self.sink_desc)
             .context("build compaction resolver output schema")?
             .to_prost();
+        let downstream_pk = self
+            .sink_desc
+            .downstream_pk
+            .as_ref()
+            .expect("validated when building the resolver schema");
+        let pk_columns: Vec<PkColumn> = downstream_pk
+            .iter()
+            .map(|&idx| PkColumn {
+                data_file_index: idx as u32,
+                column_desc: Some(self.sink_desc.columns[idx].column_desc.to_protobuf()),
+            })
+            .collect();
+        // The resolver output projects the PK columns first in `pk_columns` order, followed by
+        // the data file column and `position`. These are output-schema indices, not data-file indices.
+        let resolver_stream_key: Vec<u32> = (0..pk_columns.len() as u32).collect();
 
-        let left_input = self.input.to_stream_prost(state)?;
+        // The writer's normal input must have a fragment boundary so that it is rendered as a
+        // merge and can be disconnected while applying compaction.
+        let left_input = if self.input.as_stream_exchange().is_some() {
+            self.input.to_stream_prost(state)?
+        } else {
+            let exchange: PlanRef = StreamExchange::new_no_shuffle(self.input.clone()).into();
+            exchange.to_stream_prost(state)?
+        };
         let right_dispatcher = match self.distribution() {
             Distribution::Single => DispatcherType::Simple,
             _ => DispatcherType::Hash,
         };
-        let right_input = PbStreamNode {
-            node_body: Some(NodeBody::Merge(Box::new(MergeNode {
-                upstream_fragment_id: 0.into(),
-                upstream_dispatcher_type: right_dispatcher.into(),
-                allow_no_initial_upstream: true,
-                ..Default::default()
-            }))),
-            identity: "IcebergCompactionResolverEdge".into(),
-            fields: resolver_fields,
+        let resolver = PbStreamNode {
+            node_body: Some(NodeBody::CompactionResolver(Box::new(
+                CompactionResolverNode {
+                    sink_id: self.sink_desc.id,
+                    properties: self.sink_desc.properties.clone(),
+                    secret_refs: self.sink_desc.secret_refs.clone(),
+                    pk_columns,
+                },
+            ))),
+            identity: "CompactionResolver".into(),
+            operator_id: state.gen_operator_id(),
+            stream_key: resolver_stream_key.clone(),
+            fields: resolver_fields.clone(),
             stream_kind: PbStreamKind::AppendOnly as i32,
             ..Default::default()
+        };
+        let right_input = PbStreamNode {
+            node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
+                strategy: Some(DispatchStrategy {
+                    r#type: right_dispatcher as i32,
+                    dist_key_indices: match right_dispatcher {
+                        DispatcherType::Hash => resolver_stream_key.clone(),
+                        DispatcherType::Simple => vec![],
+                        DispatcherType::Unspecified
+                        | DispatcherType::Broadcast
+                        | DispatcherType::NoShuffle => unreachable!(),
+                    },
+                    output_mapping: Some(PbDispatchOutputMapping::identical(resolver_fields.len())),
+                }),
+            }))),
+            input: vec![resolver],
+            identity: "IcebergCompactionResolverExchange".into(),
+            operator_id: state.gen_operator_id(),
+            stream_key: resolver_stream_key,
+            fields: resolver_fields,
+            stream_kind: PbStreamKind::AppendOnly as i32,
         };
 
         Ok(PbStreamNode {
             node_body: Some(NodeBody::IcebergWithPkIndexWriter(Box::new(
                 IcebergWithPkIndexWriterNode {
                     sink_desc: Some(self.sink_desc.to_proto()),
-                    pk_index_table: Some(pk_index_table.to_internal_table_prost()),
+                    pk_index_table: Some(pk_index_table),
                 },
             ))),
             input: vec![left_input, right_input],
@@ -346,5 +413,21 @@ mod tests {
         assert_eq!(table.pk().len(), 2);
         assert_eq!(table.distribution_key(), &[0, 1]);
         assert_eq!(table.read_prefix_len_hint, 2);
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_stores_file_uuid() {
+        let mut desc = test_sink_desc();
+        desc.properties
+            .insert(LEGACY_PK_INDEX_FILE_PATH.to_owned(), "false".to_owned());
+
+        let table = build_iceberg_pk_state_table(&desc).unwrap();
+        assert_eq!(table.columns()[1].name(), "file_uuid");
+        assert_eq!(table.columns()[1].data_type(), &DataType::Bytea);
+        assert_eq!(table.columns()[2].name(), "position");
+
+        let resolver_schema = resolver_output_schema(&desc).unwrap();
+        assert_eq!(resolver_schema.fields()[1].name, "file_uuid");
+        assert_eq!(resolver_schema.fields()[1].data_type, DataType::Bytea);
     }
 }

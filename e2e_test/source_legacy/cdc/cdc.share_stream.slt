@@ -124,7 +124,7 @@ select distribution_type,flags from rw_fragments order by fragment_id;
 ----
 SINGLE {SOURCE}
 HASH {MVIEW,UPSTREAM_SINK_UNION}
-SINGLE {STREAM_SCAN}
+SINGLE {STREAM_SCAN,STREAM_CDC_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
 
@@ -140,6 +140,12 @@ create source mysql_source with (
  server.id = '5602'
 );
 
+# Wait for successful monitoring of the multi-database source, including upstream binlog metrics.
+system ok
+source_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$__DATABASE__" -U root -At -v ON_ERROR_STOP=1 -c "SELECT id FROM rw_sources WHERE name = 'mysql_source'")
+python3 e2e_test/source_legacy/cdc/wait_mysql_binlog_metrics.py \
+    --source-id "$source_id" \
+    --metrics-url "${RW_META_METRICS_URL:-http://127.0.0.1:1250/metrics}"
 
 statement ok
 CREATE TABLE IF NOT EXISTS mysql_all_types(

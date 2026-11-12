@@ -1,3 +1,79 @@
+control substitution on
+
+system ok
+test "${STARROCKS_DATABASE_IS_DISPOSABLE}" = "true"
+
+statement ok
+DROP SINK IF EXISTS sink_transaction_cap;
+
+statement ok
+DROP TABLE IF EXISTS transaction_cap;
+
+statement ok
+DROP SINK IF EXISTS s6;
+
+statement ok
+DROP SINK IF EXISTS sink_agg_table;
+
+statement ok
+DROP SINK IF EXISTS sink_reserved_words;
+
+statement ok
+DROP SINK IF EXISTS sink_timestamptz_table;
+
+statement ok
+DROP SINK IF EXISTS sink_invalid_starrocks_option;
+
+statement ok
+DROP SINK IF EXISTS sink_no_permission_table;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv6;
+
+statement ok
+DROP TABLE IF EXISTS no_permission_table;
+
+statement ok
+DROP TABLE IF EXISTS t6;
+
+statement ok
+DROP TABLE IF EXISTS agg_table;
+
+statement ok
+DROP TABLE IF EXISTS reserved_words;
+
+statement ok
+DROP TABLE IF EXISTS timestamptz_table;
+
+system ok retry 120 backoff 1s
+set -o pipefail
+starrocks -B --column-names -e 'SHOW BACKENDS' | awk -F '\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "Alive") alive_column = i; next } alive_column && (tolower($alive_column) == "true" || $alive_column == "1") { found = 1 } END { exit !found }'
+
+system ok retry 60 backoff 2s
+starrocks -e "
+DROP DATABASE IF EXISTS ${STARROCKS_DATABASE};
+CREATE DATABASE ${STARROCKS_DATABASE};
+USE ${STARROCKS_DATABASE};
+CREATE TABLE demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 date,v8 datetime,v9 boolean,v10 json,v11 decimal(10,5)) ENGINE=OLAP
+PRIMARY KEY(\`v1\`)
+DISTRIBUTED BY HASH(\`v1\`) properties(\"replication_num\" = \"1\");
+CREATE TABLE demo_agg_table(id int, value string REPLACE_IF_NOT_NULL) ENGINE=OLAP
+AGGREGATE KEY(\`id\`)
+DISTRIBUTED BY HASH(\`id\`) properties(\"replication_num\" = \"1\");
+CREATE TABLE demo_reserved_words(id int, \`order\` string, \`from\` string) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
+CREATE TABLE demo_timestamptz_table(id int, ts_datetime datetime, ts_varchar varchar(32), ts_char char(32), ts_string string) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
+CREATE TABLE demo_permission_probe(id int) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
+DROP USER IF EXISTS '${STARROCKS_USER}'@'%';
+CREATE USER '${STARROCKS_USER}'@'%' IDENTIFIED BY '${STARROCKS_PASSWORD}';
+GRANT ALL ON *.* TO '${STARROCKS_USER}'@'%';
+DROP USER IF EXISTS 'users_no_bhv_table_priv'@'%';
+CREATE USER 'users_no_bhv_table_priv'@'%' IDENTIFIED BY '${STARROCKS_PASSWORD}';
+GRANT SELECT ON ${STARROCKS_DATABASE}.demo_permission_probe TO 'users_no_bhv_table_priv'@'%';
+"
+
 statement ok
 set sink_decouple = false;
 
@@ -8,14 +84,8 @@ statement error Unknown fields in the WITH clause
 CREATE SINK sink_invalid_starrocks_option
 FROM no_permission_table
 WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_bhv_table',
     primary_key = 'v1',
     starrocks.unknown_option = '1'
@@ -27,12 +97,12 @@ FROM no_permission_table
 WITH (
     connector = 'starrocks',
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
+    starrocks.host = '${STARROCKS_HOST}',
+    starrocks.mysqlport = '${STARROCKS_QUERY_PORT}',
+    starrocks.httpport = '${STARROCKS_HTTP_PORT}',
     starrocks.user = 'users_no_bhv_table_priv',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
+    starrocks.password = '${STARROCKS_PASSWORD}',
+    starrocks.database = '${STARROCKS_DATABASE}',
     starrocks.table = 'demo_bhv_table',
     primary_key = 'v1'
 );
@@ -46,26 +116,52 @@ CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
+# Altering connector options rebuilds the writer through the decoupled log reader.
+statement ok
+SET sink_decouple = true;
+
 statement ok
 CREATE SINK s6
 FROM
     mv6 WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_bhv_table',
+    starrocks.ignore_json_size = 'false',
+    starrocks.load_mem_limit = '268435456',
+    starrocks.transaction_timeout_seconds = '900',
+    commit_checkpoint_interval = '2',
     primary_key = 'v1'
 );
 
-# verify commit_checkpoint_interval can be altered.
+# Make the CREATE settings observable before changing the writer configuration.
+statement ok
+INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'before_alter', '2013-01-01', '2013-01-01 01:01:01', false, '{"v101":100}', 1.12345678910);
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_bhv_table WHERE v1 = 1 AND v6 = 'before_alter';"
+----
+1
+
+
+# Invalid connector updates must be rejected before they reach the running writer.
+statement error starrocks.transaction_timeout_seconds.*between 1 and 2147483647
+ALTER SINK s6 CONNECTOR WITH (starrocks.transaction_timeout_seconds = '0');
+
+statement error starrocks.load_mem_limit.*must not exceed
+ALTER SINK s6 CONNECTOR WITH (starrocks.load_mem_limit = '9223372036854775808');
+
+# Verify the options are alterable and persisted, then exercise the updated writer.
 statement ok
 ALTER SINK s6 CONNECTOR WITH (
-    commit_checkpoint_interval = '1'
+    commit_checkpoint_interval = '1',
+    starrocks.ignore_json_size = 'true',
+    starrocks.load_mem_limit = '536870912',
+    starrocks.transaction_timeout_seconds = '1200',
+    starrocks.max_batch_size_bytes = '5242880'
 );
 
 query I
@@ -76,11 +172,70 @@ where name = 's6'
 ----
 1
 
+query TTT
+SELECT connector_props -> 'starrocks.ignore_json_size' ->> 'value',
+       connector_props -> 'starrocks.load_mem_limit' ->> 'value',
+       connector_props -> 'starrocks.transaction_timeout_seconds' ->> 'value'
+FROM rw_catalog.rw_sinks
+WHERE name = 's6';
+----
+true 536870912 1200
+
 statement ok
-INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01' , false, '{"v101":100}',1.12345678910);
+UPDATE t6 SET v6 = 'after_alter' WHERE v1 = 1;
 
 statement ok
 FLUSH;
+
+# FLUSH does not wait for a decoupled sink to commit to the external system.
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_bhv_table WHERE v1 = 1 AND v6 = 'after_alter';"
+----
+1
+
+
+# Restore the three options and verify the rebuilt writer can still update the row.
+statement ok
+ALTER SINK s6 CONNECTOR WITH (
+    starrocks.ignore_json_size = 'false',
+    starrocks.load_mem_limit = '268435456',
+    starrocks.transaction_timeout_seconds = '900'
+);
+
+query TTT
+SELECT connector_props -> 'starrocks.ignore_json_size' ->> 'value',
+       connector_props -> 'starrocks.load_mem_limit' ->> 'value',
+       connector_props -> 'starrocks.transaction_timeout_seconds' ->> 'value'
+FROM rw_catalog.rw_sinks
+WHERE name = 's6';
+----
+false 268435456 900
+
+statement ok
+UPDATE t6 SET v6 = 'test' WHERE v1 = 1;
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "
+SELECT COUNT(*)
+FROM ${STARROCKS_DATABASE}.demo_bhv_table
+WHERE v1 = 1
+  AND v2 = 1
+  AND v3 = 1
+  AND ABS(v4 - 1.1) < 0.0001
+  AND ABS(v5 - 1.2) < 0.0001
+  AND v6 = 'test'
+  AND v7 = '2013-01-01'
+  AND v8 = '2013-01-01 01:01:01'
+  AND v9 = false
+  AND get_json_int(CAST(v10 AS VARCHAR), '$.v101') = 100
+  AND v11 = 1.12346;
+"
+----
+1
+
 
 statement ok
 DROP SINK s6;
@@ -92,21 +247,18 @@ statement ok
 DROP TABLE t6;
 
 statement ok
+SET sink_decouple = false;
+
+statement ok
 CREATE TABLE agg_table(id int primary key, value string);
 
 statement ok
 CREATE SINK sink_agg_table
 FROM
     agg_table WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'append-only',
     force_append_only='true',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_agg_table',
     primary_key = 'id'
 );
@@ -116,6 +268,12 @@ INSERT INTO agg_table VALUES (1, 'v');
 
 statement ok
 FLUSH;
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_agg_table WHERE id = 1 AND value = 'v';"
+----
+1
+
 
 statement ok
 DROP SINK sink_agg_table;
@@ -130,14 +288,8 @@ statement ok
 CREATE SINK sink_reserved_words
 FROM reserved_words
 WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_reserved_words',
     primary_key = 'id'
 );
@@ -147,6 +299,12 @@ INSERT INTO reserved_words VALUES (1, 'asc', 'x');
 
 statement ok
 FLUSH;
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_reserved_words WHERE id = 1 AND \`order\` = 'asc' AND \`from\` = 'x';"
+----
+1
+
 
 statement ok
 DROP SINK sink_reserved_words;
@@ -170,14 +328,8 @@ statement ok
 CREATE SINK sink_timestamptz_table
 FROM timestamptz_table
 WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_timestamptz_table',
     primary_key = 'id'
 );
@@ -194,8 +346,94 @@ INSERT INTO timestamptz_table VALUES (
 statement ok
 FLUSH;
 
+system ok retry 30 backoff 1s
+starrocks -N -B -e "
+SELECT COUNT(*)
+FROM ${STARROCKS_DATABASE}.demo_timestamptz_table
+WHERE id = 1
+  AND ts_datetime = '2018-01-27 02:30:09'
+  AND ts_varchar = '2018-01-27 02:30:09.000000'
+  AND TRIM(ts_char) = '2018-01-27 02:30:09.000000'
+  AND ts_string = '2018-01-27 02:30:09.000000';
+"
+----
+1
+
+
 statement ok
 DROP SINK sink_timestamptz_table;
 
 statement ok
 DROP TABLE timestamptz_table;
+
+# A row fits in the transaction cap, but multiple rows require early commits.
+# The transaction cap is smaller than the HTTP batch cap, with JSON checks skipped.
+system ok
+starrocks -e "CREATE TABLE ${STARROCKS_DATABASE}.demo_transaction_cap(id int, v string) ENGINE=OLAP PRIMARY KEY(id) DISTRIBUTED BY HASH(id) properties(\"replication_num\" = \"1\");"
+
+statement ok
+SET sink_decouple = true;
+
+statement ok
+CREATE TABLE transaction_cap(id int primary key, v varchar);
+
+statement ok
+CREATE SINK sink_transaction_cap FROM transaction_cap WITH (
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'id',
+    starrocks.table = 'demo_transaction_cap',
+    starrocks.ignore_json_size = 'true',
+    starrocks.max_batch_size_bytes = '4096',
+    starrocks.max_transaction_size_bytes = '1024',
+    commit_checkpoint_interval = '2'
+);
+
+statement ok
+INSERT INTO transaction_cap SELECT i, repeat('x', 512) FROM generate_series(1, 6) AS t(i);
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_transaction_cap WHERE length(v) = 512;"
+----
+6
+
+
+statement error starrocks.max_transaction_size_bytes.*greater than 0
+ALTER SINK sink_transaction_cap CONNECTOR WITH (starrocks.max_transaction_size_bytes = '0');
+
+statement ok
+ALTER SINK sink_transaction_cap CONNECTOR WITH (starrocks.max_transaction_size_bytes = '2048');
+
+query T
+SELECT connector_props -> 'starrocks.max_transaction_size_bytes' ->> 'value'
+FROM rw_catalog.rw_sinks WHERE name = 'sink_transaction_cap';
+----
+2048
+
+statement ok
+UPDATE transaction_cap SET v = repeat('y', 512) WHERE id <= 3;
+
+statement ok
+DELETE FROM transaction_cap WHERE id = 6;
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT count(*), sum(v = repeat('y', 512)), sum(v = repeat('x', 512)) FROM ${STARROCKS_DATABASE}.demo_transaction_cap;"
+----
+5	3	2
+
+
+statement ok
+DROP SINK sink_transaction_cap;
+
+statement ok
+DROP TABLE transaction_cap;
+
+system ok
+starrocks -e "DROP TABLE ${STARROCKS_DATABASE}.demo_transaction_cap;"
+
+system ok
+starrocks -e "
+DROP DATABASE IF EXISTS ${STARROCKS_DATABASE};
+DROP USER IF EXISTS '${STARROCKS_USER}'@'%';
+DROP USER IF EXISTS 'users_no_bhv_table_priv'@'%';
+"

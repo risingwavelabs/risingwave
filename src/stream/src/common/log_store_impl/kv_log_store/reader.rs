@@ -834,7 +834,7 @@ mod tests {
         let pk_info = &KV_LOG_STORE_V2_INFO;
         let table = gen_test_log_store_table(pk_info);
         let vnodes = single_vnode_bitmap();
-        let serde = LogStoreRowSerde::new(&table, Some(vnodes), pk_info);
+        let serde = LogStoreRowSerde::new(&table, vnodes, pk_info);
         let read_state = LogStoreReadState {
             table_id: TEST_TABLE_ID,
             state_store: Arc::new(state_store),

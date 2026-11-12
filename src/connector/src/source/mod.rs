@@ -36,11 +36,12 @@ pub mod prelude {
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalPosixFs>;
     pub use crate::source::cdc::enumerator::DebeziumSplitEnumerator;
     pub use crate::source::filesystem::opendal_source::BatchPosixFsEnumerator as BatchPosixFsSplitEnumerator;
-    pub type CitusCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Citus>;
     pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
     pub type PostgresCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Postgres>;
     pub type MysqlCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mysql>;
+    pub type MariadbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mariadb>;
     pub type SqlServerCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::SqlServer>;
+    pub type OracleCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Oracle>;
 }
 
 pub mod base;

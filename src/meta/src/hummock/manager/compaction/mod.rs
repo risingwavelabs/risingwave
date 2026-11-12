@@ -30,6 +30,7 @@ use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
@@ -84,7 +85,6 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{HummockManager, commit_multi_var};
-use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,8 +345,10 @@ impl HummockManager {
             .await
     }
 
+    /// Selects tasks and records the worker that will receive each nontrivial task.
     pub async fn get_compact_tasks_impl(
         &self,
+        context_id: HummockContextId,
         compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut dyn CompactionSelector,
@@ -374,6 +376,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -418,6 +421,7 @@ impl HummockManager {
                 .levels
                 .contains_key(&compaction_group_id)
             {
+                // A scheduling snapshot may still contain a group deleted before we took the lock.
                 continue;
             }
 
@@ -561,7 +565,7 @@ impl HummockManager {
                             compact_task.task_id,
                             CompactTaskAssignment {
                                 compact_task: compact_task.clone(),
-                                context_id: META_NODE_ID, // deprecated
+                                context_id,
                             },
                         );
 
@@ -684,31 +688,44 @@ impl HummockManager {
         Ok((pick_tasks, unschedule_groups))
     }
 
-    /// Cancels a compaction task no matter it's assigned or unassigned.
+    /// Cancels a compaction task in meta. Manual cancellation also notifies its assigned compactor
+    /// on a best-effort basis after committing the removal.
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
         let ret = self
-            .cancel_compact_task_impl(vec![task_id], task_status)
+            .cancel_compact_tasks(vec![task_id], task_status)
             .await?;
         Ok(ret[0])
     }
 
     pub async fn cancel_compact_tasks(
         &self,
-        tasks: Vec<u64>,
-        task_status: TaskStatus,
-    ) -> Result<Vec<bool>> {
-        self.cancel_compact_task_impl(tasks, task_status).await
-    }
-
-    async fn cancel_compact_task_impl(
-        &self,
         task_ids: Vec<u64>,
         task_status: TaskStatus,
     ) -> Result<Vec<bool>> {
         assert!(CANCEL_STATUS_SET.contains(&task_status));
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("cancel_compact_tasks")
+            .await;
+        // Capture ownership under the same lock used to remove the assignments.
+        let assignments_to_notify = (task_status == TaskStatus::ManualCanceled).then(|| {
+            task_ids
+                .iter()
+                .map(|task_id| {
+                    compaction_guard
+                        .compact_task_assignment
+                        .get(task_id)
+                        .map(|assignment| (assignment.context_id, *task_id))
+                })
+                .collect_vec()
+        });
+        let versioning_guard = self
+            .versioning
+            .write_with_process_name("cancel_compact_tasks")
+            .await;
         let tasks = task_ids
             .into_iter()
             .map(|task_id| ReportTask {
@@ -719,7 +736,27 @@ impl HummockManager {
                 object_timestamps: HashMap::default(),
             })
             .collect_vec();
-        let rets = self.report_compact_tasks(tasks).await?;
+        let rets = self
+            .report_compact_tasks_impl(tasks, compaction_guard, versioning_guard)
+            .await?;
+        // Notify only after the cancellation is durable. Heartbeats retry notification if the
+        // compactor is disconnected or still reports the canceled task after reconnecting.
+        if let Some(assignments) = assignments_to_notify {
+            for (assignment, reported) in assignments.into_iter().zip_eq_fast(&rets) {
+                if *reported
+                    && let Some((context_id, task_id)) = assignment
+                    && let Some(compactor) = self.compactor_manager.get_compactor(context_id)
+                    && let Err(error) = compactor.cancel_task(task_id)
+                {
+                    tracing::warn!(
+                        error = %error.as_report(),
+                        %context_id,
+                        task_id,
+                        "Failed to notify compactor of task cancellation; retrying on heartbeat",
+                    );
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.check_state_consistency().await;
@@ -729,6 +766,7 @@ impl HummockManager {
 
     async fn get_compact_tasks(
         &self,
+        context_id: HummockContextId,
         mut compaction_groups: Vec<CompactionGroupId>,
         max_select_count: usize,
         selector: &mut dyn CompactionSelector,
@@ -738,7 +776,7 @@ impl HummockManager {
         )));
         compaction_groups.shuffle(&mut thread_rng());
         let (mut tasks, groups) = self
-            .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
+            .get_compact_tasks_impl(context_id, compaction_groups, max_select_count, selector)
             .await?;
         tasks.retain(|task| {
             if task.task_status == TaskStatus::Success {
@@ -753,6 +791,7 @@ impl HummockManager {
 
     pub async fn get_compact_task(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         selector: &mut dyn CompactionSelector,
     ) -> Result<Option<CompactTask>> {
@@ -761,7 +800,7 @@ impl HummockManager {
         )));
 
         let (normal_tasks, _) = self
-            .get_compact_tasks_impl(vec![compaction_group_id], 1, selector)
+            .get_compact_tasks_impl(context_id, vec![compaction_group_id], 1, selector)
             .await?;
         for task in normal_tasks {
             if task.task_status != TaskStatus::Success {
@@ -774,23 +813,29 @@ impl HummockManager {
 
     pub async fn manual_get_compact_task(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
         let (task, _) = self
-            .manual_get_compact_task_with_info(compaction_group_id, manual_compaction_option)
+            .manual_get_compact_task_with_info(
+                context_id,
+                compaction_group_id,
+                manual_compaction_option,
+            )
             .await?;
         Ok(task)
     }
 
     pub async fn manual_get_compact_task_with_info(
         &self,
+        context_id: HummockContextId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<(Option<CompactTask>, bool)> {
         let mut selector = ManualCompactionSelector::new(manual_compaction_option);
         let task = self
-            .get_compact_task(compaction_group_id, &mut selector)
+            .get_compact_task(context_id, compaction_group_id, &mut selector)
             .await?;
         if let Some(err) = selector.validation_error() {
             return Err(Error::InvalidManualCompactionOption(err.to_owned()));
@@ -832,13 +877,9 @@ impl HummockManager {
             .await
     }
 
-    /// Finishes or cancels a compaction task, according to `task_status`.
+    /// Finishes or cancels compaction tasks according to each report's `task_status`.
     ///
-    /// If `context_id` is not None, its validity will be checked when writing meta store.
-    /// Its ownership of the task is checked as well.
-    ///
-    /// Return Ok(false) indicates either the task is not found,
-    /// or the task is not owned by `context_id` when `context_id` is not None.
+    /// Returns one boolean per report, with `false` indicating that the task was not found.
     pub async fn report_compact_tasks_impl(
         &self,
         report_tasks: Vec<ReportTask>,
@@ -868,6 +909,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -1019,6 +1061,10 @@ impl HummockManager {
             );
 
             if !deterministic_mode
+                && versioning_guard
+                    .current_version
+                    .levels
+                    .contains_key(&compact_task.compaction_group_id)
                 && (matches!(compact_task.task_type, compact_task::TaskType::Dynamic)
                     || matches!(compact_task.task_type, compact_task::TaskType::Emergency))
             {
@@ -1060,15 +1106,17 @@ impl HummockManager {
                 old_version.id,
                 compaction_groups
             );
+            for &compaction_group in &compaction_groups {
+                if old_version.levels.contains_key(&compaction_group) {
+                    self.try_send_compaction_request(
+                        compaction_group,
+                        compact_task::TaskType::Dynamic,
+                    );
+                }
+            }
         })
         .await;
 
-        if compaction_groups.is_empty() {
-            return Ok(());
-        }
-        for compaction_group in compaction_groups {
-            self.try_send_compaction_request(compaction_group, compact_task::TaskType::Dynamic);
-        }
         Ok(())
     }
 
@@ -1095,7 +1143,11 @@ impl HummockManager {
 
         // 2. Get manual compaction task.
         let compact_task = self
-            .manual_get_compact_task_with_info(compaction_group, manual_compaction_option)
+            .manual_get_compact_task_with_info(
+                compactor.context_id(),
+                compaction_group,
+                manual_compaction_option,
+            )
             .await;
         let (compact_task, blocked_by_pending) = match compact_task {
             Ok((compact_task, blocked_by_pending)) => (compact_task, blocked_by_pending),
@@ -1185,8 +1237,10 @@ impl HummockManager {
         Ok(ManualCompactionTriggerResult::Submitted)
     }
 
-    /// Sends a compaction request for new data (clears cooldown).
-    pub fn try_send_compaction_request(
+    /// Sends a compaction request for new data or a topology change (clears cooldown).
+    /// The caller must hold the version lock and ensure the group exists, so deletion cannot
+    /// race with a late request. Lock order is `versioning` -> `compaction_state`.
+    pub(crate) fn try_send_compaction_request(
         &self,
         compaction_group: CompactionGroupId,
         task_type: compact_task::TaskType,
@@ -1196,6 +1250,25 @@ impl HummockManager {
             task_type,
             ScheduleTrigger::NewData,
         )
+    }
+
+    /// Schedules all current groups, respecting the cooldown policy of the trigger.
+    pub async fn trigger_compaction_for_all_groups(
+        &self,
+        task_type: TaskType,
+        trigger: ScheduleTrigger,
+    ) {
+        // Keep membership stable until publication, so deletion cannot be followed by a late enqueue.
+        let versioning = self
+            .versioning
+            .read_with_process_name("on_handle_trigger_multi_group")
+            .await;
+        #[cfg(test)]
+        compaction_state_tests::before_trigger().await;
+        for &group_id in versioning.current_version.levels.keys() {
+            self.compaction_state
+                .try_sched_compaction(group_id, task_type, trigger);
+        }
     }
 
     /// Apply `split_weight_by_vnode` based partition strategy.
@@ -1241,14 +1314,10 @@ impl HummockManager {
         // Check latest write throughput
         let table_write_throughput_statistic_manager =
             self.table_write_throughput_statistic_manager.read();
-        let timestamp = chrono::Utc::now().timestamp();
 
         for (table_id, compact_table_size) in table_size_info {
             let write_throughput = table_write_throughput_statistic_manager
-                .get_table_throughput_descending(table_id, timestamp)
-                .peekable()
-                .peek()
-                .map(|item| item.throughput)
+                .latest_table_throughput(table_id)
                 .unwrap_or(0);
 
             if compact_table_size > compact_task_table_size_partition_threshold_high
@@ -1430,7 +1499,7 @@ impl HummockManager {
 /// What triggered the compaction schedule request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduleTrigger {
-    /// New data arrived (e.g., `commit_epoch`). Clears cooldown.
+    /// New data arrived or group topology changed. Clears cooldown.
     NewData,
     /// Periodic timer. Respects cooldown for Dynamic type.
     Periodic,
@@ -1438,11 +1507,11 @@ pub enum ScheduleTrigger {
 
 /// A point-in-time snapshot of the compaction schedule state.
 ///
-/// `snapshot_time` is used by `unschedule()` to detect whether new data arrived
-/// after the snapshot was taken, preventing incorrect cooldown.
+/// `generation` is used by `unschedule()` to detect whether new data arrived
+/// after the snapshot was taken, preserving newer requests and preventing incorrect cooldown.
 pub struct CompactionScheduleSnapshot {
     scheduled: HashSet<(CompactionGroupId, compact_task::TaskType)>,
-    snapshot_time: Instant,
+    generation: u64,
 }
 
 impl CompactionScheduleSnapshot {
@@ -1455,8 +1524,8 @@ impl CompactionScheduleSnapshot {
         TaskType::VnodeWatermark,
     ];
 
-    pub fn snapshot_time(&self) -> Instant {
-        self.snapshot_time
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Pick compaction groups and task type from this snapshot.
@@ -1507,11 +1576,12 @@ pub struct CompactionState {
 
 #[derive(Debug, Default)]
 struct CompactionStateInner {
+    generation: u64,
     scheduled: HashSet<(CompactionGroupId, compact_task::TaskType)>,
     /// Groups skipped by periodic Dynamic trigger until new data arrives.
     dynamic_cooldown: HashSet<CompactionGroupId>,
-    /// Tracks new-data arrival time per group for cooldown race detection.
-    last_new_data_time: HashMap<CompactionGroupId, Instant>,
+    /// Tracks new-data generations so old picker results cannot remove newer requests.
+    last_new_data_generation: HashMap<CompactionGroupId, u64>,
 }
 
 impl CompactionState {
@@ -1535,9 +1605,12 @@ impl CompactionState {
             match trigger {
                 ScheduleTrigger::NewData => {
                     guard.dynamic_cooldown.remove(&compaction_group);
+                    // A coalesced request still invalidates an older picker's no-task result.
+                    guard.generation += 1;
+                    let generation = guard.generation;
                     guard
-                        .last_new_data_time
-                        .insert(compaction_group, Instant::now());
+                        .last_new_data_generation
+                        .insert(compaction_group, generation);
                 }
                 ScheduleTrigger::Periodic => {
                     if guard.dynamic_cooldown.contains(&compaction_group) {
@@ -1550,34 +1623,36 @@ impl CompactionState {
     }
 
     /// Removes a scheduled entry. For Dynamic type, adds to cooldown unless
-    /// new data arrived after `snapshot_time`.
+    /// a newer request exists than the snapshot generation.
     pub fn unschedule(
         &self,
         compaction_group: CompactionGroupId,
         task_type: compact_task::TaskType,
-        snapshot_time: Instant,
+        generation: u64,
     ) {
         let mut guard = self.inner.lock();
-        guard.scheduled.remove(&(compaction_group, task_type));
-        if task_type == TaskType::Dynamic {
-            let has_new_data = guard
-                .last_new_data_time
+        if task_type == TaskType::Dynamic
+            && guard
+                .last_new_data_generation
                 .get(&compaction_group)
-                .is_some_and(|t| *t > snapshot_time);
-            if !has_new_data {
-                guard.dynamic_cooldown.insert(compaction_group);
-            }
+                .is_some_and(|g| *g > generation)
+        {
+            return;
+        }
+        // Removal can race with an old picker result. Do not recreate state for an absent entry.
+        if guard.scheduled.remove(&(compaction_group, task_type)) && task_type == TaskType::Dynamic
+        {
+            guard.dynamic_cooldown.insert(compaction_group);
         }
     }
 
     /// Takes a snapshot of the current schedule state.
     pub fn snapshot(&self) -> CompactionScheduleSnapshot {
         let guard = self.inner.lock();
-        // Record time after lock to ensure accurate ordering vs. try_sched_compaction
-        let snapshot_time = Instant::now();
+        let generation = guard.generation;
         CompactionScheduleSnapshot {
             scheduled: guard.scheduled.clone(),
-            snapshot_time,
+            generation,
         }
     }
 
@@ -1588,7 +1663,7 @@ impl CompactionState {
             .scheduled
             .retain(|(group, _)| *group != compaction_group);
         guard.dynamic_cooldown.remove(&compaction_group);
-        guard.last_new_data_time.remove(&compaction_group);
+        guard.last_new_data_generation.remove(&compaction_group);
     }
 }
 
@@ -1847,6 +1922,84 @@ mod compaction_state_tests {
 
     use super::*;
 
+    tokio::task_local! {
+        static BEFORE_TRIGGER: Arc<tokio::sync::Barrier>;
+    }
+
+    pub(super) async fn before_trigger() {
+        if let Ok(barrier) = BEFORE_TRIGGER.try_with(Arc::clone) {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(not(madsim))]
+    async fn test_trigger_all_groups_serializes_with_deletion() {
+        use std::time::Duration;
+
+        use crate::hummock::test_utils::setup_compute_env;
+
+        for trigger in [ScheduleTrigger::NewData, ScheduleTrigger::Periodic] {
+            let (_, manager, _, _) = setup_compute_env(80).await;
+            manager
+                .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+                .await
+                .unwrap();
+            let (group, _) = manager
+                .move_state_tables_to_dedicated_compaction_group(2.into(), &[101.into()], None)
+                .await
+                .unwrap();
+            let snapshot = manager.compaction_state.snapshot();
+            manager
+                .compaction_state
+                .unschedule(2.into(), TaskType::Dynamic, snapshot.generation());
+            let barrier = Arc::new(tokio::sync::Barrier::new(2));
+            let delete = async {
+                barrier.wait().await;
+                {
+                    let write = tokio::task::unconstrained(manager.versioning.write());
+                    tokio::pin!(write);
+                    assert!(
+                        futures::poll!(write.as_mut()).is_pending(),
+                        "group deletion must wait until candidate publication finishes"
+                    );
+                }
+                barrier.wait().await;
+                manager.unregister_table_ids([101.into()]).await.unwrap();
+            };
+            tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::join!(
+                    BEFORE_TRIGGER.scope(
+                        barrier.clone(),
+                        manager.trigger_compaction_for_all_groups(TaskType::Dynamic, trigger),
+                    ),
+                    delete,
+                )
+            })
+            .await
+            .unwrap();
+            assert!(!manager.compaction_group_ids().await.contains(&group));
+            assert_eq!(
+                manager
+                    .compaction_state
+                    .snapshot()
+                    .scheduled
+                    .contains(&(2.into(), TaskType::Dynamic)),
+                trigger == ScheduleTrigger::NewData,
+                "registration wakes cooled groups; periodic scans must respect cooldown"
+            );
+            assert!(
+                !manager
+                    .compaction_state
+                    .snapshot()
+                    .scheduled
+                    .iter()
+                    .any(|(id, _)| *id == group)
+            );
+        }
+    }
+
     #[test]
     fn test_basic_schedule_and_unschedule() {
         let state = CompactionState::new();
@@ -1865,7 +2018,7 @@ mod compaction_state_tests {
         assert!(snapshot.scheduled.contains(&(group_id, TaskType::Ttl)));
 
         // Unschedule removes from scheduled set
-        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.generation());
         let snapshot2 = state.snapshot();
         assert!(!snapshot2.scheduled.contains(&(group_id, TaskType::Dynamic)));
         assert!(snapshot2.scheduled.contains(&(group_id, TaskType::Ttl)));
@@ -1879,7 +2032,7 @@ mod compaction_state_tests {
         // Schedule then unschedule - should add to cooldown
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
         let snapshot = state.snapshot();
-        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.generation());
 
         // Verify in cooldown
         assert!(state.inner.lock().dynamic_cooldown.contains(&group_id));
@@ -1900,7 +2053,7 @@ mod compaction_state_tests {
         // Put group in cooldown
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
         let snapshot = state.snapshot();
-        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.generation());
         assert!(state.inner.lock().dynamic_cooldown.contains(&group_id));
 
         // NewData trigger should clear cooldown and schedule
@@ -1916,13 +2069,13 @@ mod compaction_state_tests {
         // Put group in cooldown for Dynamic
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
         let snapshot = state.snapshot();
-        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.generation());
 
         // Ttl unschedule should NOT add to cooldown
         let group_id_2: CompactionGroupId = 2.into();
         assert!(state.try_sched_compaction(group_id_2, TaskType::Ttl, ScheduleTrigger::Periodic));
         let snapshot2 = state.snapshot();
-        state.unschedule(group_id_2, TaskType::Ttl, snapshot2.snapshot_time());
+        state.unschedule(group_id_2, TaskType::Ttl, snapshot2.generation());
         assert!(!state.inner.lock().dynamic_cooldown.contains(&group_id_2));
 
         // Other task types should work regardless of cooldown
@@ -1942,18 +2095,44 @@ mod compaction_state_tests {
         assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
         let snapshot = state.snapshot();
 
-        // Simulate new data arriving AFTER snapshot
-        {
-            let mut guard = state.inner.lock();
-            guard.last_new_data_time.insert(group_id, Instant::now());
-        }
-
-        // Unschedule should NOT add to cooldown (new data arrived after snapshot)
-        state.unschedule(group_id, TaskType::Dynamic, snapshot.snapshot_time());
+        // A duplicate request changes the generation even though set membership stays the same.
+        assert!(!state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        let latest = state.snapshot();
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.generation());
         assert!(
-            !state.inner.lock().dynamic_cooldown.contains(&group_id),
-            "Should skip cooldown when new data arrived after snapshot"
+            state
+                .snapshot()
+                .scheduled
+                .contains(&(group_id, TaskType::Dynamic))
         );
+        assert!(!state.inner.lock().dynamic_cooldown.contains(&group_id));
+
+        // Another group's newer request must not prevent this group's fresh result from cooling it.
+        state.try_sched_compaction(2.into(), TaskType::Dynamic, ScheduleTrigger::NewData);
+        state.unschedule(group_id, TaskType::Dynamic, latest.generation());
+        assert!(
+            !state
+                .snapshot()
+                .scheduled
+                .contains(&(group_id, TaskType::Dynamic))
+        );
+        assert!(!state.try_sched_compaction(
+            group_id,
+            TaskType::Dynamic,
+            ScheduleTrigger::Periodic
+        ));
+
+        // Defensive API-level ABA: remove -> requeue -> delayed old result. This does not
+        // assert that production has concurrent pickers or reuses deleted group IDs.
+        assert!(state.try_sched_compaction(group_id, TaskType::Dynamic, ScheduleTrigger::NewData));
+        state.unschedule(group_id, TaskType::Dynamic, latest.generation());
+        assert!(
+            state
+                .snapshot()
+                .scheduled
+                .contains(&(group_id, TaskType::Dynamic))
+        );
+        assert!(!state.inner.lock().dynamic_cooldown.contains(&group_id));
     }
 
     #[test]
@@ -1967,6 +2146,7 @@ mod compaction_state_tests {
         state.inner.lock().dynamic_cooldown.insert(group_id);
 
         // Remove group
+        let snapshot = state.snapshot();
         state.remove_compaction_group(group_id);
 
         // Verify all state cleaned up
@@ -1974,7 +2154,15 @@ mod compaction_state_tests {
         assert!(!guard.scheduled.contains(&(group_id, TaskType::Dynamic)));
         assert!(!guard.scheduled.contains(&(group_id, TaskType::Ttl)));
         assert!(!guard.dynamic_cooldown.contains(&group_id));
-        assert!(!guard.last_new_data_time.contains_key(&group_id));
+        assert!(!guard.last_new_data_generation.contains_key(&group_id));
+        drop(guard);
+
+        // A delayed picker result must not recreate any state for the removed group.
+        state.unschedule(group_id, TaskType::Dynamic, snapshot.generation());
+        let guard = state.inner.lock();
+        assert!(guard.scheduled.is_empty());
+        assert!(guard.dynamic_cooldown.is_empty());
+        assert!(guard.last_new_data_generation.is_empty());
     }
 
     #[test]
@@ -2029,7 +2217,7 @@ mod compaction_state_tests {
         let snapshot = state.snapshot();
 
         // Only unschedule g1
-        state.unschedule(g1, TaskType::Dynamic, snapshot.snapshot_time());
+        state.unschedule(g1, TaskType::Dynamic, snapshot.generation());
 
         let guard = state.inner.lock();
         assert!(guard.dynamic_cooldown.contains(&g1));

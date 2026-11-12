@@ -18,7 +18,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
-use itertools::Itertools;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor16};
@@ -125,12 +124,10 @@ fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_siz
     PLAIN_XOR_FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
 }
 
-#[cfg(test)]
 fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len()
 }
 
-#[cfg(test)]
 fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
 }
@@ -165,7 +162,7 @@ impl FilterBuilder for Xor16FilterBuilder {
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
-        self.key_hash_entries.sort();
+        self.key_hash_entries.sort_unstable();
         self.key_hash_entries.dedup();
 
         let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
@@ -205,7 +202,7 @@ impl FilterBuilder for Xor8FilterBuilder {
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
-        self.key_hash_entries.sort();
+        self.key_hash_entries.sort_unstable();
         self.key_hash_entries.dedup();
 
         let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
@@ -574,11 +571,13 @@ impl XorFilterReader {
         let buf = &mut data;
         let xor_filter_seed = buf.get_u64_le();
         let xor_filter_block_length = buf.get_u32_le();
-        // is correct even when there is an extra 0xff byte in the end of buf
-        let len = buf.len() / 2;
-        let xor_filter_fingerprints = (0..len)
-            .map(|_| buf.get_u16_le())
-            .collect_vec()
+        // Decode complete fingerprints in bulk, leaving the one-byte footer out.
+        let (fingerprints, _) = buf.as_chunks::<2>();
+        let xor_filter_fingerprints = fingerprints
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
+            .collect::<Vec<_>>()
             .into_boxed_slice();
         Xor16 {
             seed: xor_filter_seed,
@@ -623,8 +622,7 @@ impl XorFilterReader {
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
     /// footprint of the decoded reader.
-    #[cfg(test)]
-    fn serialized_len(&self) -> usize {
+    pub(super) fn serialized_len(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),

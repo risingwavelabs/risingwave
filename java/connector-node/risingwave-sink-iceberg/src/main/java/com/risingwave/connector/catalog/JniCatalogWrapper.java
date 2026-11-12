@@ -29,6 +29,7 @@ import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.CatalogHandlers;
 import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.requests.UpdateTableRequest;
+import org.apache.iceberg.rest.responses.GetNamespaceResponse;
 import org.apache.iceberg.rest.responses.ListNamespacesResponse;
 import org.apache.iceberg.rest.responses.ListTablesResponse;
 import org.apache.iceberg.rest.responses.LoadTableResponse;
@@ -120,6 +121,15 @@ public class JniCatalogWrapper {
         } else {
             return false;
         }
+    }
+
+    /** Load namespace properties, serialized as an Iceberg REST response. */
+    public String getNamespace(String namespaceStr) throws Exception {
+        checkArgument(catalog instanceof SupportsNamespaces, "Catalog does not support namespaces");
+        GetNamespaceResponse resp =
+                CatalogHandlers.loadNamespace(
+                        (SupportsNamespaces) catalog, parseNamespace(namespaceStr));
+        return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
     }
 
     /**

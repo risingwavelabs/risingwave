@@ -381,7 +381,7 @@
     from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr1 order_by($expr2 ASC)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr1 order_by($expr2 ASC))] }
@@ -389,9 +389,9 @@
             └─LogicalProject { exprs: [Row(items.id, items.name) as $expr1, CosineDistance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr2] }
               └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(events.embedding, events.embedding), output: [events.event_id, $expr3, events.time] }
-    ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-    └─LogicalProject { exprs: [events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
+    LogicalProject { exprs: [events.event_id, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3, events.time] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(events.embedding, events.embedding), output: all }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
       └─LogicalAgg { group_key: [events.embedding], aggs: [array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32))] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(events.embedding, events.embedding), output: [events.embedding, $expr1, $expr2, 1:Int32] }
           ├─LogicalAgg { group_key: [events.embedding], aggs: [] }
@@ -405,10 +405,10 @@
                   └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.event_id, $expr3, events.time] }
-      ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
-      │ └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
-      └─BatchProject { exprs: [events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
+    └─BatchProject { exprs: [events.event_id, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3, events.time] }
+      └─BatchHashJoin { type: Inner, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
+        │ └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
         └─BatchHashAgg { group_key: [events.embedding], aggs: [array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32))] }
           └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.embedding, $expr1, $expr2, 1:Int32] }
             ├─BatchHashAgg { group_key: [events.embedding], aggs: [] }
@@ -439,7 +439,7 @@
     as related_info from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, events.time, events.embedding, $expr3] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr1 order_by($expr2 ASC)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr1 order_by($expr2 ASC))] }
@@ -447,9 +447,9 @@
             └─LogicalProject { exprs: [Row(items.id, items.name) as $expr1, CosineDistance(items.embedding, CorrelatedInputRef { index: 2, correlated_id: 1 }) as $expr2] }
               └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(events.embedding, events.embedding), output: [events.event_id, events.time, events.embedding, $expr3] }
-    ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-    └─LogicalProject { exprs: [events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
+    LogicalProject { exprs: [events.event_id, events.time, events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(events.embedding, events.embedding), output: all }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
       └─LogicalAgg { group_key: [events.embedding], aggs: [array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32))] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(events.embedding, events.embedding), output: [events.embedding, $expr1, $expr2, 1:Int32] }
           ├─LogicalAgg { group_key: [events.embedding], aggs: [] }
@@ -463,10 +463,10 @@
                   └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.event_id, events.time, events.embedding, $expr3] }
-      ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
-      │ └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
-      └─BatchProject { exprs: [events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
+    └─BatchProject { exprs: [events.event_id, events.time, events.embedding, Coalesce(array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Varchar))) as $expr3] }
+      └─BatchHashJoin { type: Inner, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
+        │ └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
         └─BatchHashAgg { group_key: [events.embedding], aggs: [array_agg($expr1 order_by($expr2 ASC)) filter(IsNotNull(1:Int32))] }
           └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.embedding, $expr1, $expr2, 1:Int32] }
             ├─BatchHashAgg { group_key: [events.embedding], aggs: [] }
@@ -496,7 +496,7 @@
     from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
@@ -505,9 +505,9 @@
               └─LogicalProject { exprs: [items.id, items.name, CosineDistance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
                 └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(events.embedding, events.embedding), output: [events.event_id, $expr3, events.time] }
-    ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-    └─LogicalProject { exprs: [events.embedding, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3] }
+    LogicalProject { exprs: [events.event_id, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3, events.time] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(events.embedding, events.embedding), output: all }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
       └─LogicalAgg { group_key: [events.embedding], aggs: [array_agg($expr2) filter(IsNotNull(1:Int32))] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(events.embedding, events.embedding), output: [events.embedding, $expr2, 1:Int32] }
           ├─LogicalAgg { group_key: [events.embedding], aggs: [] }
@@ -521,10 +521,10 @@
                   └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.event_id, $expr3, events.time] }
-      ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
-      │ └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
-      └─BatchProject { exprs: [events.embedding, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3] }
+    └─BatchProject { exprs: [events.event_id, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Int32, Float64, Varchar))) as $expr3, events.time] }
+      └─BatchHashJoin { type: Inner, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
+        │ └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
         └─BatchHashAgg { group_key: [events.embedding], aggs: [array_agg($expr2) filter(IsNotNull(1:Int32))] }
           └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.embedding, $expr2, 1:Int32] }
             ├─BatchHashAgg { group_key: [events.embedding], aggs: [] }
@@ -559,7 +559,7 @@
     from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
@@ -591,7 +591,7 @@
     from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Int32, Varchar, Float64))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
@@ -622,7 +622,7 @@
     from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Varchar))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
@@ -654,7 +654,7 @@
     from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
-    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
       └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(Int32, Varchar, Float64))) as $expr3] }
         └─LogicalAgg { aggs: [array_agg($expr2)] }
@@ -684,12 +684,12 @@
     from events e join cte c2 on c2.id = e.event_id;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.event_id, $expr3, items.name] }
-      ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
-      │ └─BatchLookupJoin { type: Inner, predicate: events.event_id = items.id AND (items.id > 0:Int32), output: [events.event_id, events.embedding, items.name], lookup table: items }
-      │   └─BatchExchange { order: [], dist: UpstreamHashShard(events.event_id) }
-      │     └─BatchScan { table: events, columns: [events.event_id, events.embedding], distribution: UpstreamHashShard(events.event_id) }
-      └─BatchProject { exprs: [events.embedding, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Varchar))) as $expr3] }
+    └─BatchProject { exprs: [events.event_id, Coalesce(array_agg($expr2) filter(IsNotNull(1:Int32)), ARRAY[]:List(Struct(Varchar))) as $expr3, items.name] }
+      └─BatchHashJoin { type: Inner, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(events.embedding) }
+        │ └─BatchLookupJoin { type: Inner, predicate: events.event_id = items.id AND (items.id > 0:Int32), output: [events.event_id, events.embedding, items.name], lookup table: items }
+        │   └─BatchExchange { order: [], dist: UpstreamHashShard(events.event_id) }
+        │     └─BatchScan { table: events, columns: [events.event_id, events.embedding], distribution: UpstreamHashShard(events.event_id) }
         └─BatchHashAgg { group_key: [events.embedding], aggs: [array_agg($expr2) filter(IsNotNull(1:Int32))] }
           └─BatchHashJoin { type: LeftOuter, predicate: events.embedding IS NOT DISTINCT FROM events.embedding, output: [events.embedding, $expr2, 1:Int32] }
             ├─BatchHashAgg { group_key: [events.embedding], aggs: [] }
@@ -707,3 +707,33 @@
                       └─BatchExchange { order: [], dist: Single }
                         └─BatchScan { table: items, columns: [items.name, items.embedding], scan_ranges: [items.id > Int32(0)], distribution: SomeShard }
   stream_error: LogicalVectorSearchLookupJoin should use proper vector index in streaming job
+- id: create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    create table da (id int, tag varchar, v vector(3)) append only;
+    create materialized view dma as select * from da order by tag;
+    create index via on dma using hnsw (v) include (id) with (distance_type = 'l2');
+- name: vector index that does not store the primary key of an ORDER BY mv serves covered queries
+  before:
+  - create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    select id from dma order by v <-> '[1, 2, 3]' limit 5;
+  batch_plan: |-
+    BatchProject { exprs: [$expr1] }
+    └─BatchExchange { order: [$expr2 ASC], dist: Single }
+      └─BatchSort { order: [$expr2 ASC] }
+        └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 2:Int32) as $expr2] }
+          └─BatchProjectSet { select_list: [Unnest($1)] }
+            └─BatchVectorSearch { top_n: 5, distance_type: L2Sqr, index_name: "via", vector: query_vector, lookup_output: [("id", Int32), ("dma.da._row_id", Serial)], include_distance: true, hnsw_ef_search: 40 }
+              └─BatchValues { rows: [['[1,2,3]':Vector(3)]] }
+- name: vector index that does not store the primary key of an ORDER BY mv is not used to look up the mv
+  before:
+  - create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    select id, tag from dma order by v <-> '[1, 2, 3]' limit 5;
+  batch_plan: |-
+    BatchProject { exprs: [dma.id, dma.tag] }
+    └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+          └─BatchProject { exprs: [dma.id, dma.tag, L2Distance(dma.v, '[1,2,3]':Vector(3)) as $expr1] }
+            └─BatchScan { table: dma, columns: [dma.id, dma.tag, dma.v], distribution: SomeShard }

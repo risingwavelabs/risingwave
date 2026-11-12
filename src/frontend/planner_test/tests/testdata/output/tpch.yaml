@@ -146,29 +146,31 @@
                     └─BatchScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [], pk_columns: [l_returnflag, l_linestatus], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), $expr3, $expr4, $expr5, count] }
+    └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, $expr3, $expr4, $expr5, $expr6, $expr8, $expr9, $expr10, count] }
       └─StreamTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr3, Case((count(lineitem.l_extendedprice) = 0:Int32), null:Decimal, (sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal)) as $expr4, Case((count(lineitem.l_discount) = 0:Int32), null:Decimal, (sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal)) as $expr5, count, Vnode(lineitem.l_returnflag, lineitem.l_linestatus) as _vnode] }
-              └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
-                └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
-                  └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, $expr1, ($expr1 * (1:Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
-                    └─StreamProject { exprs: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
-                      └─StreamFilter { predicate: (lineitem.l_shipdate <= '1998-09-21 00:00:00':Timestamp) }
-                        └─StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+            └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, $expr3, $expr4, $expr5, $expr6, Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, ($expr3 / count(lineitem.l_quantity)::Decimal)) as $expr8, Case((count(lineitem.l_extendedprice) = 0:Int32), null:Decimal, ($expr4 / count(lineitem.l_extendedprice)::Decimal)) as $expr9, Case((count(lineitem.l_discount) = 0:Int32), null:Decimal, ($expr7 / count(lineitem.l_discount)::Decimal)) as $expr10, count, Vnode(lineitem.l_returnflag, lineitem.l_linestatus) as _vnode] }
+              └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr3, Case((count(lineitem.l_extendedprice) = 0:Int64), null:Decimal, sum(lineitem.l_extendedprice)) as $expr4, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr5, Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2)) as $expr6, count(lineitem.l_quantity), count(lineitem.l_extendedprice), Case((count(lineitem.l_discount) = 0:Int64), null:Decimal, sum(lineitem.l_discount)) as $expr7, count(lineitem.l_discount), count] }
+                └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count, count($expr1), count($expr2)] }
+                  └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
+                    └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, $expr1, ($expr1 * (1:Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
+                      └─StreamProject { exprs: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
+                        └─StreamFilter { predicate: (lineitem.l_shipdate <= '1998-09-21 00:00:00':Timestamp) }
+                          └─StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [], pk_columns: [l_returnflag, l_linestatus], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), $expr3, $expr4, $expr5, count] }
+    └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, $expr3, $expr4, $expr5, $expr6, $expr8, $expr9, $expr10, count] }
         └── StreamTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamGroupTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr3, Case((count(lineitem.l_extendedprice) = 0:Int32), null:Decimal, (sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal)) as $expr4, Case((count(lineitem.l_discount) = 0:Int32), null:Decimal, (sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal)) as $expr5, count, Vnode(lineitem.l_returnflag, lineitem.l_linestatus) as _vnode] }
-        └── StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] } { tables: [ HashAggState: 2 ] }
-            └── StreamExchange Hash([0, 1]) from 2
+    └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, $expr3, $expr4, $expr5, $expr6, Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, ($expr3 / count(lineitem.l_quantity)::Decimal)) as $expr8, Case((count(lineitem.l_extendedprice) = 0:Int32), null:Decimal, ($expr4 / count(lineitem.l_extendedprice)::Decimal)) as $expr9, Case((count(lineitem.l_discount) = 0:Int32), null:Decimal, ($expr7 / count(lineitem.l_discount)::Decimal)) as $expr10, count, Vnode(lineitem.l_returnflag, lineitem.l_linestatus) as _vnode] }
+        └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr3, Case((count(lineitem.l_extendedprice) = 0:Int64), null:Decimal, sum(lineitem.l_extendedprice)) as $expr4, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr5, Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2)) as $expr6, count(lineitem.l_quantity), count(lineitem.l_extendedprice), Case((count(lineitem.l_discount) = 0:Int64), null:Decimal, sum(lineitem.l_discount)) as $expr7, count(lineitem.l_discount), count] }
+            └── StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count, count($expr1), count($expr2)] } { tables: [ HashAggState: 2 ] }
+                └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
     StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, $expr1, ($expr1 * (1:Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -178,11 +180,11 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr1), sum($expr2), $expr3, $expr4, $expr5, count, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, $expr3, $expr4, $expr5, $expr6, $expr8, $expr9, $expr10, count, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr1), sum($expr2), $expr3, $expr4, $expr5, count, _vnode, _rw_timestamp ], primary key: [ $10 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ], distribution key: [ 0, 1 ], read pk prefix len hint: 1, vnode column idx: 10 }
+    Table 1 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, $expr3, $expr4, $expr5, $expr6, $expr8, $expr9, $expr10, count, _vnode, _rw_timestamp ], primary key: [ $10 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ], distribution key: [ 0, 1 ], read pk prefix len hint: 1, vnode column idx: 10 }
 
-    Table 2 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr1), sum($expr2), count(lineitem_l_quantity), count(lineitem_l_extendedprice), sum(lineitem_l_discount), count(lineitem_l_discount), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr1), sum($expr2), count(lineitem_l_quantity), count(lineitem_l_extendedprice), sum(lineitem_l_discount), count(lineitem_l_discount), count, count($expr1), count($expr2), _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, l_orderkey, l_linenumber, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -624,12 +626,12 @@
                         └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], stream_key: [l_orderkey, o_orderdate, o_shippriority], pk_columns: [revenue, o_orderdate, l_orderkey, o_shippriority], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority] }
-      └─StreamTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0 }
+    └─StreamProject { exprs: [lineitem.l_orderkey, $expr2, orders.o_orderdate, orders.o_shippriority] }
+      └─StreamTopN { order: [$expr2 DESC, orders.o_orderdate ASC], limit: 10, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) as _vnode] }
-              └─StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [sum($expr1), count] }
+          └─StreamGroupTopN { order: [$expr2 DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [lineitem.l_orderkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2, orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) as _vnode] }
+              └─StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [sum($expr1), count($expr1), count] }
                 └─StreamExchange { dist: HashShard(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) }
                   └─StreamProject { exprs: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, customer.c_custkey, orders.o_orderkey, lineitem.l_linenumber] }
                     └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_custkey, orders.o_orderkey, lineitem.l_linenumber] }
@@ -649,14 +651,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], stream_key: [l_orderkey, o_orderdate, o_shippriority], pk_columns: [revenue, o_orderdate, l_orderkey, o_shippriority], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority] }
-        └── StreamTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0 } { tables: [ TopN: 0 ] }
+    └── StreamProject { exprs: [lineitem.l_orderkey, $expr2, orders.o_orderdate, orders.o_shippriority] }
+        └── StreamTopN { order: [$expr2 DESC, orders.o_orderdate ASC], limit: 10, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) as _vnode] }
-        └── StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [sum($expr1), count] } { tables: [ HashAggState: 2 ] }
+    StreamGroupTopN { order: [$expr2 DESC, orders.o_orderdate ASC], limit: 10, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [lineitem.l_orderkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2, orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority) as _vnode] }
+        └── StreamHashAgg { group_key: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority], aggs: [sum($expr1), count($expr1), count] } { tables: [ HashAggState: 2 ] }
             └── StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 2
@@ -694,11 +696,11 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, _vnode, _rw_timestamp ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ lineitem_l_orderkey, $expr2, orders_o_orderdate, orders_o_shippriority, _vnode, _rw_timestamp ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, _vnode, _rw_timestamp ], primary key: [ $4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 1, vnode column idx: 4 }
+    Table 1 { columns: [ lineitem_l_orderkey, $expr2, orders_o_orderdate, orders_o_shippriority, _vnode, _rw_timestamp ], primary key: [ $4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 1, vnode column idx: 4 }
 
-    Table 2 { columns: [ lineitem_l_orderkey, orders_o_orderdate, orders_o_shippriority, sum($expr1), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ lineitem_l_orderkey, orders_o_orderdate, orders_o_shippriority, sum($expr1), count($expr1), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4, 5 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 3 { columns: [ orders_o_orderkey, orders_o_orderdate, orders_o_shippriority, customer_c_custkey, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -944,12 +946,12 @@
                           └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [n_name, revenue], stream_key: [], pk_columns: [revenue], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [nation.n_name, sum($expr1)] }
-      └─StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 }
+    └─StreamProject { exprs: [nation.n_name, $expr2] }
+      └─StreamTopN { order: [$expr2 DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [nation.n_name, sum($expr1), Vnode(nation.n_name) as _vnode] }
-              └─StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
+          └─StreamGroupTopN { order: [$expr2 DESC], limit: 1, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [nation.n_name, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2, Vnode(nation.n_name) as _vnode] }
+              └─StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count($expr1), count] }
                 └─StreamExchange { dist: HashShard(nation.n_name) }
                   └─StreamProject { exprs: [nation.n_name, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, orders.o_custkey, lineitem.l_linenumber, lineitem.l_suppkey] }
                     └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey AND nation.n_nationkey = customer.c_nationkey, output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, orders.o_custkey, lineitem.l_linenumber, lineitem.l_suppkey, customer.c_nationkey] }
@@ -981,16 +983,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [n_name, revenue], stream_key: [], pk_columns: [revenue], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [nation.n_name, sum($expr1)] }
-        └── StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
+    └── StreamProject { exprs: [nation.n_name, $expr2] }
+        └── StreamTopN { order: [$expr2 DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [_vnode] }
-    ├── tables: [ GroupTopN: 1 ]
-    └── StreamProject { exprs: [nation.n_name, sum($expr1), Vnode(nation.n_name) as _vnode] }
-        └── StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
-            ├── tables: [ HashAggState: 2 ]
+    StreamGroupTopN { order: [$expr2 DESC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [nation.n_name, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2, Vnode(nation.n_name) as _vnode] }
+        └── StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count($expr1), count] } { tables: [ HashAggState: 2 ] }
             └── StreamExchange Hash([0]) from 2
 
     Fragment 2
@@ -1057,11 +1057,11 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ nation_n_name, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ nation_n_name, $expr2, _vnode, _rw_timestamp ], primary key: [ $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ nation_n_name, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
+    Table 1 { columns: [ nation_n_name, $expr2, _vnode, _rw_timestamp ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
-    Table 2 { columns: [ nation_n_name, sum($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ nation_n_name, sum($expr1), count($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ nation_n_nationkey, nation_n_name, region_r_regionkey, _rw_timestamp ], primary key: [ $0 ASC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 0 ], read pk prefix len hint: 2 }
 
@@ -1154,23 +1154,23 @@
             └─BatchScan { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(sum($expr1))] }
-      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), count] }
+    └─StreamProject { exprs: [Case((sum0(count($expr1)) = 0:Int64), null:Decimal, sum(sum($expr1))) as $expr2] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum0(count($expr1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum($expr1)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), count($expr1)] }
             └─StreamProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
               └─StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) AND (lineitem.l_discount >= 0.07:Decimal) AND (lineitem.l_discount <= 0.09:Decimal) AND (lineitem.l_quantity < 24:Decimal) }
                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(sum($expr1))] }
-        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), count] }
+    └── StreamProject { exprs: [Case((sum0(count($expr1)) = 0:Int64), null:Decimal, sum(sum($expr1))) as $expr2] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum0(count($expr1)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamStatelessSimpleAgg { aggs: [sum($expr1)] }
+    StreamStatelessSimpleAgg { aggs: [sum($expr1), count($expr1)] }
     └── StreamProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
         └── StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) AND (lineitem.l_discount >= 0.07:Decimal) AND (lineitem.l_discount <= 0.09:Decimal) AND (lineitem.l_quantity < 24:Decimal) }
             └── StreamTableScan { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
@@ -1178,7 +1178,7 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ sum(sum($expr1)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(sum($expr1)), sum0(count($expr1)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, l_orderkey, l_linenumber, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -1284,12 +1284,12 @@
                                     └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2)] }
+    └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, $expr3] }
       └─StreamTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, nation.n_name, $expr1) as _vnode] }
-              └─StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count] }
+            └─StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2)) as $expr3, Vnode(nation.n_name, nation.n_name, $expr1) as _vnode] }
+              └─StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count($expr2), count] }
                 └─StreamExchange { dist: HashShard(nation.n_name, nation.n_name, $expr1) }
                   └─StreamProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate) as $expr1, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr2, nation.n_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, nation.n_nationkey, customer.c_custkey] }
                     └─StreamFilter { predicate: (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar))) }
@@ -1318,14 +1318,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2)] }
+    └── StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, $expr3] }
         └── StreamTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamGroupTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, nation.n_name, $expr1) as _vnode] }
-        └── StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count] } { tables: [ HashAggState: 2 ] }
+    └── StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2)) as $expr3, Vnode(nation.n_name, nation.n_name, $expr1) as _vnode] }
+        └── StreamHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2), count($expr2), count] } { tables: [ HashAggState: 2 ] }
             └── StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 2
@@ -1388,11 +1388,11 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ nation_n_name, nation_n_name_0, $expr1, sum($expr2), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ nation_n_name, nation_n_name_0, $expr1, $expr3, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ nation_n_name, nation_n_name_0, $expr1, sum($expr2), _vnode, _rw_timestamp ], primary key: [ $4 ASC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 1, vnode column idx: 4 }
+    Table 1 { columns: [ nation_n_name, nation_n_name_0, $expr1, $expr3, _vnode, _rw_timestamp ], primary key: [ $4 ASC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 1, vnode column idx: 4 }
 
-    Table 2 { columns: [ nation_n_name, nation_n_name_0, $expr1, sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ nation_n_name, nation_n_name_0, $expr1, sum($expr2), count($expr2), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4, 5 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 3 { columns: [ nation_n_name, lineitem_l_orderkey, lineitem_l_extendedprice, lineitem_l_discount, lineitem_l_shipdate, nation_n_nationkey, supplier_s_suppkey, lineitem_l_linenumber, _rw_timestamp ], primary key: [ $1 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -1567,8 +1567,8 @@
       └─StreamTopN { order: [$expr1 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [$expr1, (sum($expr3) / sum($expr2)) as $expr4, Vnode($expr1) as _vnode] }
-              └─StreamHashAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2), count] }
+            └─StreamProject { exprs: [$expr1, (Case((count($expr3) = 0:Int64), null:Decimal, sum($expr3)) / Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2))) as $expr4, Vnode($expr1) as _vnode] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2), count($expr3), count($expr2), count] }
                 └─StreamExchange { dist: HashShard($expr1) }
                   └─StreamProject { exprs: [$expr1, Case((nation.n_name = 'IRAN':Varchar), $expr2, 0:Decimal) as $expr3, $expr2, region.r_regionkey, nation.n_nationkey, customer.c_custkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber] }
                     └─StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr2, nation.n_name, region.r_regionkey, nation.n_nationkey, customer.c_custkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -1614,11 +1614,9 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [_vnode] }
-    ├── tables: [ GroupTopN: 1 ]
-    └── StreamProject { exprs: [$expr1, (sum($expr3) / sum($expr2)) as $expr4, Vnode($expr1) as _vnode] }
-        └── StreamHashAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2), count] }
-            ├── tables: [ HashAggState: 2 ]
+    StreamGroupTopN { order: [$expr1 ASC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [$expr1, (Case((count($expr3) = 0:Int64), null:Decimal, sum($expr3)) / Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2))) as $expr4, Vnode($expr1) as _vnode] }
+        └── StreamHashAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2), count($expr3), count($expr2), count] } { tables: [ HashAggState: 2 ] }
             └── StreamExchange Hash([0]) from 2
 
     Fragment 2
@@ -1711,7 +1709,7 @@
 
     Table 1 { columns: [ $expr1, $expr4, _vnode, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
-    Table 2 { columns: [ $expr1, sum($expr3), sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr1, sum($expr3), sum($expr2), count($expr3), count($expr2), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ customer_c_custkey, region_r_regionkey, nation_n_nationkey, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1886,12 +1884,12 @@
                                   └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [], pk_columns: [nation, o_year], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [nation.n_name, $expr1, sum($expr2)] }
+    └─StreamProject { exprs: [nation.n_name, $expr1, $expr3] }
       └─StreamTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, $expr1) as _vnode] }
-              └─StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] }
+            └─StreamProject { exprs: [nation.n_name, $expr1, Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2)) as $expr3, Vnode(nation.n_name, $expr1) as _vnode] }
+              └─StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count($expr2), count] }
                 └─StreamExchange { dist: HashShard(nation.n_name, $expr1) }
                   └─StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, ((lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)) as $expr2, part.p_partkey, partsupp.ps_suppkey, nation.n_nationkey, orders.o_orderkey, lineitem.l_linenumber, partsupp.ps_partkey] }
                     └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey AND partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = supplier.s_suppkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, orders.o_orderdate, nation.n_name, part.p_partkey, partsupp.ps_suppkey, partsupp.ps_partkey, nation.n_nationkey, supplier.s_suppkey, orders.o_orderkey, lineitem.l_linenumber] }
@@ -1921,15 +1919,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [], pk_columns: [nation, o_year], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [nation.n_name, $expr1, sum($expr2)] }
+    └── StreamProject { exprs: [nation.n_name, $expr1, $expr3] }
         └── StreamTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [_vnode] }
-    ├── tables: [ GroupTopN: 1 ]
-    └── StreamProject { exprs: [nation.n_name, $expr1, sum($expr2), Vnode(nation.n_name, $expr1) as _vnode] }
-        └── StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] } { tables: [ HashAggState: 2 ] }
+    StreamGroupTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [nation.n_name, $expr1, Case((count($expr2) = 0:Int64), null:Decimal, sum($expr2)) as $expr3, Vnode(nation.n_name, $expr1) as _vnode] }
+        └── StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count($expr2), count] } { tables: [ HashAggState: 2 ] }
             └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -1990,11 +1987,11 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ nation_n_name, $expr1, sum($expr2), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ nation_n_name, $expr1, $expr3, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ nation_n_name, $expr1, sum($expr2), _vnode, _rw_timestamp ], primary key: [ $3 ASC, $0 ASC, $1 DESC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 1, vnode column idx: 3 }
+    Table 1 { columns: [ nation_n_name, $expr1, $expr3, _vnode, _rw_timestamp ], primary key: [ $3 ASC, $0 ASC, $1 DESC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 1, vnode column idx: 3 }
 
-    Table 2 { columns: [ nation_n_name, $expr1, sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ nation_n_name, $expr1, sum($expr2), count($expr2), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 3 { columns: [ part_p_partkey, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_ps_supplycost, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 4 }
 
@@ -2136,12 +2133,12 @@
                         └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_returnflag], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], stream_key: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
-      └─StreamTopN { order: [sum($expr1) DESC], limit: 20, offset: 0 }
+    └─StreamProject { exprs: [customer.c_custkey, customer.c_name, $expr2, customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
+      └─StreamTopN { order: [$expr2 DESC], limit: 20, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 20, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as _vnode] }
-              └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count] }
+          └─StreamGroupTopN { order: [$expr2 DESC], limit: 20, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [customer.c_custkey, customer.c_name, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2, customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as _vnode] }
+              └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count($expr1), count] }
                 └─StreamProject { exprs: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, (lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)) as $expr1, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber] }
                   └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber] }
                     ├─StreamExchange { dist: HashShard(customer.c_custkey) }
@@ -2163,14 +2160,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], stream_key: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
-        └── StreamTopN { order: [sum($expr1) DESC], limit: 20, offset: 0 } { tables: [ TopN: 0 ] }
+    └── StreamProject { exprs: [customer.c_custkey, customer.c_name, $expr2, customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
+        └── StreamTopN { order: [$expr2 DESC], limit: 20, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC], limit: 20, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as _vnode] }
-        └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count] } { tables: [ HashAggState: 2 ] }
+    StreamGroupTopN { order: [$expr2 DESC], limit: 20, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [customer.c_custkey, customer.c_name, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2, customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as _vnode] }
+        └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count($expr1), count] } { tables: [ HashAggState: 2 ] }
             └── StreamProject { exprs: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, (lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)) as $expr1, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber] }
                 └── StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber] }
                     ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
@@ -2212,22 +2209,17 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ customer_c_custkey, customer_c_name, sum($expr1), customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, _vnode, _rw_timestamp ]
-    ├── primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 0 { columns: [ customer_c_custkey, customer_c_name, $expr2, customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, _vnode, _rw_timestamp ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ customer_c_custkey, customer_c_name, sum($expr1), customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, _vnode, _rw_timestamp ]
+    ├── columns: [ customer_c_custkey, customer_c_name, $expr2, customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, _vnode, _rw_timestamp ]
     ├── primary key: [ $8 ASC, $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 8
 
-    Table 2 { columns: [ customer_c_custkey, customer_c_name, customer_c_acctbal, customer_c_phone, nation_n_name, customer_c_address, customer_c_comment, sum($expr1), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 7 }
+    Table 2 { columns: [ customer_c_custkey, customer_c_name, customer_c_acctbal, customer_c_phone, nation_n_name, customer_c_address, customer_c_comment, sum($expr1), count($expr1), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 7 }
 
     Table 3 { columns: [ nation_n_name, customer_c_custkey, customer_c_name, customer_c_address, customer_c_phone, customer_c_acctbal, customer_c_comment, nation_n_nationkey, _rw_timestamp ], primary key: [ $1 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -2360,14 +2352,14 @@
                         └─BatchScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [ps_partkey, value], stream_key: [], pk_columns: [value], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
-      └─StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 }
+    └─StreamProject { exprs: [partsupp.ps_partkey, $expr2] }
+      └─StreamTopN { order: [$expr2 DESC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1), Vnode(partsupp.ps_partkey) as _vnode] }
-              └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
-                ├─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
-                │ └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count] }
+          └─StreamGroupTopN { order: [$expr2 DESC], limit: 1, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [partsupp.ps_partkey, $expr2, Vnode(partsupp.ps_partkey) as _vnode] }
+              └─StreamDynamicFilter { predicate: ($expr2 > $expr4), output: [partsupp.ps_partkey, $expr2] }
+                ├─StreamProject { exprs: [partsupp.ps_partkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2] }
+                │ └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count($expr1), count] }
                 │   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                 │     └─StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr1, partsupp.ps_suppkey, supplier.s_nationkey] }
                 │       └─StreamShare { id: 9 }
@@ -2383,11 +2375,11 @@
                 │               └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
                 │                 └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], stream_scan_type: SnapshotBackfill, stream_key: [nation.n_nationkey], pk: [n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                 └─StreamExchange { dist: Broadcast }
-                  └─StreamProject { exprs: [(sum(sum($expr2)) * 0.0001000000:Decimal) as $expr3] }
-                    └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr2)), count] }
+                  └─StreamProject { exprs: [(Case((sum0(count($expr3)) = 0:Int64), null:Decimal, sum(sum($expr3))) * 0.0001000000:Decimal) as $expr4] }
+                    └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr3)), sum0(count($expr3)), count] }
                       └─StreamExchange { dist: Single }
-                        └─StreamStatelessSimpleAgg { aggs: [sum($expr2)] }
-                          └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_nationkey] }
+                        └─StreamStatelessSimpleAgg { aggs: [sum($expr3), count($expr3)] }
+                          └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr3, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_nationkey] }
                             └─StreamShare { id: 9 }
                               └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_nationkey, nation.n_nationkey] }
                                 ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
@@ -2403,18 +2395,17 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [ps_partkey, value], stream_key: [], pk_columns: [value], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
-        └── StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
+    └── StreamProject { exprs: [partsupp.ps_partkey, $expr2] }
+        └── StreamTopN { order: [$expr2 DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [sum($expr1) DESC], limit: 1, offset: 0, group_key: [_vnode] }
-    ├── tables: [ GroupTopN: 1 ]
-    └── StreamProject { exprs: [partsupp.ps_partkey, sum($expr1), Vnode(partsupp.ps_partkey) as _vnode] }
-        └── StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
+    StreamGroupTopN { order: [$expr2 DESC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [partsupp.ps_partkey, $expr2, Vnode(partsupp.ps_partkey) as _vnode] }
+        └── StreamDynamicFilter { predicate: ($expr2 > $expr4), output: [partsupp.ps_partkey, $expr2] }
             ├── tables: [ DynamicFilterLeft: 2, DynamicFilterRight: 3 ]
-            ├── StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
-            │   └── StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count] }
+            ├── StreamProject { exprs: [partsupp.ps_partkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2] }
+            │   └── StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count($expr1), count] }
             │       ├── tables: [ HashAggState: 4 ]
             │       └── StreamExchange Hash([0]) from 2
             └── StreamExchange Broadcast from 8
@@ -2454,24 +2445,24 @@
             └── BatchPlanNode
 
     Fragment 8
-    StreamProject { exprs: [(sum(sum($expr2)) * 0.0001000000:Decimal) as $expr3] }
-    └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr2)), count] } { tables: [ SimpleAggState: 16 ] }
+    StreamProject { exprs: [(Case((sum0(count($expr3)) = 0:Int64), null:Decimal, sum(sum($expr3))) * 0.0001000000:Decimal) as $expr4] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr3)), sum0(count($expr3)), count] } { tables: [ SimpleAggState: 16 ] }
         └── StreamExchange Single from 9
 
     Fragment 9
-    StreamStatelessSimpleAgg { aggs: [sum($expr2)] }
-    └── StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_nationkey] }
+    StreamStatelessSimpleAgg { aggs: [sum($expr3), count($expr3)] }
+    └── StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty::Decimal) as $expr3, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_nationkey] }
         └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ partsupp_ps_partkey, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ partsupp_ps_partkey, $expr2, _vnode, _rw_timestamp ], primary key: [ $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ partsupp_ps_partkey, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
+    Table 1 { columns: [ partsupp_ps_partkey, $expr2, _vnode, _rw_timestamp ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
-    Table 2 { columns: [ partsupp_ps_partkey, sum($expr1), _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+    Table 2 { columns: [ partsupp_ps_partkey, $expr2, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
-    Table 3 { columns: [ $expr3, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 3 { columns: [ $expr4, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4 { columns: [ partsupp_ps_partkey, sum($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ partsupp_ps_partkey, sum($expr1), count($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 5 { columns: [ partsupp_ps_partkey, partsupp_ps_availqty, partsupp_ps_supplycost, supplier_s_nationkey, partsupp_ps_suppkey, supplier_s_suppkey, _rw_timestamp ], primary key: [ $3 ASC, $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
 
@@ -2495,7 +2486,7 @@
 
     Table 15 { columns: [ vnode, epoch, row_count, is_epoch_finished, n_nationkey, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 16 { columns: [ sum(sum($expr2)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 16 { columns: [ sum(sum($expr3)), sum0(count($expr3)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ ps_partkey, value, _rw_timestamp ], primary key: [ $1 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
@@ -2564,12 +2555,12 @@
                       └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], stream_key: [], pk_columns: [l_shipmode], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
+    └─StreamProject { exprs: [lineitem.l_shipmode, $expr3, $expr4] }
       └─StreamTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2), Vnode(lineitem.l_shipmode) as _vnode] }
-              └─StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count] }
+            └─StreamProject { exprs: [lineitem.l_shipmode, Case((count($expr1) = 0:Int64), null:Int64, sum($expr1)) as $expr3, Case((count($expr2) = 0:Int64), null:Int64, sum($expr2)) as $expr4, Vnode(lineitem.l_shipmode) as _vnode] }
+              └─StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count($expr1), count($expr2), count] }
                 └─StreamExchange { dist: HashShard(lineitem.l_shipmode) }
                   └─StreamProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr2, orders.o_orderkey, lineitem.l_linenumber] }
                     └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, lineitem.l_shipmode, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -2582,14 +2573,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], stream_key: [], pk_columns: [l_shipmode], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
+    └── StreamProject { exprs: [lineitem.l_shipmode, $expr3, $expr4] }
         └── StreamTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamGroupTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2), Vnode(lineitem.l_shipmode) as _vnode] }
-        └── StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count] } { tables: [ HashAggState: 2 ] }
+    └── StreamProject { exprs: [lineitem.l_shipmode, Case((count($expr1) = 0:Int64), null:Int64, sum($expr1)) as $expr3, Case((count($expr2) = 0:Int64), null:Int64, sum($expr2)) as $expr4, Vnode(lineitem.l_shipmode) as _vnode] }
+        └── StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count($expr1), count($expr2), count] } { tables: [ HashAggState: 2 ] }
             └── StreamExchange Hash([0]) from 2
 
     Fragment 2
@@ -2611,11 +2602,11 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ lineitem_l_shipmode, sum($expr1), sum($expr2), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ lineitem_l_shipmode, $expr3, $expr4, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ lineitem_l_shipmode, sum($expr1), sum($expr2), _vnode, _rw_timestamp ], primary key: [ $3 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 3 }
+    Table 1 { columns: [ lineitem_l_shipmode, $expr3, $expr4, _vnode, _rw_timestamp ], primary key: [ $3 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 3 }
 
-    Table 2 { columns: [ lineitem_l_shipmode, sum($expr1), sum($expr2), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ lineitem_l_shipmode, sum($expr1), sum($expr2), count($expr1), count($expr2), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ orders_o_orderkey, orders_o_orderpriority, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2809,10 +2800,10 @@
                     └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / sum(sum($expr2))) as $expr3] }
-      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum($expr2)), count] }
+    └─StreamProject { exprs: [((100.00:Decimal * Case((sum0(count($expr1)) = 0:Int64), null:Decimal, sum(sum($expr1)))) / Case((sum0(count($expr2)) = 0:Int64), null:Decimal, sum(sum($expr2)))) as $expr3] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum($expr2)), sum0(count($expr1)), sum0(count($expr2)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum($expr2)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum($expr2), count($expr1), count($expr2)] }
             └─StreamProject { exprs: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)), 0:Decimal) as $expr1, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr2, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
               └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_extendedprice, lineitem.l_discount, part.p_type, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey] }
                 ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
@@ -2824,13 +2815,12 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / sum(sum($expr2))) as $expr3] }
-        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum($expr2)), count] }
-            ├── tables: [ SimpleAggState: 0 ]
+    └── StreamProject { exprs: [((100.00:Decimal * Case((sum0(count($expr1)) = 0:Int64), null:Decimal, sum(sum($expr1)))) / Case((sum0(count($expr2)) = 0:Int64), null:Decimal, sum(sum($expr2)))) as $expr3] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum($expr2)), sum0(count($expr1)), sum0(count($expr2)), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamStatelessSimpleAgg { aggs: [sum($expr1), sum($expr2)] }
+    StreamStatelessSimpleAgg { aggs: [sum($expr1), sum($expr2), count($expr1), count($expr2)] }
     └── StreamProject { exprs: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)), 0:Decimal) as $expr1, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr2, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
         └── StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_extendedprice, lineitem.l_discount, part.p_type, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey] }
             ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
@@ -2850,7 +2840,7 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ sum(sum($expr1)), sum(sum($expr2)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(sum($expr1)), sum(sum($expr2)), sum0(count($expr1)), sum0(count($expr2)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ lineitem_l_partkey, lineitem_l_extendedprice, lineitem_l_discount, lineitem_l_orderkey, lineitem_l_linenumber, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2938,32 +2928,32 @@
             └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
   stream_plan: |-
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue], stream_key: [], pk_columns: [s_suppkey], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
+    └─StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2] }
       └─StreamTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), Vnode(sum($expr1)) as _vnode] }
-              └─StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
-                ├─StreamExchange { dist: HashShard(sum($expr1)) }
-                │ └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
+            └─StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2, Vnode($expr2) as _vnode] }
+              └─StreamHashJoin { type: Inner, predicate: $expr2 = max(max($expr2)), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2] }
+                ├─StreamExchange { dist: HashShard($expr2) }
+                │ └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2, lineitem.l_suppkey] }
                 │   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
                 │   │ └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], stream_scan_type: SnapshotBackfill, stream_key: [supplier.s_suppkey], pk: [s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                 │   └─StreamShare { id: 7 }
-                │     └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-                │       └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count] }
+                │     └─StreamProject { exprs: [lineitem.l_suppkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2] }
+                │       └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count($expr1), count] }
                 │         └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
                 │           └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
                 │             └─StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < '1993-04-01 00:00:00':Timestamp) }
                 │               └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                └─StreamExchange { dist: HashShard(max(max(sum($expr1)))) }
-                  └─StreamProject { exprs: [max(max(sum($expr1)))] }
-                    └─StreamSimpleAgg { aggs: [max(max(sum($expr1))), count] }
+                └─StreamExchange { dist: HashShard(max(max($expr2))) }
+                  └─StreamProject { exprs: [max(max($expr2))] }
+                    └─StreamSimpleAgg { aggs: [max(max($expr2)), count] }
                       └─StreamExchange { dist: Single }
-                        └─StreamHashAgg { group_key: [_vnode], aggs: [max(sum($expr1)), count] }
-                          └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as _vnode] }
+                        └─StreamHashAgg { group_key: [_vnode], aggs: [max($expr2), count] }
+                          └─StreamProject { exprs: [lineitem.l_suppkey, $expr2, Vnode(lineitem.l_suppkey) as _vnode] }
                             └─StreamShare { id: 7 }
-                              └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-                                └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count] }
+                              └─StreamProject { exprs: [lineitem.l_suppkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2] }
+                                └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count($expr1), count] }
                                   └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
                                     └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
                                       └─StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < '1993-04-01 00:00:00':Timestamp) }
@@ -2971,20 +2961,20 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue], stream_key: [], pk_columns: [s_suppkey], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
+    └── StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2] }
         └── StreamTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamGroupTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), Vnode(sum($expr1)) as _vnode] }
-        └── StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
+    └── StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2, Vnode($expr2) as _vnode] }
+        └── StreamHashJoin { type: Inner, predicate: $expr2 = max(max($expr2)), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2] }
             ├── tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ]
             ├── StreamExchange Hash([4]) from 2
             └── StreamExchange Hash([0]) from 6
 
     Fragment 2
-    StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
+    StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, $expr2, lineitem.l_suppkey] }
     ├── tables: [ HashJoinLeft: 6, HashJoinDegreeLeft: 7, HashJoinRight: 8, HashJoinDegreeRight: 9 ]
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange NoShuffle from 4
@@ -2996,8 +2986,8 @@
     └── BatchPlanNode
 
     Fragment 4
-    StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-    └── StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count] } { tables: [ HashAggState: 11 ] }
+    StreamProject { exprs: [lineitem.l_suppkey, Case((count($expr1) = 0:Int64), null:Decimal, sum($expr1)) as $expr2] }
+    └── StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1), count($expr1), count] } { tables: [ HashAggState: 11 ] }
         └── StreamExchange Hash([0]) from 5
 
     Fragment 5
@@ -3009,48 +2999,48 @@
             └── BatchPlanNode
 
     Fragment 6
-    StreamProject { exprs: [max(max(sum($expr1)))] }
-    └── StreamSimpleAgg { aggs: [max(max(sum($expr1))), count] } { tables: [ SimpleAggState: 14, SimpleAggCall0: 13 ] }
+    StreamProject { exprs: [max(max($expr2))] }
+    └── StreamSimpleAgg { aggs: [max(max($expr2)), count] } { tables: [ SimpleAggState: 14, SimpleAggCall0: 13 ] }
         └── StreamExchange Single from 7
 
     Fragment 7
-    StreamHashAgg { group_key: [_vnode], aggs: [max(sum($expr1)), count] } { tables: [ HashAggState: 16, HashAggCall0: 15 ] }
-    └── StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as _vnode] }
+    StreamHashAgg { group_key: [_vnode], aggs: [max($expr2), count] } { tables: [ HashAggState: 16, HashAggCall0: 15 ] }
+    └── StreamProject { exprs: [lineitem.l_suppkey, $expr2, Vnode(lineitem.l_suppkey) as _vnode] }
         └── StreamExchange NoShuffle from 4
 
-    Table 0 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, $expr2, _vnode, _rw_timestamp ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $5 ASC, $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 4 ], read pk prefix len hint: 1, vnode column idx: 5 }
+    Table 1 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, $expr2, _vnode, _rw_timestamp ], primary key: [ $5 ASC, $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 4 ], read pk prefix len hint: 1, vnode column idx: 5 }
 
-    Table 2 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr1), lineitem_l_suppkey, _rw_timestamp ], primary key: [ $4 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, $expr2, lineitem_l_suppkey, _rw_timestamp ], primary key: [ $4 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ sum($expr1), supplier_s_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr2, supplier_s_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ max(max(sum($expr1))), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ max(max($expr2)), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ max(max(sum($expr1))), _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ max(max($expr2)), _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6 { columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ supplier_s_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ lineitem_l_suppkey, sum($expr1), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ lineitem_l_suppkey, $expr2, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 9 { columns: [ lineitem_l_suppkey, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 10 { columns: [ vnode, epoch, row_count, is_epoch_finished, s_suppkey, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 11 { columns: [ lineitem_l_suppkey, sum($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ lineitem_l_suppkey, sum($expr1), count($expr1), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 12 { columns: [ vnode, epoch, row_count, is_epoch_finished, l_orderkey, l_linenumber, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 13 { columns: [ max(sum($expr1)), _vnode, _rw_timestamp ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 13 { columns: [ max($expr2), _vnode, _rw_timestamp ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 14 { columns: [ max(max(sum($expr1))), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 14 { columns: [ max(max($expr2)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 15 { columns: [ _vnode, sum($expr1), lineitem_l_suppkey, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 15 { columns: [ _vnode, $expr2, lineitem_l_suppkey, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 16 { columns: [ _vnode, max(sum($expr1)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 16 { columns: [ _vnode, max($expr2), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ s_suppkey, s_name, s_address, s_phone, total_revenue, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 1 }
 
@@ -3300,10 +3290,10 @@
                       └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal) as $expr2] }
-      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
+    └─StreamProject { exprs: [(Case((sum0(count(lineitem.l_extendedprice)) = 0:Int64), null:Decimal, sum(sum(lineitem.l_extendedprice))) / 7.0:Decimal) as $expr2] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(lineitem.l_extendedprice)), sum0(count(lineitem.l_extendedprice)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice)] }
             └─StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, part.p_partkey] }
               └─StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
                 └─StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
@@ -3315,7 +3305,7 @@
                   │     └─StreamProject { exprs: [part.p_partkey] }
                   │       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
                   │         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], stream_scan_type: SnapshotBackfill, stream_key: [part.p_partkey], pk: [p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-                  └─StreamProject { exprs: [part.p_partkey, (0.2:Decimal * Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal))) as $expr1] }
+                  └─StreamProject { exprs: [part.p_partkey, (0.2:Decimal * Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, (Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) / count(lineitem.l_quantity)::Decimal))) as $expr1] }
                     └─StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
                       └─StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                         ├─StreamExchange { dist: HashShard(part.p_partkey) }
@@ -3330,18 +3320,18 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [(sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal) as $expr2] }
-        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
+    └── StreamProject { exprs: [(Case((sum0(count(lineitem.l_extendedprice)) = 0:Int64), null:Decimal, sum(sum(lineitem.l_extendedprice))) / 7.0:Decimal) as $expr2] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(lineitem.l_extendedprice)), sum0(count(lineitem.l_extendedprice)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamStatelessSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
+    StreamStatelessSimpleAgg { aggs: [sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice)] }
     └── StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, part.p_partkey] }
         └── StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
             └── StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
                 ├── StreamExchange Hash([2]) from 2
-                └── StreamProject { exprs: [part.p_partkey, (0.2:Decimal * Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal))) as $expr1] }
+                └── StreamProject { exprs: [part.p_partkey, (0.2:Decimal * Case((count(lineitem.l_quantity) = 0:Int32), null:Decimal, (Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) / count(lineitem.l_quantity)::Decimal))) as $expr1] }
                     └── StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] } { tables: [ HashAggState: 11 ] }
                         └── StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                             ├── tables: [ HashJoinLeft: 12, HashJoinDegreeLeft: 13, HashJoinRight: 14, HashJoinDegreeRight: 15 ]
@@ -3383,7 +3373,7 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ sum(sum(lineitem_l_extendedprice)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(sum(lineitem_l_extendedprice)), sum0(count(lineitem_l_extendedprice)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ lineitem_l_quantity, lineitem_l_extendedprice, part_p_partkey, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_l_partkey, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
@@ -3513,12 +3503,12 @@
                     └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
+    └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, $expr2] }
       └─StreamTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey) as _vnode] }
-              └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count] }
+            └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr2, Vnode(orders.o_orderkey) as _vnode] }
+              └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
                 └─StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, lineitem.l_linenumber] }
                   ├─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                   │ ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
@@ -3530,22 +3520,22 @@
                   │ └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                   │   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                   └─StreamProject { exprs: [lineitem.l_orderkey] }
-                    └─StreamFilter { predicate: (sum(lineitem.l_quantity) > 1:Decimal) }
-                      └─StreamProject { exprs: [lineitem.l_orderkey, sum(lineitem.l_quantity)] }
-                        └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity), count] }
+                    └─StreamFilter { predicate: ($expr1 > 1:Decimal) }
+                      └─StreamProject { exprs: [lineitem.l_orderkey, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr1] }
+                        └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
                           └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                             └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey, lineitem.l_linenumber], pk: [l_orderkey, l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
+    └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, $expr2] }
         └── StreamTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey) as _vnode] }
-        └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count] } { tables: [ HashAggState: 2 ] }
+    └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr2, Vnode(orders.o_orderkey) as _vnode] }
+        └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] } { tables: [ HashAggState: 2 ] }
             └── StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, lineitem.l_linenumber] }
                 ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
                 ├── StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -3553,9 +3543,9 @@
                 │   ├── StreamExchange Hash([2]) from 2
                 │   └── StreamExchange Hash([0]) from 5
                 └── StreamProject { exprs: [lineitem.l_orderkey] }
-                    └── StreamFilter { predicate: (sum(lineitem.l_quantity) > 1:Decimal) }
-                        └── StreamProject { exprs: [lineitem.l_orderkey, sum(lineitem.l_quantity)] }
-                            └── StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity), count] } { tables: [ HashAggState: 18 ] }
+                    └── StreamFilter { predicate: ($expr1 > 1:Decimal) }
+                        └── StreamProject { exprs: [lineitem.l_orderkey, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr1] }
+                            └── StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] } { tables: [ HashAggState: 18 ] }
                                 └── StreamExchange Hash([0]) from 6
 
     Fragment 2
@@ -3587,22 +3577,22 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, sum(lineitem_l_quantity), _vnode, _rw_timestamp ]
-    ├── primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 0 { columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, $expr2, _vnode, _rw_timestamp ], primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, sum(lineitem_l_quantity), _vnode, _rw_timestamp ]
+    ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, $expr2, _vnode, _rw_timestamp ]
     ├── primary key: [ $6 ASC, $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 6
 
-    Table 2 { columns: [ customer_c_custkey, customer_c_name, orders_o_orderkey, orders_o_totalprice, orders_o_orderdate, sum(lineitem_l_quantity), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5, 6 ], distribution key: [ 2 ], read pk prefix len hint: 5 }
+    Table 2
+    ├── columns: [ customer_c_custkey, customer_c_name, orders_o_orderkey, orders_o_totalprice, orders_o_orderdate, sum(lineitem_l_quantity), count(lineitem_l_quantity), count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 5, 6, 7 ]
+    ├── distribution key: [ 2 ]
+    └── read pk prefix len hint: 5
 
     Table 3
     ├── columns: [ customer_c_custkey, customer_c_name, orders_o_orderkey, orders_o_totalprice, orders_o_orderdate, lineitem_l_quantity, lineitem_l_orderkey, lineitem_l_linenumber, _rw_timestamp ]
@@ -3639,7 +3629,7 @@
 
     Table 17 { columns: [ vnode, epoch, row_count, is_epoch_finished, l_orderkey, l_linenumber, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 18 { columns: [ lineitem_l_orderkey, sum(lineitem_l_quantity), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 18 { columns: [ lineitem_l_orderkey, sum(lineitem_l_quantity), count(lineitem_l_quantity), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 19 { columns: [ vnode, epoch, row_count, is_epoch_finished, l_orderkey, l_linenumber, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -3710,10 +3700,10 @@
                   └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipinstruct, lineitem.l_shipmode], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(sum($expr1))] }
-      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), count] }
+    └─StreamProject { exprs: [Case((sum0(count($expr1)) = 0:Int64), null:Decimal, sum(sum($expr1))) as $expr2] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum0(count($expr1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum($expr1)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), count($expr1)] }
             └─StreamProject { exprs: [(lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
               └─StreamFilter { predicate: ((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ((lineitem.l_quantity >= 1:Decimal) AND (lineitem.l_quantity <= 11:Decimal))) AND (part.p_size <= 5:Int32)) OR ((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ((lineitem.l_quantity >= 30:Decimal) AND (lineitem.l_quantity <= 40:Decimal))) AND (part.p_size <= 10:Int32))) OR ((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ((lineitem.l_quantity >= 10:Decimal) AND (lineitem.l_quantity <= 20:Decimal))) AND (part.p_size <= 15:Int32))) }
                 └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
@@ -3727,13 +3717,13 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(sum($expr1))] }
-        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), count] }
+    └── StreamProject { exprs: [Case((sum0(count($expr1)) = 0:Int64), null:Decimal, sum(sum($expr1))) as $expr2] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum0(count($expr1)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamStatelessSimpleAgg { aggs: [sum($expr1)] }
+    StreamStatelessSimpleAgg { aggs: [sum($expr1), count($expr1)] }
     └── StreamProject { exprs: [(lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
         └── StreamFilter { predicate: ((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ((lineitem.l_quantity >= 1:Decimal) AND (lineitem.l_quantity <= 11:Decimal))) AND (part.p_size <= 5:Int32)) OR ((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ((lineitem.l_quantity >= 30:Decimal) AND (lineitem.l_quantity <= 40:Decimal))) AND (part.p_size <= 10:Int32))) OR ((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ((lineitem.l_quantity >= 10:Decimal) AND (lineitem.l_quantity <= 20:Decimal))) AND (part.p_size <= 15:Int32))) }
             └── StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
@@ -3753,7 +3743,7 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ sum(sum($expr1)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(sum($expr1)), sum0(count($expr1)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ lineitem_l_partkey, lineitem_l_quantity, lineitem_l_extendedprice, lineitem_l_discount, lineitem_l_orderkey, lineitem_l_linenumber, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -3855,8 +3845,8 @@
                     │       ├─StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     │       │ └─StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty::Decimal as $expr1] }
                     │       │   └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], stream_scan_type: SnapshotBackfill, stream_key: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [ps_partkey, ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                    │       └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, (0.5:Decimal * sum(lineitem.l_quantity)) as $expr2] }
-                    │         └─StreamHashAgg { group_key: [lineitem.l_partkey, lineitem.l_suppkey], aggs: [sum(lineitem.l_quantity), count] }
+                    │       └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, (0.5:Decimal * Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity))) as $expr2] }
+                    │         └─StreamHashAgg { group_key: [lineitem.l_partkey, lineitem.l_suppkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
                     │           └─StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                     │             └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                     │               └─StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) }
@@ -3909,8 +3899,8 @@
     └── StreamFilter { predicate: ($expr1 > $expr2) }
         └── StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey, output: all } { tables: [ HashJoinLeft: 16, HashJoinDegreeLeft: 17, HashJoinRight: 18, HashJoinDegreeRight: 19 ] }
             ├── StreamExchange Hash([0, 1]) from 7
-            └── StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, (0.5:Decimal * sum(lineitem.l_quantity)) as $expr2] }
-                └── StreamHashAgg { group_key: [lineitem.l_partkey, lineitem.l_suppkey], aggs: [sum(lineitem.l_quantity), count] } { tables: [ HashAggState: 21 ] }
+            └── StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, (0.5:Decimal * Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity))) as $expr2] }
+                └── StreamHashAgg { group_key: [lineitem.l_partkey, lineitem.l_suppkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] } { tables: [ HashAggState: 21 ] }
                     └── StreamExchange Hash([0, 1]) from 8
 
     Fragment 7
@@ -3977,7 +3967,7 @@
 
     Table 20 { columns: [ vnode, epoch, row_count, is_epoch_finished, ps_partkey, ps_suppkey, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 21 { columns: [ lineitem_l_partkey, lineitem_l_suppkey, sum(lineitem_l_quantity), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 21 { columns: [ lineitem_l_partkey, lineitem_l_suppkey, sum(lineitem_l_quantity), count(lineitem_l_quantity), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 22 { columns: [ vnode, epoch, row_count, is_epoch_finished, l_orderkey, l_linenumber, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -4362,12 +4352,12 @@
                             └─BatchScan { table: customer, columns: [customer.c_acctbal, customer.c_phone], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [cntrycode, numcust, totacctbal], stream_key: [], pk_columns: [cntrycode], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr2, count, sum(customer.c_acctbal)] }
+    └─StreamProject { exprs: [$expr2, count, $expr3] }
       └─StreamTopN { order: [$expr2 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [$expr2 ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [$expr2, count, sum(customer.c_acctbal), Vnode($expr2) as _vnode] }
-              └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_acctbal)] }
+            └─StreamProject { exprs: [$expr2, count, Case((count(customer.c_acctbal) = 0:Int64), null:Decimal, sum(customer.c_acctbal)) as $expr3, Vnode($expr2) as _vnode] }
+              └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_acctbal), count(customer.c_acctbal)] }
                 └─StreamExchange { dist: HashShard($expr2) }
                   └─StreamProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32) as $expr2, customer.c_acctbal, customer.c_custkey] }
                     └─StreamDynamicFilter { predicate: (customer.c_acctbal > $expr1), output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
@@ -4378,7 +4368,7 @@
                       │ └─StreamExchange { dist: HashShard(orders.o_custkey) }
                       │   └─StreamTableScan { table: orders, columns: [orders.o_custkey, orders.o_orderkey], stream_scan_type: SnapshotBackfill, stream_key: [orders.o_orderkey], pk: [o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                       └─StreamExchange { dist: Broadcast }
-                        └─StreamProject { exprs: [Case((sum0(count(customer.c_acctbal)) = 0:Int32), null:Decimal, (sum(sum(customer.c_acctbal)) / sum0(count(customer.c_acctbal))::Decimal)) as $expr1] }
+                        └─StreamProject { exprs: [Case((sum0(count(customer.c_acctbal)) = 0:Int32), null:Decimal, (Case((sum0(count(customer.c_acctbal)) = 0:Int64), null:Decimal, sum(sum(customer.c_acctbal))) / sum0(count(customer.c_acctbal))::Decimal)) as $expr1] }
                           └─StreamSimpleAgg [append_only] { aggs: [sum(sum(customer.c_acctbal)), sum0(count(customer.c_acctbal)), count] }
                             └─StreamExchange { dist: Single }
                               └─StreamStatelessSimpleAgg { aggs: [sum(customer.c_acctbal), count(customer.c_acctbal)] }

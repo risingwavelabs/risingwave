@@ -20,7 +20,9 @@ import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
+import io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
+import io.debezium.heartbeat.DatabaseHeartbeatImpl;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -55,8 +57,6 @@ public class DbzConnectorConfig {
     public static final String DB_NAME = "database.name";
     public static final String TABLE_NAME = "table.name";
 
-    public static final String DB_SERVERS = "database.servers";
-
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
     public static final String MYSQL_SSL_MODE = "ssl.mode";
@@ -74,14 +74,26 @@ public class DbzConnectorConfig {
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
     public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
+    /* Oracle configs */
+    public static final String ORACLE_PDB_NAME = "database.pdb.name";
+    public static final String ORACLE_SCHEMA_NAME = "schema.name";
+    public static final String ORACLE_HEARTBEAT_TABLE_NAME = "heartbeat.table.name";
+
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
+    private static final String MARIADB_CONFIG_FILE = "risingwave-mariadb.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
     private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
     private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
+    private static final String ORACLE_CONFIG_FILE = "oracle.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
+
+    public static final String HEARTBEAT_ACTION_QUERY_KEY =
+            DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
+    public static final String HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY =
+            "heartbeat.table.auto.initialize";
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
@@ -143,6 +155,30 @@ public class DbzConnectorConfig {
         return waitStreamingStartTimeout;
     }
 
+    public static String normalizeMariaDbSslMode(String sslMode) {
+        return switch (sslMode) {
+            case "disabled" -> "disable";
+            case "preferred" ->
+                    throw new IllegalArgumentException(
+                            "MariaDB CDC does not support ssl.mode 'preferred'; use 'required',"
+                                    + " 'verify-ca', or 'verify-full'");
+            case "required" -> "trust";
+            default -> sslMode;
+        };
+    }
+
+    public static String mariaDbSslMode(Map<String, String> userProps) {
+        return normalizeMariaDbSslMode(
+                userProps.getOrDefault(
+                        MYSQL_SSL_MODE,
+                        userProps.getOrDefault("debezium.database.sslmode", "disabled")));
+    }
+
+    public static String mariaDbSslRootCert(Map<String, String> userProps) {
+        return userProps.getOrDefault(
+                "ssl.root.cert", userProps.get("debezium.database.sslrootcert"));
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
@@ -163,7 +199,8 @@ public class DbzConnectorConfig {
                         userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "60"));
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}, waitStreamingStartTimeout={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={},"
+                        + " isCdcBackfill={}, isCdcSourceJob={}, waitStreamingStartTimeout={}",
                 source,
                 sourceId,
                 startOffset,
@@ -172,8 +209,21 @@ public class DbzConnectorConfig {
                 isCdcSourceJob,
                 waitStreamingStartTimeout);
 
-        if (source == SourceTypeE.MYSQL) {
-            var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
+        if (source == SourceTypeE.MYSQL || source == SourceTypeE.MARIADB) {
+            var mysqlProps =
+                    initiateDbConfig(
+                            source == SourceTypeE.MARIADB ? MARIADB_CONFIG_FILE : MYSQL_CONFIG_FILE,
+                            substitutor);
+
+            if (source == SourceTypeE.MARIADB) {
+                mysqlProps.setProperty("database.ssl.mode", mariaDbSslMode(userProps));
+                var rootCert = mariaDbSslRootCert(userProps);
+                if (rootCert != null) {
+                    mysqlProps.setProperty("driver.serverSslCert", rootCert);
+                    mysqlProps.setProperty(
+                            MariaDbStreamingChangeEventSource.SSL_ROOT_CERT_CONFIG, rootCert);
+                }
+            }
 
             // Enable schema history for all MySQL CDC modes to handle schema changes properly
             mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
@@ -275,28 +325,6 @@ public class DbzConnectorConfig {
             if (userProps.containsKey(PG_SSL_ROOT_CERT)) {
                 dbzProps.setProperty("database.sslrootcert", userProps.get(PG_SSL_ROOT_CERT));
             }
-        } else if (source == SourceTypeE.CITUS) {
-            var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
-
-            // citus needs all_tables publication to capture all shards
-            postgresProps.setProperty("publication.autocreate.mode", "all_tables");
-
-            // disable publication auto creation if needed
-            var pubAutoCreate =
-                    Boolean.parseBoolean(
-                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
-
-            if (!pubAutoCreate) {
-                postgresProps.setProperty("publication.autocreate.mode", "disabled");
-            }
-            // if snapshot phase is finished and offset is specified, we will continue reading
-            // changes from the given offset
-            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                postgresProps.setProperty("snapshot.mode", "no_data");
-                postgresProps.setProperty(
-                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-            }
-            dbzProps.putAll(postgresProps);
         } else if (source == SourceTypeE.MONGODB) {
             var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
 
@@ -325,7 +353,9 @@ public class DbzConnectorConfig {
                                             MongoDbConnectorConfig.FiltersMatchMode.LITERAL
                                                     .getValue());
                                     LOG.info(
-                                            "Inferred MongoDB database include list '{}' and literal filter match mode from collection list '{}'",
+                                            "Inferred MongoDB database include list '{}' and"
+                                                    + " literal filter match mode from collection list"
+                                                    + " '{}'",
                                             databaseList,
                                             collection);
                                 });
@@ -370,6 +400,19 @@ public class DbzConnectorConfig {
                 LOG.info("Disable table filtering for the shared Sql Server source");
                 dbzProps.remove("table.include.list");
             }
+        } else if (source == SourceTypeE.ORACLE) {
+            var oracleProps = initiateDbConfig(ORACLE_CONFIG_FILE, substitutor);
+            var heartbeatTable =
+                    OracleHeartbeatTable.parse(userProps.get(ORACLE_HEARTBEAT_TABLE_NAME));
+            oracleProps.setProperty(
+                    DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME,
+                    heartbeatTable.actionQuery());
+            dbzProps.putAll(oracleProps);
+            if (isCdcSourceJob) {
+                // A shared Oracle source captures tables from multiple schemas in one PDB.
+                LOG.info("Disable table filtering for the shared Oracle source");
+                dbzProps.remove("table.include.list");
+            }
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
@@ -381,7 +424,6 @@ public class DbzConnectorConfig {
         // Calculate max.queue.size.in.bytes based on JVM heap size and ratio
         calculateAndSetMaxQueueSizeInBytes(dbzProps);
 
-        LOG.info("Final Debezium properties: {}", dbzProps);
         LOG.info(
                 "Debezium max.queue.size.in.bytes: {} bytes ({} MB)",
                 dbzProps.getProperty("max.queue.size.in.bytes", "not set"),
@@ -458,7 +500,8 @@ public class DbzConnectorConfig {
             // User did not specify ratio, do nothing
             // Debezium will use its default max.queue.size from debezium.properties
             LOG.info(
-                    "Debezium {} not specified, skipping calculating and setting max.queue.size.in.bytes calculation",
+                    "Debezium {} not specified, skipping calculating and setting"
+                            + " max.queue.size.in.bytes calculation",
                     QUEUE_MAX_MEMORY_RATIO);
             return;
         }

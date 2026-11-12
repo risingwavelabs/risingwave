@@ -103,7 +103,7 @@ SELECT * FROM mv_up;
 2
 3
 
-query I rowsort retry 15 backoff 1s
+query I rowsort retry 30 backoff 2s
 SELECT * FROM mv_batch;
 ----
 1

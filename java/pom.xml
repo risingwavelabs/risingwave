@@ -65,11 +65,12 @@
         <!-- dependency versions -->
         <protobuf.version>3.25.8</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
         <grpc.version>1.75.0</grpc.version>
-        <log4j.version>2.25.4</log4j.version>
+        <log4j.version>2.25.5</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
-        <debezium.version>3.2.4.Final</debezium.version>
+        <debezium.version>3.2.4.Final-rw-SNAPSHOT</debezium.version>
+        <oracle.jdbc.version>21.15.0.0</oracle.jdbc.version>
         <bouncycastle.version>1.84</bouncycastle.version>
-        <jackson.version>2.22.1</jackson.version>
+        <jackson.version>2.22.4</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <!-- Iceberg's HiveCatalog is compiled against Hive 2.3.x. -->
         <hive.version>2.3.10</hive.version>
@@ -77,6 +78,7 @@
         <aws.version>2.32.19</aws.version>
         <jetty.version>12.0.35</jetty.version>
         <parquet.version>1.15.1</parquet.version>
+        <arrow.version>18.3.0</arrow.version>
     </properties>
 
     <dependencyManagement>
@@ -85,6 +87,13 @@
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-bom</artifactId>
                 <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.arrow</groupId>
+                <artifactId>arrow-bom</artifactId>
+                <version>${arrow.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -169,6 +178,11 @@
             </dependency>
             <dependency>
                 <groupId>io.debezium</groupId>
+                <artifactId>debezium-connector-mariadb</artifactId>
+                <version>${debezium.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.debezium</groupId>
                 <artifactId>debezium-connector-mongodb</artifactId>
                 <version>${debezium.version}</version>
             </dependency>
@@ -176,6 +190,21 @@
                 <groupId>io.debezium</groupId>
                 <artifactId>debezium-connector-sqlserver</artifactId>
                 <version>${debezium.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.debezium</groupId>
+                <artifactId>debezium-connector-oracle</artifactId>
+                <version>${debezium.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.oracle.database.jdbc</groupId>
+                <artifactId>ojdbc11</artifactId>
+                <version>${oracle.jdbc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.oracle.database.jdbc</groupId>
+                <artifactId>ucp11</artifactId>
+                <version>${oracle.jdbc.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.postgresql</groupId>
@@ -310,7 +339,7 @@
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
-                <version>33.4.8-jre</version>
+                <version>33.7.2-jre</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.httpcomponents</groupId>
@@ -377,7 +406,7 @@
             <dependency>
                 <groupId>org.xerial.snappy</groupId>
                 <artifactId>snappy-java</artifactId>
-                <version>1.1.10.8</version>
+                <version>1.1.10.12</version>
             </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
@@ -388,6 +417,12 @@
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>mysql</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>mariadb</artifactId>
                 <version>${testcontainers.version}</version>
                 <scope>test</scope>
             </dependency>
@@ -535,7 +570,7 @@
                 </executions>
                 <configuration>
                     <excludePackageNames>
-                        com.risingwave.connector.*:io.debezium.*:com.risingwave.connector.cdc.debezium.*
+                        com.risingwave.connector.*:com.risingwave.connector.cdc.debezium.*
                     </excludePackageNames>
                 </configuration>
             </plugin>

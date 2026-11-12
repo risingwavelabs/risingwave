@@ -43,7 +43,8 @@ pub struct StreamingConfig {
     pub snapshot_backfill_finish_max_lagged_barriers: usize,
 
     /// The multiplier applied to `in_flight_barrier_nums` when limiting pending barriers in a
-    /// snapshot backfill partial graph. A value of 0 is treated as 1.
+    /// snapshot backfill partial graph. A value of 0 is treated as 1. The resulting limit must
+    /// be at least 2, so that queued catch-up barriers can still drain.
     #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
     pub snapshot_backfill_barrier_amplification_factor: usize,
 
@@ -263,6 +264,14 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::iceberg_fetch_batch_size")]
     pub iceberg_fetch_batch_size: u64,
 
+    /// `IcebergUpdateListExecutor`: A `streaming_updates` phase with at most this many files
+    /// (capped by `iceberg_fetch_batch_size`) is fetched in order by a single Fetch actor,
+    /// without waiting for the previous phase to commit.
+    /// Larger phases are spread across Fetch actors and wait for their completion. Set to 0 to
+    /// always spread phases.
+    #[serde(default = "default::developer::iceberg_update_ordered_max_tasks")]
+    pub iceberg_update_ordered_max_tasks: u64,
+
     /// `IcebergSink`: The size of the cache for positional delete in the sink.
     #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
     pub iceberg_sink_positional_delete_cache_size: usize,
@@ -270,6 +279,17 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The maximum number of rows in a row group when writing Parquet files.
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
+
+    /// `IcebergWithPkIndexWriter`: The maximum number of concurrent PK index lookups issued for
+    /// deletes and updates in one batch. Values smaller than 1 will be clamped to 1.
+    #[serde(default = "default::developer::iceberg_pk_index_sink_lookup_concurrency")]
+    pub iceberg_pk_index_sink_lookup_concurrency: usize,
+
+    /// `IcebergWithPkIndexWriter`: The maximum number of input rows to process as one batch.
+    /// The writer only merges chunks that are already buffered in its input, so batching never
+    /// waits for new data. Set to 1 to process chunks one by one.
+    #[serde(default = "default::developer::iceberg_pk_index_sink_max_batch_rows")]
+    pub iceberg_pk_index_sink_max_batch_rows: usize,
 
     /// When enabled, materialized views using default `NoCheck` conflict behavior will be forced
     /// to use `Overwrite`. Useful to avoid propagating inconsistent changelog downstream.
@@ -330,6 +350,18 @@ pub struct StreamingDeveloperConfig {
     /// validating the correctness of vnode stats pruning before enabling it in production.
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
+
+    /// Runtime switch for the sort buffer of `LocalityProviderExecutor`. Only takes effect on
+    /// streaming jobs planned with the `enable_locality_sort_buffer` session variable enabled.
+    /// Setting it to false makes such locality providers always pass through input directly.
+    #[serde(default = "default::developer::enable_locality_sort_buffer")]
+    pub enable_locality_sort_buffer: bool,
+
+    /// The number of input rows within one epoch after which the sort buffer of
+    /// `LocalityProviderExecutor` activates. Below this threshold, input is passed through
+    /// directly without buffering, so that no extra latency is introduced for normal workloads.
+    #[serde(default = "default::developer::locality_sort_buffer_activate_threshold")]
+    pub locality_sort_buffer_activate_threshold: u64,
 
     /// Cache refill policy for streaming cache refill feature.
     /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.

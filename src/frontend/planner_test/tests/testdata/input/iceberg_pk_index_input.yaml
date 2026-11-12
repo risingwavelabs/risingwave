@@ -1,0 +1,85 @@
+- name: reject CDC upsert input for Iceberg PK-index sink
+  sql: |
+    create source shared_cdc with (
+      connector = 'postgres-cdc',
+      hostname = 'localhost',
+      port = '5432',
+      username = 'postgres',
+      password = '',
+      database.name = 'db'
+    ) format plain encode json;
+    create source orders (v1 int primary key, v2 bigint, v3 varchar, v4 time)
+      with (snapshot = 'false') from shared_cdc table 'public.orders';
+    explain create sink s from orders with (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      write_mode = 'merge-on-read',
+      format_version = '3',
+      create_table_if_not_exists = 'true',
+      enable_pk_index = 'true'
+    );
+  expected_outputs:
+    - planner_error
+- name: allow materialized CDC input for Iceberg PK-index sink
+  sql: |
+    create source shared_cdc with (
+      connector = 'postgres-cdc',
+      hostname = 'localhost',
+      port = '5432',
+      username = 'postgres',
+      password = '',
+      database.name = 'db'
+    ) format plain encode json;
+    create source orders (v1 int primary key, v2 bigint, v3 varchar, v4 time)
+      with (snapshot = 'false') from shared_cdc table 'public.orders';
+    create materialized view orders_mv as select * from orders;
+    explain create sink s from orders_mv with (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      write_mode = 'merge-on-read',
+      format_version = '3',
+      create_table_if_not_exists = 'true',
+      enable_pk_index = 'true'
+    );
+  expected_outputs:
+    - explain_output
+- name: allow append-only input for Iceberg PK-index sink
+  sql: |
+    create table orders (v1 int, v2 bigint, v3 varchar, v4 time) append only;
+    explain create sink s from orders with (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      write_mode = 'merge-on-read',
+      format_version = '3',
+      create_table_if_not_exists = 'true',
+      enable_pk_index = 'true'
+    );
+  expected_outputs:
+    - explain_output

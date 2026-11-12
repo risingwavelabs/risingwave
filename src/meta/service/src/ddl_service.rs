@@ -27,7 +27,6 @@ use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
-use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
 use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
@@ -71,7 +70,6 @@ pub struct DdlServiceImpl {
     env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
@@ -98,15 +96,13 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
-            sink_manager.clone(),
-            iceberg_compaction_manager.clone(),
+            sink_manager,
             iceberg_pk_index_sink_manager.clone(),
         )
         .await;
         Self {
             env,
             metadata_manager,
-            sink_manager,
             ddl_controller,
             meta_metrics,
             iceberg_compaction_manager,
@@ -500,12 +496,6 @@ impl DdlService for DdlServiceImpl {
         };
 
         let version = self.ddl_controller.run_command(command).await?;
-
-        self.sink_manager
-            .stop_sink_coordinator(vec![SinkId::from(sink_id)])
-            .await;
-        self.iceberg_compaction_manager
-            .clear_iceberg_maintenance_by_sink_id(SinkId::from(sink_id));
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -1521,7 +1511,7 @@ impl DdlService for DdlServiceImpl {
                 let latency_timer = self
                     .meta_metrics
                     .auto_schema_change_latency
-                    .with_guarded_label_values(&[&table.id.to_string(), &table.name])
+                    .with_label_values(&[&table.id.to_string(), &table.name])
                     .start_timer();
                 // send a request to the frontend to get the ReplaceJobPlan
                 // will retry with exponential backoff if the request fails
@@ -1562,10 +1552,7 @@ impl DdlService for DdlServiceImpl {
 
                                     self.meta_metrics
                                         .auto_schema_change_success_cnt
-                                        .with_guarded_label_values(&[
-                                            &table.id.to_string(),
-                                            &table.name,
-                                        ])
+                                        .with_label_values(&[&table.id.to_string(), &table.name])
                                         .inc();
                                     latency_timer.observe_duration();
                                 }
@@ -1790,6 +1777,31 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn remove_iceberg_table_orphan_files(
+        &self,
+        request: Request<RemoveIcebergTableOrphanFilesRequest>,
+    ) -> Result<Response<RemoveIcebergTableOrphanFilesResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = req.sink_id;
+
+        let orphan_file_count = self
+            .iceberg_compaction_manager
+            .remove_orphan_files(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to remove orphan files for sink {}: {}",
+                    sink_id,
+                    e.as_report()
+                ))
+            })?;
+
+        Ok(Response::new(RemoveIcebergTableOrphanFilesResponse {
+            status: None,
+            orphan_file_count,
+        }))
+    }
+
     async fn create_iceberg_table(
         &self,
         request: Request<CreateIcebergTableRequest>,
@@ -2010,7 +2022,7 @@ impl DdlService for DdlServiceImpl {
 }
 
 fn add_auto_schema_change_fail_event_log(
-    meta_metrics: &Arc<MetaMetrics>,
+    meta_metrics: &MetaMetrics,
     table_id: TableId,
     table_name: String,
     cdc_table_id: String,
@@ -2020,7 +2032,7 @@ fn add_auto_schema_change_fail_event_log(
 ) {
     meta_metrics
         .auto_schema_change_failure_cnt
-        .with_guarded_label_values(&[&table_id.to_string(), &table_name])
+        .with_label_values(&[&table_id.to_string(), &table_name])
         .inc();
     let event = event_log::EventAutoSchemaChangeFail {
         table_id,
@@ -2045,7 +2057,10 @@ fn normalize_cdc_auto_schema_change_column_names(
     cdc_table_type: PbCdcTableType,
     original_columns_by_name: &HashMap<String, ColumnCatalog>,
 ) -> TableSchemaChange {
-    if cdc_table_type != PbCdcTableType::Mysql {
+    if !matches!(
+        cdc_table_type,
+        PbCdcTableType::Mysql | PbCdcTableType::Mariadb
+    ) {
         return table_change;
     }
 

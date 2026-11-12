@@ -66,7 +66,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 table,
                 node.staging_table.as_ref().unwrap(),
                 node.refresh_progress_table.as_ref().unwrap(),
-                params.vnode_bitmap.clone().map(Arc::new),
+                Some(Arc::new(params.vnode_bitmap.clone())),
             )
             .await;
 
@@ -77,7 +77,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 store,
                 order_key,
                 params.actor_context,
-                params.vnode_bitmap.map(Arc::new),
+                Some(Arc::new(params.vnode_bitmap)),
                 table,
                 params.watermark_epoch,
                 conflict_behavior,
@@ -98,7 +98,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     store,
                     order_key,
                     params.actor_context,
-                    params.vnode_bitmap.map(Arc::new),
+                    Some(Arc::new(params.vnode_bitmap)),
                     table,
                     params.watermark_epoch,
                     conflict_behavior,
@@ -117,7 +117,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     store,
                     order_key,
                     params.actor_context,
-                    params.vnode_bitmap.map(Arc::new),
+                    Some(Arc::new(params.vnode_bitmap)),
                     table,
                     params.watermark_epoch,
                     conflict_behavior,
@@ -161,7 +161,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
 
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `SINGLETON_VNODE`, so we need to make the Arrange a singleton.
-        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
         let version_column_indices: Vec<u32> = table.version_column_indices.clone();

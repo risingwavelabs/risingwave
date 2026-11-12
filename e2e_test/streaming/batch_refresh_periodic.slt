@@ -57,9 +57,10 @@ SELECT * FROM mv_up;
 3
 4
 
-# Wait for at least one refresh cycle to kick in and complete. The retry
-# window covers variance in the periodic trigger's firing time.
-query I rowsort retry 15 backoff 1s
+# Wait for at least one refresh cycle to kick in and complete. A cycle starts only
+# once the committed epoch passes the interval, which can lag by over 10s on a
+# loaded cluster.
+query I rowsort retry 30 backoff 2s
 SELECT * FROM mv_batch;
 ----
 1
@@ -86,7 +87,7 @@ SELECT * FROM mv_up;
 4
 5
 
-query I rowsort retry 15 backoff 1s
+query I rowsort retry 30 backoff 2s
 SELECT * FROM mv_batch;
 ----
 2

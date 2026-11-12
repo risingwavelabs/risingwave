@@ -44,7 +44,7 @@ use crate::catalog::system_catalog::{
     SystemTableCatalog, get_sys_tables_in_schema, get_sys_views_in_schema,
 };
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::catalog::{DatabaseId, IndexCatalog, RelationKind, SchemaId};
 use crate::expr::{Expr, ExprImpl};
 
 #[derive(Copy, Clone)]
@@ -700,6 +700,20 @@ impl Catalog {
             .ok_or_else(|| CatalogError::not_found("source", source_id.to_string()))
     }
 
+    /// Finds a source by ID across all schemas in the given database.
+    pub fn get_source_by_id_with_db(
+        &self,
+        db_name: &str,
+        source_id: SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(source) = schema.get_source_by_id(source_id) {
+                return Ok(source);
+            }
+        }
+        Err(CatalogError::not_found("source", source_id.to_string()))
+    }
+
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,
@@ -933,6 +947,36 @@ impl Catalog {
                     .get_view_by_name(view_name))
             })?
             .ok_or_else(|| CatalogError::not_found("view", view_name))
+    }
+
+    /// Returns what `name` refers to in the first schema on `schema_path` that has it.
+    pub fn relation_kind(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        name: &str,
+    ) -> Option<RelationKind> {
+        let (kind, _) = schema_path
+            .try_find(|schema_name| -> CatalogResult<_> {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .relation_kind(name))
+            })
+            .ok()??;
+        Some(kind)
+    }
+
+    /// Returns the error for a `DROP` statement of the `expected` kind whose lookup of `name`
+    /// failed, or `None` if `name` is not a relation of another kind.
+    pub fn wrong_kind_for_drop(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        name: &str,
+        expected: RelationKind,
+    ) -> Option<CatalogError> {
+        let kind = self.relation_kind(db_name, schema_path, name)?;
+        (kind != expected).then(|| kind.bad_drop_error())
     }
 
     pub fn get_view_by_id(&self, db_name: &str, view_id: u32) -> CatalogResult<Arc<ViewCatalog>> {

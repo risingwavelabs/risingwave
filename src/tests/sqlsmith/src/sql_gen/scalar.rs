@@ -15,9 +15,9 @@
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
-use rand::Rng;
 use rand::distr::Alphanumeric;
 use rand::prelude::IndexedRandom;
+use rand::{Rng, RngExt as _};
 use risingwave_common::types::{DataType, ListType};
 use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
 

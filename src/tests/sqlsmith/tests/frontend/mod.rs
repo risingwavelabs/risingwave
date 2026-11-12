@@ -160,7 +160,7 @@ async fn test_stream_query(
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
         && x == "true"
     {
-        rng = SmallRng::from_os_rng();
+        rng = rand::make_rng();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
@@ -228,7 +228,7 @@ fn test_batch_query(
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
         && x == "true"
     {
-        rng = SmallRng::from_os_rng();
+        rng = rand::make_rng();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
@@ -239,7 +239,7 @@ fn test_batch_query(
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
     let context: OptimizerContextRef =
-        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, sql)?).into();
+        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, sql)?)?.into();
 
     match stmt {
         Statement::Query(_) => {
@@ -273,7 +273,7 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
         && x == "true"
     {
-        rng = SmallRng::from_os_rng();
+        rng = rand::make_rng();
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }

@@ -16,8 +16,7 @@ chrono = { workspace = true }
 clap = { workspace = true }
 console = "0.16"
 itertools = { workspace = true }
-rand = { version = "0.9", features = ["small_rng"] }
-rand_chacha = { version = "0.9" }
+rand = { version = "0.10", features = ["chacha"] }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -26,7 +25,7 @@ risingwave_frontend = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"
-similar = "2.7.0"
+similar = "3.2.0"
 strum = { version = "0.28", features = ["derive"] }
 thiserror-ext = { workspace = true }
 tokio = { workspace = true }

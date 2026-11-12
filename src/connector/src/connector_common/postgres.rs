@@ -167,7 +167,7 @@ pub async fn create_pg_client_from_properties(
     tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> ConnectorResult<PgClient> {
     let config = pg_connection_config_from_properties(props)?;
-    create_pg_client(&config, tcp_keepalive)
+    create_pg_client(&config, tcp_keepalive, None)
         .await
         .map_err(Into::into)
 }
@@ -564,6 +564,7 @@ impl std::str::FromStr for SslMode {
 pub async fn create_pg_client(
     config: &PgConnectionConfig,
     tcp_keepalive: Option<TcpKeepaliveConfig>,
+    application_name: Option<&str>,
 ) -> anyhow::Result<PgClient> {
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
@@ -572,6 +573,9 @@ pub async fn create_pg_client(
         .host(&config.host)
         .port(config.port)
         .dbname(&config.database);
+    if let Some(application_name) = application_name {
+        pg_config.application_name(application_name);
+    }
 
     // Configure TCP keepalive if provided
     if let Some(keepalive) = tcp_keepalive {

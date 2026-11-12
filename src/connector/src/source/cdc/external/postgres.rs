@@ -236,6 +236,7 @@ impl PostgresExternalTableReader {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<Self> {
         tracing::info!(
             ?rw_schema,
@@ -243,7 +244,16 @@ impl PostgresExternalTableReader {
             "create postgres external table reader"
         );
         // No TCP keepalive for CDC source
-        let client = create_pg_client(&config.pg_connection_config()?, None).await?;
+        let application_name = format!(
+            "risingwave-postgres-source-reader-{}-{}.{}",
+            table_id, schema_table_name.schema_name, schema_table_name.table_name
+        );
+        let client = create_pg_client(
+            &config.pg_connection_config()?,
+            None,
+            Some(&application_name),
+        )
+        .await?;
 
         // Discover user-defined composite columns and arrays of composites.
         // tokio-postgres cannot decode composite values natively, so for these
@@ -320,7 +330,8 @@ impl PostgresExternalTableReader {
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!(
             "\"{}\".\"{}\"",
-            table_name.schema_name, table_name.table_name
+            table_name.schema_name.replace('"', "\"\""),
+            table_name.table_name.replace('"', "\"\"")
         )
     }
 
@@ -474,7 +485,7 @@ impl PostgresExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("\"{}\"", column)
+        format!("\"{}\"", column.replace('"', "\"\""))
     }
 
     async fn min_and_max(
@@ -483,8 +494,8 @@ impl PostgresExternalTableReader {
     ) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
         let sql = format!(
             "SELECT MIN({}), MAX({}) FROM {}",
-            split_column.name,
-            split_column.name,
+            Self::quote_column(&split_column.name),
+            Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
         );
         let client = self.client.lock().await;
@@ -612,6 +623,20 @@ impl PostgresExternalTableReader {
         right: OwnedRow,
         split_columns: Vec<Field>,
     ) {
+        // Conceptually, the query is:
+        //
+        // SELECT <selected_columns>
+        // FROM <upstream_table>
+        // WHERE <split_filter>
+        //
+        // `<split_filter>` is exactly one of:
+        // - `1 = 1` when both bounds contain the unbounded `NULL` sentinel;
+        // - `(<split_columns>) < (<right_bound_params>)` for the first split;
+        // - `(<split_columns>) >= (<left_bound_params>)` for the last split;
+        // - `(<split_columns>) >= (<left_bound_params>) AND
+        //    (<split_columns>) < (<right_bound_params>)` for a middle split.
+        //
+        // Bound values are bound in placeholder order: left, then right.
         assert_eq!(
             split_columns.len(),
             1,
@@ -998,6 +1023,7 @@ mod tests {
             password: "123456".to_owned(),
             database: "mydb".to_owned(),
             schema: "public".to_owned(),
+            pdb_name: None,
             table: "mytest".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,
@@ -1241,6 +1267,7 @@ mod tests {
             rw_schema,
             vec![0, 1],
             schema_table_name.clone(),
+            233,
         )
         .await
         .unwrap();

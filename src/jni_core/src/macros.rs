@@ -484,6 +484,8 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native void cdcSourceSenderClose(long channelPtr);
 
+                public static native boolean sendOracleSnapshotResponseToChannel(long channelPtr, byte[] msg);
+
                 public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
                     recvSinkWriterRequestFromChannel(long channelPtr);
 
@@ -920,6 +922,7 @@ mod tests {
                 sendCdcSourceMsgToChannel                (J[B)Z,
                 sendCdcSourceErrorToChannel              (JLjava/lang/String;)Z,
                 cdcSourceSenderClose                     (J)V,
+                sendOracleSnapshotResponseToChannel      (J[B)Z,
                 recvSinkWriterRequestFromChannel         (J)Lcom/risingwave/java/binding/JniSinkWriterStreamRequest;,
                 sendSinkWriterResponseToChannel          (J[B)Z,
                 sendSinkWriterErrorToChannel             (JLjava/lang/String;)Z,

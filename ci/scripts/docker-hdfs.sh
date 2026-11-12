@@ -17,6 +17,9 @@ else
 fi
 echo $java_home_path
 
+echo "--- init Debezium submodule"
+git submodule update --init java/debezium
+
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
 docker build -f docker/Dockerfile.hdfs --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" --build-arg "JAVA_HOME_PATH=${java_home_path}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .

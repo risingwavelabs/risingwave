@@ -187,7 +187,7 @@ pub(crate) struct LogStoreRowSerde {
 impl LogStoreRowSerde {
     pub(crate) fn new(
         table_catalog: &Table,
-        vnodes: Option<Arc<Bitmap>>,
+        vnodes: Arc<Bitmap>,
         pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -228,11 +228,6 @@ impl LogStoreRowSerde {
         let payload_schema = data_types[predefined_column_len..].to_vec();
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
-
-        let vnodes = match vnodes {
-            Some(vnodes) => vnodes,
-            None => Bitmap::singleton_arc().clone(),
-        };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
         // is nulls last
@@ -1249,7 +1244,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
@@ -1395,7 +1390,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
         let (ops, rows) = gen_test_data(0);
@@ -1429,6 +1424,63 @@ mod tests {
             assert_eq!(ops[i], op);
             assert_eq!(rows[i], row.to_owned_row());
         }
+    }
+
+    #[tokio::test]
+    async fn test_recompact_writer_upsert_output_after_chunk_merge() {
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_pb::stream_plan::stream_node::StreamKind;
+
+        use crate::common::change_buffer::output_kind::UPSERT;
+        use crate::common::compact_chunk::{InconsistencyBehavior, compact_chunk_inline};
+
+        let serde = LogStoreRowSerde::new(
+            &gen_test_log_store_table(&KV_LOG_STORE_V2_INFO),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            &KV_LOG_STORE_V2_INFO,
+        );
+        // The downstream already has (1, old). The writer receives a retract update and
+        // deletion in separate chunks, and converts each chunk to upsert output.
+        let mut seq_id = 1;
+        let streams = ["I T\n- 1 old\n+ 1 new", "I T\n- 1 new"].map(|input| {
+            let written = compact_chunk_inline::<UPSERT>(
+                StreamChunk::from_pretty(input),
+                &[0],
+                StreamKind::Retract,
+                InconsistencyBehavior::Panic,
+            );
+            let (ops, rows) = written
+                .rows()
+                .map(|(op, row)| (op, row.to_owned_row()))
+                .unzip();
+            let (stream, tx) = gen_row_stream(serde.clone(), ops, rows, EPOCH1, &mut seq_id);
+            tx.send(()).unwrap();
+            stream
+        });
+        // Persisted log rows have no chunk boundaries. Read the two flushed ranges as one
+        // chunk, as the KV log reader does after merging adjacent ranges.
+        let merged = serde
+            .deserialize_stream_chunk(
+                once((
+                    VirtualNode::ZERO,
+                    FromStreamStateStoreIter::new(stream::iter(streams).flatten().boxed()),
+                )),
+                1,
+                seq_id - 1,
+                EPOCH1,
+                &KvLogStoreReadMetrics::for_test(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(merged, StreamChunk::from_pretty("I T\n+ 1 new\n- 1 new"));
+        let compacted = compact_chunk_inline::<UPSERT>(
+            merged,
+            &[0],
+            StreamKind::Upsert,
+            InconsistencyBehavior::Panic,
+        )
+        .compact_vis();
+        assert_eq!(compacted, StreamChunk::from_pretty("I T\n- 1 new"));
     }
 
     fn gen_row_stream(
@@ -1558,7 +1610,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
@@ -1694,7 +1746,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
@@ -1808,7 +1860,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
