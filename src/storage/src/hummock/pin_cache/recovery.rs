@@ -67,8 +67,8 @@ impl PinCache {
             };
             let entry = self.track_file(metadata.key, metadata.total_size as u64);
             let shard_index = Self::shard_index(object_id, self.shards.len());
-            let state = self.shards[shard_index].state.get_mut();
-            let Some(object) = state.objects.get_mut(&object_id) else {
+            let objects = self.shards[shard_index].objects.get_mut();
+            let Some(object) = objects.get_mut(&object_id) else {
                 continue;
             };
             // A short failed download must not become a readable object after restart.

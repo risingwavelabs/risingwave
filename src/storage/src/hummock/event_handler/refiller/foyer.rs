@@ -12,119 +12,135 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Executes Foyer refill tasks from snapshots captured before spawning.
-
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Instant;
 
 use ::foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use thiserror_ext::AsReport;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
-use super::{CacheRefillContext, TableCacheRefillContext};
-use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
+use super::CacheRefillConfig;
+use super::admission::foyer::{TableCacheRefillContextMap, select_blocks};
+use super::admission::{SstLocality, load_sst_metadata};
 use crate::hummock::{
-    Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex, TableHolder,
+    Block, HummockError, RecentFilterTrait, SstableBlockIndex, SstableStoreRef, TableHolder,
 };
-use crate::monitor::{GLOBAL_CACHE_REFILL_METRICS, StoreLocalStatistic};
+use crate::monitor::GLOBAL_CACHE_REFILL_METRICS;
 
-pub(super) fn spawn_refill_task(
-    deltas: Vec<SstDeltaInfo>,
-    context: CacheRefillContext,
-) -> JoinHandle<()> {
-    let task = CacheRefillTask { deltas, context };
-    tokio::spawn(task.run())
+#[cfg(test)]
+pub(in crate::hummock::event_handler) type SpawnRefillTask =
+    Arc<dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext) -> JoinHandle<()> + Send + Sync + 'static>;
+
+#[cfg(test)]
+pub(super) fn default_spawn_refill_task() -> SpawnRefillTask {
+    Arc::new(spawn_refill_task)
 }
 
-impl TableCacheRefillContext {
-    fn allows_normal_data_refill_block(&self, sstable: &Sstable, block_index: usize) -> bool {
-        if self.policy.is_unscoped_enabled() {
-            return true;
+fn spawn_refill_task(plan: Vec<SstDeltaInfo>, context: CacheRefillContext) -> JoinHandle<()> {
+    let timeout = context.config.timeout;
+    let task = CacheRefillTask { plan, context };
+    tokio::spawn(async move {
+        if tokio::time::timeout(timeout, task.run()).await.is_err() {
+            tracing::warn!("Foyer cache refill timed out");
         }
+    })
+}
 
-        (self.policy.is_streaming_scoped()
-            && self.check_table_refill_streaming_vnodes(sstable, block_index))
-            || (self.policy.is_serving_scoped()
-                && self.check_table_refill_serving_vnodes(sstable, block_index))
+/// Executes independent per-event Foyer attempts from admitted SSTs and immutable table inputs.
+/// Metadata/block preparation and recent/inheritance selection stay in this backend.
+pub(super) struct FoyerRefiller {
+    #[cfg(test)]
+    pub(super) spawn_refill_task: Option<SpawnRefillTask>,
+    config: Arc<CacheRefillConfig>,
+    pub(super) meta_refill_concurrency: Option<Arc<Semaphore>>,
+    pub(super) concurrency: Arc<Semaphore>,
+    sstable_store: SstableStoreRef,
+}
+
+impl FoyerRefiller {
+    pub(super) fn new(
+        config: Arc<CacheRefillConfig>,
+        sstable_store: SstableStoreRef,
+        meta_refill_concurrency: Option<Arc<Semaphore>>,
+        concurrency: Arc<Semaphore>,
+    ) -> Self {
+        Self {
+            #[cfg(test)]
+            spawn_refill_task: None,
+            config,
+            meta_refill_concurrency,
+            concurrency,
+            sstable_store,
+        }
     }
 
-    fn allows_insert_only_data_refill_block(&self, sstable: &Sstable, block_index: usize) -> bool {
-        // Insert-only deltas have no delete-side evidence for recent/inheritance filters.
-        // Only serving-owned blocks need refill, because streaming writers already populated
-        // their local cache.
-        (self.policy.is_unscoped_enabled() || self.policy.is_serving_scoped())
-            && self.check_table_refill_serving_vnodes(sstable, block_index)
-    }
-
-    fn check_table_refill_streaming_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
-        self.streaming_vnode_bitmap.as_ref().is_some_and(|bitmap| {
-            let vnode_range = block_vnode_range(sstable, block_index);
-            vnode_range_overlaps_bitmap(vnode_range, bitmap)
-        })
-    }
-
-    fn check_table_refill_serving_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
-        self.serving_vnode_bitmap.as_ref().is_some_and(|bitmap| {
-            let vnode_range = block_vnode_range(sstable, block_index);
-            vnode_range_overlaps_bitmap(vnode_range, bitmap)
-        })
+    /// Starts an admitted per-event attempt; this backend does not read CN policy metadata.
+    pub(super) fn start_cache_refill(
+        &self,
+        deltas: Vec<SstDeltaInfo>,
+        table_contexts: TableCacheRefillContextMap,
+    ) -> JoinHandle<()> {
+        let context = CacheRefillContext {
+            config: self.config.clone(),
+            meta_refill_concurrency: self.meta_refill_concurrency.clone(),
+            concurrency: self.concurrency.clone(),
+            sstable_store: self.sstable_store.clone(),
+            table_cache_refill_context_map: table_contexts,
+        };
+        #[cfg(test)]
+        if let Some(spawn) = &self.spawn_refill_task {
+            return spawn(deltas, context);
+        }
+        spawn_refill_task(deltas, context)
     }
 }
 
-struct DataCacheRefillTaskGenerator<'a> {
-    context: &'a CacheRefillContext,
-    delta: &'a SstDeltaInfo,
-    ssts: &'a [TableHolder],
+pub(crate) struct CacheRefillContext {
+    pub(super) config: Arc<CacheRefillConfig>,
+    pub(super) meta_refill_concurrency: Option<Arc<Semaphore>>,
+    pub(super) concurrency: Arc<Semaphore>,
+    pub(super) sstable_store: SstableStoreRef,
+    pub(super) table_cache_refill_context_map: TableCacheRefillContextMap,
+}
+
+pub(super) struct DataCacheRefillTaskGenerator<'a> {
+    pub(super) context: &'a CacheRefillContext,
+    pub(super) delta: &'a SstDeltaInfo,
+    pub(super) ssts: &'a [SstLocality],
 }
 
 impl DataCacheRefillTaskGenerator<'_> {
-    fn generate_unfiltered_tasks(&self) -> Vec<DataCacheRefillTask> {
+    pub(super) fn generate_unfiltered_tasks(&self) -> Vec<DataCacheRefillTask> {
         let mut tasks = Vec::new();
-
-        // Skip data cache refill if data disk cache is not enabled.
-        if !self.context.sstable_store.block_cache().is_hybrid() {
-            return tasks;
-        }
 
         if self.delta.insert_sst_infos.is_empty() {
             return tasks;
         }
 
-        let has_parent_ssts = !self.delta.delete_sst_object_ids.is_empty();
+        let has_parent_ssts = !self.delta.delete_sst_infos.is_empty();
         // CN-written SSTs are appended to L0 without replacing parent SSTs. Other inserted SSTs
         // need delete-side evidence for recent and inheritance filtering.
         debug_assert!(has_parent_ssts || self.delta.insert_sst_level == 0);
-
-        // Return if the target level is not in the refill levels
-        if !self
-            .context
-            .config
-            .data_refill_levels
-            .contains(&self.delta.insert_sst_level)
-        {
-            return tasks;
-        }
 
         // Cache refill units must not cross a table boundary. A logical SST projection still
         // decides whether to admit each single-table unit.
         let unit = self.context.config.unit;
         assert!(unit > 0, "cache refill unit must be positive");
-        let table_cache_refill_context_map = &self.context.table_cache_refill_context_map;
-        for (sst_info, sst) in self.delta.insert_sst_infos.iter().zip_eq_fast(self.ssts) {
-            debug_assert_eq!(sst_info.object_id, sst.id);
-            debug_assert!(sst_info.table_ids.is_sorted());
+        for locality in self.ssts {
+            let sst = &locality.sst;
             let mut blk_start = 0;
             while blk_start < sst.block_count() {
                 // SstableBuilder ends a block before the table ID changes, so block metadata
-                // defines the exact physical boundary. `table_ids` below only admits logical
-                // projections and must not make a unit span another table.
+                // defines the exact physical boundary. The prepared locality bitmap admits
+                // logical projections but must not make a unit span another table.
                 let table_id = sst.meta.block_metas[blk_start].table_id();
                 let mut blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
                 if let Some(table_boundary) = (blk_start + 1..blk_end)
@@ -133,18 +149,7 @@ impl DataCacheRefillTaskGenerator<'_> {
                     blk_end = table_boundary;
                 }
 
-                let should_refill = sst_info.table_ids.binary_search(&table_id).is_ok()
-                    && (blk_start..blk_end).any(|block_index| {
-                        table_cache_refill_context_map
-                            .get(&table_id)
-                            .is_some_and(|context| {
-                                if has_parent_ssts {
-                                    context.allows_normal_data_refill_block(sst, block_index)
-                                } else {
-                                    context.allows_insert_only_data_refill_block(sst, block_index)
-                                }
-                            })
-                    });
+                let should_refill = (blk_start..blk_end).any(|index| locality.blocks.is_set(index));
                 if should_refill {
                     tasks.push(DataCacheRefillTask {
                         sst: sst.clone(),
@@ -167,7 +172,7 @@ impl DataCacheRefillTaskGenerator<'_> {
         {
             GLOBAL_CACHE_REFILL_METRICS
                 .data_refill_filtered_total
-                .inc_by(self.delta.delete_sst_object_ids.len() as u64);
+                .inc_by(self.delta.delete_sst_infos.len() as u64);
             return vec![];
         }
 
@@ -181,7 +186,7 @@ impl DataCacheRefillTaskGenerator<'_> {
         // Skipping the recent filter selects full refill. Inheritance filtering only applies to
         // non-L0 normal refill after real recent-filter admission.
         let should_filter_by_inheritance = !tasks.is_empty()
-            && !self.delta.delete_sst_object_ids.is_empty()
+            && !self.delta.delete_sst_infos.is_empty()
             && self.delta.insert_sst_level != 0
             && !self.context.config.skip_recent_filter
             && !self.context.config.skip_inheritance_filter;
@@ -197,9 +202,9 @@ impl DataCacheRefillTaskGenerator<'_> {
         let recent_filter = self.context.sstable_store.recent_filter();
         let targets = self
             .delta
-            .delete_sst_object_ids
+            .delete_sst_infos
             .iter()
-            .map(|id| (*id, usize::MAX))
+            .map(|sst| (sst.object_id, usize::MAX))
             .collect_vec();
         recent_filter.contains_any(targets.iter())
     }
@@ -209,11 +214,11 @@ impl DataCacheRefillTaskGenerator<'_> {
         originals: Vec<DataCacheRefillTask>,
     ) -> Vec<DataCacheRefillTask> {
         // Get parent sst metas from cache.
-        let sstable_store = self.context.sstable_store.clone();
-        let futures = self.delta.delete_sst_object_ids.iter().map(|sst_obj_id| {
-            let store = &sstable_store;
+        let sstable_store = &self.context.sstable_store;
+        let futures = self.delta.delete_sst_infos.iter().map(|sst| {
+            let sst_obj_id = sst.object_id;
             async move {
-                let res = store.sstable_cached(*sst_obj_id).await;
+                let res = sstable_store.sstable_cached(sst_obj_id).await;
                 match res {
                     Ok(Some(_)) => GLOBAL_CACHE_REFILL_METRICS
                         .data_refill_parent_meta_lookup_hit_total
@@ -297,9 +302,9 @@ impl DataCacheRefillTaskGenerator<'_> {
 }
 
 #[derive(Debug)]
-struct DataCacheRefillTask {
-    sst: TableHolder,
-    blks: Range<usize>,
+pub(super) struct DataCacheRefillTask {
+    pub(super) sst: TableHolder,
+    pub(super) blks: Range<usize>,
 }
 
 impl DataCacheRefillTask {
@@ -324,29 +329,56 @@ impl DataCacheRefillTask {
 }
 
 struct CacheRefillTask {
-    deltas: Vec<SstDeltaInfo>,
+    plan: Vec<SstDeltaInfo>,
     context: CacheRefillContext,
 }
 
 impl CacheRefillTask {
     async fn run(self) {
         let tasks = self
-            .deltas
+            .plan
             .iter()
             .map(|delta| {
-                let context = self.context.clone();
+                let context = &self.context;
                 async move {
-                    let holders = match Self::meta_cache_refill(&context, delta).await {
-                        Ok(holders) => holders,
+                    let refill_data = context.sstable_store.block_cache().is_hybrid()
+                        && context
+                            .config
+                            .data_refill_levels
+                            .contains(&delta.insert_sst_level);
+                    let prepared = match load_sst_metadata(
+                        &context.sstable_store,
+                        delta.insert_sst_infos.iter(),
+                        |info| info,
+                        context.meta_refill_concurrency.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok(prepared) => prepared,
                         Err(e) => {
                             tracing::warn!(error = %e.as_report(), "meta cache refill error");
                             return;
                         }
                     };
+                    // Metadata warming does not require Foyer data refill to be enabled.
+                    if !refill_data || prepared.is_empty() {
+                        return;
+                    }
+                    let localities = prepared
+                        .into_iter()
+                        .map(|(info, sst)| {
+                            select_blocks(
+                                sst,
+                                info,
+                                &context.table_cache_refill_context_map,
+                                delta.delete_sst_infos.is_empty(),
+                            )
+                        })
+                        .collect_vec();
                     let generator = DataCacheRefillTaskGenerator {
-                        context: &context,
+                        context,
                         delta,
-                        ssts: &holders,
+                        ssts: &localities,
                     };
                     let tasks = generator.generate_unfiltered_tasks();
 
@@ -358,47 +390,12 @@ impl CacheRefillTask {
                         .inc_by(unfiltered_block_count);
 
                     let tasks = generator.filter_by_inheritance_if_needed(tasks).await;
-                    Self::data_cache_refill(&context, tasks).await;
+                    Self::data_cache_refill(context, tasks).await;
                 }
             })
             .collect_vec();
-        let future = join_all(tasks);
-
-        let _ = tokio::time::timeout(self.context.config.timeout, future).await;
-    }
-
-    async fn meta_cache_refill(
-        context: &CacheRefillContext,
-        delta: &SstDeltaInfo,
-    ) -> HummockResult<Vec<TableHolder>> {
-        let tasks = delta
-            .insert_sst_infos
-            .iter()
-            .map(|info| async {
-                let mut stats = StoreLocalStatistic::default();
-                GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
-
-                let permit = if let Some(c) = &context.meta_refill_concurrency {
-                    Some(c.acquire().await.unwrap())
-                } else {
-                    None
-                };
-
-                let now = Instant::now();
-                let res = context.sstable_store.sstable(info, &mut stats).await;
-                stats.discard();
-                if res.is_ok() {
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .meta_refill_success_duration
-                        .observe(now.elapsed().as_secs_f64());
-                }
-                drop(permit);
-
-                res
-            })
-            .collect_vec();
-        let holders = try_join_all(tasks).await?;
-        Ok(holders)
+        // Await every Foyer delta. Its task timeout bounds this work independently of Pin.
+        join_all(tasks).await;
     }
 
     async fn data_cache_refill(context: &CacheRefillContext, tasks: Vec<DataCacheRefillTask>) {
@@ -441,8 +438,7 @@ impl CacheRefillTask {
             }
 
             if admits as f64 / contexts.len() as f64 >= context.config.threshold {
-                let sstable_store = context.sstable_store.clone();
-                let context = context.clone();
+                let sstable_store = &context.sstable_store;
                 let future = async move {
                     GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
 

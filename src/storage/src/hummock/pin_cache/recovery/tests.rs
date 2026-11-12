@@ -109,7 +109,7 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
     }
     for id in ids {
         assert_eq!(
-            cache.shard(id).state.read().objects[&id]
+            cache.shard(id).objects.read()[&id]
                 .published
                 .as_ref()
                 .unwrap()

@@ -25,9 +25,8 @@ use super::HummockVersionUpdate;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::monitor::GLOBAL_CACHE_REFILL_METRICS;
 
-/// Completion permits this event to be published after earlier events.
-/// Refillers start their work independently of polling this future and define whether
-/// dropping it cancels or detaches the underlying work. It may be first-polled late.
+/// Waits for this event's independent refill attempts, including fallback on failure/timeout.
+/// Work starts at submission independently of polling; refillers own cancellation semantics.
 pub(super) type VersionUpdateCondition = BoxFuture<'static, ()>;
 
 /// One received payload's version transition, possibly containing multiple raw deltas.
@@ -38,13 +37,19 @@ pub(super) struct VersionUpdateEvent {
     pub new_pinned_version: PinnedVersion,
 }
 
+/// Keeps raw inputs only until the refiller has planned this received payload.
+pub(super) struct ResolvedVersionUpdate {
+    pub event: VersionUpdateEvent,
+    pub version_deltas: Option<Vec<HummockVersionDelta>>,
+}
+
 struct PendingVersion {
     condition: VersionUpdateCondition,
     event: VersionUpdateEvent,
 }
 
-/// Constructs received versions and orders their publication after cache refill completes.
-/// The refiller starts the work; this queue only waits for its completion.
+/// Constructs received versions and orders their publication after refill conditions complete.
+/// Refillers start the work and bound their own attempts; this queue only waits for completion.
 pub(super) struct VersionUpdateQueue {
     /// Advanced by enqueue; may lead the version currently published to readers.
     latest_received: PinnedVersion,
@@ -71,9 +76,9 @@ impl VersionUpdateQueue {
         &self,
         payload: HummockVersionUpdate,
         mut before_apply: impl FnMut(&HummockVersion, &HummockVersionDelta),
-    ) -> Option<VersionUpdateEvent> {
+    ) -> Option<ResolvedVersionUpdate> {
         let pinned_version = &self.latest_received;
-        let new_pinned_version = match payload {
+        let (new_pinned_version, version_deltas) = match payload {
             HummockVersionUpdate::VersionDeltas(deltas) => {
                 let mut version = (**pinned_version).clone();
                 for delta in &deltas {
@@ -81,15 +86,21 @@ impl VersionUpdateQueue {
                     before_apply(&version, delta);
                     version.apply_version_delta(delta);
                 }
-                pinned_version.new_with_local_version(version)?
+                (
+                    pinned_version.new_with_local_version(version)?,
+                    Some(deltas),
+                )
             }
             HummockVersionUpdate::PinnedVersion(version) => {
-                pinned_version.new_pin_version(*version)?
+                (pinned_version.new_pin_version(*version)?, None)
             }
         };
-        Some(VersionUpdateEvent {
-            prev_version_id: pinned_version.id(),
-            new_pinned_version,
+        Some(ResolvedVersionUpdate {
+            event: VersionUpdateEvent {
+                prev_version_id: pinned_version.id(),
+                new_pinned_version,
+            },
+            version_deltas,
         })
     }
 
@@ -167,7 +178,8 @@ mod tests {
                         observed.push((before.id.as_raw_id(), delta.id.as_raw_id()));
                     },
                 )
-                .unwrap();
+                .unwrap()
+                .event;
             assert_eq!(
                 observed,
                 vec![(id * 2 - 2, id * 2 - 1), (id * 2 - 1, id * 2)]
@@ -185,6 +197,7 @@ mod tests {
         );
         let last = queue.next_events().await;
         assert_eq!(last.len(), 1);
-        assert_eq!(last[0].new_pinned_version.id().as_raw_id(), 34);
+        assert_eq!(last[0].new_pinned_version.id(), 34);
+        assert!(queue.next_events().now_or_never().is_none());
     }
 }

@@ -69,9 +69,8 @@ async fn test_pin_refill_survives_waiter_drop_and_cached_submission() {
         source_sst: info,
         admitted_tables: [table].into(),
     };
-    let token = cache.prepare_refill(object).unwrap();
     let executor = PinCacheRefillExecutor::new(store.clone(), Arc::new(Semaphore::new(1)));
-    let completion = executor.submit(&candidate, token);
+    let completion = executor.submit(&candidate);
     // Even the only, never-polled waiter must not own or cancel its download.
     drop(completion);
     wait_finished(&executor).await;
@@ -81,13 +80,8 @@ async fn test_pin_refill_survives_waiter_drop_and_cached_submission() {
     let bytes = store.store().read(&path, ..).await.unwrap();
     store.store().delete(&path).await.unwrap();
     store.clear_meta_cache().await.unwrap();
-    let token = cache.prepare_refill(object);
     // A defensive repeat job skips the cached file without remote I/O.
-    assert_eq!(
-        executor.submit(&candidate, token.unwrap()).now_or_never(),
-        Some(true)
-    );
-    assert_eq!(cache.prepare_refill(object), token);
+    assert_eq!(executor.submit(&candidate).now_or_never(), Some(true));
     assert_eq!(cache.get(object).unwrap().read(..).await.unwrap(), bytes);
     assert!(executor.work.lock().is_empty());
 }
@@ -103,30 +97,13 @@ async fn test_failed_attempt_finishes_and_defensive_resubmission_can_succeed() {
     store.store().delete(&path).await.unwrap();
     let (store, cache) = with_pin_cache(store).await;
     cache.register_objects([object]);
-    let concurrency = Arc::new(Semaphore::new(1));
-    let executor = PinCacheRefillExecutor::new(store.clone(), concurrency.clone());
+    let executor = PinCacheRefillExecutor::new(store.clone(), Arc::new(Semaphore::new(1)));
     let candidate = PinCacheRefillObject {
         source_sst: info,
         admitted_tables: [table].into(),
     };
-    // Revocation must skip I/O even when the remote file is unavailable.
-    let revoked = cache.prepare_refill(object).unwrap();
-    cache.revoke_refill(object);
-    let permit = concurrency.acquire_owned().await.unwrap();
-    assert!(matches!(
-        refill_pin_cache_object(
-            &store,
-            candidate.source_sst.file_size,
-            revoked,
-            permit,
-            executor.work.clone(),
-        )
-        .await,
-        Ok(Obsolete)
-    ));
-    let token = cache.prepare_refill(object).unwrap();
-    let first = executor.submit(&candidate, token);
-    let duplicate = executor.submit(&candidate, token);
+    let first = executor.submit(&candidate);
+    let duplicate = executor.submit(&candidate);
     assert!(!wait(first).await);
     assert!(!wait(duplicate).await);
     assert!(
@@ -139,7 +116,7 @@ async fn test_failed_attempt_finishes_and_defensive_resubmission_can_succeed() {
         "restoring the remote file does not submit work"
     );
     // Explicit resubmission is API defense, not evidence of a repeated production delta.
-    assert!(wait(executor.submit(&candidate, token)).await);
+    assert!(wait(executor.submit(&candidate)).await);
     assert!(cache.get(object).is_some());
 }
 
@@ -157,29 +134,15 @@ async fn test_cancelled_attempt_preserves_new_registration_without_restarting() 
         source_sst: info,
         admitted_tables: [table].into(),
     };
-    let waiter = executor.submit(
-        &candidate,
-        cache
-            .prepare_refill(candidate.source_sst.object_id)
-            .unwrap(),
-    );
+    let waiter = executor.submit(&candidate);
     // Exercise stale-work isolation defensively; ordinary cancellation need not re-register.
-    executor.unregister_objects([object]);
+    cache.unregister_objects([object]);
+    executor.cancel_objects([object]);
     cache.register_objects([object]);
-    let token = cache.prepare_refill(object);
     executor.cancel_tables(&candidate.admitted_tables);
-    assert_eq!(cache.prepare_refill(object), token);
     assert!(!wait(waiter).await);
     assert!(
-        !wait(
-            executor.submit(
-                &candidate,
-                cache
-                    .prepare_refill(candidate.source_sst.object_id)
-                    .unwrap()
-            )
-        )
-        .await,
+        !wait(executor.submit(&candidate)).await,
         "a cancelled physical attempt still prevents an overlapping copy"
     );
     drop(permit);
@@ -188,17 +151,7 @@ async fn test_cancelled_attempt_preserves_new_registration_without_restarting() 
         cache.get(object).is_none(),
         "cancellation never queues a replacement"
     );
-    assert!(
-        wait(
-            executor.submit(
-                &candidate,
-                cache
-                    .prepare_refill(candidate.source_sst.object_id)
-                    .unwrap()
-            )
-        )
-        .await
-    );
+    assert!(wait(executor.submit(&candidate)).await);
 }
 
 #[cfg(not(madsim))]
@@ -224,20 +177,15 @@ fn test_driver_shutdown_finishes_pending_and_future_submissions() {
             admitted_tables: [table].into(),
         };
         cache.register_objects([object]);
-        let old_token = cache.prepare_refill(object).unwrap();
         cache.unregister_objects([object]);
-        let (executor, waiter, token) = {
+        let (executor, waiter) = {
             let _entered = runtime.enter();
             let executor = PinCacheRefillExecutor::new(store, Arc::new(Semaphore::new(0)));
-            assert_eq!(
-                executor.submit(&candidate, old_token).now_or_never(),
-                Some(true)
-            );
+            assert_eq!(executor.submit(&candidate).now_or_never(), Some(true));
             assert!(executor.work.lock().is_empty());
             cache.register_objects([object]);
-            let token = cache.prepare_refill(object).unwrap();
-            let waiter = executor.submit(&candidate, token);
-            (executor, waiter, token)
+            let waiter = executor.submit(&candidate);
+            (executor, waiter)
         };
         if poll_driver {
             runtime.block_on(tokio::task::yield_now());
@@ -255,15 +203,7 @@ fn test_driver_shutdown_finishes_pending_and_future_submissions() {
         drop(runtime);
         assert!(executor.jobs.is_closed());
         assert_eq!(waiter.now_or_never(), Some(false));
-        assert_eq!(
-            executor.submit(&candidate, token).now_or_never(),
-            Some(false)
-        );
-        assert_eq!(
-            executor.submit(&candidate, old_token).now_or_never(),
-            Some(false),
-            "shutdown takes precedence over stale admission"
-        );
+        assert_eq!(executor.submit(&candidate).now_or_never(), Some(false));
     }
 }
 
@@ -289,17 +229,7 @@ async fn test_pin_executor_uses_shared_budget_and_targeted_removal() {
     let foyer_permits = concurrency.acquire_many(2).await.unwrap();
     let mut waiters: HashMap<_, _> = objects
         .into_iter()
-        .map(|(object, candidate)| {
-            (
-                object,
-                executor.submit(
-                    &candidate,
-                    cache
-                        .prepare_refill(candidate.source_sst.object_id)
-                        .unwrap(),
-                ),
-            )
-        })
+        .map(|(object, candidate)| (object, executor.submit(&candidate)))
         .collect();
     let (removed, survivor) = ([850.into(), 851.into()], 852.into());
     struct WakeCount(AtomicUsize);
@@ -327,9 +257,9 @@ async fn test_pin_executor_uses_shared_budget_and_targeted_removal() {
             .poll(&mut Context::from_waker(&removed_waker))
             .is_pending()
     );
-    let survivor_token = cache.prepare_refill(survivor);
-    executor.unregister_objects([]);
-    executor.unregister_objects(removed);
+    cache.unregister_objects(removed.iter().copied());
+    executor.cancel_objects([]);
+    executor.cancel_objects(removed);
     assert!(removed_wakes.0.load(Ordering::Relaxed) > 0);
     assert_eq!(
         survivor_wakes.0.load(Ordering::Relaxed),
@@ -348,7 +278,6 @@ async fn test_pin_executor_uses_shared_budget_and_targeted_removal() {
         "withdrawal must finish queued waiters without waiting for a permit"
     );
     assert!(!cache.is_registered(removed[1]));
-    assert_eq!(cache.prepare_refill(survivor), survivor_token);
     drop(foyer_permits);
     assert!(
         tokio::time::timeout(Duration::from_secs(1), survivor_ticket)
