@@ -71,9 +71,9 @@ Physical reads run in independent tasks. The fixed-SST changelog comparison belo
 selected this mode with a 1 ms preparation deadline, so it is now the default
 when coalescing is enabled. Remove `independent_io_execution` from older test TOMLs.
 
-For an in-image control, disable prefix prefetch, changelog prefetch,
-read coalescing, and point MultiGet. For a main comparison, use a separate
-main image built with the same architecture, features and profile.
+For an in-image control, disable prefix, changelog and Locality Backfill
+Blockwise prefetch, read coalescing, and point MultiGet. For a main comparison,
+use a separate main image built with the same architecture, features and profile.
 
 To isolate metadata reuse, set `storage.read_batch.enabled = true` in both
 arms and toggle only `meta_reuse`. `concurrency` limits concurrent keys per

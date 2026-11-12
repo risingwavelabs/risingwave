@@ -26,11 +26,40 @@ The worker consumes a packet intact, but it can regroup its members with
 other ready reads. An older adjacent range can consume some of the byte budget
 and move the final GET boundary inside that packet.
 
-Source snapshot backfill uses Range prefetch. LocalityProvider can select
-Blockwise independently. HashJoin prefix scans have their own Blockwise
-control, and change-log scans have a separate switch. Point MultiGet is a
-separate state-store API. Those callers share the object scheduler whenever
-their reads reach it.
+## Executor entry points
+
+The three Blockwise switches act independently. The prefix-scan switch
+maps a caller's Blockwise request to ordinary reads when disabled.
+LocalityProvider snapshot scans fall back to Range when their switch is
+disabled. Change-log scans construct their own SST iterator options.
+The SST iterator registers lookahead only with `CachePolicy::Fill` and
+when the scan bounds and window budget allow at least one neighbor.
+[Hummock option selection](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/storage/src/hummock/store/version.rs#L1121)
+
+| Executor or read path | Where it enters | Startup control |
+| --- | --- | --- |
+| HashJoin | A join-cache miss scans state rows by join-key prefix. The degree-state lookup uses the same prefetch option when the join needs degrees. [Call sites](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/join/hash_join.rs#L266-L337) | `storage.blockwise_prefetch.enabled` |
+| TemporalJoin | Lookup-side cache fills and memo-table scans for deletes or update-deletes request prefix prefetch. [Cache fill](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/temporal_join.rs#L115-L145) · [Memo scan](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/temporal_join.rs#L553-L572) | `storage.blockwise_prefetch.enabled` |
+| AsOfJoin | Cache population scans the join-key prefix. The uncached range-stream path requests prefix prefetch with the inequality bounds. [Cache fill](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/join/asof_join.rs#L364-L390) · [Uncached scan](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/join/asof_join.rs#L689-L698) | `storage.blockwise_prefetch.enabled` |
+| OverWindow | Partition cache expansion scans the full partition or a bounded forward subrange. Emit-on-window-close state recovery scans the partition prefix. [Full partition](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/over_window/over_partition.rs#L792-L808) · [Bounded subrange](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/over_window/over_partition.rs#L1007-L1021) · [State recovery](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/over_window/eowc.rs#L387-L399) | `storage.blockwise_prefetch.enabled` |
+| LocalityProvider | The snapshot stream scans its state table one vnode at a time and resumes from the saved position. Sort-buffer replay uses Range prefetch. [Snapshot scan](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/locality_provider.rs#L338-L381) · [Sort-buffer replay](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/locality_provider.rs#L592-L613) | `storage.blockwise_prefetch.locality_backfill_enabled` for the snapshot stream |
+| Snapshot backfill | The source snapshot uses Range prefetch. Catch-up through `BatchTable` calls Hummock `iter_log`, which selects Blockwise for old and new value SST iterators and passes down the key-range end. [Backfill](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/backfill/snapshot_backfill/executor.rs#L501-L567) · [Change-log iterator](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/storage/src/hummock/store/version.rs#L1295-L1337) | `storage.blockwise_prefetch.changelog_enabled` for the catch-up phase |
+| HashAgg and Materialize | HashAgg restores intermediate state for multiple missing group keys through `StateTable::get_rows`. Materialize uses the same API for missing cache entries on its checked-write path. The point API runs bounded concurrent gets and can reuse SST metadata handles within that call. [HashAgg](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/aggregate/hash_agg.rs#L294-L309) · [Materialize](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/stream/src/executor/mview/cache.rs#L360-L403) | `storage.read_batch.enabled`, with optional `meta_reuse` |
+| Batch RowSeqScan | Full-key probes use individual point reads with bounded concurrency. The remaining SQL `LIMIT` can further lower the number of outstanding point reads. [Point-read loop](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/batch/executors/src/executor/row_seq_scan.rs#L203-L228) | `batch.point_get_concurrency` |
+
+These paths share the object scheduler once a read reaches a supported
+Hummock object store. It also accepts ordinary bounded reads, including
+Range-prefetch reads and point-read misses. The store enables coalescing
+through `storage.object_store.enable_hummock_read_coalescing` for native S3,
+in-memory object storage, and OpenDAL S3 or MinIO.
+[Store wiring](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/storage/src/store_impl.rs#L990-L1011) ·
+[Backend selection](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/object_store/src/object/mod.rs#L297-L312)
+
+The Blockwise, coalescing, and point MultiGet switches default to off.
+With coalescing enabled, the scheduler defaults to Q32/B16/P32,
+256 KiB maximum range, and a 1 ms explicit-window preparation timeout.
+Blockwise defaults to three blocks and 256 KiB per iterator window.
+The Q18 measurements used an explicit N16/Q64 override.
 
 ## Admission and resource lifetime
 
@@ -40,20 +69,32 @@ their reads reach it.
 | `max_batch_requests` (B) | The logical receive budget per dequeue pass, capped by Q. A packet that does not fit the remaining budget is deferred intact. Ready requests from multiple passes can enter the same GET. |
 | `max_inflight_reads` (P) | Concurrent scheduled physical reads. A group holds one slot across its retry loop. |
 
-A complete window can transfer preparation permits only if its cold requests
-form a contiguous or overlapping span in one object, fit the byte limit, and
-fit a packet. Otherwise, ordinary admission publishes the prefix that fits
-and waits for capacity for the rest. The prefix relinquishes preparation
-permits as soon as it obtains Q and is ready to publish. The unpublished tail
-keeps its reservation until admission or cancellation. The driver releases
-unused reservations as soon as preparation closes.
+A complete window of two or more surviving cold reads first tries to take
+all its ordinary Q permits together, up to `min(B, Q)` reads. On failure it
+can transfer its preparation permits if the ranges form one contiguous or
+overlapping span in one object under the byte cap. The fallback takes the
+available prefix under ordinary Q, publishes it, and waits for the tail.
+If the preparation reservation was rejected, the reads use ordinary
+admission. If the deadline fired, the staged reads use prefix admission and
+late members submit individually. A timeout of zero disables explicit
+window preparation.
+
+The prefix relinquishes preparation permits as soon as it obtains Q and is
+ready to publish. The unpublished tail keeps its reservation until admission
+or cancellation. The driver releases unused reservations as soon as
+preparation closes. Preparation permits
+transferred to an admitted packet live with its requests through completion
+or cancellation.
+[Window admission](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/object_store/src/object/read_scheduler.rs#L274-L447)
 
 Ordinary reads dispatch whenever their ranges are ready and physical capacity
-is available. Only an explicit window has a preparation deadline. Oversized
-and unbounded ranges use the direct path. Cancellation removes queued members
-and can cancel a physical read after all its waiters leave. Range-error
+is available. The worker collects an available batch without waiting to fill
+it, then chooses the group containing the oldest ready request. Positive gaps
+end a group. Oversized and unbounded ranges use the direct path. Cancellation
+removes queued members and can cancel a physical read after all its waiters leave. Range-error
 fallback releases the parent physical slot before issuing individual
 children under the same physical limit.
+[Dispatch and range grouping](https://github.com/risingwavelabs/risingwave/blob/4549066c84066448793e134ea404945e91d40c07/src/object_store/src/object/read_scheduler.rs#L451-L689)
 
 ## Q18 stage assessment
 
