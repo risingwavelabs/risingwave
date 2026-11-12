@@ -45,6 +45,7 @@ pub mod observer_manager;
 // The backend is exercised by component tests before production wiring in the final stack layer.
 #[allow(dead_code)]
 pub(crate) mod pin_cache;
+pub(crate) mod refill_locality;
 pub mod store;
 pub(crate) mod table_cache_metadata;
 pub use store::*;
