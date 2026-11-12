@@ -789,11 +789,13 @@ impl HummockManager {
             self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )
         .await?;
-        let has_state_table_info_delta = delta
+        let has_time_travel_table_delta = delta
             .state_table_info_delta
             .keys()
+            .chain(delta.vector_index_delta.keys())
+            .chain(delta.full_text_index_delta.keys())
             .any(|table_id| time_travel_table_ids.contains(table_id));
-        if written > 0 || has_state_table_info_delta {
+        if written > 0 || has_time_travel_table_delta {
             let m = hummock_time_travel_delta::ActiveModel {
                 version_id: Set(delta.id),
                 version_delta: Set((&IncompleteHummockVersionDelta::from((

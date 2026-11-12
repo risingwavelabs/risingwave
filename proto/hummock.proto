@@ -239,19 +239,14 @@ message StateTableInfoDelta {
   uint64 compaction_group_id = 3;
 }
 
-// Type of a file of an object index, i.e. an index whose data is stored in its own objects
-// instead of SSTs (vector index or full-text index).
-enum ObjectIndexFileType {
-  OBJECT_INDEX_FILE_TYPE_UNSPECIFIED = 0;
-  OBJECT_INDEX_FILE_TYPE_VECTOR = 1;
-  OBJECT_INDEX_FILE_TYPE_HNSW_GRAPH = 2;
-  OBJECT_INDEX_FILE_TYPE_FULL_TEXT_SEGMENT = 3;
-  OBJECT_INDEX_FILE_TYPE_FULL_TEXT_DELETE_FILE = 4;
-  OBJECT_INDEX_FILE_TYPE_FULL_TEXT_DELETION_VECTOR = 5;
+enum VectorIndexObjectType {
+  VECTOR_INDEX_OBJECT_UNSPECIFIED = 0;
+  VECTOR_INDEX_OBJECT_VECTOR = 1;
+  VECTOR_INDEX_OBJECT_HNSW_GRAPH = 2;
 }
-message ObjectIndexFile {
+message VectorIndexObject {
   uint64 id = 1;
-  ObjectIndexFileType file_type = 2;
+  VectorIndexObjectType object_type = 2;
 }
 
 message VectorFileInfo {
@@ -307,6 +302,17 @@ message HnswFlatIndexAdd {
   repeated VectorFileInfo added_vector_files = 1;
   uint64 next_vector_id = 2;
   HnswGraphFileInfo graph_file = 3;
+}
+
+enum FullTextIndexObjectType {
+  FULL_TEXT_INDEX_OBJECT_TYPE_UNSPECIFIED = 0;
+  FULL_TEXT_INDEX_OBJECT_TYPE_SEGMENT = 1;
+  FULL_TEXT_INDEX_OBJECT_TYPE_DELETE_FILE = 2;
+  FULL_TEXT_INDEX_OBJECT_TYPE_DELETION_VECTOR = 3;
+}
+message FullTextIndexObject {
+  uint64 id = 1;
+  FullTextIndexObjectType object_type = 2;
 }
 
 message FullTextDeletionVectorInfo {
@@ -467,7 +473,8 @@ message HummockVersionCheckpoint {
   message StaleObjects {
     repeated uint64 id = 1;
     uint64 total_file_size = 2;
-    repeated ObjectIndexFile object_index_files = 3;
+    repeated VectorIndexObject vector_files = 3;
+    repeated FullTextIndexObject full_text_files = 4;
   }
   HummockVersion version = 1;
   map<uint64, StaleObjects> stale_objects = 2;
