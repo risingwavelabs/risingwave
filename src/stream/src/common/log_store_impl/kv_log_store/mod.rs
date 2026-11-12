@@ -2650,6 +2650,179 @@ mod tests {
         .await;
     }
 
+    /// A replacement commits its marker but recovery restores the original plan. A later successful
+    /// replacement reuses version 0, and must not apply its schema change at the abandoned marker.
+    async fn check_cancelled_schema_change(write_rows: bool, retry_same_change: bool) {
+        use ExpectedItem::*;
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as PbSchemaChangeOp;
+
+        let test_env = prepare_hummock_test_env().await;
+        let table_v0 = table_with_extra_columns(&KV_LOG_STORE_V2_INFO, 0);
+        let table_v1 = table_with_extra_columns(&KV_LOG_STORE_V2_INFO, 1);
+        test_env.register_table(table_v0.clone()).await;
+        let schema_change = add_column_schema_change(&table_v0);
+        let mut abandoned_schema_change = schema_change.clone();
+        if !retry_same_change {
+            let Some(PbSchemaChangeOp::AddColumns(op)) = &mut abandoned_schema_change.op else {
+                unreachable!()
+            };
+            op.fields[0].name = "abandoned_column".to_owned();
+        }
+        let read_version = LogStoreReadSchemaVersion::default();
+        let chunk_a = gen_versioned_chunk(0, 0);
+        let chunk_b = gen_versioned_chunk(100, 0);
+        let chunk_c = gen_versioned_chunk(200, 1);
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(TEST_TABLE_ID)
+            .unwrap()
+            .next_epoch();
+        let epoch2 = epoch1.next_epoch();
+
+        let factory_v0 = || {
+            versioned_factory(
+                test_env.storage.clone(),
+                &table_v0,
+                0,
+                vec![],
+                &read_version,
+            )
+        };
+        let (_, mut writer) = factory_v0().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_a.clone()).await.unwrap();
+        flush_schema_change(&mut writer, epoch2, &abandoned_schema_change).await;
+        test_env.commit_epoch(epoch1).await;
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        // Recover the old plan without schema history. Even at the end of the persisted log, the
+        // abandoned marker is an ordinary checkpoint and must not block consumption.
+        let (mut reader, mut writer) = factory_v0().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch2), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        let mut expected = vec![Chunk(epoch1, 0, &chunk_a), Barrier(epoch1, 0, None)];
+        assert_read_items(&mut reader, &read_version, &expected).await;
+
+        // Keep all old data untruncated while retrying the replacement. Also cover adjacent markers
+        // without intervening rows, and an empty first epoch of the new schema.
+        let retry_epoch = if write_rows {
+            writer.write_chunk(chunk_b.clone()).await.unwrap();
+            let epoch3 = epoch2.next_epoch();
+            test_env
+                .storage
+                .start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
+            writer
+                .flush_current_epoch_for_test(epoch3, true)
+                .await
+                .unwrap();
+            expected.extend([Chunk(epoch2, 0, &chunk_b), Barrier(epoch2, 0, None)]);
+            epoch3
+        } else {
+            epoch2
+        };
+        let new_epoch = retry_epoch.next_epoch();
+        flush_schema_change(&mut writer, new_epoch, &schema_change).await;
+        test_env.commit_epoch(epoch2).await;
+        if retry_epoch != epoch2 {
+            test_env.commit_epoch(retry_epoch).await;
+        }
+        drop(reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+        expected.push(Barrier(retry_epoch, 0, Some(&schema_change)));
+
+        let factory_v1 = || {
+            versioned_factory(
+                test_env.storage.clone(),
+                &table_v1,
+                1,
+                vec![history_entry(0, &table_v0, &schema_change)],
+                &read_version,
+            )
+        };
+        let (mut reader, mut writer) = factory_v1().build().await;
+        test_env
+            .storage
+            .start_epoch(new_epoch, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(new_epoch), false)
+            .await
+            .unwrap();
+        if write_rows {
+            writer.write_chunk(chunk_c.clone()).await.unwrap();
+            expected.push(Chunk(new_epoch, 1, &chunk_c));
+        }
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(&mut reader, &read_version, &expected).await;
+
+        // Sink retries must replay the same boundary, without losing the lookahead row.
+        reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(&mut reader, &read_version, &expected).await;
+
+        let recovery_epoch = new_epoch.next_epoch();
+        writer
+            .flush_current_epoch_for_test(recovery_epoch, true)
+            .await
+            .unwrap();
+        test_env.commit_epoch(new_epoch).await;
+        drop(reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+        expected.push(Barrier(new_epoch, 1, None));
+
+        let (mut reader, mut writer) = factory_v1().build().await;
+        test_env
+            .storage
+            .start_epoch(recovery_epoch, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(recovery_epoch), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(&mut reader, &read_version, &expected).await;
+
+        // Truncating the abandoned marker must not discard the real schema boundary.
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .unwrap();
+        reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(&mut reader, &read_version, &expected[2..]).await;
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_schema_change_with_rows() {
+        Box::pin(check_cancelled_schema_change(true, true)).await;
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_schema_change_with_different_change() {
+        Box::pin(check_cancelled_schema_change(true, false)).await;
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_schema_change_without_rows() {
+        Box::pin(check_cancelled_schema_change(false, true)).await;
+    }
+
     /// Two schema changes happen before the sink consumes any row. The latest actor reads rows of
     /// all three schema versions in order, before and after recovery.
     #[tokio::test]

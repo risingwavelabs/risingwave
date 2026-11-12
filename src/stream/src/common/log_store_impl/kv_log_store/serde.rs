@@ -865,7 +865,8 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         pin_mut!(this);
 
         let mut read_info = ReadInfo::new();
-        while let Some(row) = this.next_op().await? {
+        let mut next_row = this.next_op().await?;
+        while let Some(row) = next_row.take() {
             let epoch = row.epoch;
             let row_op = row.op;
             let row_read_size = row.size;
@@ -965,21 +966,40 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             },
                         );
                     }
+                    let schema_change = if is_schema_change {
+                        // A marker can survive a replacement that recovery later abandons. The
+                        // schema version is then reused by a retry, so history alone cannot tell
+                        // which marker actually changes the schema. Inspect the next aligned item,
+                        // including barriers of empty epochs. At the end of the historical log,
+                        // the current actor's schema is the schema of the following buffered data.
+                        next_row = this.next_op().await?;
+                        let next_version = next_row
+                            .as_ref()
+                            .map_or(this.serde.schema_version, |row| row.version);
+                        if next_version > row_version {
+                            this.serde.schema_change_of(row_version)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     yield (
                         epoch,
                         KvLogStoreItem::Barrier {
                             vnodes,
                             is_checkpoint,
                             schema_version: row_version,
-                            schema_change: if is_schema_change {
-                                this.serde.schema_change_of(row_version)
-                            } else {
-                                None
-                            },
+                            schema_change,
                         },
-                    )
+                    );
+                    if is_schema_change {
+                        // Process the lookahead item without polling again, even if it is EOF.
+                        continue;
+                    }
                 }
             }
+            next_row = this.next_op().await?;
         }
     }
 }
