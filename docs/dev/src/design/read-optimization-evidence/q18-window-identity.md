@@ -218,3 +218,35 @@ same binary. The historical untraced Locality ON run with Range prefetch
 and scheduler disabled completed in 335.8 seconds with 51,333 CN GETs.
 That run used a different experimental binary. The timings are single
 runs. [Untraced counters and build identity](./q18-source-blockwise-no-trace.json).
+
+### Work after the source scan
+
+The existing five-second scrapes put 295.5 seconds of the untraced
+Range run and 298.6 seconds of the untraced Blockwise run after the
+source checkpoint. The CN used 1,180 and 1,192 CPU seconds and issued
+9,126 and 9,148 physical GETs in those intervals. In the Blockwise
+interval, physical read timers summed to 16.0 seconds, scheduler
+admission timers to 0.08 seconds, and scheduler queue timers to 2.08
+seconds. These timers cover the CN and include concurrent work.
+
+| Full-run metric | Source Range | Source Blockwise |
+| --- | ---: | ---: |
+| HashJoin cache lookups | 16,648,401 | 16,648,397 |
+| HashJoin cache lookup misses | 6,245,732 | 6,245,731 |
+| Iterator initializations on the six Join state tables | 6,245,070 | 6,245,005 |
+| Join state iterator initialization sum, seconds | 622.85 | 643.13 |
+| Join state iterator scan sum, seconds | 82.00 | 78.20 |
+| HashJoin matching time sum, seconds | 862.12 | 879.45 |
+| Actor poll duration for the two busiest Join fragments, seconds | 574.48 | 577.16 |
+
+In Blockwise, Join fragment 23 accumulated 351.5 seconds polling and
+425.1 seconds in chunk matching across four actors. Upstream fragment
+29 accumulated 661.1 seconds in dispatch to fragment 23, whose own
+dispatch to fragment 22 accumulated 10.3 seconds. The same edges in
+Range accumulated 601.9 and 2.9 seconds. The dispatch timer includes
+dispatch work and channel waiting. The Join matching timer excludes
+time suspended at output yields and includes awaits inside matching.
+Actor and iterator times overlap and cannot be added to get wall time.
+Their counters are available for the full run, while almost all Join
+lookups occur after the source checkpoint. No matching Q18 CPU sample
+profile was retained.
