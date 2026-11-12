@@ -1126,8 +1126,7 @@ impl LogicalPlanRoot {
         let refreshable = source_catalog
             .as_ref()
             .map(|catalog| {
-                catalog.with_properties.supports_full_reload_refresh()
-                    && catalog.ingest_mode.is_full_reload()
+                catalog.with_properties.supports_full_reload_refresh() && catalog.is_full_reload()
             })
             .unwrap_or(false);
 

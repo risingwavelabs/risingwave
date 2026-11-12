@@ -423,7 +423,11 @@ impl Planner {
         } else {
             let mut as_of = source.as_of.clone();
 
-            if let Some(scan) = source.catalog.ingest_mode.iceberg_bounded_scan() {
+            if let Some(scan) = source
+                .catalog
+                .ingest_mode()
+                .and_then(|mode| mode.iceberg_bounded_scan())
+            {
                 if as_of.is_some() {
                     return Err(ErrorCode::NotSupported(
                         "AS OF on a bounded source is not supported".to_owned(),

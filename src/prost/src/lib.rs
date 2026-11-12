@@ -546,6 +546,22 @@ impl stream_plan::DispatchOutputMapping {
     }
 }
 
+impl catalog::Source {
+    pub fn ingest_mode(&self) -> Option<&plan_common::SourceIngestMode> {
+        match &self.kind {
+            Some(catalog::source::Kind::IngestMode(mode)) => Some(mode),
+            _ => None,
+        }
+    }
+
+    pub fn hybrid(&self) -> Option<&catalog::HybridSource> {
+        match &self.kind {
+            Some(catalog::source::Kind::Hybrid(hybrid)) => Some(hybrid),
+            _ => None,
+        }
+    }
+}
+
 impl catalog::HybridSource {
     pub fn from_stage_source_ids(ids: impl IntoIterator<Item = SourceId>) -> Self {
         Self {

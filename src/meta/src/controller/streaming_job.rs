@@ -767,7 +767,7 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
 
                 if table.refreshable {
-                    let ingest_mode = src.as_ref().and_then(|source| source.ingest_mode.as_ref());
+                    let ingest_mode = src.as_ref().and_then(|source| source.ingest_mode());
                     let trigger_interval_secs =
                         IngestMode::from_proto(ingest_mode)?.refresh_interval_sec();
 

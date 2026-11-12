@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::PbSource;
+use risingwave_pb::catalog::source::Kind as PbSourceKind;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,8 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSource> for ActiveModel {
     fn from(source: PbSource) -> Self {
         let optional_associated_table_id = source.optional_associated_table_id.map(Into::into);
+        let ingest_mode = source.ingest_mode().map(SourceIngestMode::from);
+        let hybrid = source.hybrid().map(HybridSource::from);
         Self {
             source_id: Set(source.id),
             name: Set(source.name),
@@ -107,13 +110,25 @@ impl From<PbSource> for ActiveModel {
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
             rate_limit: Set(source.rate_limit.map(|id| id as _)),
-            ingest_mode: Set(source.ingest_mode.as_ref().map(SourceIngestMode::from)),
-            hybrid: Set(None),
+            ingest_mode: Set(ingest_mode),
+            hybrid: Set(hybrid),
         }
     }
 }
 
 impl Model {
+    pub fn kind(&self) -> Option<PbSourceKind> {
+        match (&self.ingest_mode, &self.hybrid) {
+            (Some(_), Some(_)) => panic!(
+                "source {} has both an ingest mode and a hybrid definition",
+                self.source_id
+            ),
+            (Some(mode), None) => Some(PbSourceKind::IngestMode(mode.to_protobuf())),
+            (None, Some(hybrid)) => Some(PbSourceKind::Hybrid(hybrid.to_protobuf())),
+            (None, None) => None,
+        }
+    }
+
     pub fn is_shared(&self) -> bool {
         self.source_info
             .as_ref()

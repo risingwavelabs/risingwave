@@ -16,14 +16,16 @@ use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SOURCE_PREFIX, SourceVer
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
-use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::source::Kind as PbSourceKind;
+use risingwave_pb::catalog::{PbHybridSource, PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
 
 use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
-use crate::catalog::TableId;
+use crate::catalog::root_catalog::Catalog;
+use crate::catalog::{CatalogError, TableId};
 use crate::error::Result;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
@@ -53,7 +55,13 @@ pub struct SourceCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
-    pub ingest_mode: IngestMode,
+    pub kind: SourceKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SourceKind {
+    Connector(IngestMode),
+    Hybrid(Vec<SourceId>),
 }
 
 impl SourceCatalog {
@@ -93,7 +101,12 @@ impl SourceCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
-            ingest_mode: Some(self.ingest_mode.to_proto()),
+            kind: Some(match &self.kind {
+                SourceKind::Connector(mode) => PbSourceKind::IngestMode(mode.to_proto()),
+                SourceKind::Hybrid(stages) => PbSourceKind::Hybrid(
+                    PbHybridSource::from_stage_source_ids(stages.iter().copied()),
+                ),
+            }),
         }
     }
 
@@ -117,9 +130,45 @@ impl SourceCatalog {
         self.info.external_table.is_some()
     }
 
+    pub fn ingest_mode(&self) -> Option<IngestMode> {
+        match &self.kind {
+            SourceKind::Connector(mode) => Some(*mode),
+            SourceKind::Hybrid(_) => None,
+        }
+    }
+
+    pub fn is_full_reload(&self) -> bool {
+        self.ingest_mode().is_some_and(|mode| mode.is_full_reload())
+    }
+
+    /// The stages of a hybrid source, in order. Empty for other sources.
+    pub fn hybrid_stages(&self) -> &[SourceId] {
+        match &self.kind {
+            SourceKind::Connector(_) => &[],
+            SourceKind::Hybrid(stages) => stages,
+        }
+    }
+
+    /// Whether this source reads other sources as ordered stages.
+    pub fn is_hybrid(&self) -> bool {
+        matches!(self.kind, SourceKind::Hybrid(_))
+    }
+
     /// Whether this source loads a bounded input once instead of streaming continuously.
-    pub fn is_bounded(&self) -> bool {
-        self.ingest_mode.is_bounded()
+    /// A hybrid source is bounded when its last stage is.
+    pub fn is_bounded(&self, catalog: &Catalog) -> Result<bool> {
+        match &self.kind {
+            SourceKind::Connector(mode) => Ok(mode.is_bounded()),
+            SourceKind::Hybrid(stages) => {
+                let last = stages.last().expect("a hybrid source has stages");
+                let database = catalog.get_database_by_id(self.database_id)?;
+                let stage = database
+                    .iter_schemas()
+                    .find_map(|schema| schema.get_source_by_id(*last))
+                    .ok_or_else(|| CatalogError::not_found("source", last.to_string()))?;
+                stage.is_bounded(catalog)
+            }
+        }
     }
 
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
@@ -203,8 +252,13 @@ impl From<&PbSource> for SourceCatalog {
 
         let connection_id = prost.connection_id;
         let rate_limit = prost.rate_limit;
-        let ingest_mode = IngestMode::from_proto(prost.ingest_mode.as_ref())
-            .expect("stored ingest mode should be valid");
+        let kind = match prost.hybrid() {
+            Some(hybrid) => SourceKind::Hybrid(hybrid.stage_source_ids()),
+            None => SourceKind::Connector(
+                IngestMode::from_proto(prost.ingest_mode())
+                    .expect("stored ingest mode should be valid"),
+            ),
+        };
 
         Self {
             id,
@@ -228,7 +282,7 @@ impl From<&PbSource> for SourceCatalog {
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
             rate_limit,
-            ingest_mode,
+            kind,
         }
     }
 }

@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
@@ -121,7 +122,7 @@ impl StreamNode for StreamFsFetch {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
-                ingest_mode: Some(source_catalog.ingest_mode.to_proto()),
+                ingest_mode: source_catalog.ingest_mode().map(IngestMode::to_proto),
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });

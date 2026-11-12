@@ -70,7 +70,7 @@ impl StreamSource {
             // iceberg list node (singleton) stores last_snapshot (just 1 row, no pk)
             let is_streaming = self
                 .source_catalog()
-                .is_none_or(|catalog| catalog.ingest_mode == IngestMode::Streaming);
+                .is_none_or(|catalog| catalog.ingest_mode() == Some(IngestMode::Streaming));
             let name = if is_streaming {
                 "last_snapshot"
             } else {
@@ -130,7 +130,7 @@ impl StreamNode for StreamSource {
                 downstream_columns: self.downstream_columns.as_ref().map(|cols| Columns {
                     columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
                 }),
-                ingest_mode: Some(source_catalog.ingest_mode.to_proto()),
+                ingest_mode: source_catalog.ingest_mode().map(IngestMode::to_proto),
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
