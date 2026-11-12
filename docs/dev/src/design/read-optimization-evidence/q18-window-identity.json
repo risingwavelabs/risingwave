@@ -1,0 +1,213 @@
+{
+  "binary_sha256": "90ed156b69c24a91662fefb02d62d32ff513dccfbf8136228145bb49fb94dec4",
+  "cn_trace_sha256": "eb1962e64ac6467ff8ead4d5682f67886247e2f1da7226c432d68f0add98a732",
+  "phases": {
+    "after_source_scan": {
+      "elapsed_s": 404.156,
+      "events": {
+        "cancelled_before_dispatch": 0,
+        "cancelled_queued": 0,
+        "group_cancelled": 0,
+        "group_error": 0,
+        "group_ok": 8569,
+        "merged_requests": 28131,
+        "split_bytes": 0,
+        "split_gap": 30,
+        "split_object": 175,
+        "window_admitted_with_preparation": 1,
+        "window_budget_reject": 1,
+        "window_complete": 8679,
+        "window_late": 106,
+        "window_split_admission": 1,
+        "window_split_limit": 0,
+        "window_timeout": 57
+      },
+      "physical_bytes": 2466047479,
+      "physical_gets": 8916,
+      "read_errors": null,
+      "routes": {
+        "direct": 0,
+        "empty_range": 0,
+        "oversized": 0,
+        "scheduled": 36700,
+        "unbounded": 347
+      }
+    },
+    "full": {
+      "elapsed_s": 464.659,
+      "events": {
+        "cancelled_before_dispatch": 0,
+        "cancelled_queued": 0,
+        "group_cancelled": 0,
+        "group_error": 0,
+        "group_ok": 52575,
+        "merged_requests": 28572,
+        "split_bytes": 0,
+        "split_gap": 1385,
+        "split_object": 4534,
+        "window_admitted_with_preparation": 1,
+        "window_budget_reject": 1,
+        "window_complete": 8938,
+        "window_late": 118,
+        "window_split_admission": 1,
+        "window_split_limit": 0,
+        "window_timeout": 68
+      },
+      "physical_bytes": 6180254395,
+      "physical_gets": 53070,
+      "read_errors": {
+        "attempt": 0,
+        "logical": 0,
+        "physical": 0
+      },
+      "routes": {
+        "direct": 0,
+        "empty_range": 0,
+        "oversized": 0,
+        "scheduled": 81147,
+        "unbounded": 495
+      }
+    },
+    "through_source_scan": {
+      "elapsed_s": 60.503,
+      "events": {
+        "cancelled_before_dispatch": 0,
+        "cancelled_queued": 0,
+        "group_cancelled": 0,
+        "group_error": 0,
+        "group_ok": 44006,
+        "merged_requests": 441,
+        "split_bytes": 0,
+        "split_gap": 1355,
+        "split_object": 4359,
+        "window_admitted_with_preparation": 0,
+        "window_budget_reject": 0,
+        "window_complete": 259,
+        "window_late": 12,
+        "window_split_admission": 0,
+        "window_split_limit": 0,
+        "window_timeout": 11
+      },
+      "physical_bytes": 3714206916,
+      "physical_gets": 44154,
+      "read_errors": null,
+      "routes": {
+        "direct": 0,
+        "empty_range": 0,
+        "oversized": 0,
+        "scheduled": 44447,
+        "unbounded": 148
+      }
+    }
+  },
+  "request_identity": {
+    "examples": {
+      "one_get": {
+        "admitted_packets": [
+          {
+            "request_ids": [
+              47686,
+              47687,
+              47685,
+              47688,
+              47689,
+              47690,
+              47691,
+              47692,
+              47693,
+              47694,
+              47695,
+              47696,
+              47699,
+              47697,
+              47698,
+              47700
+            ],
+            "uses_preparation": false
+          }
+        ],
+        "executor": "LocalityProvider",
+        "first_block": 87,
+        "gets": [
+          {
+            "range": [
+              5697794,
+              6745819
+            ],
+            "request_ids": [
+              47700,
+              47685,
+              47686,
+              47687,
+              47688,
+              47689,
+              47690,
+              47691,
+              47692,
+              47693,
+              47694,
+              47695,
+              47696,
+              47697,
+              47698,
+              47699
+            ]
+          }
+        ],
+        "object_id": 1684,
+        "outer_read_ids": [
+          47686,
+          47687,
+          47685,
+          47688,
+          47689,
+          47690,
+          47691,
+          47692,
+          47693,
+          47694,
+          47695,
+          47696,
+          47699,
+          47697,
+          47698,
+          47700
+        ],
+        "window_range": [
+          5697794,
+          6745819
+        ]
+      }
+    },
+    "full_cold_distribution": {
+      "16 outer reads / [16] admitted / 1 GETs": 770
+    },
+    "matched_full_cold_by_executor": {
+      "LocalityProvider": 770
+    },
+    "split_causes": {},
+    "window_counts": {
+      "complete_staged_14": 12,
+      "complete_staged_15": 177,
+      "complete_staged_16": 770,
+      "reserved_16_window_complete": 959,
+      "reserved_16_window_timeout": 41
+    }
+  },
+  "run": {
+    "arm": "on-q64-window-identity",
+    "block_lookups": 3216536.0,
+    "block_misses": 68965.0,
+    "cn_cpu_s": 1855.0,
+    "cn_gets": 53070.0,
+    "cn_read_gib": 5.7558104349300265,
+    "completed": true,
+    "join_lookups": 16648465.0,
+    "join_misses": 6245732.0,
+    "locality": true,
+    "seconds": 464.6589789169375
+  },
+  "source_base": "658df66c87da111f9c2439ca3245acb10aa158a5",
+  "source_build_delta": "Adds explicit window packet IDs to scheduler DEBUG trace.",
+  "source_checkpoint": 13652430.0
+}

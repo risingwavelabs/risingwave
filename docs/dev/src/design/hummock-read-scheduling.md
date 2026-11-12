@@ -122,11 +122,14 @@ The later Q64 run recorded seven packets admitted with preparation permits
 and zero admission or packet-limit splits. These are measurements of the
 frozen whole-window binary from before the fallback accounting cleanup.
 
-The measurements establish aggregate merge behavior. To distinguish
-cache effects from scheduler splits for a particular window, correlate
-selected blocks, external reads, admitted packets, and physical groups by
-request identity. Gap observations describe the worker's ready set and still
-need a combined-span check to estimate eligible merges and extra bytes.
+The checkpoint Q64 trace matched 770 complete, fully cold 16-block
+LocalityProvider windows by request identity. Each produced 16 Foyer outer
+reads, one 16-request packet, and one successful GET. The only observed
+admission split followed a preparation timeout in a three-block window.
+The [request identity trace](./read-optimization-evidence/q18-window-identity.md)
+records the cohort and the split. Gap observations describe the worker's
+ready set and need a combined-span check to estimate eligible merges and
+extra bytes.
 The [Q18 repeat](./read-optimization-testing.md#q18-q64-io-distribution-repeat)
 records the I/O distributions and their measurement boundaries.
 The [checkpoint artifacts](./read-optimization-evidence/q18-checkpoint.md) retain the

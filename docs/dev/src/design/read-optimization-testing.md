@@ -1513,3 +1513,12 @@ See `target/locality-tpch-q18/on-q64-whole-window-io-distribution/summary.txt`
 and `io-distribution.json` alongside it for raw evidence, disjoint
 histograms, and cleanup. The analysis script is
 `target/locality-tpch-q18/analyze-io-distribution.py`.
+
+#### Q18 Q64 window identity trace
+
+The checkpoint diagnostic joined the Foyer, admission, and physical dispatch
+records. All 770 fully cold 16-block LocalityProvider windows prepared
+completely, entered in one packet each, and issued one successful GET each.
+The sole admission split followed a deadline in a three-block window.
+The [request identity trace](./read-optimization-evidence/q18-window-identity.md)
+records the counts, matching rules, and request ranges.

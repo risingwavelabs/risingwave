@@ -50,6 +50,7 @@
     - [Hummock Blockwise Prefetch and Read Scheduling](./design/hummock-read-scheduling.md)
         - [Read Optimization Controls and Experiments](./design/read-optimization-testing.md)
         - [Q18 Read Optimization Checkpoint](./design/read-optimization-evidence/q18-checkpoint.md)
+            - [Q18 Cold-Window Request Trace](./design/read-optimization-evidence/q18-window-identity.md)
 - [Meta Service](./design/meta-service.md)
 - [Data Model and Encoding](./design/data-model-and-encoding.md)
 - [Batch Local Execution Mode](./design/batch-local-execution-mode.md)

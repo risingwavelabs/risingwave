@@ -345,7 +345,7 @@ impl ReadScheduler {
                 request.admit(slots.split(1).unwrap(), self)
             })
             .collect();
-        if self.requests.send(packet).is_ok() {
+        if self.publish_window_packet(packet, uses_preparation).is_ok() {
             self.event("window_packet");
             if uses_preparation {
                 self.event("window_admitted_with_preparation");
@@ -439,12 +439,35 @@ impl ReadScheduler {
             // One publication: another worker cannot select the first member
             // before seeing the other admitted members of this packet.
             preparation.retain(requests.len());
-            if self.requests.send(packet).is_err() {
+            if self.publish_window_packet(packet, false).is_err() {
                 return;
             }
             self.event("window_packet");
             // Never await further Q while retaining an unpublished admitted prefix.
         }
+    }
+
+    fn publish_window_packet(
+        &self,
+        packet: Vec<ReadRequest>,
+        uses_preparation: bool,
+    ) -> Result<(), mpsc::error::SendError<Vec<ReadRequest>>> {
+        let request_ids =
+            tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG).then(
+                || {
+                    packet
+                        .iter()
+                        .filter_map(|request| request.trace_id)
+                        .collect_vec()
+                },
+            );
+        let size = packet.len();
+        self.requests.send(packet)?;
+        if let Some(request_ids) = request_ids {
+            tracing::debug!(target: "object_store_read_scheduler",
+                size, uses_preparation, ?request_ids, "scheduler window packet admitted");
+        }
+        Ok(())
     }
 }
 
