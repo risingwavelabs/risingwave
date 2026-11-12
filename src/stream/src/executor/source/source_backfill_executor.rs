@@ -284,12 +284,10 @@ impl BackfillStage {
                     *state_inner = BackfillState::Backfilling(Some(offset.to_owned()));
                 }
             }
-            BackfillState::SourceCachingUp(backfill_offset) => {
-                if compare_kafka_offset(backfill_offset, offset).is_lt() {
-                    *backfill_offset = offset.to_owned();
-                }
-            }
-            BackfillState::Finished => {}
+            // The backfill stopped emitting at `SourceCachingUp`: rows the reader read after that
+            // were dropped, so the upstream must still emit them. Moving the offset forward here
+            // would make the upstream drop them too.
+            BackfillState::SourceCachingUp(_) | BackfillState::Finished => {}
         }
     }
 }
@@ -1336,5 +1334,59 @@ impl PauseControl {
         }
         self.command_paused = false;
         !self.backfill_paused
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stage(state: BackfillState, target_offset: &str) -> BackfillStage {
+        BackfillStage {
+            states: HashMap::from([(
+                SplitId::from("0"),
+                BackfillStateWithProgress {
+                    state,
+                    num_consumed_rows: 0,
+                    target_offset: Some(target_offset.to_owned()),
+                },
+            )]),
+            splits: vec![],
+        }
+    }
+
+    fn state(stage: &BackfillStage) -> &BackfillState {
+        &stage.states.get("0").unwrap().state
+    }
+
+    #[test]
+    fn test_progress_after_source_caching_up_keeps_dropped_rows_for_upstream() {
+        let mut stage = stage(BackfillState::Backfilling(Some("108".to_owned())), "109");
+
+        assert!(stage.handle_backfill_row("0", "110"));
+        assert!(!stage.handle_backfill_row("0", "111"));
+        stage.handle_backfill_progress("0", "219");
+        assert_eq!(
+            *state(&stage),
+            BackfillState::SourceCachingUp("110".to_owned())
+        );
+
+        assert!(!stage.handle_upstream_row("0", "110"));
+        assert!(stage.handle_upstream_row("0", "111"));
+        assert!(stage.handle_upstream_row("0", "218"));
+    }
+
+    #[test]
+    fn test_progress_over_control_record_finishes_backfill() {
+        let mut stage = stage(BackfillState::Backfilling(Some("108".to_owned())), "109");
+
+        stage.handle_backfill_progress("0", "109");
+        assert_eq!(
+            *state(&stage),
+            BackfillState::SourceCachingUp("109".to_owned())
+        );
+
+        assert!(stage.handle_upstream_row("0", "110"));
+        assert_eq!(*state(&stage), BackfillState::Finished);
     }
 }
