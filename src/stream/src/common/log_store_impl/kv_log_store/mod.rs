@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::mem::replace;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableOption;
@@ -25,7 +26,9 @@ use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, RelabeledAggregatedIntGauge,
 };
 use risingwave_connector::sink::SinkParam;
-use risingwave_connector::sink::log_store::{LogStoreFactory, TruncateBarrierLogReader};
+use risingwave_connector::sink::log_store::{
+    LogStoreFactory, LogStoreResult, TruncateBarrierLogReader,
+};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
@@ -35,6 +38,7 @@ use tokio::sync::{oneshot, watch};
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
 use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+pub(crate) use crate::common::log_store_impl::kv_log_store::serde::LogStoreSchemaHistoryEntry;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::FragmentId;
@@ -187,6 +191,26 @@ pub(crate) type Epoch = u64;
 
 pub(crate) type SeqId = i32;
 type RowOpCodeType = i16;
+
+/// Schema version of the rows in a kv log store. See `SinkNode::log_store_schema_version`.
+pub(crate) type SchemaVersion = u32;
+
+/// Schema version of the latest item returned by a kv log store reader.
+///
+/// It is shared with the consumer so that the consumer can tell which schema an item uses,
+/// without changing the `LogReader` interface.
+#[derive(Clone, Default, Debug)]
+pub(crate) struct LogStoreReadSchemaVersion(Arc<AtomicU32>);
+
+impl LogStoreReadSchemaVersion {
+    pub(crate) fn get(&self) -> SchemaVersion {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set(&self, version: SchemaVersion) {
+        self.0.store(version, Ordering::Relaxed);
+    }
+}
 
 pub(crate) const FIRST_SEQ_ID: SeqId = 0;
 
@@ -545,6 +569,10 @@ pub struct KvLogStoreFactory<S: StateStore> {
     /// Semaphore to limit the number of concurrent historical reads.
     /// `None` means unlimited.
     historical_read_semaphore: Option<Arc<tokio::sync::Semaphore>>,
+
+    schema_version: SchemaVersion,
+    schema_history: Vec<LogStoreSchemaHistoryEntry>,
+    read_schema_version: LogStoreReadSchemaVersion,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -570,7 +598,28 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             identity: identity.into(),
             pk_info,
             historical_read_semaphore,
+            schema_version: 0,
+            schema_history: vec![],
+            read_schema_version: LogStoreReadSchemaVersion::default(),
         }
+    }
+
+    /// Set the schema version of newly written rows and the older schemas whose rows may still be
+    /// in the log store. The reader reports the schema version of each returned item through
+    /// `read_schema_version`.
+    pub(crate) fn with_schema_history(
+        mut self,
+        schema_version: SchemaVersion,
+        schema_history: Vec<LogStoreSchemaHistoryEntry>,
+        read_schema_version: LogStoreReadSchemaVersion,
+    ) -> LogStoreResult<Self> {
+        // Validate the history early, since `build` cannot return an error.
+        LogStoreRowSerde::new(&self.table_catalog, self.vnodes.clone(), self.pk_info)
+            .with_schema_history(schema_version, &schema_history)?;
+        self.schema_version = schema_version;
+        self.schema_history = schema_history;
+        self.read_schema_version = read_schema_version;
+        Ok(self)
     }
 }
 
@@ -586,7 +635,9 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = self.table_catalog.id;
         let (pause_tx, pause_rx) = watch::channel(false);
-        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes, self.pk_info);
+        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes, self.pk_info)
+            .with_schema_history(self.schema_version, &self.schema_history)
+            .expect("schema history should have been validated");
         let local_state_store = self
             .state_store
             .new_local(NewLocalOptions {
@@ -623,6 +674,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             pause_rx,
             self.identity.clone(),
             self.historical_read_semaphore,
+            self.read_schema_version,
         );
 
         let writer = KvLogStoreWriter::new(
@@ -649,13 +701,12 @@ mod tests {
     use std::task::Poll;
     use std::time::Duration;
 
-    use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
@@ -663,11 +714,11 @@ mod tests {
         ChunkId, FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
         TruncateOffset,
     };
-    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::plan_common::PbField;
     use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
-    use risingwave_storage::table::batch_table::BatchTable;
+    use risingwave_storage::StateStore;
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         LogWriterTestExt, TEST_DATA_SIZE, TEST_TABLE_ID, calculate_vnode_bitmap, check_rows_eq,
@@ -676,6 +727,7 @@ mod tests {
     };
     use crate::common::log_store_impl::kv_log_store::{
         KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
+        LogStoreReadSchemaVersion, LogStoreSchemaHistoryEntry, SchemaVersion,
     };
 
     #[tokio::test]
@@ -2197,138 +2249,539 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
-    async fn test_schema_change() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
-        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
-        let test_env = prepare_hummock_test_env().await;
+    /// A log store table whose payload is the test payload followed by `extra_column_count`
+    /// `Int32` columns.
+    fn table_with_extra_columns(
+        pk_info: &'static KvLogStorePkInfo,
+        extra_column_count: usize,
+    ) -> Table {
+        let mut table = gen_test_log_store_table(pk_info);
+        for _ in 0..extra_column_count {
+            let column_id = table.columns.len() as i32;
+            table.columns.push(
+                ColumnCatalog::visible(ColumnDesc::named(
+                    format!("extra_{column_id}"),
+                    ColumnId::new(column_id),
+                    DataType::Int32,
+                ))
+                .to_protobuf(),
+            );
+        }
+        table.value_indices = (0..table.columns.len() as i32).collect();
+        table
+    }
 
-        let table = gen_test_log_store_table(pk_info);
-
-        test_env.register_table(table.clone()).await;
-
-        let stream_chunk1 = gen_stream_chunk(0);
-        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows());
-        let bitmap = Arc::new(bitmap);
-
-        let factory = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            table.clone(),
-            bitmap,
-            1024,
-            1024,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            None,
-            pk_info,
-        );
-        let (mut reader, mut writer) = factory.build().await;
-
-        let epoch1 = test_env
-            .storage
-            .get_pinned_version()
-            .table_committed_epoch(table.id)
-            .unwrap()
-            .next_epoch();
-        test_env
-            .storage
-            .start_epoch(epoch1, HashSet::from_iter([table.id]));
-        writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
-            .await
-            .unwrap();
-
-        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-
-        let epoch2 = epoch1.next_epoch();
-        test_env
-            .storage
-            .start_epoch(epoch2, HashSet::from_iter([table.id]));
-
+    /// The schema change that adds an `Int32` column to `table`.
+    fn add_column_schema_change(table: &Table) -> PbSinkSchemaChange {
         use risingwave_pb::stream_plan::sink_schema_change::PbOp as PbSchemaChangeOp;
-        let schema_change = PbSinkSchemaChange {
+        PbSinkSchemaChange {
             original_schema: table
                 .columns
                 .iter()
-                .map(|col| PbField {
-                    data_type: Some(
-                        col.column_desc
-                            .as_ref()
-                            .unwrap()
-                            .column_type
-                            .as_ref()
-                            .unwrap()
-                            .clone(),
-                    ),
-                    name: col.column_desc.as_ref().unwrap().name.clone(),
+                .map(|col| {
+                    let column_desc = col.column_desc.as_ref().unwrap();
+                    PbField {
+                        data_type: column_desc.column_type.clone(),
+                        name: column_desc.name.clone(),
+                    }
                 })
                 .collect(),
             op: Some(PbSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
                 fields: vec![PbField {
                     data_type: Some(DataType::Int32.to_protobuf()),
-                    name: "new_col".to_owned(),
+                    name: format!("extra_{}", table.columns.len()),
                 }],
             })),
-        };
+        }
+    }
 
-        // Flush with schema change should wait until the reader truncates the barrier.
-        let mut flush_future = Box::pin(writer.flush_current_epoch(
-            epoch2,
-            FlushCurrentEpochOptions {
-                is_checkpoint: true,
-                new_vnode_bitmap: None,
-                is_stop: false,
-                schema_change: Some(schema_change.clone()),
-                wait_log_store_flush: false,
-            },
-        ));
+    /// A chunk of the test payload followed by `extra_column_count` `Int32` columns.
+    fn gen_versioned_chunk(base: i64, extra_column_count: usize) -> StreamChunk {
+        let mut data_types = vec![DataType::Int64, DataType::Varchar];
+        data_types.extend(std::iter::repeat_n(DataType::Int32, extra_column_count));
+        let mut builder = DataChunkBuilder::new(data_types, 1024);
+        let mut ops = vec![];
+        for i in 0..TEST_DATA_SIZE as i64 {
+            let id = base + i;
+            let mut datums = vec![
+                Some(ScalarImpl::Int64(id)),
+                Some(ScalarImpl::Utf8(format!("name{id}").into())),
+            ];
+            datums.extend(
+                (0..extra_column_count).map(|j| Some(ScalarImpl::Int32(id as i32 * 10 + j as i32))),
+            );
+            ops.push(if i % 3 == 1 { Op::Delete } else { Op::Insert });
+            assert!(builder.append_one_row(OwnedRow::new(datums)).is_none());
+        }
+        StreamChunk::from_parts(ops, builder.consume_all().unwrap())
+    }
 
+    fn versioned_factory<S: StateStore>(
+        state_store: S,
+        table: &Table,
+        schema_version: SchemaVersion,
+        schema_history: Vec<LogStoreSchemaHistoryEntry>,
+        read_schema_version: &LogStoreReadSchemaVersion,
+    ) -> KvLogStoreFactory<S> {
+        KvLogStoreFactory::new(
+            state_store,
+            table.clone(),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            1024,
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            None,
+            &KV_LOG_STORE_V2_INFO,
+        )
+        .with_schema_history(schema_version, schema_history, read_schema_version.clone())
+        .unwrap()
+    }
+
+    fn history_entry(
+        version: SchemaVersion,
+        table: &Table,
+        schema_change: &PbSinkSchemaChange,
+    ) -> LogStoreSchemaHistoryEntry {
+        LogStoreSchemaHistoryEntry {
+            version,
+            table: table.clone(),
+            schema_change: schema_change.clone(),
+        }
+    }
+
+    /// Flush a checkpoint barrier that carries a schema change and stops the actor. The flush must
+    /// not wait for the log reader.
+    async fn flush_schema_change(
+        writer: &mut impl LogWriter,
+        next_epoch: u64,
+        schema_change: &PbSinkSchemaChange,
+    ) {
+        let post_flush = tokio::time::timeout(
+            Duration::from_secs(10),
+            writer.flush_current_epoch(
+                next_epoch,
+                FlushCurrentEpochOptions {
+                    is_checkpoint: true,
+                    new_vnode_bitmap: None,
+                    is_stop: true,
+                    schema_change: Some(schema_change.clone()),
+                    wait_log_store_flush: false,
+                },
+            ),
+        )
+        .await
+        .expect("schema change flush should not wait for the log reader")
+        .unwrap();
+        post_flush.post_yield_barrier().await.unwrap();
+    }
+
+    #[derive(Debug)]
+    enum ExpectedItem<'a> {
+        /// Epoch, schema version and the chunk.
+        Chunk(u64, SchemaVersion, &'a StreamChunk),
+        /// Epoch, schema version and the schema change of a checkpoint barrier.
+        Barrier(u64, SchemaVersion, Option<&'a PbSinkSchemaChange>),
+    }
+
+    /// Read exactly `expected` from the reader, and check that no more item is available.
+    async fn assert_read_items(
+        reader: &mut impl LogReader,
+        read_schema_version: &LogStoreReadSchemaVersion,
+        expected: &[ExpectedItem<'_>],
+    ) {
+        for expected in expected {
+            let (epoch, item) = tokio::time::timeout(Duration::from_secs(10), reader.next_item())
+                .await
+                .unwrap_or_else(|_| panic!("timeout when reading {expected:?}"))
+                .unwrap();
+            match (expected, item) {
+                (
+                    ExpectedItem::Chunk(expected_epoch, version, chunk),
+                    LogStoreReadItem::StreamChunk {
+                        chunk: read_chunk, ..
+                    },
+                ) => {
+                    assert_eq!(epoch, *expected_epoch);
+                    assert_eq!(read_schema_version.get(), *version);
+                    assert_eq!(read_chunk.data_types(), chunk.data_types());
+                    assert!(
+                        check_stream_chunk_eq(chunk, &read_chunk),
+                        "expected {chunk:?}, read {read_chunk:?}"
+                    );
+                }
+                (
+                    ExpectedItem::Barrier(expected_epoch, version, schema_change),
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint,
+                        schema_change: read_schema_change,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(epoch, *expected_epoch);
+                    assert_eq!(read_schema_version.get(), *version);
+                    assert!(is_checkpoint);
+                    assert_eq!(read_schema_change.as_ref(), *schema_change);
+                }
+                (expected, item) => {
+                    panic!("expected {expected:?}, read epoch {epoch} item {item:?}")
+                }
+            }
+        }
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), flush_future.as_mut())
+            tokio::time::timeout(Duration::from_millis(100), reader.next_item())
+                .await
+                .is_err(),
+            "no more item is expected"
+        );
+    }
+
+    /// The old actor writes a schema change marker without waiting for its reader. The new actor
+    /// reads rows of the old schema, the marker and then rows of the new schema, before and after
+    /// recovery.
+    #[tokio::test]
+    async fn test_schema_change_keeps_old_rows_for_new_actor() {
+        use ExpectedItem::*;
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let test_env = prepare_hummock_test_env().await;
+        let table_v0 = table_with_extra_columns(pk_info, 0);
+        let table_v1 = table_with_extra_columns(pk_info, 1);
+        test_env.register_table(table_v0.clone()).await;
+        let schema_change = add_column_schema_change(&table_v0);
+
+        let chunk_a = gen_versioned_chunk(0, 0);
+        let chunk_b = gen_versioned_chunk(100, 0);
+        let chunk_c = gen_versioned_chunk(200, 1);
+        let chunk_d = gen_versioned_chunk(300, 1);
+
+        // The old actor writes rows of version 0 and then the schema change marker.
+        let old_read_version = LogStoreReadSchemaVersion::default();
+        let (mut old_reader, mut writer) = versioned_factory(
+            test_env.storage.clone(),
+            &table_v0,
+            0,
+            vec![],
+            &old_read_version,
+        )
+        .build()
+        .await;
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(TEST_TABLE_ID)
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_a.clone()).await.unwrap();
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .flush_current_epoch_for_test(epoch2, true)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_b.clone()).await.unwrap();
+        let epoch3 = epoch2.next_epoch();
+        // Rows after a schema change can only be written by a new actor.
+        assert!(
+            writer
+                .flush_current_epoch(
+                    epoch3,
+                    FlushCurrentEpochOptions {
+                        is_checkpoint: true,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
+                        schema_change: Some(schema_change.clone()),
+                        wait_log_store_flush: false,
+                    },
+                )
                 .await
                 .is_err()
         );
+        // The reader has not started, so the flush returning proves that it does not wait for the
+        // reader to consume the log.
+        flush_schema_change(&mut writer, epoch3, &schema_change).await;
+
+        // The old reader stops before the marker and leaves the schema change to the new actor.
+        old_reader.init().await.unwrap();
+        old_reader.start_from(None).await.unwrap();
+        assert_read_items(
+            &mut old_reader,
+            &old_read_version,
+            &[
+                Chunk(epoch1, 0, &chunk_a),
+                Barrier(epoch1, 0, None),
+                Chunk(epoch2, 0, &chunk_b),
+            ],
+        )
+        .await;
+        test_env.commit_epoch(epoch1).await;
+        test_env.commit_epoch(epoch2).await;
+        drop(old_reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        // The new actor writes rows of version 1.
+        let read_version = LogStoreReadSchemaVersion::default();
+        let new_factory = || {
+            versioned_factory(
+                test_env.storage.clone(),
+                &table_v1,
+                1,
+                vec![history_entry(0, &table_v0, &schema_change)],
+                &read_version,
+            )
+        };
+        let (mut reader, mut writer) = new_factory().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch3), false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_c.clone()).await.unwrap();
+        let epoch4 = epoch3.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .flush_current_epoch_for_test(epoch4, true)
+            .await
+            .unwrap();
 
         reader.init().await.unwrap();
         reader.start_from(None).await.unwrap();
+        assert_read_items(
+            &mut reader,
+            &read_version,
+            &[
+                Chunk(epoch1, 0, &chunk_a),
+                Barrier(epoch1, 0, None),
+                Chunk(epoch2, 0, &chunk_b),
+                Barrier(epoch2, 0, Some(&schema_change)),
+                Chunk(epoch3, 1, &chunk_c),
+                Barrier(epoch3, 1, None),
+            ],
+        )
+        .await;
 
-        match reader.next_item().await.unwrap() {
-            (
-                epoch,
-                LogStoreReadItem::StreamChunk {
-                    chunk: read_chunk, ..
-                },
-            ) => {
-                assert_eq!(epoch, epoch1);
-                assert!(check_stream_chunk_eq(&stream_chunk1, &read_chunk));
-            }
-            item => unreachable!("{:?}", item),
-        }
+        // Recover with the log truncated before the marker.
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .unwrap();
+        let epoch5 = epoch4.next_epoch();
+        writer
+            .flush_current_epoch_for_test(epoch5, true)
+            .await
+            .unwrap();
+        test_env.commit_epoch(epoch3).await;
+        test_env.commit_epoch(epoch4).await;
+        drop(reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
 
-        match reader.next_item().await.unwrap() {
-            (
-                epoch,
-                LogStoreReadItem::Barrier {
-                    is_checkpoint,
-                    schema_change: read_schema_change,
-                    ..
-                },
-            ) => {
-                assert_eq!(epoch, epoch1);
-                assert!(is_checkpoint);
-                assert_eq!(read_schema_change, Some(schema_change.clone()));
-                reader
-                    .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-                    .unwrap();
-            }
-            item => unreachable!("{:?}", item),
-        }
+        let (mut reader, mut writer) = new_factory().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch5, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch5), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(
+            &mut reader,
+            &read_version,
+            &[
+                Chunk(epoch2, 0, &chunk_b),
+                Barrier(epoch2, 0, Some(&schema_change)),
+                Chunk(epoch3, 1, &chunk_c),
+                Barrier(epoch3, 1, None),
+                Barrier(epoch4, 1, None),
+            ],
+        )
+        .await;
 
-        let post_flush = flush_future.await.unwrap();
-        post_flush.post_yield_barrier().await.unwrap();
+        // Recover with the log truncated at the marker.
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch2 })
+            .unwrap();
+        writer.write_chunk(chunk_d.clone()).await.unwrap();
+        let epoch6 = epoch5.next_epoch();
+        writer
+            .flush_current_epoch_for_test(epoch6, true)
+            .await
+            .unwrap();
+        test_env.commit_epoch(epoch5).await;
+        drop(reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
 
-        // Writer should be able to continue with the next epoch after reader truncation.
-        writer.write_chunk(gen_stream_chunk(10)).await.unwrap();
+        let (mut reader, mut writer) = new_factory().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch6, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch6), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(
+            &mut reader,
+            &read_version,
+            &[
+                Chunk(epoch3, 1, &chunk_c),
+                Barrier(epoch3, 1, None),
+                Barrier(epoch4, 1, None),
+                Chunk(epoch5, 1, &chunk_d),
+                Barrier(epoch5, 1, None),
+            ],
+        )
+        .await;
+    }
+
+    /// Two schema changes happen before the sink consumes any row. The latest actor reads rows of
+    /// all three schema versions in order, before and after recovery.
+    #[tokio::test]
+    async fn test_consecutive_schema_changes() {
+        use ExpectedItem::*;
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let test_env = prepare_hummock_test_env().await;
+        let table_v0 = table_with_extra_columns(pk_info, 0);
+        let table_v1 = table_with_extra_columns(pk_info, 1);
+        let table_v2 = table_with_extra_columns(pk_info, 2);
+        test_env.register_table(table_v0.clone()).await;
+        let schema_change1 = add_column_schema_change(&table_v0);
+        let schema_change2 = add_column_schema_change(&table_v1);
+
+        let chunk_a = gen_versioned_chunk(0, 0);
+        let chunk_b = gen_versioned_chunk(100, 1);
+        let chunk_c = gen_versioned_chunk(200, 2);
+
+        let unused_read_version = LogStoreReadSchemaVersion::default();
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(TEST_TABLE_ID)
+            .unwrap()
+            .next_epoch();
+        let epoch2 = epoch1.next_epoch();
+        let epoch3 = epoch2.next_epoch();
+        let epoch4 = epoch3.next_epoch();
+
+        // Version 0.
+        let (_, mut writer) = versioned_factory(
+            test_env.storage.clone(),
+            &table_v0,
+            0,
+            vec![],
+            &unused_read_version,
+        )
+        .build()
+        .await;
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_a.clone()).await.unwrap();
+        flush_schema_change(&mut writer, epoch2, &schema_change1).await;
+        test_env.commit_epoch(epoch1).await;
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        // Version 1.
+        let (_, mut writer) = versioned_factory(
+            test_env.storage.clone(),
+            &table_v1,
+            1,
+            vec![history_entry(0, &table_v0, &schema_change1)],
+            &unused_read_version,
+        )
+        .build()
+        .await;
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch2), false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_b.clone()).await.unwrap();
+        flush_schema_change(&mut writer, epoch3, &schema_change2).await;
+        test_env.commit_epoch(epoch2).await;
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        // Version 2.
+        let read_version = LogStoreReadSchemaVersion::default();
+        let factory_v2 = || {
+            versioned_factory(
+                test_env.storage.clone(),
+                &table_v2,
+                2,
+                vec![
+                    history_entry(0, &table_v0, &schema_change1),
+                    history_entry(1, &table_v1, &schema_change2),
+                ],
+                &read_version,
+            )
+        };
+        let (mut reader, mut writer) = factory_v2().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch3), false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk_c.clone()).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch4, true)
+            .await
+            .unwrap();
+
+        let expected = [
+            Chunk(epoch1, 0, &chunk_a),
+            Barrier(epoch1, 0, Some(&schema_change1)),
+            Chunk(epoch2, 1, &chunk_b),
+            Barrier(epoch2, 1, Some(&schema_change2)),
+            Chunk(epoch3, 2, &chunk_c),
+            Barrier(epoch3, 2, None),
+        ];
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(&mut reader, &read_version, &expected).await;
+
+        // Replay all versions from the persisted log after recovery.
+        test_env.commit_epoch(epoch3).await;
+        drop(reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        let (mut reader, mut writer) = factory_v2().build().await;
+        test_env
+            .storage
+            .start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch4), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        assert_read_items(&mut reader, &read_version, &expected).await;
     }
 
     #[tokio::test]
@@ -2416,233 +2869,5 @@ mod tests {
 
         let post_flush = flush_future.await.unwrap();
         post_flush.post_yield_barrier().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_schema_change_batch_scan_skips_old_schema_rows() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
-        let test_env = prepare_hummock_test_env().await;
-
-        let old_table = gen_test_log_store_table(pk_info);
-        test_env.register_table(old_table.clone()).await;
-
-        let old_chunk = gen_stream_chunk_with_info(0, pk_info);
-        let old_bitmap = Arc::new(calculate_vnode_bitmap(old_chunk.rows()));
-        let factory = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            old_table.clone(),
-            old_bitmap,
-            1024,
-            1024,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            None,
-            pk_info,
-        );
-        let (mut reader, mut writer) = factory.build().await;
-
-        let epoch1 = test_env
-            .storage
-            .get_pinned_version()
-            .table_committed_epoch(old_table.id)
-            .unwrap()
-            .next_epoch();
-        test_env
-            .storage
-            .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
-        writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
-            .await
-            .unwrap();
-        writer.write_chunk(old_chunk).await.unwrap();
-
-        let epoch2 = epoch1.next_epoch();
-        test_env
-            .storage
-            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
-        let schema_change = PbSinkSchemaChange {
-            original_schema: old_table
-                .columns
-                .iter()
-                .map(|col| PbField {
-                    data_type: Some(
-                        col.column_desc
-                            .as_ref()
-                            .unwrap()
-                            .column_type
-                            .as_ref()
-                            .unwrap()
-                            .clone(),
-                    ),
-                    name: col.column_desc.as_ref().unwrap().name.clone(),
-                })
-                .collect(),
-            op: Some(
-                risingwave_pb::stream_plan::sink_schema_change::PbOp::AddColumns(
-                    PbSinkAddColumnsOp {
-                        fields: vec![PbField {
-                            data_type: Some(DataType::Int32.to_protobuf()),
-                            name: "age".to_owned(),
-                        }],
-                    },
-                ),
-            ),
-        };
-        let flush_future = writer.flush_current_epoch(
-            epoch2,
-            FlushCurrentEpochOptions {
-                is_checkpoint: true,
-                new_vnode_bitmap: None,
-                is_stop: false,
-                schema_change: Some(schema_change),
-                wait_log_store_flush: false,
-            },
-        );
-        let mut flush_future = Box::pin(flush_future);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), flush_future.as_mut())
-                .await
-                .is_err()
-        );
-
-        reader.init().await.unwrap();
-        reader.start_from(None).await.unwrap();
-        let _ = reader.next_item().await.unwrap();
-        let _ = reader.next_item().await.unwrap();
-        reader
-            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .unwrap();
-        {
-            let post_flush = tokio::time::timeout(Duration::from_secs(10), flush_future)
-                .await
-                .expect("schema-change flush should finish after reader truncates barrier")
-                .unwrap();
-            post_flush.post_yield_barrier().await.unwrap();
-        }
-        tokio::time::timeout(Duration::from_secs(10), test_env.commit_epoch(epoch1))
-            .await
-            .expect("committing the schema-change epoch should not hang");
-
-        drop(reader);
-        drop(writer);
-        test_env.storage.clear_shared_buffer().await;
-
-        let mut new_table = old_table.clone();
-        new_table.columns.push(
-            ColumnCatalog::visible(ColumnDesc::named(
-                "age",
-                ColumnId::new(new_table.columns.len() as i32),
-                DataType::Int32,
-            ))
-            .to_protobuf(),
-        );
-        new_table.value_indices = (0..new_table.columns.len() as i32).collect();
-        let mut builder = DataChunkBuilder::new(
-            vec![DataType::Int64, DataType::Varchar, DataType::Int32],
-            1024,
-        );
-        let vnode_zero_ids = (0_i64..)
-            .filter(|id| {
-                let row = OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(*id)),
-                    Some(ScalarImpl::Utf8("probe".into())),
-                    Some(ScalarImpl::Int32(0)),
-                ]);
-                VirtualNode::compute_row_for_test(&row, &[0]).to_index() == 0
-            })
-            .take(2)
-            .collect_vec();
-        for row in [
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(vnode_zero_ids[0])),
-                Some(ScalarImpl::Utf8("alice".into())),
-                Some(ScalarImpl::Int32(40)),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(vnode_zero_ids[1])),
-                Some(ScalarImpl::Utf8("bob".into())),
-                Some(ScalarImpl::Int32(50)),
-            ]),
-        ] {
-            assert!(builder.append_one_row(row).is_none());
-        }
-        let new_chunk =
-            StreamChunk::from_parts(vec![Op::Insert, Op::Insert], builder.consume_all().unwrap());
-
-        let new_bitmap = Arc::new(calculate_vnode_bitmap(new_chunk.rows()));
-        let factory = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            new_table.clone(),
-            new_bitmap.clone(),
-            1024,
-            1024,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            None,
-            pk_info,
-        );
-        let (_, mut writer) = factory.build().await;
-        test_env
-            .storage
-            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
-        writer
-            .init(EpochPair::new_test_epoch(epoch2), false)
-            .await
-            .unwrap();
-        writer.write_chunk(new_chunk).await.unwrap();
-        let epoch3 = epoch2.next_epoch();
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            writer.flush_current_epoch_for_test(epoch3, true),
-        )
-        .await
-        .expect("flushing the rebuilt writer should not hang")
-        .unwrap();
-        tokio::time::timeout(Duration::from_secs(10), test_env.commit_epoch(epoch2))
-            .await
-            .expect("committing the rebuilt-writer epoch should not hang");
-
-        let batch_table = BatchTable::for_test(
-            test_env.storage.clone(),
-            TEST_TABLE_ID,
-            new_table
-                .columns
-                .iter()
-                .map(|col| col.column_desc.as_ref().unwrap().into())
-                .collect_vec(),
-            pk_info.pk_orderings.to_vec(),
-            (0..pk_info.pk_len()).collect_vec(),
-            new_table
-                .value_indices
-                .iter()
-                .map(|&idx| idx as usize)
-                .collect_vec(),
-        );
-        let age_column_idx = pk_info.predefined_column_len() + 2;
-        let mut iter = pin!(
-            batch_table
-                .batch_iter(
-                    HummockReadEpoch::Committed(epoch2),
-                    false,
-                    Default::default(),
-                )
-                .await
-                .unwrap()
-        );
-
-        let mut ages = tokio::time::timeout(Duration::from_secs(10), async {
-            let mut ages = vec![];
-            while let Some(row) = iter.next().await {
-                let row = row.unwrap();
-                if let Some(age) = row.datum_at(age_column_idx) {
-                    ages.push(age.into_int32());
-                }
-            }
-            ages
-        })
-        .await
-        .expect("batch scan after schema change should not hang");
-        ages.sort_unstable();
-        assert_eq!(ages, vec![40, 50]);
     }
 }

@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::future::pending;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use std::{assert_matches, mem};
 
@@ -34,7 +37,7 @@ use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
     FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
-    LogWriter, LogWriterExt, LogWriterMetrics,
+    LogStoreReadItem, LogStoreResult, LogWriter, LogWriterExt, LogWriterMetrics, TruncateOffset,
 };
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION,
@@ -53,6 +56,7 @@ use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
     InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
 };
+use crate::common::log_store_impl::kv_log_store::{LogStoreReadSchemaVersion, SchemaVersion};
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -67,6 +71,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     input_data_types: Vec<DataType>,
     non_append_only_behavior: Option<NonAppendOnlyBehavior>,
     rate_limit: Option<u32>,
+    log_store_schema_versions: LogStoreSchemaVersions,
 }
 
 const SINK_RETRY_BACKOFF_RESET_INTERVAL: Duration = Duration::from_secs(60);
@@ -333,7 +338,24 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             input_data_types,
             non_append_only_behavior,
             rate_limit,
+            log_store_schema_versions: LogStoreSchemaVersions::default(),
         })
+    }
+
+    /// Set the schema versions of the log store. Rows of an older version are sunk with the sink
+    /// parameters of that version.
+    pub(crate) fn with_log_store_schema_versions(
+        mut self,
+        read_version: LogStoreReadSchemaVersion,
+        current_version: SchemaVersion,
+        older: Vec<SinkSchemaVersionParam>,
+    ) -> Self {
+        self.log_store_schema_versions = LogStoreSchemaVersions {
+            read_version,
+            current_version,
+            older,
+        };
+        self
     }
 
     fn execute_inner(self) -> BoxedMessageStream {
@@ -441,6 +463,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.actor_context,
                             rate_limit_rx,
                             rebuild_sink_rx,
+                            self.log_store_schema_versions,
                         )
                         .instrument_await(
                             await_tree::span!("consume_log (sink_id {sink_id})").long_running(),
@@ -761,23 +784,41 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
+        log_store_schema_versions: LogStoreSchemaVersions,
     ) -> StreamExecutorResult<!> {
-        let mut visible_columns = columns
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
-            .collect_vec();
-
-        let needs_projection = visible_columns.len() != columns.len();
-
-        if needs_projection
-            && let Some(extra_partition_col_idx) = sink_writer_param.extra_partition_col_idx
-        {
-            // The extra partition column is appended after all normal sink columns.
-            debug_assert_eq!(extra_partition_col_idx, columns.len());
-            sink_writer_param.extra_partition_col_idx = Some(visible_columns.len());
-            visible_columns.push(extra_partition_col_idx);
+        let LogStoreSchemaVersions {
+            read_version,
+            current_version,
+            older: older_versions,
+        } = log_store_schema_versions;
+        let extra_partition_col_idx = sink_writer_param.extra_partition_col_idx;
+        let mut layouts = HashMap::new();
+        let mut sink_params = HashMap::new();
+        layouts.insert(
+            current_version,
+            SinkVersionLayout::new(
+                &columns,
+                sink_param.downstream_pk.clone(),
+                extra_partition_col_idx,
+            ),
+        );
+        sink_params.insert(current_version, sink_param.clone());
+        for older in older_versions {
+            layouts.insert(
+                older.version,
+                SinkVersionLayout::new(
+                    &older.columns,
+                    older.sink_param.downstream_pk.clone(),
+                    extra_partition_col_idx.map(|_| older.columns.len()),
+                ),
+            );
+            sink_params.insert(older.version, older.sink_param);
         }
+        let layouts = Arc::new(layouts);
+        sink_writer_param.extra_partition_col_idx =
+            layouts[&current_version].extra_partition_col_idx;
+        let sink_version = Arc::new(AtomicU32::new(current_version));
+        let (switch_version_tx, mut switch_version_rx) = unbounded_channel();
 
         let labels = [
             &actor_context.id.to_string(),
@@ -804,39 +845,56 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             log_store_reader_wait_new_future_duration_ns,
         };
 
-        let downstream_pk = sink_param.downstream_pk.clone();
+        let sink_type = sink_param.sink_type;
+        let log_reader = SchemaVersionedLogReader {
+            inner: log_reader,
+            read_version,
+            sink_version: sink_version.clone(),
+            known_versions: layouts.keys().copied().collect(),
+            latest_offset: None,
+            truncate_offset: None,
+            marker: None,
+            pending_version: None,
+            switch_requested: false,
+            switch_version_tx,
+        };
 
         let mut log_reader = log_reader
-            .transform_chunk(move |chunk| {
-                let chunk = if let Some(b) = non_append_only_behavior
-                    && b.should_compact_in_log_reader()
-                {
-                    // This guarantees that user has specified a `downstream_pk`.
-                    let downstream_pk = downstream_pk.as_ref().unwrap();
-                    dispatch_output_kind!(sink_param.sink_type, KIND, {
-                        compact_chunk_inline::<KIND>(
-                            chunk,
-                            downstream_pk,
-                            // Writer-side compaction has already converted updates for upsert sinks.
-                            if sink_param.sink_type == SinkType::Upsert {
-                                StreamKind::Upsert
-                            } else {
-                                StreamKind::Retract
-                            },
-                            // When compacting based on user provided primary key, we should never panic
-                            // on inconsistency in case the user provided primary key is not unique.
-                            InconsistencyBehavior::Warn,
-                        )
-                    })
-                } else {
-                    chunk
-                };
-                if needs_projection {
-                    // Do projection here because we may have columns that aren't visible to
-                    // the downstream.
-                    chunk.project(&visible_columns)
-                } else {
-                    chunk
+            .transform_chunk({
+                let layouts = layouts.clone();
+                let sink_version = sink_version.clone();
+                move |chunk| {
+                    let layout = &layouts[&sink_version.load(Ordering::Relaxed)];
+                    let chunk = if let Some(b) = non_append_only_behavior
+                        && b.should_compact_in_log_reader()
+                    {
+                        // This guarantees that user has specified a `downstream_pk`.
+                        let downstream_pk = layout.downstream_pk.as_ref().unwrap();
+                        dispatch_output_kind!(sink_type, KIND, {
+                            compact_chunk_inline::<KIND>(
+                                chunk,
+                                downstream_pk,
+                                // Writer-side compaction has already converted updates for upsert sinks.
+                                if sink_type == SinkType::Upsert {
+                                    StreamKind::Upsert
+                                } else {
+                                    StreamKind::Retract
+                                },
+                                // When compacting based on user provided primary key, we should never panic
+                                // on inconsistency in case the user provided primary key is not unique.
+                                InconsistencyBehavior::Warn,
+                            )
+                        })
+                    } else {
+                        chunk
+                    };
+                    if layout.needs_projection {
+                        // Do projection here because we may have columns that aren't visible to
+                        // the downstream.
+                        chunk.project(&layout.visible_columns)
+                    } else {
+                        chunk
+                    }
                 }
             })
             .monitored(metrics)
@@ -904,11 +962,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                 }
             });
-            let message = loop {
+            let event = loop {
                 select! {
                     result = &mut future => {
                         let Err(e): StreamExecutorResult<!> = result;
                         return Err(e);
+                    }
+                    version = switch_version_rx.recv() => {
+                        let version = version.ok_or_else(|| anyhow!("failed to receive sink schema version switch"))?;
+                        break SinkConsumerEvent::SwitchVersion(version);
                     }
                     result = rebuild_sink_rx.recv() => {
                         let message = result.ok_or_else(|| anyhow!("failed to receive rebuild sink notify"))?;
@@ -924,11 +986,37 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             );
                             continue;
                         }
-                        break message;
+                        break SinkConsumerEvent::Rebuild(message);
                     }
                 }
             };
             drop(future);
+            let message = match event {
+                SinkConsumerEvent::SwitchVersion(version) => {
+                    if !F::ALLOW_REWIND {
+                        return Err(anyhow!(
+                            "log store without rewind cannot switch sink schema version to {}",
+                            version
+                        )
+                        .into());
+                    }
+                    // Read again from the truncation offset with the sink of the new version.
+                    log_reader.rewind().await?;
+                    sink = TryFrom::try_from(sink_params[&version].clone())
+                        .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                    sink_writer_param.extra_partition_col_idx =
+                        layouts[&version].extra_partition_col_idx;
+                    sink_version.store(version, Ordering::Relaxed);
+                    info!(
+                        executor_id = %sink_writer_param.executor_id,
+                        sink_id = %sink_param.sink_id,
+                        version,
+                        "switch sink schema version"
+                    );
+                    continue;
+                }
+                SinkConsumerEvent::Rebuild(message) => message,
+            };
             match message {
                 RebuildSinkMessage::RebuildSink(new_vnode, notify) => {
                     sink_writer_param.vnode_bitmap = (*new_vnode).clone();
@@ -941,8 +1029,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if F::ALLOW_REWIND {
                         match log_reader.rewind().await {
                             Ok(()) => {
-                                sink_param.properties.extend(config);
-                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                                sink_param.properties.extend(config.clone());
+                                for param in sink_params.values_mut() {
+                                    param.properties.extend(config.clone());
+                                }
+                                let version = sink_version.load(Ordering::Relaxed);
+                                sink = TryFrom::try_from(sink_params[&version].clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                                 info!(
                                     executor_id = %sink_writer_param.executor_id,
                                     sink_id = %sink_param.sink_id,
@@ -968,6 +1060,201 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
         }
     }
+}
+
+/// Sink parameters of an older log store schema version, whose rows may still be in the log store.
+pub(crate) struct SinkSchemaVersionParam {
+    pub version: SchemaVersion,
+    pub sink_param: SinkParam,
+    pub columns: Vec<ColumnCatalog>,
+}
+
+#[derive(Default)]
+struct LogStoreSchemaVersions {
+    /// Schema version of the latest item returned by the log reader.
+    read_version: LogStoreReadSchemaVersion,
+    current_version: SchemaVersion,
+    older: Vec<SinkSchemaVersionParam>,
+}
+
+/// How the sink executor turns a log store chunk of a schema version into a sink chunk.
+struct SinkVersionLayout {
+    visible_columns: Vec<usize>,
+    needs_projection: bool,
+    extra_partition_col_idx: Option<usize>,
+    downstream_pk: Option<Vec<usize>>,
+}
+
+impl SinkVersionLayout {
+    fn new(
+        columns: &[ColumnCatalog],
+        downstream_pk: Option<Vec<usize>>,
+        extra_partition_col_idx: Option<usize>,
+    ) -> Self {
+        let mut visible_columns = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
+            .collect_vec();
+        let needs_projection = visible_columns.len() != columns.len();
+        let mut writer_extra_partition_col_idx = extra_partition_col_idx;
+        if needs_projection && let Some(extra_partition_col_idx) = extra_partition_col_idx {
+            // The extra partition column is appended after all normal sink columns.
+            debug_assert_eq!(extra_partition_col_idx, columns.len());
+            writer_extra_partition_col_idx = Some(visible_columns.len());
+            visible_columns.push(extra_partition_col_idx);
+        }
+        Self {
+            visible_columns,
+            needs_projection,
+            extra_partition_col_idx: writer_extra_partition_col_idx,
+            downstream_pk,
+        }
+    }
+}
+
+/// A log reader that only yields items of the schema version that the current sink is built for.
+///
+/// The log store may hold rows of older schema versions, followed by a schema change marker
+/// barrier. The marker is yielded with `is_stop` set, so that the sink commits the schema change
+/// and stops as it did in the replaced actor. Once the marker is truncated, or an item of another
+/// version is read with all yielded items truncated, it asks the sink executor to rebuild the sink
+/// for the new version. The sink executor then rewinds the reader to read from the new version.
+struct SchemaVersionedLogReader<R: LogReader> {
+    inner: R,
+    read_version: LogStoreReadSchemaVersion,
+    sink_version: Arc<AtomicU32>,
+    known_versions: BTreeSet<SchemaVersion>,
+    latest_offset: Option<TruncateOffset>,
+    truncate_offset: Option<TruncateOffset>,
+    /// The epoch of the yielded schema change marker and the version after it.
+    marker: Option<(u64, SchemaVersion)>,
+    /// The version of a read item that is not yielded because it differs from the sink version.
+    pending_version: Option<SchemaVersion>,
+    switch_requested: bool,
+    switch_version_tx: UnboundedSender<SchemaVersion>,
+}
+
+impl<R: LogReader> SchemaVersionedLogReader<R> {
+    fn reset(&mut self) {
+        self.latest_offset = None;
+        self.truncate_offset = None;
+        self.marker = None;
+        self.pending_version = None;
+        self.switch_requested = false;
+    }
+
+    fn request_switch(&mut self, version: SchemaVersion) -> LogStoreResult<()> {
+        if !self.switch_requested {
+            self.switch_requested = true;
+            self.switch_version_tx
+                .send(version)
+                .map_err(|_| anyhow!("failed to request switching sink schema version"))?;
+        }
+        Ok(())
+    }
+
+    fn all_yielded_truncated(&self) -> bool {
+        match (self.latest_offset, self.truncate_offset) {
+            (None, _) => true,
+            (Some(latest), Some(truncated)) => truncated >= latest,
+            (Some(_), None) => false,
+        }
+    }
+}
+
+impl<R: LogReader> LogReader for SchemaVersionedLogReader<R> {
+    async fn init(&mut self) -> LogStoreResult<()> {
+        self.reset();
+        self.inner.init().await
+    }
+
+    async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
+        self.reset();
+        self.inner.start_from(start_offset).await
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        if self.pending_version.is_none() && self.marker.is_none() {
+            let (epoch, item) = self.inner.next_item().await?;
+            let version = self.read_version.get();
+            let sink_version = self.sink_version.load(Ordering::Relaxed);
+            if version == sink_version {
+                let item = match item {
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                        self.latest_offset = Some(TruncateOffset::Chunk { epoch, chunk_id });
+                        LogStoreReadItem::StreamChunk { chunk, chunk_id }
+                    }
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint,
+                        new_vnode_bitmap,
+                        mut is_stop,
+                        schema_change,
+                    } => {
+                        self.latest_offset = Some(TruncateOffset::Barrier { epoch });
+                        if schema_change.is_some()
+                            && let Some(next_version) = self
+                                .known_versions
+                                .range(sink_version + 1..)
+                                .next()
+                                .copied()
+                        {
+                            self.marker = Some((epoch, next_version));
+                            is_stop = true;
+                        }
+                        LogStoreReadItem::Barrier {
+                            is_checkpoint,
+                            new_vnode_bitmap,
+                            is_stop,
+                            schema_change,
+                        }
+                    }
+                };
+                return Ok((epoch, item));
+            }
+            if !self.known_versions.contains(&version) {
+                return Err(anyhow!(
+                    "unknown sink schema version {} in log store, known versions: {:?}",
+                    version,
+                    self.known_versions
+                ));
+            }
+            self.pending_version = Some(version);
+        }
+        if let Some(version) = self.pending_version
+            && self.all_yielded_truncated()
+        {
+            self.request_switch(version)?;
+        }
+        // Wait for the yielded items to be truncated, and then the sink to be rebuilt.
+        pending().await
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset)?;
+        self.truncate_offset = Some(offset);
+        if let Some((epoch, next_version)) = self.marker
+            && offset >= (TruncateOffset::Barrier { epoch })
+        {
+            self.request_switch(next_version)?;
+        }
+        if let Some(version) = self.pending_version
+            && self.all_yielded_truncated()
+        {
+            self.request_switch(version)?;
+        }
+        Ok(())
+    }
+
+    async fn rewind(&mut self) -> LogStoreResult<()> {
+        self.reset();
+        self.inner.rewind().await
+    }
+}
+
+enum SinkConsumerEvent {
+    Rebuild(RebuildSinkMessage),
+    SwitchVersion(SchemaVersion),
 }
 
 enum RebuildSinkMessage {
@@ -1102,6 +1389,217 @@ mod test {
         }
     }
 
+    struct SchemaCheckingSink {
+        columns: Vec<ColumnDesc>,
+    }
+
+    impl TryFrom<SinkParam> for SchemaCheckingSink {
+        type Error = risingwave_connector::sink::SinkError;
+
+        fn try_from(param: SinkParam) -> Result<Self, Self::Error> {
+            Ok(Self {
+                columns: param.columns,
+            })
+        }
+    }
+
+    impl Sink for SchemaCheckingSink {
+        type LogSinker = Self;
+
+        const SINK_NAME: &'static str = "schema_checking";
+
+        async fn validate(&self) -> risingwave_connector::sink::Result<()> {
+            Ok(())
+        }
+
+        async fn new_log_sinker(
+            &self,
+            _param: SinkWriterParam,
+        ) -> risingwave_connector::sink::Result<Self> {
+            Ok(Self {
+                columns: self.columns.clone(),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LogSinker for SchemaCheckingSink {
+        async fn consume_log_and_sink(
+            self,
+            mut reader: impl risingwave_connector::sink::SinkLogReader,
+        ) -> risingwave_connector::sink::Result<!> {
+            reader.start_from(None).await?;
+            loop {
+                let (epoch, item) = reader.next_item().await?;
+                match item {
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                        assert_eq!(
+                            chunk.data_types(),
+                            self.columns
+                                .iter()
+                                .map(|column| column.data_type.clone())
+                                .collect_vec()
+                        );
+                        reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
+                    }
+                    LogStoreReadItem::Barrier {
+                        schema_change,
+                        is_stop,
+                        ..
+                    } => {
+                        if schema_change.is_some() {
+                            assert!(is_stop);
+                        }
+                        reader.truncate(TruncateOffset::Barrier { epoch })?;
+                        if is_stop {
+                            return pending().await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    struct SchemaSequenceReader {
+        read_version: LogStoreReadSchemaVersion,
+        state: Arc<RewindRequiredLogReaderState>,
+        position: usize,
+        truncated_position: usize,
+        completed: Option<oneshot::Sender<()>>,
+    }
+
+    impl LogReader for SchemaSequenceReader {
+        async fn init(&mut self) -> LogStoreResult<()> {
+            Ok(())
+        }
+
+        async fn start_from(&mut self, _offset: Option<u64>) -> LogStoreResult<()> {
+            self.position = self.truncated_position;
+            Ok(())
+        }
+
+        async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+            use risingwave_common::array::StreamChunkTestExt;
+
+            let position = self.position;
+            if position == 6 {
+                return pending().await;
+            }
+            let version = (position / 2) as u32;
+            self.read_version.set(version);
+            let item = if position % 2 == 0 {
+                // Each version has one more visible column and a hidden column. The sink must be
+                // rebuilt with matching columns, and the projection must use that version's layout.
+                let chunk = StreamChunk::from_pretty(match version {
+                    0 => " I I\n + 1 99",
+                    1 => " I I I\n + 1 2 99",
+                    2 => " I I I I\n + 1 2 3 99",
+                    _ => unreachable!(),
+                });
+                LogStoreReadItem::StreamChunk { chunk, chunk_id: 0 }
+            } else {
+                LogStoreReadItem::Barrier {
+                    is_checkpoint: true,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                    schema_change: (version < 2).then(Default::default),
+                }
+            };
+            self.position += 1;
+            Ok((u64::from(version) + 1, item))
+        }
+
+        fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+            self.truncated_position = match offset {
+                TruncateOffset::Chunk { epoch, .. } => (epoch as usize - 1) * 2 + 1,
+                TruncateOffset::Barrier { epoch } => epoch as usize * 2,
+            };
+            if self.truncated_position == 6 {
+                self.completed.take().unwrap().send(()).unwrap();
+            }
+            Ok(())
+        }
+
+        async fn rewind(&mut self) -> LogStoreResult<()> {
+            self.position = self.truncated_position;
+            self.state.rewind_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sink_switches_consecutive_schema_versions() {
+        let columns = |version: u32| {
+            let mut columns = (0..=version)
+                .map(|i| {
+                    ColumnCatalog::visible(ColumnDesc::unnamed(
+                        ColumnId::new(i as i32),
+                        DataType::Int64,
+                    ))
+                })
+                .collect_vec();
+            columns.push(ColumnCatalog::hidden(ColumnDesc::unnamed(
+                ColumnId::new(99),
+                DataType::Int64,
+            )));
+            columns
+        };
+        let param = |version| {
+            let columns = columns(version);
+            SinkParam {
+                columns: columns
+                    .into_iter()
+                    .filter(|c| !c.is_hidden)
+                    .map(|c| c.column_desc)
+                    .collect(),
+                ..sink_param_for_config_update_test()
+            }
+        };
+        let read_version = LogStoreReadSchemaVersion::default();
+        let state = Arc::new(RewindRequiredLogReaderState::default());
+        let (completed_tx, completed_rx) = oneshot::channel();
+        let reader = SchemaSequenceReader {
+            read_version: read_version.clone(),
+            state: state.clone(),
+            position: 0,
+            truncated_position: 0,
+            completed: Some(completed_tx),
+        };
+        let (_rate_limit_tx, rate_limit_rx) = unbounded_channel();
+        let (_rebuild_tx, rebuild_rx) = unbounded_channel();
+        let consumer = SinkExecutor::<TestLogStoreFactory<true>>::execute_consume_log(
+            SchemaCheckingSink::try_from(param(2)).unwrap(),
+            reader,
+            columns(2),
+            param(2),
+            SinkWriterParam::for_test(),
+            None,
+            ActorContext::for_test(0),
+            rate_limit_rx,
+            rebuild_rx,
+            LogStoreSchemaVersions {
+                read_version,
+                current_version: 2,
+                older: (0..2)
+                    .map(|version| SinkSchemaVersionParam {
+                        version,
+                        sink_param: param(version),
+                        columns: columns(version),
+                    })
+                    .collect(),
+            },
+        );
+        tokio::select! {
+            result = consumer => panic!("consumer exited unexpectedly: {result:?}"),
+            result = tokio::time::timeout(Duration::from_secs(5), completed_rx) => {
+                result.expect("all versions should be consumed").unwrap();
+            }
+        }
+        // Start with the current schema, switch to the oldest pending schema, then cross both
+        // markers. Every switch must rewind before starting the new sink.
+        assert_eq!(state.rewind_count.load(Ordering::SeqCst), 3);
+    }
+
     #[test]
     fn test_sink_config_has_changes() {
         let current = BTreeMap::from([
@@ -1158,6 +1656,7 @@ mod test {
             ActorContext::for_test(0),
             rate_limit_rx,
             rebuild_sink_rx,
+            LogStoreSchemaVersions::default(),
         );
         tokio::pin!(consume_log);
 
@@ -1218,6 +1717,7 @@ mod test {
             ActorContext::for_test(0),
             rate_limit_rx,
             rebuild_sink_rx,
+            LogStoreSchemaVersions::default(),
         );
         tokio::pin!(consume_log);
 
@@ -1259,6 +1759,7 @@ mod test {
             ActorContext::for_test(0),
             rate_limit_rx,
             rebuild_sink_rx,
+            LogStoreSchemaVersions::default(),
         );
         tokio::pin!(consume_log);
 

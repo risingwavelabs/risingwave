@@ -63,6 +63,30 @@ cd ../.. && ./risedev k
 
 CI runs `ci/scripts/e2e-iceberg-test.sh`. The main suite uses the `ci-iceberg-test` profile, which needs an external postgres for the meta store and prebuilt connector libs downloaded from CI artifacts. The steps above are the local equivalent.
 
+The same CI lane runs `python3 e2e_test/iceberg/cdc_schema_change_failure.py` from
+the repository root. It uses the PostgreSQL CDC fixture and a per-sink TCP proxy
+to keep Iceberg unavailable across two CDC column additions. An unrelated MV in
+the same database must complete six checkpoints during the outage. After storage
+recovers, the test checks all old and new rows in Iceberg. The proxy does not
+interrupt Hummock storage or change the shared MinIO service.
+
+For a local PostgreSQL CDC fixture, override `CDC_PGHOST`, `CDC_PGPORT`,
+`CDC_PGUSER`, `CDC_PGDATABASE`, and `CDC_PGPASSWORD` as needed. These settings
+configure both the upstream SQL client and the RisingWave CDC source. For example,
+start RisingWave with `ENABLE_BUILD_RW_CONNECTOR=true` so its nodes receive the
+Java connector library path. With the fixture password and PostgreSQL exposed on
+localhost port 15432, run:
+
+```sh
+CDC_PGHOST=127.0.0.1 CDC_PGPORT=15432 python3 e2e_test/iceberg/cdc_schema_change_failure.py
+```
+
+Schema-change recovery currently retains all historical log schemas without
+garbage collection. The row-op encoding allows 4095 schema changes per sink;
+further changes fail rather than discard schemas that may still have unread rows.
+While an Iceberg managed table's downstream schema is catching up, reads use
+committed Iceberg data only and temporarily omit pending log rows.
+
 ### Multi-batch compaction rounds
 
 CI runs `compaction_round.slt` and `pk_index_compaction_round.slt` first in the

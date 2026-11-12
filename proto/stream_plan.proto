@@ -401,12 +401,34 @@ enum SinkLogStoreType {
   SINK_LOG_STORE_TYPE_IN_MEMORY_LOG_STORE = 2;
 }
 
+// The schema of a sink and its kv log store before an auto schema change.
+//
+// After a schema change, the rebuilt sink still reads rows written under older schemas from the
+// log store, so it keeps the older schemas to decode them and to write them downstream with the
+// matching sink schema.
+message SinkLogStoreSchemaHistory {
+  // The log store schema version that the entry describes.
+  uint32 version = 1;
+  // Columns and value indices of the log store table under this version.
+  repeated plan_common.ColumnCatalog log_store_columns = 2;
+  repeated int32 log_store_value_indices = 3;
+  // Sink columns under this version.
+  repeated plan_common.ColumnCatalog sink_columns = 4;
+  // The schema change that moves the sink from this version to the next one.
+  SinkSchemaChange schema_change = 5;
+}
+
 message SinkNode {
   SinkDesc sink_desc = 1;
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
   SinkLogStoreType log_store_type = 3;
   optional uint32 rate_limit = 4;
+  // Schema version of the rows that this sink writes to its kv log store. Bumped on every auto
+  // schema change of the sink.
+  uint32 log_store_schema_version = 5;
+  // Older schemas whose rows may still be in the kv log store, ordered by version.
+  repeated SinkLogStoreSchemaHistory log_store_schema_history = 6;
 }
 
 message IcebergWithPkIndexWriterNode {

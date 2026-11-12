@@ -104,7 +104,7 @@ pub struct OptimizerContext {
     overwrite_options: OverwriteOptions,
     /// Mapping from Iceberg table identifier to the current snapshot and its RisingWave commit
     /// boundary. Used to keep multiple scans of the same table consistent within one query.
-    iceberg_snapshot_info_map: RefCell<HashMap<SourceId, Option<IcebergSnapshotInfo>>>,
+    iceberg_snapshot_info_map: RefCell<HashMap<SourceId, IcebergTableState>>,
     /// Batch materialized view candidates for exact-match rewriting.
     batch_mview_candidates: RefCell<Vec<MaterializedViewCandidate>>,
 
@@ -136,6 +136,14 @@ pub struct MaterializedViewCandidate {
 pub(crate) struct IcebergSnapshotInfo {
     pub(crate) snapshot_id: i64,
     pub(crate) commit_epoch: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct IcebergTableState {
+    pub(crate) snapshot: Option<IcebergSnapshotInfo>,
+    /// Whether rows written before the latest schema change can no longer be pending in the
+    /// sink log store.
+    pub(crate) schema_settled: bool,
 }
 
 pub(in crate::optimizer) struct LastAssignedIds {
@@ -458,7 +466,7 @@ impl OptimizerContext {
 
     pub(crate) fn iceberg_snapshot_info_map(
         &self,
-    ) -> RefMut<'_, HashMap<SourceId, Option<IcebergSnapshotInfo>>> {
+    ) -> RefMut<'_, HashMap<SourceId, IcebergTableState>> {
         self.iceberg_snapshot_info_map.borrow_mut()
     }
 }

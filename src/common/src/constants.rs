@@ -47,6 +47,14 @@ pub mod log_store {
     pub const VNODE_COLUMN_TYPE: DataType = DataType::Int16;
     pub const INSERT_OP_CODE: i16 = 1;
 
+    /// The row op column stores `base_op_code + encoded_schema_version * ROW_OP_CODE_VERSION_STRIDE`,
+    /// where base op codes are in `1..ROW_OP_CODE_VERSION_STRIDE`. Rows of schema version 0 keep
+    /// the original op codes.
+    pub const ROW_OP_CODE_VERSION_STRIDE: i16 = 8;
+
+    /// Schema versions are stored modulo this value so that the encoded op code fits in `i16`.
+    pub const ROW_OP_CODE_VERSION_MODULUS: u32 = (i16::MAX / ROW_OP_CODE_VERSION_STRIDE) as u32 + 1;
+
     /// Encode an unsigned RisingWave epoch so that its signed integer ordering is preserved in
     /// the log-store primary key.
     pub const fn encode_epoch(epoch: u64) -> i64 {

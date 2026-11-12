@@ -36,16 +36,18 @@ use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::expr::{ExprNode as PbExprNode, expr_node};
 use risingwave_pb::id::{RelationId, StreamNodeLocalOperatorId};
-use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc, PbField};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
+use risingwave_pb::stream_plan::sink_schema_change::PbOp as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{
-    BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, PbStreamNode,
-    PbStreamScanType, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
-    StreamScanType,
+    BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, PbSinkAddColumnsOp,
+    PbSinkDropColumnsOp, PbSinkLogStoreSchemaHistory, PbSinkSchemaChange, PbStreamNode,
+    PbStreamScanType, SinkLogStoreType, StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -751,6 +753,59 @@ fn rewrite_project_node(
     Ok(())
 }
 
+/// All retained schemas must have distinct encoded row op versions. Never discard a schema merely
+/// to make room: a failed sink may still have unread rows of that version.
+const MAX_SINK_LOG_STORE_SCHEMA_HISTORY: usize =
+    risingwave_common::constants::log_store::ROW_OP_CODE_VERSION_MODULUS as usize - 1;
+
+fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
+    columns
+        .iter()
+        .filter(|col| !col.is_hidden)
+        .map(|col| {
+            let column_desc = col
+                .column_desc
+                .as_ref()
+                .expect("sink column catalog should have a column descriptor");
+            PbField {
+                data_type: Some(
+                    column_desc
+                        .column_type
+                        .as_ref()
+                        .expect("sink column descriptor should have a column type")
+                        .clone(),
+                ),
+                name: column_desc.name.clone(),
+            }
+        })
+        .collect()
+}
+
+/// The schema change of an auto schema refresh sink, sent to the sink in the barrier and recorded
+/// in the log store schema history.
+pub fn build_sink_schema_change(
+    original_sink_columns: &[PbColumnCatalog],
+    newly_add_fields: &[Field],
+    removed_column_names: &[String],
+) -> PbSinkSchemaChange {
+    let op = if !removed_column_names.is_empty() {
+        PbSinkSchemaChangeOp::DropColumns(PbSinkDropColumnsOp {
+            column_names: removed_column_names.to_vec(),
+        })
+    } else {
+        PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+            fields: newly_add_fields
+                .iter()
+                .map(|field| field.to_prost())
+                .collect(),
+        })
+    };
+    PbSinkSchemaChange {
+        original_schema: sink_original_schema_fields(original_sink_columns),
+        op: Some(op),
+    }
+}
+
 pub fn rewrite_refresh_schema_sink_fragment(
     original_sink_fragment: &Fragment,
     sink: &PbSink,
@@ -817,6 +872,48 @@ pub fn rewrite_refresh_schema_sink_fragment(
         };
         format!("StreamSink {{ type: {sink_type_str}, columns: [{column_names}]{downstream_pk} }}")
     };
+    if sink_node_body.log_store_type() == SinkLogStoreType::KvLogStore
+        && let Some(log_store_table) = &sink_node_body.table
+    {
+        // Rows of the current schema stay in the log store after the schema change. Record the
+        // current schema so that the rebuilt sink can read them.
+        let newly_add_fields = newly_added_columns
+            .iter()
+            .map(|col| Field::from(&col.column_desc))
+            .collect_vec();
+        let removed_column_names = removed_columns
+            .iter()
+            .map(|col| col.column_desc.name.clone())
+            .collect_vec();
+        let history_entry = PbSinkLogStoreSchemaHistory {
+            version: sink_node_body.log_store_schema_version,
+            log_store_columns: log_store_table.columns.clone(),
+            log_store_value_indices: log_store_table.value_indices.clone(),
+            sink_columns: sink_node_body
+                .sink_desc
+                .as_ref()
+                .unwrap()
+                .column_catalogs
+                .clone(),
+            schema_change: Some(build_sink_schema_change(
+                &sink.columns,
+                &newly_add_fields,
+                &removed_column_names,
+            )),
+        };
+        let history = &mut sink_node_body.log_store_schema_history;
+        if history.len() >= MAX_SINK_LOG_STORE_SCHEMA_HISTORY {
+            return Err(anyhow!(
+                "sink log store schema history is full; cannot discard schemas with potentially unread rows"
+            )
+            .into());
+        }
+        history.push(history_entry);
+        sink_node_body.log_store_schema_version = sink_node_body
+            .log_store_schema_version
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("too many log store schema versions"))?;
+    }
     let new_log_store_table = if let Some(log_store_table) = &mut sink_node_body.table {
         rewrite_log_store_table(
             log_store_table,
@@ -2709,6 +2806,32 @@ mod tests {
         );
 
         let sink_node = &new_fragment.nodes;
+        let PbNodeBody::Sink(sink_body) = sink_node.node_body.as_ref().unwrap() else {
+            panic!("expected sink node");
+        };
+        assert_eq!(sink_body.log_store_schema_version, 1);
+        let [history] = sink_body.log_store_schema_history.as_slice() else {
+            panic!("expected the original schema to be retained");
+        };
+        assert_eq!(history.version, 0);
+        assert_eq!(history.sink_columns, sink.columns);
+        let PbNodeBody::Sink(original_body) = original_fragment.nodes.node_body.as_ref().unwrap()
+        else {
+            panic!("expected original sink node");
+        };
+        assert_eq!(
+            history.log_store_columns,
+            original_body.table.as_ref().unwrap().columns
+        );
+        assert_eq!(history.log_store_value_indices, vec![0, 1, 2]);
+        assert_eq!(
+            history.schema_change,
+            Some(build_sink_schema_change(
+                &sink.columns,
+                &[],
+                &["tmp".to_owned()],
+            ))
+        );
         let [project_node] = sink_node.input.as_slice() else {
             panic!("Sink has more than 1 input: {:?}", sink_node.input);
         };
@@ -2756,6 +2879,49 @@ mod tests {
             new_log_store_table.value_indices,
             (0..new_log_store_table.columns.len() as i32).collect::<Vec<_>>()
         );
+
+        // Reaching the encoded version limit must reject another change, never evict schemas
+        // whose rows may still be retained by a failing sink.
+        for history_len in [
+            MAX_SINK_LOG_STORE_SCHEMA_HISTORY - 1,
+            MAX_SINK_LOG_STORE_SCHEMA_HISTORY,
+        ] {
+            let mut fragment = original_fragment.clone();
+            let PbNodeBody::Sink(body) = fragment.nodes.node_body.as_mut().unwrap() else {
+                unreachable!()
+            };
+            body.log_store_schema_version = history_len as u32;
+            body.log_store_schema_history = (0..history_len)
+                .map(|version| {
+                    let mut entry = history.clone();
+                    entry.version = version as u32;
+                    entry
+                })
+                .collect();
+            let result = rewrite_refresh_schema_sink_fragment(
+                &fragment,
+                &sink,
+                &[],
+                std::slice::from_ref(&removed_column),
+                &upstream_table,
+                7.into(),
+                id_gen_manager,
+            );
+            if history_len == MAX_SINK_LOG_STORE_SCHEMA_HISTORY {
+                assert!(result.unwrap_err().to_string().contains("history is full"));
+            } else {
+                let (rewritten, _, _) = result.unwrap();
+                let PbNodeBody::Sink(body) = rewritten.nodes.node_body.as_ref().unwrap() else {
+                    unreachable!()
+                };
+                assert_eq!(
+                    body.log_store_schema_history.len(),
+                    MAX_SINK_LOG_STORE_SCHEMA_HISTORY
+                );
+                assert_eq!(body.log_store_schema_history.first().unwrap().version, 0);
+                assert_eq!(body.log_store_schema_version, history_len as u32 + 1);
+            }
+        }
     }
 
     #[test]

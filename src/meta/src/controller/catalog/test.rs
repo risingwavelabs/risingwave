@@ -3101,4 +3101,147 @@ mod tests {
 
         Ok(())
     }
+
+    /// Fragment relations of a job being created or replaced are committed before the barrier
+    /// worker publishes its actors. Readers that resolve dispatchers in this window must not
+    /// panic, and must see the complete topology once the actors are published.
+    #[tokio::test]
+    async fn test_fragment_actor_dispatchers_before_actor_publication() -> MetaResult<()> {
+        use risingwave_meta_model::{DispatcherType, fragment_relation};
+        use risingwave_pb::id::ActorId;
+        use risingwave_pb::stream_plan::PbDispatcherType;
+
+        use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+        use crate::error::MetaErrorInner;
+
+        let env = MetaSrvEnv::for_test().await;
+        let mgr = CatalogController::new(env.clone()).await?;
+        let upstream_fragment_id = FragmentId::new(100);
+        let downstream_fragment_id = FragmentId::new(200);
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (upstream_job_id, _, _) =
+            insert_test_streaming_job(&txn, "upstream_job", true, None).await?;
+        insert_test_fragment(
+            &txn,
+            upstream_fragment_id,
+            upstream_job_id,
+            TableIdArray::default(),
+        )
+        .await?;
+        let (downstream_job_id, _, _) =
+            insert_test_streaming_job(&txn, "downstream_job", true, None).await?;
+        insert_test_fragment(
+            &txn,
+            downstream_fragment_id,
+            downstream_job_id,
+            TableIdArray::default(),
+        )
+        .await?;
+        fragment_relation::Model {
+            source_fragment_id: upstream_fragment_id,
+            target_fragment_id: downstream_fragment_id,
+            dispatcher_type: DispatcherType::Simple,
+            dist_key_indices: I32Array::default(),
+            output_indices: I32Array::default(),
+            output_type_mapping: None,
+        }
+        .into_active_model()
+        .insert(&txn)
+        .await?;
+        // Listing fragments visits every node body, so the test fragments need one.
+        let no_op_node = PbStreamNode {
+            node_body: Some(PbNodeBody::NoOp(Default::default())),
+            ..Default::default()
+        };
+        for fragment_id in [upstream_fragment_id, downstream_fragment_id] {
+            fragment::ActiveModel {
+                fragment_id: Set(fragment_id),
+                stream_node: Set(StreamNode::from(&no_op_node)),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let publish = |fragment_id: FragmentId, job_id: JobId, actor_id: u32| {
+            let info = InflightFragmentInfo {
+                fragment_id,
+                distribution_type: fragment::DistributionType::Single,
+                fragment_type_mask: FragmentTypeMask::empty(),
+                vnode_count: 1,
+                nodes: PbStreamNode::default(),
+                actors: HashMap::from([(
+                    actor_id.into(),
+                    InflightActorInfo {
+                        worker_id: 1.into(),
+                        vnode_bitmap: None,
+                        splits: vec![],
+                    },
+                )]),
+                state_table_ids: HashSet::new(),
+            };
+            env.shared_actor_infos()
+                .upsert_for_test(TEST_DATABASE_ID, [(&info, job_id)]);
+        };
+
+        // Nothing is published yet: the source of the relation is missing.
+        let err = mgr
+            .get_fragment_actor_dispatchers(vec![upstream_fragment_id])
+            .await
+            .expect_err("unpublished source fragment must be reported");
+        assert!(
+            matches!(err.inner(), MetaErrorInner::Unavailable(_)),
+            "unexpected error: {err:?}"
+        );
+
+        // Only the upstream is published: the relation to the downstream has no runtime
+        // dispatcher yet.
+        publish(upstream_fragment_id, upstream_job_id, 1);
+        let dispatchers = mgr
+            .get_fragment_actor_dispatchers(vec![upstream_fragment_id])
+            .await?;
+        assert!(dispatchers.is_empty(), "{dispatchers:?}");
+        let err = mgr
+            .table_fragments()
+            .await
+            .expect_err("a job without published actors cannot be listed");
+        assert!(
+            matches!(err.inner(), MetaErrorInner::Unavailable(_)),
+            "unexpected error: {err:?}"
+        );
+        let err = mgr
+            .get_fragment_desc_by_id(downstream_fragment_id)
+            .await
+            .expect_err("a fragment without published actors cannot be described");
+        assert!(
+            matches!(err.inner(), MetaErrorInner::Unavailable(_)),
+            "unexpected error: {err:?}"
+        );
+
+        // After publication the full topology is visible.
+        publish(downstream_fragment_id, downstream_job_id, 2);
+        let dispatchers = mgr
+            .get_fragment_actor_dispatchers(vec![upstream_fragment_id])
+            .await?;
+        let actor_dispatchers = &dispatchers[&upstream_fragment_id];
+        assert_eq!(actor_dispatchers.len(), 1);
+        let [dispatcher] = actor_dispatchers[&ActorId::new(1)].as_slice() else {
+            panic!("expect exactly one dispatcher: {actor_dispatchers:?}");
+        };
+        assert_eq!(dispatcher.r#type, PbDispatcherType::Simple as i32);
+        assert_eq!(dispatcher.dispatcher_id, downstream_fragment_id);
+        assert_eq!(dispatcher.downstream_actor_id, vec![ActorId::new(2)]);
+        assert_eq!(mgr.table_fragments().await?.len(), 2);
+        assert!(
+            mgr.get_fragment_desc_by_id(downstream_fragment_id)
+                .await?
+                .is_some()
+        );
+
+        Ok(())
+    }
 }

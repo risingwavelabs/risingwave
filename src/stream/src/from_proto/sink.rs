@@ -40,8 +40,9 @@ use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
     KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
+    LogStoreReadSchemaVersion, LogStoreSchemaHistoryEntry,
 };
-use crate::executor::{SinkExecutor, StreamExecutorError};
+use crate::executor::{SinkExecutor, SinkSchemaVersionParam, StreamExecutorError};
 
 /// Build [`SinkParam`] from a [`PbSinkDesc`], along with the full [`ColumnCatalog`] list for
 /// downstream use. `connector` is the resolved connector name (e.g. `ICEBERG_SINK`), used for
@@ -130,6 +131,47 @@ pub(super) fn build_sink_param(
     };
 
     Ok((sink_param, columns))
+}
+
+/// The sink desc of an older schema version with `columns`. The downstream pk is mapped to the
+/// older columns by name.
+fn sink_desc_of_columns(
+    sink_desc: &PbSinkDesc,
+    columns: &[PbColumnCatalog],
+) -> Result<PbSinkDesc, StreamExecutorError> {
+    let column_name = |column: &PbColumnCatalog| {
+        column
+            .column_desc
+            .as_ref()
+            .map(|desc| desc.name.clone())
+            .unwrap_or_default()
+    };
+    let downstream_pk = sink_desc
+        .downstream_pk
+        .iter()
+        .map(|idx| {
+            let name = sink_desc
+                .column_catalogs
+                .get(*idx as usize)
+                .map(column_name)
+                .ok_or_else(|| anyhow!("invalid downstream pk index {}", idx))?;
+            columns
+                .iter()
+                .position(|column| column_name(column) == name)
+                .map(|idx| idx as u32)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "downstream pk column {} not found in older sink schema",
+                        name
+                    )
+                })
+        })
+        .try_collect()?;
+    Ok(PbSinkDesc {
+        column_catalogs: columns.to_vec(),
+        downstream_pk,
+        ..sink_desc.clone()
+    })
 }
 
 pub struct SinkExecutorBuilder;
@@ -269,7 +311,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             )?
         };
 
-        let (sink_param, columns) = build_sink_param(sink_desc, properties_with_secret, connector)?;
+        let (sink_param, columns) =
+            build_sink_param(sink_desc, properties_with_secret.clone(), connector)?;
 
         let sink_write_param = SinkWriterParam {
             executor_id: params.executor_id,
@@ -343,6 +386,45 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
+                let schema_history = node
+                    .log_store_schema_history
+                    .iter()
+                    .map(|entry| {
+                        Ok::<_, StreamExecutorError>(LogStoreSchemaHistoryEntry {
+                            version: entry.version,
+                            table: Table {
+                                columns: entry.log_store_columns.clone(),
+                                value_indices: entry.log_store_value_indices.clone(),
+                                ..Default::default()
+                            },
+                            schema_change: entry.schema_change.clone().ok_or_else(|| {
+                                anyhow!(
+                                    "missing schema change of log store schema version {}",
+                                    entry.version
+                                )
+                            })?,
+                        })
+                    })
+                    .try_collect()?;
+                let older_sink_params = node
+                    .log_store_schema_history
+                    .iter()
+                    .map(|entry| {
+                        let sink_desc = sink_desc_of_columns(sink_desc, &entry.sink_columns)?;
+                        let (sink_param, columns) = build_sink_param(
+                            &sink_desc,
+                            properties_with_secret.clone(),
+                            connector,
+                        )?;
+                        Ok::<_, StreamExecutorError>(SinkSchemaVersionParam {
+                            version: entry.version,
+                            sink_param,
+                            columns,
+                        })
+                    })
+                    .try_collect()?;
+                let read_schema_version = LogStoreReadSchemaVersion::default();
+
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -354,7 +436,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     log_store_identity,
                     params.env.kv_log_store_historical_read_semaphore(),
                     pk_info,
-                );
+                )
+                .with_schema_history(
+                    node.log_store_schema_version,
+                    schema_history,
+                    read_schema_version.clone(),
+                )?;
 
                 SinkExecutor::new(
                     params.actor_context,
@@ -369,6 +456,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     input_data_types,
                     node.rate_limit.map(|x| x as _),
                 )?
+                .with_log_store_schema_versions(
+                    read_schema_version,
+                    node.log_store_schema_version,
+                    older_sink_params,
+                )
                 .boxed()
             }
         };
