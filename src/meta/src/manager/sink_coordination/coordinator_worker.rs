@@ -40,9 +40,8 @@ use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
-use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
 use tokio_retry::strategy::jitter;
 use tonic::Status;
@@ -289,6 +288,9 @@ struct CoordinationHandleManager {
     writer_handles: HashMap<HandleId, SinkWriterCoordinationHandle>,
     next_handle_id: HandleId,
     request_rx: UnboundedReceiver<CoordinatorRequest>,
+    /// Drain requests not yet replied to. They are queued here as soon as they are received, so
+    /// they are kept no matter which phase of the coordinator receives them.
+    drain_waiters: Vec<DrainRequest>,
 }
 
 impl CoordinationHandleManager {
@@ -381,7 +383,8 @@ enum CoordinationHandleManagerEvent {
         handle_id: HandleId,
         epoch: u64,
     },
-    Drain(DrainRequest),
+    /// A drain request has been queued in [`CoordinationHandleManager::drain_waiters`].
+    Drain,
 }
 
 impl CoordinationHandleManagerEvent {
@@ -392,7 +395,7 @@ impl CoordinationHandleManagerEvent {
             CoordinationHandleManagerEvent::Stop(_) => "Stop",
             CoordinationHandleManagerEvent::CommitRequest { .. } => "CommitRequest",
             CoordinationHandleManagerEvent::AlignInitialEpoch { .. } => "AlignInitialEpoch",
-            CoordinationHandleManagerEvent::Drain(_) => "Drain",
+            CoordinationHandleManagerEvent::Drain => "Drain",
         }
     }
 }
@@ -413,7 +416,8 @@ impl CoordinationHandleManager {
                         Ok(CoordinationHandleManagerEvent::NewHandle(handle_id))
                     }
                     CoordinatorRequest::Drain(request) => {
-                        Ok(CoordinationHandleManagerEvent::Drain(request))
+                        self.drain_waiters.push(request);
+                        Ok(CoordinationHandleManagerEvent::Drain)
                     }
                 }
             }
@@ -467,6 +471,8 @@ impl CoordinationHandleManager {
                     init_requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
                     continue;
                 }
+                // Queued and replied to once commits make progress after initialization.
+                CoordinationHandleManagerEvent::Drain => continue,
                 event => event.name(),
             };
             return Err(anyhow!(
@@ -480,7 +486,7 @@ impl CoordinationHandleManager {
     async fn alter_parallelisms(
         &mut self,
         altered_handles: impl Iterator<Item = HandleId>,
-    ) -> anyhow::Result<AlterParallelismsResult> {
+    ) -> anyhow::Result<HashSet<HandleId>> {
         let mut requests = AligningRequests::default();
         for handle_id in altered_handles {
             requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
@@ -491,11 +497,13 @@ impl CoordinationHandleManager {
             .filter(|handle_id| !requests.handle_ids.contains(handle_id))
             .cloned()
             .collect();
-        let mut drain_waiters = Vec::new();
         loop {
+            // When every writer has stopped and someone waits for the commits to drain (the old
+            // sink of `REPLACE SINK`), return without waiting for new writers, so that the
+            // coordinator can finish committing the acknowledged epochs.
             if remaining_handles.is_empty()
                 && (requests.aligned()
-                    || (requests.handle_ids.is_empty() && !drain_waiters.is_empty()))
+                    || (requests.handle_ids.is_empty() && !self.drain_waiters.is_empty()))
             {
                 break;
             }
@@ -528,21 +536,11 @@ impl CoordinationHandleManager {
                         handle_id
                     );
                 }
-                CoordinationHandleManagerEvent::Drain(drain_waiter) => {
-                    drain_waiters.push(drain_waiter);
-                }
+                CoordinationHandleManagerEvent::Drain => {}
             }
         }
-        Ok(AlterParallelismsResult {
-            handle_ids: requests.handle_ids,
-            drain_waiters,
-        })
+        Ok(requests.handle_ids)
     }
-}
-
-struct AlterParallelismsResult {
-    handle_ids: HashSet<HandleId>,
-    drain_waiters: Vec<DrainRequest>,
 }
 
 /// Represents the coordinator worker's state machine for handling schema changes.
@@ -563,7 +561,6 @@ enum CommitRequestAlignment {
 
 pub struct CoordinatorWorker {
     handle_manager: CoordinationHandleManager,
-    drain_waiters: Vec<DrainRequest>,
     /// Last epoch whose commit has been acknowledged to sink writers.
     ///
     /// On recovery, pending sink states are treated as already acknowledged to writers, so this is
@@ -628,8 +625,8 @@ impl CoordinatorWorker {
                 writer_handles: HashMap::new(),
                 next_handle_id: 0,
                 request_rx,
+                drain_waiters: Vec::new(),
             },
-            drain_waiters: Vec::new(),
             last_writer_acked_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
         };
@@ -685,6 +682,8 @@ impl CoordinatorWorker {
                             self.handle_manager.vnode_bitmap(handle_id),
                         )?;
                     }
+                    // Queued and replied to once commits make progress after initialization.
+                    CoordinationHandleManagerEvent::Drain => {}
                     other => {
                         return Err(anyhow!("expect AlignInitialEpoch but got {}", other.name()));
                     }
@@ -713,7 +712,7 @@ impl CoordinatorWorker {
         }
 
         let last_writer_acked_epoch = self.last_writer_acked_epoch;
-        for waiter in self.drain_waiters.extract_if(.., |waiter| {
+        for waiter in self.handle_manager.drain_waiters.extract_if(.., |waiter| {
             last_writer_acked_epoch.is_some_and(|epoch| epoch >= waiter.target_epoch)
         }) {
             let _ = waiter.reply.send(Ok(()));
@@ -787,27 +786,33 @@ impl CoordinatorWorker {
                 CoordinatorWorkerEvent::HandleManagerEvent(event) => match event {
                     CoordinationHandleManagerEvent::NewHandle(handle_id) => {
                         pending_new_handles.push(handle_id);
+                        if running_handles.is_empty() {
+                            // Every previous writer has stopped, so no `UpdateVnodeBitmap` will
+                            // arrive to start the new writers.
+                            running_handles = self
+                                .handle_manager
+                                .alter_parallelisms(pending_new_handles.drain(..))
+                                .await?;
+                            self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
+                                .await?;
+                        }
                         continue;
                     }
                     CoordinationHandleManagerEvent::UpdateVnodeBitmap(handle_id) => {
-                        let result = self
+                        running_handles = self
                             .handle_manager
                             .alter_parallelisms(pending_new_handles.drain(..).chain([handle_id]))
                             .await?;
-                        running_handles = result.handle_ids;
-                        self.drain_waiters.extend(result.drain_waiters);
                         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
                             .await?;
                         continue;
                     }
                     CoordinationHandleManagerEvent::Stop(handle_id) => {
                         self.handle_manager.stop_handle(handle_id)?;
-                        let result = self
+                        running_handles = self
                             .handle_manager
                             .alter_parallelisms(pending_new_handles.drain(..))
                             .await?;
-                        running_handles = result.handle_ids;
-                        self.drain_waiters.extend(result.drain_waiters);
                         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
                             .await?;
 
@@ -822,10 +827,8 @@ impl CoordinatorWorker {
                     CoordinationHandleManagerEvent::AlignInitialEpoch { .. } => {
                         bail!("receive AlignInitialEpoch after initialization")
                     }
-                    CoordinationHandleManagerEvent::Drain(drain_waiter) => {
-                        self.drain_waiters.push(drain_waiter);
-                        continue;
-                    }
+                    // Replied to by `next_event` once the commits have drained.
+                    CoordinationHandleManagerEvent::Drain => continue,
                 },
                 CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
                     let start_time = Instant::now();

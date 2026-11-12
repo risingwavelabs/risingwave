@@ -619,6 +619,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
     use std::task::Poll;
+    use std::time::Duration;
 
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -2737,6 +2738,144 @@ mod tests {
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "COMMITTED");
         }
+    }
+
+    #[tokio::test]
+    async fn test_drain_two_phase_commits_after_writer_stop() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+
+        let vnode = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let metadata = vec![1u8, 2u8];
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    // Hummock has not committed `epoch1` yet.
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let metadata = metadata.clone();
+                let db = db.clone();
+                move |param, request_rx| {
+                    let metadata = metadata.clone();
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                request_rx,
+                                MockTwoPhaseCoordinator::new_coordinator(
+                                    move |_epoch, metadata_list, _schema_change| {
+                                        let metadata =
+                                            Itertools::exactly_one(metadata_list.into_iter())
+                                                .unwrap();
+                                        Ok(match metadata.metadata {
+                                            Some(Metadata::Serialized(SerializedMetadata {
+                                                metadata,
+                                            })) => Some(metadata),
+                                            _ => unreachable!(),
+                                        })
+                                    },
+                                    move |_epoch, commit_metadata| {
+                                        assert_eq!(commit_metadata, metadata);
+                                        Ok(())
+                                    },
+                                    move |_epoch, _schema_change| unreachable!(),
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let mut client =
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap()
+            .0;
+
+        // The drain request reaches the coordinator while it waits for the writer to align the
+        // initial epoch, and must stay queued instead of failing the coordinator.
+        let drain = tokio::spawn({
+            let manager = manager.clone();
+            let sink_id = param.sink_id;
+            async move { manager.wait_sink_commits_drained(sink_id, epoch1).await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(client.align_initial_epoch(1).await.unwrap(), 1);
+        client
+            .commit(
+                epoch1,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata.clone(),
+                    })),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        // The last writer stops while `epoch1` is acknowledged but not committed yet.
+        client.stop().await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !drain.is_finished(),
+            "drain must wait for the pending commit of epoch {epoch1}"
+        );
+
+        sender.lock().await.as_ref().unwrap().send(epoch1).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), drain)
+            .await
+            .expect("drain should finish once the pending commit is done")
+            .unwrap()
+            .unwrap();
+
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch1 as i64);
+        assert_eq!(rows[0].2, "COMMITTED");
     }
 
     #[tokio::test]
