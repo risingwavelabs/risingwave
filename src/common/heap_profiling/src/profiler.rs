@@ -39,7 +39,8 @@ impl HeapProfiler {
     /// # Arguments
     ///
     /// `total_memory` must be the total available memory for the process.
-    /// It will be compared with the process resident memory.
+    /// The threshold derived from it is compared with cgroup memory usage in containers,
+    /// or system memory usage when cgroup usage is unavailable.
     pub fn new(total_memory: usize, config: HeapProfilingConfig) -> Self {
         let threshold_auto_dump_heap_profile =
             (total_memory as f64 * config.threshold_auto as f64) as usize;
