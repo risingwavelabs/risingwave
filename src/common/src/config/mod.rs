@@ -988,7 +988,7 @@ pub mod tests {
                 "storage.object_store.read_scheduler",
                 vec![
                     "max_batch_requests",
-                    "max_admitted_requests",
+                    "max_admitted_groups",
                     "max_inflight_reads",
                     "max_read_bytes",
                 ],

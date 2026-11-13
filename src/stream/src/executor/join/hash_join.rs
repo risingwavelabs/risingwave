@@ -29,6 +29,7 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
+use risingwave_storage::hummock::SstMetaBatch;
 use risingwave_storage::store::PrefetchOptions;
 
 use super::row::{CachedJoinRow, DegreeType, build_degree_row};
@@ -219,6 +220,10 @@ pub struct JoinHashMap<K: HashKey, S: StateStore, E: JoinEncoding> {
 }
 
 impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
+    pub(crate) fn new_iterator_meta_batch(&self) -> Option<Arc<SstMetaBatch>> {
+        self.state.table.new_iterator_meta_batch()
+    }
+
     pub(crate) fn get_degree_state_mut_ref(&mut self) -> (&[usize], &mut Option<TableInner<S>>) {
         (&self.state.order_key_indices, &mut self.degree_state)
     }
@@ -232,6 +237,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     pub(crate) async fn fetch_matched_rows_and_get_degree_table_ref<'a>(
         &'a mut self,
         key: &'a K,
+        metadata: Option<&'a Arc<SstMetaBatch>>,
     ) -> StreamExecutorResult<(
         impl Stream<Item = StreamExecutorResult<(PkType, JoinRow<OwnedRow>)>> + 'a,
         &'a [usize],
@@ -244,7 +250,15 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             &mut self.state.table,
         );
         let degrees = if let Some(degree_state) = degree_state {
-            Some(fetch_degrees(key, &self.join_key_data_types, &degree_state.table).await?)
+            Some(
+                fetch_degrees(
+                    key,
+                    &self.join_key_data_types,
+                    &degree_state.table,
+                    metadata,
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -255,6 +269,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             state_table,
             key,
             degrees,
+            metadata,
         );
         Ok((stream, order_key_indices, &mut self.degree_state))
     }
@@ -268,16 +283,19 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
     state_table: &'a StateTable<S>,
     key: &'a K,
     degrees: Option<Vec<DegreeType>>,
+    metadata: Option<&'a Arc<SstMetaBatch>>,
 ) {
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let decoded_key = key.deserialize(join_key_data_types)?;
-    let table_iter = state_table
-        .iter_with_prefix_respecting_watermark(
+    let table_iter = SstMetaBatch::scope(
+        metadata,
+        state_table.iter_with_prefix_respecting_watermark(
             &decoded_key,
             sub_range,
             PrefetchOptions::prefetch_for_prefix_scan(),
-        )
-        .await?;
+        ),
+    )
+    .await?;
 
     #[for_await]
     for (i, entry) in table_iter.enumerate() {
@@ -318,17 +336,20 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
     key: &K,
     join_key_data_types: &[DataType],
     degree_state_table: &StateTable<S>,
+    metadata: Option<&Arc<SstMetaBatch>>,
 ) -> StreamExecutorResult<Vec<DegreeType>> {
     let key = key.deserialize(join_key_data_types)?;
     let mut degrees = vec![];
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
-    let table_iter = degree_state_table
-        .iter_with_prefix_respecting_watermark(
+    let table_iter = SstMetaBatch::scope(
+        metadata,
+        degree_state_table.iter_with_prefix_respecting_watermark(
             key,
             sub_range,
             PrefetchOptions::prefetch_for_prefix_scan(),
-        )
-        .await?;
+        ),
+    )
+    .await?;
     let degree_col_idx = degree_col_idx_in_row(degree_state_table);
     #[for_await]
     for entry in table_iter {

@@ -12,38 +12,342 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, RandomState};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
-use std::sync::Arc;
-use std::task::Poll;
+use std::sync::{Arc, Mutex};
+use std::task::{Poll, Waker, ready};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use futures::future::join_all;
+use futures::future::{BoxFuture, join_all};
 use futures::stream::{FuturesUnordered, StreamExt};
-use itertools::Itertools;
 use risingwave_common::config::storage::ReadSchedulerConfig;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::sync::{AcquireError, Notify, OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::time::Instant as BatchInstant;
 use tracing::Instrument;
 
 use super::{ObjectError, ObjectErrorInner, ObjectResult, ObjectStoreMetrics};
 
+#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+pub mod replay;
+#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+use replay::PhysicalPermit;
+#[cfg(not(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay")))]
+type PhysicalPermit = OwnedSemaphorePermit;
+
 pub(super) type ReadResult = ObjectResult<Bytes>;
 
 pub(super) struct ReadScheduler {
-    requests: mpsc::UnboundedSender<Vec<ReadRequest>>,
-    preparation_slots: Arc<Semaphore>,
-    preparing: prometheus::IntGauge,
-    prepare_duration: prometheus::HistogramVec,
-    prepared_batch_size: prometheus::Histogram,
-    media_type: &'static str,
-    events: prometheus::IntCounterVec,
-    slots: Arc<Semaphore>,
+    _shutdown: oneshot::Sender<()>,
+    groups: Arc<GroupQueue>,
     config: ReadSchedulerConfig,
     pending: prometheus::IntGauge,
     waiting: prometheus::IntGauge,
     queued: prometheus::IntGauge,
     admission_duration: prometheus::Histogram,
+    batch_members: prometheus::IntCounter,
+    sealed_batches: [prometheus::IntCounter; 3],
+    batch_releases: [prometheus::IntCounter; 3],
+    batch_wait: prometheus::Histogram,
+}
+
+/// Collects external reads from one prefetch window on a single object.
+pub struct ReadBatch {
+    member: ReadBatchMember,
+}
+
+#[derive(Clone)]
+pub struct ReadBatchMember(Arc<ReadBatchInner>);
+
+struct ReadBatchInner {
+    scheduler: Arc<ReadScheduler>,
+    state: Mutex<ReadBatchState>,
+    max_reads: usize,
+}
+
+enum ReadBatchState {
+    Registering {
+        candidates: Vec<Range<usize>>,
+        reads: Vec<StagedRead>,
+    },
+    Sealed(Vec<BatchGroup>),
+}
+
+struct BatchGroup {
+    span: Range<usize>,
+    missing: Vec<Range<usize>>,
+    reads: Vec<StagedRead>,
+    timer: Option<(BatchInstant, ReadTask)>,
+}
+
+#[derive(Clone, Copy)]
+enum BatchRelease {
+    Ready,
+    Deadline,
+    Pressure,
+}
+
+impl ReadBatch {
+    pub(super) fn new(scheduler: Arc<ReadScheduler>, max_reads: usize) -> Self {
+        Self {
+            member: ReadBatchMember(Arc::new(ReadBatchInner {
+                scheduler,
+                state: Mutex::new(ReadBatchState::Registering {
+                    candidates: Vec::new(),
+                    reads: Vec::new(),
+                }),
+                max_reads,
+            })),
+        }
+    }
+
+    pub fn member(&self) -> ReadBatchMember {
+        self.member.clone()
+    }
+
+    /// Register a range that may still reach the store after registration ends.
+    pub fn expect(&self, range: Range<usize>) {
+        let batch = &self.member.0;
+        if batch.scheduler.config.prefetch_batch_wait_us > 0
+            && batch.scheduler.can_schedule(&range)
+            && let ReadBatchState::Registering { candidates, .. } =
+                &mut *batch.state.lock().unwrap()
+            && candidates.len() < batch.max_reads
+        {
+            candidates.push(range);
+        }
+    }
+}
+
+impl Drop for ReadBatch {
+    fn drop(&mut self) {
+        // Cache producers can still have followers after the iterator leaves.
+        let batch = &self.member.0;
+        let mut state = batch.state.lock().unwrap();
+        let ReadBatchState::Registering { candidates, reads } =
+            std::mem::replace(&mut *state, ReadBatchState::Sealed(Vec::new()))
+        else {
+            unreachable!("the batch has only one registration owner")
+        };
+        batch.scheduler.sealed_batches[reads.len().min(2)].inc();
+        if candidates.is_empty() {
+            drop(state);
+            if !reads.is_empty() {
+                batch.scheduler.submit_batch(reads);
+            }
+            return;
+        }
+        let mut groups = batch.plan_groups(candidates);
+        let mut ready = Vec::new();
+        for read in reads {
+            match groups
+                .iter_mut()
+                .find(|group| group.missing.contains(&read.range))
+            {
+                Some(group) => group.push(read),
+                None => ready.push(read),
+            }
+        }
+        groups.retain_mut(|group| {
+            if group.reads.is_empty() {
+                return true;
+            }
+            if let Some(reason) = batch.release_reason(group) {
+                batch.observe_release(&group.reads, reason);
+                ready.append(&mut group.reads);
+                return false;
+            }
+            batch.arm_timeout(group);
+            true
+        });
+        *state = ReadBatchState::Sealed(groups);
+        drop(state);
+        if !ready.is_empty() {
+            batch.scheduler.submit_batch(ready);
+        }
+    }
+}
+
+struct StagedRead {
+    path: String,
+    range: Range<usize>,
+    response: oneshot::Sender<ReadResult>,
+    trace_id: Option<u64>,
+    arrived: Option<BatchInstant>,
+    _waiting: ReadGauge,
+    _admission: prometheus::HistogramTimer,
+}
+
+impl StagedRead {
+    fn into_request(self, scheduler: &ReadScheduler, queued: bool) -> ReadRequest {
+        ReadRequest {
+            path: self.path,
+            range: self.range,
+            response: self.response,
+            queued_at: Instant::now(),
+            trace_id: self.trace_id,
+            _pending: ReadGauge::new(&scheduler.pending),
+            _queued: queued.then(|| ReadGauge::new(&scheduler.queued)),
+        }
+    }
+}
+
+fn staged_span(reads: &[StagedRead]) -> Option<Range<usize>> {
+    let start = reads.first()?.range.start;
+    let end = reads.iter().map(|read| read.range.end).max().unwrap();
+    Some(start..end)
+}
+
+impl BatchGroup {
+    fn push(&mut self, read: StagedRead) {
+        self.missing.retain(|candidate| *candidate != read.range);
+        self.reads.push(read);
+    }
+}
+
+impl ReadBatchInner {
+    fn plan_groups(&self, mut candidates: Vec<Range<usize>>) -> Vec<BatchGroup> {
+        let config = &self.scheduler.config;
+        candidates.sort_unstable_by_key(|range| range.start);
+        let mut groups: Vec<BatchGroup> = Vec::new();
+        for range in candidates {
+            if let Some(group) = groups.last_mut()
+                && group.missing.len() < config.max_batch_requests.get()
+                && range.start.saturating_sub(group.span.end) <= config.max_gap_bytes
+                && group.span.end.max(range.end) - group.span.start <= config.max_read_bytes.get()
+            {
+                group.span.end = group.span.end.max(range.end);
+                group.missing.push(range);
+            } else {
+                groups.push(BatchGroup {
+                    span: range.clone(),
+                    missing: vec![range],
+                    reads: Vec::new(),
+                    timer: None,
+                });
+            }
+        }
+        groups.retain(|group| group.missing.len() > 1);
+        groups
+    }
+
+    fn release_reason(&self, group: &BatchGroup) -> Option<BatchRelease> {
+        if group.missing.is_empty() {
+            return Some(BatchRelease::Ready);
+        }
+        let first = group.reads[0].arrived.unwrap();
+        if first.elapsed() >= Duration::from_micros(self.scheduler.config.prefetch_batch_wait_us) {
+            return Some(BatchRelease::Deadline);
+        }
+        // Stop collecting at admission pressure without reserving a group
+        // credit or a physical slot for the missing reads.
+        if self.scheduler.waiting.get() as usize >= self.scheduler.config.max_admitted_groups.get()
+            || self.scheduler.groups.slots.available_permits() == 0
+        {
+            return Some(BatchRelease::Pressure);
+        }
+        None
+    }
+
+    fn arm_timeout(self: &Arc<Self>, group: &mut BatchGroup) {
+        if group.timer.is_some() {
+            return;
+        }
+        let deadline = group.reads[0].arrived.unwrap()
+            + Duration::from_micros(self.scheduler.config.prefetch_batch_wait_us);
+        let batch = Arc::downgrade(self);
+        let start = group.span.start;
+        let task = tokio::spawn(async move {
+            tokio::time::sleep_until(deadline).await;
+            let Some(batch) = batch.upgrade() else {
+                return;
+            };
+            let group = {
+                let mut state = batch.state.lock().unwrap();
+                let ReadBatchState::Sealed(groups) = &mut *state else {
+                    unreachable!("a timeout is armed only at or after seal")
+                };
+                let Some(index) = groups.iter().position(|group| group.span.start == start) else {
+                    return;
+                };
+                groups.swap_remove(index)
+            };
+            batch.release(group.reads, BatchRelease::Deadline);
+        });
+        group.timer = Some((deadline, ReadTask(task)));
+    }
+
+    fn observe_release(&self, reads: &[StagedRead], reason: BatchRelease) {
+        self.scheduler.batch_releases[reason as usize].inc();
+        for read in reads {
+            self.scheduler
+                .batch_wait
+                .observe(read.arrived.unwrap().elapsed().as_secs_f64());
+        }
+    }
+
+    fn release(&self, reads: Vec<StagedRead>, reason: BatchRelease) {
+        self.observe_release(&reads, reason);
+        self.scheduler.submit_batch(reads);
+    }
+}
+
+impl ReadBatchMember {
+    pub(super) fn stage(
+        &self,
+        scheduler: &ReadScheduler,
+        path: &str,
+        range: Range<usize>,
+        trace_id: Option<u64>,
+    ) -> Option<oneshot::Receiver<ReadResult>> {
+        let batch = &self.0;
+        if !std::ptr::eq(scheduler, batch.scheduler.as_ref()) {
+            return None;
+        }
+        let mut state = batch.state.lock().unwrap();
+        let make_read = || {
+            scheduler.stage_read(
+                path,
+                range.clone(),
+                trace_id,
+                (scheduler.config.prefetch_batch_wait_us > 0).then(BatchInstant::now),
+            )
+        };
+        match &mut *state {
+            ReadBatchState::Registering { reads, .. } if reads.len() < batch.max_reads => {
+                let (read, receiver) = make_read();
+                reads.push(read);
+                Some(receiver)
+            }
+            ReadBatchState::Registering { .. } => None,
+            ReadBatchState::Sealed(groups) => {
+                let index = groups
+                    .iter()
+                    .position(|group| group.missing.contains(&range))?;
+                let group = &mut groups[index];
+                if group
+                    .timer
+                    .as_ref()
+                    .is_some_and(|(deadline, _)| BatchInstant::now() >= *deadline)
+                {
+                    let reads = groups.swap_remove(index).reads;
+                    drop(state);
+                    batch.release(reads, BatchRelease::Deadline);
+                    return None;
+                }
+                let (read, receiver) = make_read();
+                group.push(read);
+                if let Some(reason) = batch.release_reason(group) {
+                    let reads = groups.swap_remove(index).reads;
+                    drop(state);
+                    batch.release(reads, reason);
+                } else {
+                    batch.arm_timeout(group);
+                }
+                Some(receiver)
+            }
+        }
+    }
 }
 
 struct ReadRequest {
@@ -52,101 +356,22 @@ struct ReadRequest {
     response: oneshot::Sender<ReadResult>,
     queued_at: Instant,
     trace_id: Option<u64>,
-    // Hold the slot while the scheduler retains the request, including in an in-flight group.
-    _slot: OwnedSemaphorePermit,
     _pending: ReadGauge,
     _queued: Option<ReadGauge>,
 }
 
-struct ReadGauge(prometheus::IntGauge, i64);
+struct ReadGauge(prometheus::IntGauge);
+
 impl ReadGauge {
     fn new(gauge: &prometheus::IntGauge) -> Self {
-        Self::with_count(gauge, 1)
-    }
-
-    fn with_count(gauge: &prometheus::IntGauge, count: i64) -> Self {
-        gauge.add(count);
-        Self(gauge.clone(), count)
-    }
-
-    fn shrink_to(&mut self, count: i64) {
-        debug_assert!(count <= self.1);
-        self.0.sub(self.1 - count);
-        self.1 = count;
+        gauge.inc();
+        Self(gauge.clone())
     }
 }
+
 impl Drop for ReadGauge {
     fn drop(&mut self) {
-        self.0.sub(self.1);
-    }
-}
-
-/// Retains descriptors owned by the window until they are admitted or dropped.
-pub(super) struct ReadPreparation {
-    permits: OwnedSemaphorePermit,
-    gauge: ReadGauge,
-}
-
-impl ReadPreparation {
-    fn retain(&mut self, count: usize) -> usize {
-        let released = self.permits.num_permits() - count;
-        if released > 0 {
-            drop(self.take(released));
-        }
-        released
-    }
-
-    fn take(&mut self, count: usize) -> OwnedSemaphorePermit {
-        let permits = self.permits.split(count).unwrap();
-        self.gauge.shrink_to(self.permits.num_permits() as i64);
-        permits
-    }
-}
-
-pub(super) struct PreparedRead {
-    path: String,
-    range: Range<usize>,
-    response: oneshot::Sender<ReadResult>,
-    trace_id: Option<u64>,
-}
-
-impl PreparedRead {
-    fn is_closed(&self) -> bool {
-        self.response.is_closed()
-    }
-
-    fn trace_id(&self) -> Option<u64> {
-        self.trace_id
-    }
-
-    pub(super) fn new(
-        path: &str,
-        range: Range<usize>,
-        trace_id: Option<u64>,
-    ) -> (Self, oneshot::Receiver<ReadResult>) {
-        let (response, receiver) = oneshot::channel();
-        (
-            Self {
-                path: path.to_owned(),
-                range,
-                response,
-                trace_id,
-            },
-            receiver,
-        )
-    }
-
-    fn admit(self, slot: OwnedSemaphorePermit, scheduler: &ReadScheduler) -> ReadRequest {
-        ReadRequest {
-            path: self.path,
-            range: self.range,
-            response: self.response,
-            trace_id: self.trace_id,
-            queued_at: Instant::now(),
-            _slot: slot,
-            _pending: ReadGauge::new(&scheduler.pending),
-            _queued: Some(ReadGauge::new(&scheduler.queued)),
-        }
+        self.0.dec();
     }
 }
 
@@ -170,6 +395,317 @@ impl Drop for ReadTask {
 
 struct ReadGroup {
     requests: Vec<ReadRequest>,
+    _credit: (ReadGauge, OwnedSemaphorePermit),
+}
+
+struct PendingReadGroup {
+    span: Range<usize>,
+    group: ReadGroup,
+    _queued: ReadGauge,
+}
+
+impl PendingReadGroup {
+    fn new(
+        queue: &GroupQueue,
+        credit: OwnedSemaphorePermit,
+        span: Range<usize>,
+        requests: Vec<ReadRequest>,
+    ) -> Self {
+        Self {
+            span,
+            group: ReadGroup {
+                requests,
+                _credit: (ReadGauge::new(&queue.admitted), credit),
+            },
+            _queued: ReadGauge::new(&queue.queued),
+        }
+    }
+
+    fn merge_span(
+        &self,
+        path: &str,
+        range: &Range<usize>,
+        members: usize,
+        config: &ReadSchedulerConfig,
+    ) -> Option<Range<usize>> {
+        let start = self.span.start.min(range.start);
+        let end = self.span.end.max(range.end);
+        let gap = self
+            .span
+            .start
+            .max(range.start)
+            .saturating_sub(self.span.end.min(range.end));
+        (self.group.requests[0].path == path
+            && self.group.requests.len() + members <= config.max_batch_requests.get()
+            && gap <= config.max_gap_bytes
+            && end - start <= config.max_read_bytes.get())
+        .then_some(start..end)
+    }
+
+    fn absorb_pending(&mut self, pending: &mut Vec<Self>, config: &ReadSchedulerConfig) {
+        // An arriving range can bridge two pending groups. Dropping the
+        // absorbed group returns its credit immediately.
+        while let Some((index, span)) = pending.iter().enumerate().find_map(|(i, other)| {
+            self.merge_span(
+                &other.group.requests[0].path,
+                &other.span,
+                other.group.requests.len(),
+                config,
+            )
+            .map(|span| (i, span))
+        }) {
+            self.span = span;
+            self.group
+                .requests
+                .append(&mut pending.swap_remove(index).group.requests);
+        }
+    }
+}
+
+enum GroupAdmission {
+    Join(usize, Range<usize>),
+    New(OwnedSemaphorePermit),
+}
+
+struct GroupQueue {
+    pending: Mutex<PendingReadGroups>,
+    slots: Arc<Semaphore>,
+    ready: Notify,
+    admitted: prometheus::IntGauge,
+    queued: prometheus::IntGauge,
+}
+
+struct ActiveRead {
+    path: String,
+    span: Range<usize>,
+    // None means the result or cancellation has closed the flight.
+    followers: Mutex<Option<Vec<ReadRequest>>>,
+}
+
+impl ActiveRead {
+    fn covers(&self, path: &str, span: &Range<usize>) -> bool {
+        self.path == path && self.span.start <= span.start && span.end <= self.span.end
+    }
+}
+
+struct ActiveReadGuard<'a> {
+    queue: &'a GroupQueue,
+    flight: Arc<ActiveRead>,
+}
+
+impl Drop for ActiveReadGuard<'_> {
+    fn drop(&mut self) {
+        self.queue
+            .pending
+            .lock()
+            .unwrap()
+            .active
+            .retain(|active| !Arc::ptr_eq(active, &self.flight));
+    }
+}
+
+#[derive(Default)]
+struct PendingReadGroups {
+    groups: Vec<PendingReadGroup>,
+    active: Vec<Arc<ActiveRead>>,
+    waiting: HashMap<String, BTreeMap<(usize, u64), WaitingReadGroup>>,
+    next_waiter: u64,
+    // Physical tasks holding a P permit that have not taken a group yet.
+    starting: usize,
+}
+
+struct WaitingReadGroup {
+    reads: Vec<StagedRead>,
+    // Keep the acquire with the entry so joining also cancels its G request,
+    // including a credit already assigned by the semaphore but not yet polled.
+    acquire: BoxFuture<'static, Result<OwnedSemaphorePermit, AcquireError>>,
+    waker: Option<Waker>,
+}
+
+// The submitting future owns the registration, even when it is cancelled.
+struct GroupWaiter<'a> {
+    queue: &'a GroupQueue,
+    path: String,
+    key: (usize, u64),
+}
+
+impl Drop for GroupWaiter<'_> {
+    fn drop(&mut self) {
+        self.queue
+            .pending
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .remove_waiter(&self.path, self.key);
+    }
+}
+
+impl PendingReadGroups {
+    fn register_waiter<'a>(
+        &mut self,
+        queue: &'a GroupQueue,
+        reads: Vec<StagedRead>,
+    ) -> GroupWaiter<'a> {
+        let key = (reads[0].range.start, self.next_waiter);
+        self.next_waiter += 1;
+        let path = reads[0].path.clone();
+        self.waiting.entry(path.clone()).or_default().insert(
+            key,
+            WaitingReadGroup {
+                reads,
+                acquire: Box::pin(queue.slots.clone().acquire_owned()),
+                waker: None,
+            },
+        );
+        GroupWaiter { queue, path, key }
+    }
+
+    fn remove_waiter(&mut self, path: &str, key: (usize, u64)) -> Option<WaitingReadGroup> {
+        let waiters = self.waiting.get_mut(path)?;
+        let removed = waiters.remove(&key);
+        if waiters.is_empty() {
+            self.waiting.remove(path);
+        }
+        removed
+    }
+
+    fn take_mergeable_waiter(
+        &mut self,
+        group: &PendingReadGroup,
+        config: &ReadSchedulerConfig,
+    ) -> Option<(Range<usize>, WaitingReadGroup)> {
+        if group.group.requests.len() == config.max_batch_requests.get() {
+            return None;
+        }
+        let path = &group.group.requests[0].path;
+        // The original start can shift right on cancellation, by at most the
+        // byte limit for a group. Anything earlier cannot reach the left edge.
+        let left = group
+            .span
+            .start
+            .saturating_sub(config.max_gap_bytes)
+            .saturating_sub(config.max_read_bytes.get());
+        let right = group.span.end.saturating_add(config.max_gap_bytes);
+        let (key, merged_span) = self
+            .waiting
+            .get_mut(path)?
+            .range_mut((left, 0)..=(right, u64::MAX))
+            .find_map(|(&key, waiter)| {
+                waiter.reads.retain(|read| !read.response.is_closed());
+                let span = staged_span(&waiter.reads)?;
+                let merged_span = group.merge_span(path, &span, waiter.reads.len(), config)?;
+                // Preserve active reuse without taking a follower lock in inline seal.
+                if self.active.iter().any(|read| read.covers(path, &span)) {
+                    return None;
+                }
+                Some((key, merged_span))
+            })?;
+        Some((merged_span, self.remove_waiter(path, key).unwrap()))
+    }
+
+    fn covering_read(
+        &self,
+        path: &str,
+        range: &Range<usize>,
+        count: usize,
+        max_followers: usize,
+    ) -> Option<std::sync::MutexGuard<'_, Option<Vec<ReadRequest>>>> {
+        self.active.iter().find_map(|read| {
+            if !read.covers(path, range) {
+                return None;
+            }
+            let mut followers = read.followers.lock().unwrap();
+            let requests = followers.as_mut()?;
+            requests.retain(|request| !request.response.is_closed());
+            (requests.len() + count <= max_followers).then_some(followers)
+        })
+    }
+}
+
+impl GroupQueue {
+    fn new(metrics: &ObjectStoreMetrics, media_type: &str, config: ReadSchedulerConfig) -> Self {
+        Self {
+            pending: Mutex::default(),
+            slots: Arc::new(Semaphore::new(config.max_admitted_groups.get())),
+            ready: Notify::new(),
+            admitted: metrics
+                .read_scheduler_groups
+                .with_label_values(&[media_type, "admitted"]),
+            queued: metrics
+                .read_scheduler_groups
+                .with_label_values(&[media_type, "queued"]),
+        }
+    }
+
+    fn admission(
+        &self,
+        pending: &[PendingReadGroup],
+        path: &str,
+        range: &Range<usize>,
+        members: usize,
+        reserved: &mut Option<OwnedSemaphorePermit>,
+        config: &ReadSchedulerConfig,
+    ) -> Option<GroupAdmission> {
+        if self.slots.is_closed() {
+            return None;
+        }
+        for (index, group) in pending.iter().enumerate() {
+            if let Some(span) = group.merge_span(path, range, members, config) {
+                return Some(GroupAdmission::Join(index, span));
+            }
+        }
+        reserved
+            .take()
+            .or_else(|| self.slots.clone().try_acquire_owned().ok())
+            .map(GroupAdmission::New)
+    }
+
+    fn admit(
+        &self,
+        pending: &mut Vec<PendingReadGroup>,
+        admission: GroupAdmission,
+        span: Range<usize>,
+        requests: impl IntoIterator<Item = ReadRequest>,
+        config: &ReadSchedulerConfig,
+    ) -> PendingReadGroup {
+        match admission {
+            GroupAdmission::New(credit) => {
+                PendingReadGroup::new(self, credit, span, requests.into_iter().collect())
+            }
+            GroupAdmission::Join(index, span) => {
+                let mut group = pending.swap_remove(index);
+                group.span = span;
+                group.group.requests.extend(requests);
+                group.absorb_pending(pending, config);
+                group
+            }
+        }
+    }
+
+    fn start_read(&self) -> Option<ReadGroup> {
+        let mut pending = self.pending.lock().unwrap();
+        pending.starting -= 1;
+        let (index, _) = pending
+            .groups
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, group)| group.group.requests.iter().map(|r| r.queued_at).min())?;
+        let mut group = pending.groups.swap_remove(index).group;
+        #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+        replay::queue(&pending, "selected");
+        group.requests.sort_unstable_by_key(|r| r.range.start);
+        Some(group)
+    }
+}
+
+// The worker owns queued reads even though producers can modify the queue.
+struct GroupQueueWorker(Arc<GroupQueue>);
+
+impl Drop for GroupQueueWorker {
+    fn drop(&mut self) {
+        let mut pending = self.0.pending.lock().unwrap_or_else(|err| err.into_inner());
+        self.0.slots.close();
+        pending.groups.clear();
+    }
 }
 
 impl ReadScheduler {
@@ -187,31 +723,22 @@ impl ReadScheduler {
         F: Fn(String, Range<usize>) -> R + Send + Sync + 'static,
         R: Future<Output = ReadResult> + Send + 'static,
     {
-        // Every descriptor entering the inbox owns either a Q or a preparation permit.
-        // Those two pools bound the inbox and ready queue together with in-flight reads.
-        let (requests, receiver) = mpsc::unbounded_channel();
-        let started_at = Instant::now();
-        tokio::spawn(run(
-            receiver,
+        let (shutdown, shutdown_rx) = oneshot::channel();
+        let groups = Arc::new(GroupQueue::new(metrics, media_type, config));
+        let worker = run(
+            shutdown_rx,
+            GroupQueueWorker(groups.clone()),
             read,
-            started_at,
             config,
             metrics.clone(),
             media_type,
-        ));
+        );
+        #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+        let worker = replay::dispatcher(worker);
+        tokio::spawn(worker);
         Self {
-            requests,
-            preparation_slots: Arc::new(Semaphore::new(config.max_admitted_requests.get())),
-            preparing: metrics
-                .read_scheduler_preparing
-                .with_label_values(&[media_type]),
-            prepare_duration: metrics.read_scheduler_prepare_duration.clone(),
-            prepared_batch_size: metrics
-                .read_scheduler_prepared_batch_size
-                .with_label_values(&[media_type]),
-            media_type,
-            events: metrics.read_scheduler_events.clone(),
-            slots: Arc::new(Semaphore::new(config.max_admitted_requests.get())),
+            _shutdown: shutdown,
+            groups,
             config,
             pending: metrics
                 .read_scheduler_pending
@@ -225,6 +752,27 @@ impl ReadScheduler {
             admission_duration: metrics
                 .read_scheduler_admission_duration
                 .with_label_values(&[media_type]),
+            batch_members: metrics
+                .read_scheduler_events
+                .with_label_values(&[media_type, "submitted_batch_members"]),
+            sealed_batches: [
+                "sealed_batch_empty",
+                "sealed_batch_single",
+                "sealed_batch_multiple",
+            ]
+            .map(|event| {
+                metrics
+                    .read_scheduler_events
+                    .with_label_values(&[media_type, event])
+            }),
+            batch_wait: metrics
+                .read_scheduler_batch_wait
+                .with_label_values(&[media_type]),
+            batch_releases: ["batch_ready", "batch_deadline", "batch_pressure"].map(|event| {
+                metrics
+                    .read_scheduler_events
+                    .with_label_values(&[media_type, event])
+            }),
         }
     }
 
@@ -237,244 +785,265 @@ impl ReadScheduler {
     ) -> impl Future<Output = ObjectResult<oneshot::Receiver<ReadResult>>> + Send + 'a {
         Box::pin(async move {
             debug_assert!(self.can_schedule(&range));
-            // Wait in the existing caller/foyer producer. Allocate retained request state
-            // only after admission, and never turn saturation into independent IO.
-            let slot = {
-                let _waiting = ReadGauge::new(&self.waiting);
-                let _timer = self.admission_duration.start_timer();
-                tokio::select! {
-                    biased;
-                    _ = self.requests.closed() => return Err(ObjectError::internal("read scheduler stopped")),
-                    slot = self.slots.clone().acquire_owned() => slot.map_err(|_| ObjectError::internal("read scheduler admission closed"))?,
+            let groups = &self.groups;
+            let (read, response) = self.stage_read(path, range.clone(), trace_id, None);
+            let waiter = {
+                let mut state = groups.pending.lock().unwrap();
+                if let Some(mut followers) =
+                    state.covering_read(path, &range, 1, self.config.max_batch_requests.get())
+                {
+                    followers
+                        .as_mut()
+                        .unwrap()
+                        .push(read.into_request(self, false));
+                    return Ok(response);
                 }
+                if let Some(admission) =
+                    groups.admission(&state.groups, path, &range, 1, &mut None, &self.config)
+                {
+                    self.insert_group(&mut state, admission, range, std::iter::once(read));
+                    return Ok(response);
+                }
+                state.register_waiter(groups, vec![read])
             };
-            let (request, receiver) = PreparedRead::new(path, range, trace_id);
-            let request = request.admit(slot, self);
-            self.requests
-                .send(vec![request])
-                .map_err(|_| ObjectError::internal("read scheduler stopped"))?;
-            Ok(receiver)
+            self.wait_for_group(waiter).await?;
+            Ok(response)
         })
     }
 
-    pub(super) fn event(&self, event: &'static str) {
-        self.events
-            .with_label_values(&[self.media_type, event])
-            .inc();
-    }
-
-    pub(super) async fn closed(&self) {
-        self.requests.closed().await;
-    }
-
-    pub(super) fn preparation_timeout(&self) -> Duration {
-        Duration::from_millis(self.config.batch_prepare_timeout_ms.into())
-    }
-
-    pub(super) fn reserve_preparation(&self, count: usize) -> Option<ReadPreparation> {
-        if count <= 1 || self.preparation_timeout().is_zero() {
-            return None;
-        }
-        let count = u32::try_from(count).ok()?;
-        let Ok(permits) = self.preparation_slots.clone().try_acquire_many_owned(count) else {
-            self.event("window_budget_reject");
-            return None;
-        };
-        self.event("window_started");
-        Some(ReadPreparation {
-            permits,
-            gauge: ReadGauge::with_count(&self.preparing, count.into()),
-        })
-    }
-
-    pub(super) async fn submit_window(
+    fn stage_read(
         &self,
-        mut requests: Vec<PreparedRead>,
-        mut preparation: ReadPreparation,
-        reason: &'static str,
-        elapsed: Duration,
+        path: &str,
+        range: Range<usize>,
+        trace_id: Option<u64>,
+        arrived: Option<BatchInstant>,
+    ) -> (StagedRead, oneshot::Receiver<ReadResult>) {
+        let (response, receiver) = oneshot::channel();
+        (
+            StagedRead {
+                path: path.to_owned(),
+                range,
+                response,
+                trace_id,
+                arrived,
+                _waiting: ReadGauge::new(&self.waiting),
+                _admission: self.admission_duration.start_timer(),
+            },
+            receiver,
+        )
+    }
+
+    fn insert_group(
+        &self,
+        state: &mut PendingReadGroups,
+        admission: GroupAdmission,
+        span: Range<usize>,
+        reads: impl IntoIterator<Item = StagedRead>,
     ) {
-        self.prepare_duration
-            .with_label_values(&[self.media_type, reason])
-            .observe(elapsed.as_secs_f64());
-        requests.retain(|request| !request.is_closed());
-        let released = preparation.retain(requests.len());
-        if tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG) {
-            let request_ids: Vec<_> = requests.iter().filter_map(PreparedRead::trace_id).collect();
-            tracing::debug!(target: "object_store_read_scheduler",
-                reason, ?request_ids, released_permits = released, "prepared window released");
-        }
-        self.prepared_batch_size.observe(requests.len() as f64);
-        if reason == "window_complete" {
-            match self.try_submit_whole_window(requests, &mut preparation) {
-                Ok(()) => return,
-                Err(unsubmitted) => requests = unsubmitted,
-            }
-        }
-        self.submit_prepared(requests, preparation).await;
-    }
-
-    fn try_submit_whole_window(
-        &self,
-        requests: Vec<PreparedRead>,
-        preparation: &mut ReadPreparation,
-    ) -> Result<(), Vec<PreparedRead>> {
-        let count = requests.len();
-        if count < 2 || count > self.packet_limit() {
-            return Err(requests);
-        }
-        let start = Instant::now();
-        let (mut slots, uses_preparation) =
-            match self.slots.clone().try_acquire_many_owned(count as u32) {
-                Ok(slots) => {
-                    preparation.retain(0);
-                    (slots, false)
-                }
-                Err(_) if self.is_mergeable_window(&requests) => {
-                    // Carry the existing descriptor budget into the queue, without waiting
-                    // for a group of Q permits or consuming the Q left for ordinary reads.
-                    (preparation.take(count), true)
-                }
-                Err(_) => return Err(requests),
-            };
-        let admission_duration = start.elapsed().as_secs_f64();
-        let packet = requests
-            .into_iter()
-            .map(|request| {
-                self.admission_duration.observe(admission_duration);
-                request.admit(slots.split(1).unwrap(), self)
-            })
-            .collect();
-        if self.publish_window_packet(packet, uses_preparation).is_ok() {
-            self.event("window_packet");
-            if uses_preparation {
-                self.event("window_admitted_with_preparation");
-            }
-        }
-        Ok(())
-    }
-
-    fn is_mergeable_window(&self, requests: &[PreparedRead]) -> bool {
-        if requests
-            .iter()
-            .any(|request| request.path != requests[0].path)
+        let requests = reads.into_iter().map(|read| read.into_request(self, true));
+        let mut group =
+            self.groups
+                .admit(&mut state.groups, admission, span, requests, &self.config);
+        // Take compatible waiters before publishing the group. Waking them to
+        // retry would race the worker taking the group for dispatch.
+        while let Some((
+            span,
+            WaitingReadGroup {
+                reads,
+                acquire,
+                waker,
+            },
+        )) = state.take_mergeable_waiter(&group, &self.config)
         {
-            return false;
-        }
-        // Producer polling can stage the neighbors in any order. Leave the
-        // submission order intact if the window falls back to prefix admission.
-        let mut ranges = requests
-            .iter()
-            .map(|request| &request.range)
-            .sorted_unstable_by_key(|range| range.start);
-        let first = ranges.next().unwrap();
-        let mut end = first.end;
-        ranges.all(|range| {
-            if range.start > end {
-                return false;
+            drop(acquire);
+            group.span = span;
+            group
+                .group
+                .requests
+                .extend(reads.into_iter().map(|read| read.into_request(self, true)));
+            group.absorb_pending(&mut state.groups, &self.config);
+            if let Some(waker) = waker {
+                waker.wake();
             }
-            end = end.max(range.end);
-            end - first.start <= self.config.max_read_bytes.get()
-        })
+        }
+        state.groups.push(group);
+        #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+        replay::queue(state, "installed");
+        self.groups.ready.notify_one();
     }
 
-    fn packet_limit(&self) -> usize {
-        self.config
-            .max_batch_requests
-            .get()
-            .min(self.config.max_admitted_requests.get())
-    }
-
-    async fn submit_prepared(&self, requests: Vec<PreparedRead>, mut preparation: ReadPreparation) {
-        // Count every logical read while it waits, including the unpublished tail
-        // of a prepared window. Prefix splitting must not change metric semantics.
-        let mut requests: std::collections::VecDeque<_> = requests
-            .into_iter()
-            .map(|request| {
-                (
-                    request,
-                    ReadGauge::new(&self.waiting),
-                    self.admission_duration.start_timer(),
-                )
-            })
-            .collect();
-        let limit = self.packet_limit();
-        while let Some((mut first, waiting, timer)) = requests.pop_front() {
-            let slot = {
-                tokio::select! {
-                    biased;
-                    _ = self.requests.closed() => return,
-                    _ = first.response.closed() => {
-                        preparation.retain(requests.len());
-                        continue;
-                    }
-                    slot = self.slots.clone().acquire_owned() => slot.expect("admission semaphore is never closed"),
-                }
+    fn submit_batch(self: &Arc<Self>, mut reads: Vec<StagedRead>) {
+        self.batch_members.inc_by(reads.len() as u64);
+        reads.retain(|read| !read.response.is_closed());
+        reads.sort_unstable_by(|a, b| (&a.path, a.range.start).cmp(&(&b.path, b.range.start)));
+        let mut groups: Vec<(Range<usize>, Vec<StagedRead>)> = Vec::new();
+        for read in reads {
+            if let Some((span, members)) = groups.last_mut()
+                && members[0].path == read.path
+                && members.len() < self.config.max_batch_requests.get()
+                && read.range.start.saturating_sub(span.end) <= self.config.max_gap_bytes
+                && span.end.max(read.range.end) - span.start <= self.config.max_read_bytes.get()
+            {
+                span.end = span.end.max(read.range.end);
+                members.push(read);
+            } else {
+                groups.push((read.range.clone(), vec![read]));
+            }
+        }
+        let mut deferred = Vec::new();
+        for (span, reads) in groups {
+            let Ok(mut state) = self.groups.pending.try_lock() else {
+                deferred.push(reads);
+                continue;
             };
-            drop((waiting, timer));
-            let mut packet = vec![first.admit(slot, self)];
-            while packet.len() < limit {
-                let Some((next, _, _)) = requests.front() else {
-                    break;
-                };
-                if next.is_closed() {
-                    requests.pop_front();
-                    continue;
-                }
-                let Ok(slot) = self.slots.clone().try_acquire_owned() else {
-                    self.event("window_split_admission");
-                    tracing::debug!(target: "object_store_read_scheduler",
-                        admitted_request_id = ?packet[0].trace_id,
-                        next_request_id = ?requests.front().and_then(|(request, _, _)| request.trace_id()),
-                        "prepared window admission split");
-                    break;
-                };
-                let (request, waiting, timer) = requests.pop_front().unwrap();
-                drop((waiting, timer));
-                packet.push(request.admit(slot, self));
+            // The follower lock belongs to the physical task. Leave covering
+            // reads to the background path to preserve in-flight reuse.
+            if state
+                .active
+                .iter()
+                .any(|read| read.covers(&reads[0].path, &span))
+            {
+                deferred.push(reads);
+                continue;
             }
-            if packet.len() == limit && !requests.is_empty() {
-                self.event("window_split_limit");
+            if let Err(reads) = self.try_admit_group(&mut state, span, reads, &mut None) {
+                deferred.push(reads);
             }
-            // One publication: another worker cannot select the first member
-            // before seeing the other admitted members of this packet.
-            preparation.retain(requests.len());
-            if self.publish_window_packet(packet, false).is_err() {
-                return;
-            }
-            self.event("window_packet");
-            // Never await further Q while retaining an unpublished admitted prefix.
+        }
+        if !deferred.is_empty() {
+            let scheduler = self.clone();
+            tokio::spawn(async move {
+                // Each group can progress even when another needs a new G permit.
+                join_all(
+                    deferred
+                        .into_iter()
+                        .map(|reads| scheduler.submit_group(reads)),
+                )
+                .await;
+            });
         }
     }
 
-    fn publish_window_packet(
+    fn try_admit_group(
         &self,
-        packet: Vec<ReadRequest>,
-        uses_preparation: bool,
-    ) -> Result<(), mpsc::error::SendError<Vec<ReadRequest>>> {
-        let request_ids =
-            tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG).then(
-                || {
-                    packet
-                        .iter()
-                        .filter_map(|request| request.trace_id)
-                        .collect_vec()
-                },
-            );
-        let size = packet.len();
-        self.requests.send(packet)?;
-        if let Some(request_ids) = request_ids {
-            tracing::debug!(target: "object_store_read_scheduler",
-                size, uses_preparation, ?request_ids, "scheduler window packet admitted");
-        }
+        state: &mut PendingReadGroups,
+        span: Range<usize>,
+        reads: Vec<StagedRead>,
+        reserved: &mut Option<OwnedSemaphorePermit>,
+    ) -> Result<(), Vec<StagedRead>> {
+        let Some(admission) = self.groups.admission(
+            &state.groups,
+            &reads[0].path,
+            &span,
+            reads.len(),
+            reserved,
+            &self.config,
+        ) else {
+            return Err(reads);
+        };
+        self.insert_group(state, admission, span, reads);
         Ok(())
+    }
+
+    fn try_reuse_group(
+        &self,
+        state: &PendingReadGroups,
+        span: &Range<usize>,
+        reads: Vec<StagedRead>,
+    ) -> Result<(), Vec<StagedRead>> {
+        let Some(mut followers) = state.covering_read(
+            &reads[0].path,
+            span,
+            reads.len(),
+            self.config.max_batch_requests.get(),
+        ) else {
+            return Err(reads);
+        };
+        followers
+            .as_mut()
+            .unwrap()
+            .extend(reads.into_iter().map(|read| read.into_request(self, false)));
+        Ok(())
+    }
+
+    async fn submit_group(&self, mut reads: Vec<StagedRead>) {
+        reads.retain(|read| !read.response.is_closed());
+        let Some(span) = staged_span(&reads) else {
+            return;
+        };
+        let waiter = {
+            let mut state = self.groups.pending.lock().unwrap();
+            let Err(reads) = self.try_reuse_group(&state, &span, reads) else {
+                return;
+            };
+            let Err(reads) = self.try_admit_group(&mut state, span, reads, &mut None) else {
+                return;
+            };
+            state.register_waiter(&self.groups, reads)
+        };
+        // The result channel carries shutdown errors to each staged caller.
+        let _ = self.wait_for_group(waiter).await;
+    }
+
+    async fn wait_for_group(&self, waiter: GroupWaiter<'_>) -> ObjectResult<()> {
+        std::future::poll_fn(|cx| {
+            let mut state = self.groups.pending.lock().unwrap();
+            let Some(waiting) = state
+                .waiting
+                .get_mut(&waiter.path)
+                .and_then(|groups| groups.get_mut(&waiter.key))
+            else {
+                return Poll::Ready(Ok(()));
+            };
+            if waiting
+                .reads
+                .iter_mut()
+                .all(|read| read.response.poll_closed(cx).is_ready())
+            {
+                state.remove_waiter(&waiter.path, waiter.key);
+                return Poll::Ready(Ok(()));
+            }
+            waiting
+                .waker
+                .get_or_insert_with(|| cx.waker().clone())
+                .clone_from(cx.waker());
+            let mut reserved = ready!(waiting.acquire.as_mut().poll(cx)).ok();
+            let mut reads = state.remove_waiter(&waiter.path, waiter.key).unwrap().reads;
+            reads.retain(|read| !read.response.is_closed());
+            let Some(span) = staged_span(&reads) else {
+                return Poll::Ready(Ok(()));
+            };
+            let Err(reads) = self.try_reuse_group(&state, &span, reads) else {
+                return Poll::Ready(Ok(()));
+            };
+            if let Err(reads) = self.try_admit_group(&mut state, span, reads, &mut reserved) {
+                for read in reads {
+                    let _ = read
+                        .response
+                        .send(Err(ObjectError::internal("read scheduler stopped")));
+                }
+                return Poll::Ready(Err(ObjectError::internal("read scheduler stopped")));
+            }
+            Poll::Ready(Ok(()))
+        })
+        .await
     }
 }
 
+#[cfg(not(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay")))]
+fn acquire_physical(
+    slots: Arc<Semaphore>,
+) -> impl Future<Output = Result<PhysicalPermit, AcquireError>> {
+    slots.acquire_owned()
+}
+
+#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+use replay::acquire_physical;
+
 async fn run<F, R>(
-    mut receiver: mpsc::UnboundedReceiver<Vec<ReadRequest>>,
+    mut shutdown: oneshot::Receiver<()>,
+    worker: GroupQueueWorker,
     read: F,
-    started_at: Instant,
     config: ReadSchedulerConfig,
     metrics: ObjectStoreMetrics,
     media_type: &'static str,
@@ -482,35 +1051,38 @@ async fn run<F, R>(
     F: Fn(String, Range<usize>) -> R + Send + Sync + 'static,
     R: Future<Output = ReadResult> + Send + 'static,
 {
+    let groups = &worker.0;
     let physical_slots = Arc::new(Semaphore::new(config.max_inflight_reads.get()));
     let read = Arc::new(read);
     let metrics = Arc::new(metrics);
-    let max_batch = config
-        .max_batch_requests
-        .get()
-        .min(config.max_admitted_requests.get());
-    // Keep a packet whole when it does not fit the remaining logical receive
-    // budget. It already owns retention permits; the next pass consumes it first.
-    let mut deferred_packet = None;
-    let mut incoming = Vec::new();
-    let mut ready = Vec::new();
+    let cancelled_queued = metrics
+        .read_scheduler_events
+        .with_label_values(&[media_type, "cancelled_queued"]);
     let mut in_flight = FuturesUnordered::new();
     let mut closed = false;
-    let trace_hash = RandomState::new();
     loop {
-        let received = ready.len();
-        ready.retain(|request: &ReadRequest| !request.response.is_closed());
-        metrics
-            .read_scheduler_events
-            .with_label_values(&[media_type, "cancelled_queued"])
-            .inc_by((received - ready.len()) as u64);
-        let has_ready = !ready.is_empty();
-        if closed && !has_ready && in_flight.is_empty() && deferred_packet.is_none() {
+        let (has_pending, can_start) = {
+            let mut pending = groups.pending.lock().unwrap();
+            pending.groups.retain(|group| {
+                let requests = &group.group.requests;
+                if requests.iter().all(|request| request.response.is_closed()) {
+                    cancelled_queued.inc_by(requests.len() as u64);
+                    false
+                } else {
+                    true
+                }
+            });
+            #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+            replay::queue(&pending, "dispatch_check");
+            (
+                !pending.groups.is_empty(),
+                pending.groups.len() > pending.starting,
+            )
+        };
+        if closed && !has_pending && in_flight.is_empty() {
             return;
         }
         tokio::select! {
-            // Progress existing work before accepting more input. A stream of
-            // cancelled/replaced requests must not starve an older ready request.
             biased;
             completed = in_flight.next(), if !in_flight.is_empty() => {
                 if let Some(Err(error)) = completed {
@@ -520,195 +1092,59 @@ async fn run<F, R>(
                 }
             }
             _ = std::future::poll_fn(|cx| {
-                for request in &mut ready {
-                    if request.response.poll_closed(cx).is_ready() {
+                for group in &mut groups.pending.lock().unwrap().groups {
+                    if group.group.requests.iter_mut().all(|r| r.response.poll_closed(cx).is_ready()) {
                         return Poll::Ready(());
                     }
                 }
                 Poll::Pending
-            }), if has_ready => {}
-            permit = physical_slots.clone().acquire_owned(), if has_ready => {
+            }), if has_pending => {}
+            permit = acquire_physical(physical_slots.clone()), if can_start => {
                 let permit = permit.expect("scheduler physical semaphore is never closed");
-                // Include already-available neighbors without waiting or indefinitely
-                // draining a producer that continually replaces cancelled requests.
-                closed |= collect_ready_requests(&mut receiver, &mut deferred_packet, &mut incoming, max_batch);
-                record_read_batch(&incoming, &trace_hash, started_at, &metrics, media_type);
-                ready.append(&mut incoming);
-                let received = ready.len();
-                ready.retain(|request| !request.response.is_closed());
-                metrics.read_scheduler_events.with_label_values(&[media_type, "cancelled_queued"])
-                    .inc_by((received - ready.len()) as u64);
-                if !ready.is_empty() {
-                    let group = take_read_group(&mut ready, config.max_read_bytes.get(), &metrics, media_type);
+                {
+                    let mut pending = groups.pending.lock().unwrap();
+                    if pending.groups.len() <= pending.starting {
+                        continue;
+                    }
+                    pending.starting += 1;
+                    #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+                    replay::queue(&pending, "reserved");
+                }
+                let groups = groups.clone();
+                let read = read.clone();
+                let physical_slots = physical_slots.clone();
+                let metrics = metrics.clone();
+                let execute = async move {
+                    // Keep queued ranges mergeable through the existing task handoff.
+                    let Some(group) = groups.start_read() else {
+                        return;
+                    };
                     let group_span = tracing::debug_span!(
                         target: "object_store_read_scheduler", parent: None, "object_read_group"
                     );
                     if tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG) {
                         let request_ids: Vec<_> = group.requests.iter().filter_map(|r| r.trace_id).collect();
+                        let ready: usize = groups.pending.lock().unwrap().groups.iter()
+                            .map(|group| group.group.requests.len()).sum();
                         tracing::debug!(target: "object_store_read_scheduler", parent: &group_span,
-                            group_id = ?request_ids.first(), ?request_ids,
-                            ready = ready.len(), channel = receiver.len(),
-                            available_permits = physical_slots.available_permits(),
-                            "scheduler group selected");
+                            group_id = ?request_ids.first(), ?request_ids, ready,
+                            available_permits = physical_slots.available_permits(), "scheduler group selected");
                     }
-                    let read = read.clone();
-                    let physical_slots = physical_slots.clone();
-                    let metrics = metrics.clone();
-                    let execute = async move { group.execute(&*read, &physical_slots, permit, &metrics, media_type).await }
+                    let sharing = config.reuse_inflight_reads
+                        .then_some((&*groups, config.max_batch_requests.get()));
+                    #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+                    let id = permit.id();
+                    let read = group.execute(&*read, &physical_slots, permit, &metrics, media_type, sharing)
                         .instrument(group_span);
-                    in_flight.push(ReadTask(tokio::spawn(execute)));
-                }
+                    #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+                    let read = replay::read_scope(id, read);
+                    read.await;
+                };
+                in_flight.push(ReadTask(tokio::spawn(execute)));
             }
-            packet = async {
-                match deferred_packet.take() {
-                    Some(packet) => Some(packet),
-                    None => receiver.recv().await,
-                }
-            }, if !closed || deferred_packet.is_some() => {
-                if let Some(mut packet) = packet {
-                    incoming.append(&mut packet);
-                    closed |= collect_ready_requests(&mut receiver, &mut deferred_packet, &mut incoming, max_batch);
-                } else {
-                    closed = true;
-                }
-                record_read_batch(&incoming, &trace_hash, started_at, &metrics, media_type);
-                ready.append(&mut incoming);
-            }
+            _ = groups.ready.notified() => {}
+            _ = &mut shutdown, if !closed => closed = true,
         }
-    }
-}
-
-/// Collect already-ready work within a logical request budget. Never wait for
-/// more requests, split a packet, or turn B packets into B-squared planning work.
-fn collect_ready_requests(
-    receiver: &mut mpsc::UnboundedReceiver<Vec<ReadRequest>>,
-    deferred: &mut Option<Vec<ReadRequest>>,
-    incoming: &mut Vec<ReadRequest>,
-    limit: usize,
-) -> bool {
-    while incoming.len() < limit {
-        let mut packet = match deferred
-            .take()
-            .map(Ok)
-            .unwrap_or_else(|| receiver.try_recv())
-        {
-            Ok(packet) => packet,
-            Err(mpsc::error::TryRecvError::Empty) => return false,
-            Err(mpsc::error::TryRecvError::Disconnected) => return true,
-        };
-        if incoming.len() + packet.len() > limit {
-            *deferred = Some(packet);
-            break;
-        }
-        incoming.append(&mut packet);
-    }
-    false
-}
-
-fn record_read_batch(
-    ready: &[ReadRequest],
-    hash: &RandomState,
-    started_at: Instant,
-    metrics: &ObjectStoreMetrics,
-    media_type: &str,
-) {
-    if ready.is_empty() {
-        return;
-    }
-    metrics
-        .read_scheduler_batch_size
-        .with_label_values(&[media_type])
-        .observe(ready.len() as f64);
-    if !tracing::enabled!(target: "state_store_read_batch", tracing::Level::DEBUG)
-        && !tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG)
-    {
-        return;
-    }
-    let dequeued_us = started_at.elapsed().as_micros() as u64;
-    // Record (object hash, start, end, enqueue time in microseconds) without exposing object paths.
-    let requests: Vec<_> = ready
-        .iter()
-        .map(|request| {
-            (
-                hash.hash_one(&request.path),
-                request.range.start,
-                request.range.end,
-                request.queued_at.duration_since(started_at).as_micros() as u64,
-            )
-        })
-        .collect();
-    let request_ids: Vec<_> = ready.iter().map(|request| request.trace_id).collect();
-    let dequeue_span = tracing::debug_span!(
-        target: "object_store_read_scheduler", parent: None, "object_read_dequeue"
-    );
-    tracing::debug!(target: "state_store_read_batch", parent: &dequeue_span,
-        scheduler = hash.hash_one(started_at),
-        ?request_ids,
-        dequeued_us,
-        ?requests,
-        "read scheduler batch"
-    );
-    tracing::debug!(target: "object_store_read_scheduler", parent: &dequeue_span,
-        scheduler = hash.hash_one(started_at), ?request_ids, dequeued_us, ?requests,
-        "scheduler requests dequeued"
-    );
-}
-
-// Plan only a group that can dispatch now. Unsubmitted members remain available
-// for merging with later arrivals. The oldest member chooses the next group so
-// sorting by object cannot starve a different object's older request.
-fn take_read_group(
-    ready: &mut Vec<ReadRequest>,
-    max_bytes: usize,
-    metrics: &ObjectStoreMetrics,
-    media_type: &str,
-) -> ReadGroup {
-    ready.sort_unstable_by(|a, b| (&a.path, a.range.start).cmp(&(&b.path, b.range.start)));
-    let oldest = ready
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, request)| request.queued_at)
-        .expect("dispatch requires a pending request")
-        .0;
-    let mut start = 0;
-    let mut span = ready[0].range.clone();
-    let mut end = 1;
-    while end < ready.len() {
-        let next = &ready[end];
-        let reason = if ready[start].path != next.path {
-            Some("split_object")
-        } else if next.range.start > span.end {
-            Some("split_gap")
-        } else if span.end.max(next.range.end) - span.start > max_bytes {
-            Some("split_bytes")
-        } else {
-            None
-        };
-        if let Some(reason) = reason {
-            if oldest < end {
-                // Count only the boundary of the selected group, not all groups
-                // considered again while they are waiting for dispatch.
-                metrics
-                    .read_scheduler_events
-                    .with_label_values(&[media_type, reason])
-                    .inc();
-                if reason == "split_gap" {
-                    metrics
-                        .read_scheduler_gap_bytes
-                        .with_label_values(&[media_type])
-                        .observe((next.range.start - span.end) as f64);
-                }
-                break;
-            }
-            start = end;
-            span = next.range.clone();
-        } else {
-            span.end = span.end.max(next.range.end);
-        }
-        end += 1;
-    }
-    ReadGroup {
-        requests: ready.drain(start..end).collect(),
     }
 }
 
@@ -717,9 +1153,10 @@ impl ReadGroup {
         mut self,
         read: &F,
         physical_slots: &Semaphore,
-        permit: OwnedSemaphorePermit,
+        permit: PhysicalPermit,
         metrics: &ObjectStoreMetrics,
         media_type: &str,
+        sharing: Option<(&GroupQueue, usize)>,
     ) where
         F: Fn(String, Range<usize>) -> R,
         R: Future<Output = ReadResult>,
@@ -738,12 +1175,12 @@ impl ReadGroup {
         // Keep the planned group if interior members cancel: do not split it into more GETs.
         let path = first.path.clone();
         let start = first.range.start;
-        let end = self
-            .requests
-            .iter()
-            .map(|request| request.range.end)
-            .max()
-            .unwrap();
+        let mut end = first.range.end;
+        let mut gap_bytes = 0;
+        for request in &self.requests[1..] {
+            gap_bytes += request.range.start.saturating_sub(end);
+            end = end.max(request.range.end);
+        }
         let span = start..end;
         metrics
             .read_scheduler_group_size
@@ -756,6 +1193,25 @@ impl ReadGroup {
             drop(request._queued.take());
             queue_duration.observe(request.queued_at.elapsed().as_secs_f64());
         }
+        let flight = if let Some((queue, max_followers)) = sharing {
+            let mut state = queue.pending.lock().unwrap();
+            // A covering GET can start between this group's admission and dispatch.
+            if let Some(mut followers) =
+                state.covering_read(&path, &span, self.requests.len(), max_followers)
+            {
+                followers.as_mut().unwrap().append(&mut self.requests);
+                return;
+            }
+            let flight = Arc::new(ActiveRead {
+                path: path.clone(),
+                span: span.clone(),
+                followers: Mutex::new(Some(Vec::new())),
+            });
+            state.active.push(flight.clone());
+            Some(ActiveReadGuard { queue, flight })
+        } else {
+            None
+        };
         // Tokens identify actual outer reads. Build this list only for trace collection,
         // and emit dispatch inside the polled read future (not merely at dequeue).
         let trace_members =
@@ -773,6 +1229,8 @@ impl ReadGroup {
             .copied();
         let physical = async {
             let _permit = permit;
+            #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+            _permit.backend_begin();
             let _in_flight = ReadGauge::new(
                 &metrics
                     .read_scheduler_in_flight
@@ -783,7 +1241,13 @@ impl ReadGroup {
             tracing::debug!(target: "object_store_read_scheduler", ?group_id,
                 request_ids = ?trace_members, start = span.start, end = span.end,
                 "scheduler physical read started");
-            let result = read(path, span.clone()).await;
+            let result = {
+                let _timer = metrics
+                    .read_scheduler_physical_duration
+                    .with_label_values(&[media_type, "group"])
+                    .start_timer();
+                read(path, span.clone()).await
+            };
             tracing::debug!(target: "object_store_read_scheduler", ?group_id,
                 ok = result.is_ok(), "scheduler physical read completed");
             tracing::debug!(target: "state_store_read_batch",
@@ -793,7 +1257,35 @@ impl ReadGroup {
             );
             result
         };
-        let result = read_while_wanted(&mut self.requests, physical).await;
+        let initial_members = self.requests.len();
+        let result = if let Some(flight) = flight {
+            let result = tokio::select! {
+                biased;
+                _ = std::future::poll_fn(|cx| {
+                    if !self.requests.iter_mut().all(|request| request.response.poll_closed(cx).is_ready()) {
+                        return Poll::Pending;
+                    }
+                    let mut followers = flight.flight.followers.lock().unwrap();
+                    if followers.as_mut().unwrap().iter_mut().all(|request| request.response.poll_closed(cx).is_ready()) {
+                        // Close registration while holding the lock so a new follower
+                        // cannot join a GET that is about to be cancelled.
+                        followers.take();
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                }) => None,
+                result = physical => Some(result),
+            };
+            let followers = flight.flight.followers.lock().unwrap().take();
+            drop(flight);
+            if let Some(followers) = followers {
+                self.requests.extend(followers);
+            }
+            result
+        } else {
+            read_while_wanted(&mut self.requests, physical).await
+        };
         let Some(result) = result else {
             metrics
                 .read_scheduler_events
@@ -824,10 +1316,26 @@ impl ReadGroup {
             ])
             .inc();
         if result.is_ok() {
+            if gap_bytes > 0 {
+                metrics
+                    .read_scheduler_overread_bytes
+                    .with_label_values(&[media_type])
+                    .inc_by(gap_bytes as u64);
+                metrics
+                    .read_scheduler_events
+                    .with_label_values(&[media_type, "group_with_gap"])
+                    .inc();
+            }
             metrics
                 .read_scheduler_events
                 .with_label_values(&[media_type, "merged_requests"])
-                .inc_by(self.requests.len().saturating_sub(1) as u64);
+                .inc_by(initial_members.saturating_sub(1) as u64);
+            if self.requests.len() > initial_members {
+                metrics
+                    .read_scheduler_events
+                    .with_label_values(&[media_type, "inflight_reused"])
+                    .inc_by((self.requests.len() - initial_members) as u64);
+            }
         }
         if self.requests.len() == 1 {
             let _ = self.requests.pop().unwrap().response.send(result);
@@ -847,12 +1355,19 @@ impl ReadGroup {
                 let future = async {
                     // The merged read released its permit before fallback. Each child
                     // shares the same physical budget and can be cancelled while waiting.
-                    let _permit = physical_slots.acquire().await
-                        .expect("scheduler physical semaphore is never closed");
+                    let _permit = {
+                        let _timer = metrics.read_scheduler_physical_duration
+                            .with_label_values(&[media_type, "fallback_wait"]).start_timer();
+                        physical_slots.acquire().await.expect("scheduler physical semaphore is never closed")
+                    };
                     let _in_flight = ReadGauge::new(&metrics.read_scheduler_in_flight.with_label_values(&[media_type]));
                     tracing::debug!(target: "state_store_read_batch",?group_id, request_id = ?trace_id,
                         "read scheduler range fallback dispatch");
-                    let result = read(path, range).await;
+                    let result = {
+                        let _timer = metrics.read_scheduler_physical_duration
+                            .with_label_values(&[media_type, "fallback"]).start_timer();
+                        read(path, range).await
+                    };
                     tracing::debug!(target: "state_store_read_batch",?group_id, request_id = ?trace_id, ok = result.is_ok(),
                         "read scheduler range fallback completed");
                     result
@@ -899,432 +1414,10 @@ async fn read_while_wanted(
 mod tests {
     use std::time::Duration;
 
-    use tokio::sync::Notify;
+    use tokio::sync::mpsc;
 
     use super::super::{InMemObjectStore, ObjectStore, ObjectStoreConfig};
     use super::*;
-
-    fn batch_scheduler(q: usize) -> (Arc<ReadScheduler>, Arc<std::sync::Mutex<Vec<Range<usize>>>>) {
-        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let scheduler = Arc::new(ReadScheduler::new(
-            &ObjectStoreMetrics::new(&prometheus::Registry::new()),
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_requests: q.try_into().unwrap(),
-                batch_prepare_timeout_ms: 100,
-                ..Default::default()
-            },
-            {
-                let calls = calls.clone();
-                move |_, range| {
-                    let calls = calls.clone();
-                    async move {
-                        calls.lock().unwrap().push(range.clone());
-                        Ok(Bytes::from_static(&b"abcdefgh"[range]))
-                    }
-                }
-            },
-        ));
-        (scheduler, calls)
-    }
-
-    #[tokio::test]
-    async fn explicit_windows_preserve_ready_request_collection() {
-        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let scheduler = ReadScheduler::new(
-            &ObjectStoreMetrics::new(&prometheus::Registry::new()),
-            "test",
-            ReadSchedulerConfig {
-                batch_prepare_timeout_ms: 1,
-                max_batch_requests: 4.try_into().unwrap(),
-                ..Default::default()
-            },
-            {
-                let calls = calls.clone();
-                move |path, range| {
-                    let calls = calls.clone();
-                    async move {
-                        calls.lock().unwrap().push((path, range.clone()));
-                        Ok(Bytes::from_static(&b"abcdefgh"[range]))
-                    }
-                }
-            },
-        );
-        // All three packets are ready before the dispatcher runs. Enabling
-        // explicit windows must not hide B behind a different object's packet.
-        let a = scheduler.submit("file", 0..2, None).await.unwrap();
-        let other = scheduler.submit("other", 0..2, None).await.unwrap();
-        let b = scheduler.submit("file", 2..4, None).await.unwrap();
-        assert_eq!(a.await.unwrap().unwrap(), "ab");
-        assert_eq!(b.await.unwrap().unwrap(), "cd");
-        assert_eq!(other.await.unwrap().unwrap(), "ab");
-        let calls = calls.lock().unwrap();
-        let file_reads: Vec<_> = calls
-            .iter()
-            .filter(|(path, _)| path == "file")
-            .map(|(_, range)| range.clone())
-            .collect();
-        assert_eq!(file_reads, vec![0..4]);
-    }
-
-    #[tokio::test]
-    async fn packet_overflow_preserves_logical_budget_and_shutdown_progress() {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-            let batches = metrics
-                .read_scheduler_batch_size
-                .with_label_values(&["test"]);
-            let pending = metrics.read_scheduler_pending.with_label_values(&["test"]);
-            let scheduler = ReadScheduler::new(
-                &metrics,
-                "test",
-                ReadSchedulerConfig {
-                    batch_prepare_timeout_ms: 1,
-                    max_batch_requests: 3.try_into().unwrap(),
-                    ..Default::default()
-                },
-                |_, range| async move { Ok(Bytes::from_static(&b"abcdefghijkl"[range])) },
-            );
-            let mut responses = Vec::new();
-            for start in [0, 4, 8] {
-                let mut packet = Vec::new();
-                for start in [start, start + 2] {
-                    let (request, response) = PreparedRead::new("file", start..start + 2, None);
-                    packet.push(request);
-                    responses.push(response);
-                }
-                let preparation = scheduler.reserve_preparation(packet.len()).unwrap();
-                scheduler.submit_prepared(packet, preparation).await;
-            }
-            // A second two-member packet cannot fit a remaining budget of one.
-            // Closing the input must still drain that deferred packet whole.
-            drop(scheduler);
-            for (i, response) in responses.into_iter().enumerate() {
-                assert_eq!(
-                    &response.await.unwrap().unwrap()[..],
-                    &b"abcdefghijkl"[i * 2..i * 2 + 2]
-                );
-            }
-            assert_eq!(batches.get_sample_count(), 3);
-            assert_eq!(batches.get_sample_sum(), 6.0);
-            assert_eq!(pending.get(), 0);
-        })
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn window_publishes_ready_members_together() {
-        let (scheduler, calls) = batch_scheduler(3);
-        let batch = super::super::ReadBatch::new(scheduler.clone(), 3).unwrap();
-        let (a_role, a) = batch.register().unwrap();
-        let (b_role, b) = batch.register().unwrap();
-        let (hit_role, hit) = batch.register().unwrap();
-        // Outer IO can be polled before registration has returned its role.
-        let a = a.stage("file", 0..2, None);
-        tokio::pin!(a);
-        assert!(futures::poll!(&mut a).is_pending());
-        a_role.set_leader(true);
-        let a = a.await.unwrap();
-        b_role.set_leader(true);
-        let b = b.stage("file", 2..4, None).await.unwrap();
-        batch.seal();
-        tokio::task::yield_now().await;
-        assert!(calls.lock().unwrap().is_empty());
-        // A memory hit / joined producer excludes this slot immediately, without
-        // waiting for a retained fallback or for the iterator to consume it.
-        let hit = hit.stage("file", 4..6, None);
-        tokio::pin!(hit);
-        assert!(futures::poll!(&mut hit).is_pending());
-        hit_role.set_leader(false);
-        assert!(hit.await.is_none());
-        assert_eq!(a.await.unwrap().unwrap(), "ab");
-        assert_eq!(b.await.unwrap().unwrap(), "cd");
-        assert_eq!(*calls.lock().unwrap(), vec![0..4]);
-        assert_eq!(scheduler.preparing.get(), 0);
-        assert_eq!(scheduler.pending.get(), 0);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn whole_window_progresses_with_partial_q_and_releases_its_permits() {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-            let in_flight = metrics
-                .read_scheduler_in_flight
-                .with_label_values(&["test"]);
-            let (record, mut calls) = mpsc::unbounded_channel();
-            let release_window = Arc::new(Notify::new());
-            let scheduler = Arc::new(ReadScheduler::new(
-                &metrics,
-                "test",
-                ReadSchedulerConfig {
-                    max_admitted_requests: 3.try_into().unwrap(),
-                    max_inflight_reads: 3.try_into().unwrap(),
-                    ..Default::default()
-                },
-                {
-                    let release_window = release_window.clone();
-                    move |path: String, range: Range<usize>| {
-                        let record = record.clone();
-                        let release_window = release_window.clone();
-                        async move {
-                            record.send((path.clone(), range.clone())).unwrap();
-                            match path.as_str() {
-                                "blocker" => std::future::pending().await,
-                                "window" => release_window.notified().await,
-                                _ => {}
-                            }
-                            Ok(Bytes::from_static(&b"abcdefgh"[range]))
-                        }
-                    }
-                },
-            ));
-
-            // One real GET holds two Q permits and only one P permit.
-            let (x, x_result) = PreparedRead::new("blocker", 0..2, None);
-            let (y, y_result) = PreparedRead::new("blocker", 2..4, None);
-            let preparation = scheduler.reserve_preparation(2).unwrap();
-            scheduler.submit_prepared(vec![x, y], preparation).await;
-            assert_eq!(calls.recv().await.unwrap(), ("blocker".to_owned(), 0..4));
-            assert_eq!(scheduler.slots.available_permits(), 1);
-
-            for cancel in [false, true] {
-                let batch = super::super::ReadBatch::new(scheduler.clone(), 2).unwrap();
-                let (b_role, b) = batch.register().unwrap();
-                let (a_role, a) = batch.register().unwrap();
-                b_role.set_leader(true);
-                a_role.set_leader(true);
-                let b = b.stage("window", 2..4, None).await.unwrap();
-                let a = a.stage("window", 0..2, None).await.unwrap();
-                batch.seal();
-                assert_eq!(calls.recv().await.unwrap(), ("window".to_owned(), 0..4));
-                assert_eq!(scheduler.slots.available_permits(), 1);
-                assert_eq!(scheduler.preparation_slots.available_permits(), 1);
-
-                // The other two GETs are held, so this must use the remaining Q and P.
-                let point = scheduler.submit("point", 4..5, None).await.unwrap();
-                assert_eq!(point.await.unwrap().unwrap(), "e");
-                assert_eq!(calls.recv().await.unwrap(), ("point".to_owned(), 4..5));
-
-                if cancel {
-                    drop((a, b));
-                } else {
-                    release_window.notify_one();
-                    assert_eq!(a.await.unwrap().unwrap(), "ab");
-                    assert_eq!(b.await.unwrap().unwrap(), "cd");
-                }
-                drop(
-                    scheduler
-                        .preparation_slots
-                        .clone()
-                        .acquire_many_owned(3)
-                        .await
-                        .unwrap(),
-                );
-                assert_eq!(scheduler.preparing.get(), 0);
-                assert_eq!(scheduler.pending.get(), 2);
-                assert_eq!(scheduler.slots.available_permits(), 1);
-                assert_eq!(in_flight.get(), 1);
-                assert!(calls.try_recv().is_err());
-            }
-            drop((x_result, y_result));
-            drop(scheduler.slots.clone().acquire_many_owned(3).await.unwrap());
-            assert_eq!(scheduler.pending.get(), 0);
-            assert_eq!(in_flight.get(), 0);
-            assert_eq!(
-                scheduler
-                    .events
-                    .with_label_values(&["test", "window_admitted_with_preparation"])
-                    .get(),
-                2
-            );
-        })
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn window_splits_at_available_q_without_holding_partial_admission() {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            for (q, expected_splits) in [(2, 1), (3, 0)] {
-                let (scheduler, calls) = batch_scheduler(q);
-                let held = scheduler.slots.clone().acquire_owned().await.unwrap();
-                let batch = super::super::ReadBatch::new(scheduler.clone(), 2).unwrap();
-                let (a_role, a) = batch.register().unwrap();
-                let (b_role, b) = batch.register().unwrap();
-                a_role.set_leader(true);
-                b_role.set_leader(true);
-                let a = a.stage("file", 0..2, None).await.unwrap();
-                // A gap makes this window ineligible to use preparation permits.
-                let b = b.stage("file", 4..6, None).await.unwrap();
-                batch.seal();
-                assert_eq!(a.await.unwrap().unwrap(), "ab");
-                assert_eq!(b.await.unwrap().unwrap(), "ef");
-                assert_eq!(*calls.lock().unwrap(), vec![0..2, 4..6]);
-                assert_eq!(
-                    scheduler
-                        .events
-                        .with_label_values(&["test", "window_complete"])
-                        .get(),
-                    1
-                );
-                assert_eq!(
-                    scheduler
-                        .events
-                        .with_label_values(&["test", "window_split_admission"])
-                        .get(),
-                    expected_splits
-                );
-                assert_eq!(scheduler.slots.available_permits(), q - 1);
-                assert_eq!(scheduler.preparation_slots.available_permits(), q);
-                drop(held);
-            }
-            let (q1, _) = batch_scheduler(1);
-            assert!(super::super::ReadBatch::new(q1.clone(), 2).is_none());
-            q1.submit("file", 0..2, None)
-                .await
-                .unwrap()
-                .await
-                .unwrap()
-                .unwrap();
-        })
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn published_prefix_releases_preparation_while_tail_waits() {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-            let (record, mut calls) = mpsc::unbounded_channel();
-            let scheduler = Arc::new(ReadScheduler::new(
-                &metrics,
-                "test",
-                ReadSchedulerConfig {
-                    max_admitted_requests: 2.try_into().unwrap(),
-                    ..Default::default()
-                },
-                move |_, range: Range<usize>| {
-                    let record = record.clone();
-                    async move {
-                        record.send(range.clone()).unwrap();
-                        if range.start == 0 {
-                            std::future::pending::<()>().await;
-                        }
-                        Ok(Bytes::from_static(&b"abcdefgh"[range]))
-                    }
-                },
-            ));
-            let held = scheduler.slots.clone().acquire_owned().await.unwrap();
-            let batch = super::super::ReadBatch::new(scheduler.clone(), 2).unwrap();
-            let (first_role, first) = batch.register().unwrap();
-            let (tail_role, tail) = batch.register().unwrap();
-            first_role.set_leader(true);
-            tail_role.set_leader(true);
-            let first = first.stage("file", 0..2, None).await.unwrap();
-            // The gap keeps the window on the ordinary admission path.
-            let tail = tail.stage("file", 4..6, None).await.unwrap();
-            batch.seal();
-
-            assert_eq!(calls.recv().await.unwrap(), 0..2);
-            assert_eq!(scheduler.slots.available_permits(), 0);
-            assert_eq!(scheduler.preparation_slots.available_permits(), 1);
-            assert_eq!(scheduler.preparing.get(), 1);
-            drop(held);
-            assert_eq!(tail.await.unwrap().unwrap(), "ef");
-            assert_eq!(calls.recv().await.unwrap(), 4..6);
-            assert_eq!(scheduler.preparation_slots.available_permits(), 2);
-            assert_eq!(scheduler.preparing.get(), 0);
-            drop(first);
-            drop(scheduler.slots.clone().acquire_many_owned(2).await.unwrap());
-        })
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn window_timeout_retains_preparation_lease_through_admission() {
-        let (scheduler, calls) = batch_scheduler(3);
-        let held = scheduler.slots.clone().acquire_many_owned(3).await.unwrap();
-        let batch = super::super::ReadBatch::new(scheduler.clone(), 3).unwrap();
-        let (role, member) = batch.register().unwrap();
-        let (late_role, late) = batch.register().unwrap();
-        role.set_leader(true);
-        late_role.set_leader(true);
-        let response = member.stage("file", 0..2, None).await.unwrap();
-        batch.seal();
-        tokio::time::advance(Duration::from_millis(101)).await;
-        tokio::task::yield_now().await;
-        assert!(calls.lock().unwrap().is_empty());
-        assert_eq!(scheduler.preparing.get(), 1);
-        assert_eq!(scheduler.preparation_slots.available_permits(), 2);
-        let next = super::super::ReadBatch::new(scheduler.clone(), 2).unwrap();
-        assert_eq!(scheduler.preparation_slots.available_permits(), 0);
-        drop(next);
-        assert!(late.stage("file", 2..4, None).await.is_none());
-        drop(held);
-        assert_eq!(response.await.unwrap().unwrap(), "ab");
-        assert_eq!(*calls.lock().unwrap(), vec![0..2]);
-        assert_eq!(scheduler.preparing.get(), 0);
-        assert_eq!(scheduler.preparation_slots.available_permits(), 3);
-    }
-
-    #[tokio::test]
-    async fn window_cancellation_dissolves_without_cancelling_shared_reads() {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let (scheduler, calls) = batch_scheduler(2);
-            let batch = super::super::ReadBatch::new(scheduler.clone(), 2).unwrap();
-            let (role, member) = batch.register().unwrap();
-            let (late_role, late) = batch.register().unwrap();
-            role.set_leader(true);
-            let response = member.stage("file", 0..2, None).await.unwrap();
-            batch.seal();
-            drop(batch);
-            // Dissolving releases staged work; it does not abort a Foyer producer.
-            assert_eq!(response.await.unwrap().unwrap(), "ab");
-            late_role.set_leader(true);
-            assert!(late.stage("file", 2..4, None).await.is_none());
-            assert_eq!(*calls.lock().unwrap(), vec![0..2]);
-            assert_eq!(scheduler.preparing.get(), 0);
-
-            let held = scheduler.slots.clone().acquire_many_owned(2).await.unwrap();
-            let batch = super::super::ReadBatch::new(scheduler.clone(), 2).unwrap();
-            let (role, member) = batch.register().unwrap();
-            role.set_leader(true);
-            let response = member.stage("file", 4..6, None).await.unwrap();
-            batch.seal();
-            tokio::task::yield_now().await;
-            drop(response);
-            // Cancelled admission must release preparation without requiring Q.
-            while scheduler.preparing.get() != 0 {
-                tokio::task::yield_now().await;
-            }
-            assert_eq!(*calls.lock().unwrap(), vec![0..2]);
-            drop(held);
-        })
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn window_unpolled_member_and_registration_drop_resolve_once() {
-        let (scheduler, calls) = batch_scheduler(3);
-        let batch = super::super::ReadBatch::new(scheduler.clone(), 3).unwrap();
-        let (role, member) = batch.register().unwrap();
-        let (unused_role, unused) = batch.register().unwrap();
-        let (unknown_role, unknown) = batch.register().unwrap();
-        role.set_leader(true);
-        let response = member.stage("file", 0..2, None).await.unwrap();
-        batch.seal();
-        // Hit/disk-hit producers can drop their outer fetch before role returns.
-        drop(unused);
-        unused_role.set_leader(true);
-        drop(unknown_role);
-        assert!(unknown.stage("file", 2..4, None).await.is_none());
-        assert_eq!(response.await.unwrap().unwrap(), "ab");
-        assert_eq!(*calls.lock().unwrap(), vec![0..2]);
-        assert_eq!(scheduler.preparing.get(), 0);
-    }
 
     #[tokio::test]
     async fn read_coalesces_adjacent_ranges_on_the_same_object() {
@@ -1332,7 +1425,6 @@ mod tests {
         let config = ObjectStoreConfig {
             read_scheduler: ReadSchedulerConfig {
                 max_batch_requests: 4.try_into().unwrap(),
-                max_admitted_requests: 7.try_into().unwrap(),
                 max_read_bytes: 8.try_into().unwrap(),
                 ..Default::default()
             },
@@ -1442,6 +1534,523 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn contained_read_shares_a_started_get_until_its_last_waiter_leaves() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+            let (calls, mut reads) = mpsc::unbounded_channel();
+            let release = Arc::new(Notify::new());
+            let scheduler = ReadScheduler::new(
+                &metrics,
+                "test",
+                ReadSchedulerConfig {
+                    max_admitted_groups: 1.try_into().unwrap(),
+                    max_inflight_reads: 1.try_into().unwrap(),
+                    reuse_inflight_reads: true,
+                    ..Default::default()
+                },
+                {
+                    let release = release.clone();
+                    move |_, range: Range<usize>| {
+                        let release = release.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.send(range.clone()).unwrap();
+                            if range == (0..4) {
+                                release.notified().await;
+                            }
+                            Ok(Bytes::from_static(&b"abcdef"[range]))
+                        }
+                    }
+                },
+            );
+            let leader = scheduler.submit("file", 0..4, None).await.unwrap();
+            assert_eq!(reads.recv().await.unwrap(), 0..4);
+            assert_eq!(scheduler.groups.slots.available_permits(), 0);
+            let follower = scheduler.submit("file", 1..3, None).await.unwrap();
+            let partial = scheduler.submit("file", 3..5, None);
+            tokio::pin!(partial);
+            assert!(futures::poll!(&mut partial).is_pending());
+            drop(leader);
+            release.notify_one();
+            assert_eq!(follower.await.unwrap().unwrap(), "bc");
+            assert_eq!(partial.await.unwrap().await.unwrap().unwrap(), "de");
+            assert_eq!(reads.recv().await.unwrap(), 3..5);
+            assert!(reads.try_recv().is_err());
+            assert_eq!(
+                metrics
+                    .read_scheduler_events
+                    .with_label_values(&["test", "inflight_reused"])
+                    .get(),
+                1,
+            );
+
+            let leader = scheduler.submit("file", 0..4, None).await.unwrap();
+            assert_eq!(reads.recv().await.unwrap(), 0..4);
+            let follower = scheduler.submit("file", 1..3, None).await.unwrap();
+            drop(leader);
+            drop(follower);
+            drop(
+                scheduler
+                    .groups
+                    .slots
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .unwrap(),
+            );
+            assert!(scheduler.groups.pending.lock().unwrap().active.is_empty());
+            assert_eq!(scheduler.pending.get(), 0);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sealed_batch_waits_for_one_group_credit_without_splitting() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+            let (calls, mut reads) = mpsc::unbounded_channel();
+            let release = Arc::new(Notify::new());
+            let scheduler = Arc::new(ReadScheduler::new(
+                &metrics,
+                "test",
+                ReadSchedulerConfig {
+                    max_admitted_groups: 1.try_into().unwrap(),
+                    max_inflight_reads: 1.try_into().unwrap(),
+                    ..Default::default()
+                },
+                {
+                    let release = release.clone();
+                    move |path, range: Range<usize>| {
+                        let release = release.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.send((path.clone(), range.clone())).unwrap();
+                            if path == "busy" {
+                                release.notified().await;
+                            }
+                            Ok(Bytes::from_static(&b"abcd"[range]))
+                        }
+                    }
+                },
+            ));
+            let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
+            assert_eq!(reads.recv().await.unwrap(), ("busy".to_owned(), 0..1));
+
+            let batch = ReadBatch::new(scheduler.clone(), 2);
+            let member = batch.member();
+            let b = member.stage(&scheduler, "file", 2..4, None).unwrap();
+            let a = member.stage(&scheduler, "file", 0..2, None).unwrap();
+            drop(batch);
+            assert!(member.stage(&scheduler, "file", 0..1, None).is_none());
+
+            let cancelled = ReadBatch::new(scheduler.clone(), 2);
+            let cancelled_response = cancelled
+                .member()
+                .stage(&scheduler, "cancelled", 0..1, None);
+            assert!(cancelled_response.is_some());
+            drop(cancelled);
+            while scheduler.batch_members.get() < 3 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(scheduler.groups.slots.available_permits(), 0);
+            assert_eq!(scheduler.waiting.get(), 3);
+            assert!(reads.try_recv().is_err());
+            drop(cancelled_response);
+            while scheduler.waiting.get() != 2 {
+                tokio::task::yield_now().await;
+            }
+
+            release.notify_one();
+            assert_eq!(busy.await.unwrap().unwrap(), "a");
+            assert_eq!(a.await.unwrap().unwrap(), "ab");
+            assert_eq!(b.await.unwrap().unwrap(), "cd");
+            assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..4));
+            assert!(reads.try_recv().is_err());
+            drop(
+                scheduler
+                    .groups
+                    .slots
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(scheduler.waiting.get(), 0);
+            assert_eq!(scheduler.pending.get(), 0);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn seal_merges_ready_group_while_another_group_waits_for_credit() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+            let (calls, mut reads) = mpsc::unbounded_channel();
+            let release = Arc::new(Notify::new());
+            let scheduler = Arc::new(ReadScheduler::new(
+                &metrics,
+                "test",
+                ReadSchedulerConfig {
+                    max_admitted_groups: 2.try_into().unwrap(),
+                    max_inflight_reads: 1.try_into().unwrap(),
+                    ..Default::default()
+                },
+                {
+                    let release = release.clone();
+                    move |path, range: Range<usize>| {
+                        let release = release.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.send((path.clone(), range.clone())).unwrap();
+                            if path == "busy" {
+                                release.notified().await;
+                            }
+                            Ok(Bytes::from_static(&b"abcd"[range]))
+                        }
+                    }
+                },
+            ));
+
+            let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
+            assert_eq!(reads.recv().await.unwrap(), ("busy".to_owned(), 0..1));
+            let queued = scheduler.submit("file", 0..1, None).await.unwrap();
+            assert_eq!(scheduler.groups.slots.available_permits(), 0);
+
+            let batch = ReadBatch::new(scheduler.clone(), 3);
+            let member = batch.member();
+            let deferred = member.stage(&scheduler, "after", 0..1, None).unwrap();
+            let c = member.stage(&scheduler, "file", 2..3, None).unwrap();
+            let b = member.stage(&scheduler, "file", 1..2, None).unwrap();
+            drop(batch);
+
+            // No task has had a chance to poll since sealing the batch.
+            {
+                let pending = scheduler.groups.pending.lock().unwrap();
+                assert_eq!(pending.groups.len(), 1);
+                assert_eq!(pending.groups[0].span, 0..3);
+                assert_eq!(pending.groups[0].group.requests.len(), 3);
+            }
+            assert_eq!(scheduler.waiting.get(), 1);
+            drop(deferred);
+            release.notify_one();
+            assert_eq!(busy.await.unwrap().unwrap(), "a");
+            assert_eq!(queued.await.unwrap().unwrap(), "a");
+            assert_eq!(b.await.unwrap().unwrap(), "b");
+            assert_eq!(c.await.unwrap().unwrap(), "c");
+            assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..3));
+            assert!(reads.try_recv().is_err());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn group_headroom_admits_demand_but_preserves_prefetch_dispatch_order() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for group_limit in [2, 3] {
+                let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+                let (send_call, mut calls) = mpsc::unbounded_channel();
+                let release_active = Arc::new(Notify::new());
+                let release_queued = Arc::new(Notify::new());
+                let scheduler = Arc::new(ReadScheduler::new(
+                    &metrics,
+                    "test",
+                    ReadSchedulerConfig {
+                        max_admitted_groups: group_limit.try_into().unwrap(),
+                        max_inflight_reads: 1.try_into().unwrap(),
+                        prefetch_batch_wait_us: 0,
+                        ..Default::default()
+                    },
+                    {
+                        let release_active = release_active.clone();
+                        let release_queued = release_queued.clone();
+                        move |path, range: Range<usize>| {
+                            let send_call = send_call.clone();
+                            let release = match path.as_str() {
+                                "active-prefetch" => Some(release_active.clone()),
+                                "queued-prefetch" => Some(release_queued.clone()),
+                                _ => None,
+                            };
+                            async move {
+                                send_call.send((path, range.clone())).unwrap();
+                                if let Some(release) = release {
+                                    release.notified().await;
+                                }
+                                Ok(Bytes::from_static(&b"abcd"[range]))
+                            }
+                        }
+                    },
+                ));
+
+                let active_batch = ReadBatch::new(scheduler.clone(), 1);
+                let active = active_batch
+                    .member()
+                    .stage(&scheduler, "active-prefetch", 0..1, None)
+                    .unwrap();
+                drop(active_batch);
+                assert_eq!(
+                    calls.recv().await.unwrap(),
+                    ("active-prefetch".into(), 0..1)
+                );
+
+                let queued_batch = ReadBatch::new(scheduler.clone(), 2);
+                let member = queued_batch.member();
+                let a = member
+                    .stage(&scheduler, "queued-prefetch", 0..1, None)
+                    .unwrap();
+                let b = member
+                    .stage(&scheduler, "queued-prefetch", 1..2, None)
+                    .unwrap();
+                drop(queued_batch);
+                assert_eq!(scheduler.groups.admitted.get(), 2);
+                assert_eq!(scheduler.groups.queued.get(), 1);
+
+                let mut demand = std::pin::pin!(scheduler.submit("demand", 2..3, None));
+                let admitted = match futures::poll!(&mut demand) {
+                    Poll::Pending => None,
+                    Poll::Ready(result) => Some(result.unwrap()),
+                };
+                assert_eq!(admitted.is_some(), group_limit == 3);
+                assert_eq!(scheduler.groups.slots.available_permits(), 0);
+                assert!(calls.try_recv().is_err());
+
+                let waiters = scheduler.waiting.get();
+                {
+                    let mut cancelled = std::pin::pin!(scheduler.submit("cancelled", 3..4, None));
+                    assert!(futures::poll!(&mut cancelled).is_pending());
+                    assert_eq!(scheduler.waiting.get(), waiters + 1);
+                }
+                assert_eq!(scheduler.waiting.get(), waiters);
+
+                release_active.notify_one();
+                assert_eq!(active.await.unwrap().unwrap(), "a");
+                let demand = match admitted {
+                    Some(response) => response,
+                    None => demand.await.unwrap(),
+                };
+                assert_eq!(
+                    calls.recv().await.unwrap(),
+                    ("queued-prefetch".into(), 0..2)
+                );
+                assert!(calls.try_recv().is_err());
+
+                release_queued.notify_one();
+                assert_eq!(a.await.unwrap().unwrap(), "a");
+                assert_eq!(b.await.unwrap().unwrap(), "b");
+                assert_eq!(calls.recv().await.unwrap(), ("demand".into(), 2..3));
+                assert_eq!(demand.await.unwrap().unwrap(), "c");
+                assert!(calls.try_recv().is_err());
+                drop(
+                    scheduler
+                        .groups
+                        .slots
+                        .clone()
+                        .acquire_many_owned(group_limit as u32)
+                        .await
+                        .unwrap(),
+                );
+                assert_eq!(scheduler.groups.admitted.get(), 0);
+                assert_eq!(scheduler.groups.queued.get(), 0);
+                assert_eq!(scheduler.pending.get(), 0);
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn prefetch_batch_wait_merges_late_neighbors_without_blocking_point_reads() {
+        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+        let (calls, mut reads) = mpsc::unbounded_channel();
+        let scheduler = Arc::new(ReadScheduler::new(
+            &metrics,
+            "test",
+            ReadSchedulerConfig {
+                prefetch_batch_wait_us: 10_000,
+                max_admitted_groups: 4.try_into().unwrap(),
+                max_inflight_reads: 1.try_into().unwrap(),
+                ..Default::default()
+            },
+            move |path, range: Range<usize>| {
+                calls.send((path, range.clone())).unwrap();
+                std::future::ready(Ok(Bytes::from_static(&b"abcdef"[range])))
+            },
+        ));
+        let batch = ReadBatch::new(scheduler.clone(), 4);
+        for range in [0..1, 1..2, 3..4, 4..5] {
+            batch.expect(range);
+        }
+        let member = batch.member();
+        let a = member.stage(&scheduler, "file", 0..1, None).unwrap();
+        drop(batch);
+        let d = member.stage(&scheduler, "file", 3..4, None).unwrap();
+        assert_eq!(scheduler.groups.slots.available_permits(), 4);
+
+        let point = scheduler.submit("point", 1..2, None).await.unwrap();
+        assert_eq!(point.await.unwrap().unwrap(), "b");
+        assert_eq!(reads.recv().await.unwrap(), ("point".to_owned(), 1..2));
+        assert!(reads.try_recv().is_err());
+
+        let b = member.stage(&scheduler, "file", 1..2, None).unwrap();
+        assert_eq!(a.await.unwrap().unwrap(), "a");
+        assert_eq!(b.await.unwrap().unwrap(), "b");
+        assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..2));
+        assert!(reads.try_recv().is_err());
+
+        // E never joins D's batch. Only D is submitted when the timer expires.
+        tokio::time::advance(Duration::from_millis(11)).await;
+        assert_eq!(d.await.unwrap().unwrap(), "d");
+        assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 3..4));
+        assert!(member.stage(&scheduler, "file", 4..5, None).is_none());
+        let e = scheduler.submit("file", 4..5, None).await.unwrap();
+        assert_eq!(e.await.unwrap().unwrap(), "e");
+        assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 4..5));
+        assert_eq!(
+            scheduler.batch_releases[BatchRelease::Ready as usize].get(),
+            1
+        );
+        assert_eq!(
+            scheduler.batch_releases[BatchRelease::Deadline as usize].get(),
+            1
+        );
+        assert_eq!(scheduler.batch_wait.get_sample_count(), 3);
+        assert_eq!(scheduler.waiting.get(), 0);
+        assert_eq!(scheduler.groups.slots.available_permits(), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn prefetch_batch_wait_releases_under_pressure_and_drops_cancelled_reads() {
+        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+        let (calls, mut reads) = mpsc::unbounded_channel();
+        let scheduler = Arc::new(ReadScheduler::new(
+            &metrics,
+            "test",
+            ReadSchedulerConfig {
+                prefetch_batch_wait_us: 10_000,
+                max_admitted_groups: 2.try_into().unwrap(),
+                ..Default::default()
+            },
+            move |path, range: Range<usize>| {
+                calls.send((path, range.clone())).unwrap();
+                std::future::ready(Ok(Bytes::from_static(&b"abcd"[range])))
+            },
+        ));
+        let batch = ReadBatch::new(scheduler.clone(), 2);
+        batch.expect(0..1);
+        batch.expect(1..2);
+        let member = batch.member();
+        drop(batch);
+        let cancelled = member.stage(&scheduler, "cancelled", 0..1, None).unwrap();
+        drop(cancelled);
+        // Production drops the member with the cancelled object-read future.
+        drop(member);
+        assert_eq!(scheduler.waiting.get(), 0);
+
+        let batch = ReadBatch::new(scheduler.clone(), 2);
+        batch.expect(0..1);
+        batch.expect(1..2);
+        let member = batch.member();
+        drop(batch);
+        let slots = &scheduler.groups.slots;
+        let busy = slots.clone().try_acquire_many_owned(2).unwrap();
+        let a = member.stage(&scheduler, "file", 0..1, None).unwrap();
+        assert_eq!(
+            scheduler.batch_releases[BatchRelease::Pressure as usize].get(),
+            1
+        );
+        assert!(member.stage(&scheduler, "file", 1..2, None).is_none());
+        assert!(reads.try_recv().is_err());
+        drop(busy);
+        assert_eq!(a.await.unwrap().unwrap(), "a");
+        assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..1));
+        tokio::time::advance(Duration::from_millis(11)).await;
+        assert!(reads.try_recv().is_err());
+        assert_eq!(scheduler.waiting.get(), 0);
+        assert_eq!(slots.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn queued_group_stays_mergeable_until_physical_task_starts() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for (neighbor, cancel) in [(true, false), (false, false), (false, true)] {
+                let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+                let config = ReadSchedulerConfig {
+                    max_admitted_groups: 1.try_into().unwrap(),
+                    max_inflight_reads: 2.try_into().unwrap(),
+                    ..Default::default()
+                };
+                let groups = Arc::new(GroupQueue::new(&metrics, "test", config));
+                let (shutdown, shutdown_rx) = oneshot::channel();
+                let (reads, mut physical) = mpsc::unbounded_channel();
+                let pending = metrics.read_scheduler_pending.with_label_values(&["test"]);
+                let submit = |range: Range<usize>| {
+                    let (response, receiver) = oneshot::channel();
+                    let mut state = groups.pending.lock().unwrap();
+                    let request = ReadRequest {
+                        path: "file".to_owned(),
+                        range: range.clone(),
+                        response,
+                        queued_at: Instant::now(),
+                        trace_id: None,
+                        _pending: ReadGauge::new(&pending),
+                        _queued: None,
+                    };
+                    let admission = groups
+                        .admission(&state.groups, "file", &range, 1, &mut None, &config)
+                        .expect("adjacent read must join even with no free group credit");
+                    let group =
+                        groups.admit(&mut state.groups, admission, range, [request], &config);
+                    state.groups.push(group);
+                    groups.ready.notify_one();
+                    receiver
+                };
+                let a = submit(0..2);
+                let dispatcher = run(
+                    shutdown_rx,
+                    GroupQueueWorker(groups.clone()),
+                    move |_, range: Range<usize>| {
+                        reads.send(range.clone()).unwrap();
+                        std::future::ready(Ok(Bytes::from_static(&b"abcd"[range])))
+                    },
+                    config,
+                    metrics,
+                    "test",
+                );
+                tokio::pin!(dispatcher);
+                // Drive the dispatcher to spawn on this current-thread runtime,
+                // without yielding to the spawned task.
+                assert!(futures::poll!(&mut dispatcher).is_pending());
+                assert_eq!(groups.queued.get(), 1);
+                assert_eq!(groups.pending.lock().unwrap().starting, 1);
+                let b = neighbor.then(|| submit(2..4));
+                drop(shutdown);
+                if cancel {
+                    drop(a);
+                    dispatcher.await;
+                } else {
+                    dispatcher.await;
+                    assert_eq!(a.await.unwrap().unwrap(), "ab");
+                    if let Some(b) = b {
+                        assert_eq!(b.await.unwrap().unwrap(), "cd");
+                    }
+                    assert_eq!(
+                        physical.try_recv().unwrap(),
+                        0..if neighbor { 4 } else { 2 }
+                    );
+                }
+                assert!(physical.try_recv().is_err());
+                assert_eq!(pending.get(), 0);
+                assert_eq!(groups.slots.available_permits(), 1);
+                assert_eq!(groups.pending.lock().unwrap().starting, 0);
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn stopping_dispatcher_cancels_physical_reads() {
         // The spawned future must also be cancelled if its owner is dropped
         // before either the child or its join handle has been polled.
@@ -1466,24 +2075,38 @@ mod tests {
         let active = metrics
             .read_scheduler_in_flight
             .with_label_values(&["test"]);
-        let slots = Arc::new(Semaphore::new(1));
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let groups = Arc::new(GroupQueue::new(
+            &metrics,
+            "test",
+            ReadSchedulerConfig {
+                max_admitted_groups: 1.try_into().unwrap(),
+                ..Default::default()
+            },
+        ));
+        let (_shutdown, shutdown_rx) = oneshot::channel();
         let (response, result) = oneshot::channel();
-        sender
-            .send(vec![ReadRequest {
-                path: "file".to_owned(),
-                range: 0..1,
-                response,
-                queued_at: Instant::now(),
-                trace_id: None,
-                _slot: slots.clone().acquire_owned().await.unwrap(),
-                _pending: ReadGauge::new(&pending),
-                _queued: None,
-            }])
-            .unwrap();
+        {
+            let mut pending_groups = groups.pending.lock().unwrap();
+            let permit = groups.slots.clone().try_acquire_owned().unwrap();
+            pending_groups.groups.push(PendingReadGroup::new(
+                &groups,
+                permit,
+                0..1,
+                vec![ReadRequest {
+                    path: "file".to_owned(),
+                    range: 0..1,
+                    response,
+                    queued_at: Instant::now(),
+                    trace_id: None,
+                    _pending: ReadGauge::new(&pending),
+                    _queued: None,
+                }],
+            ));
+        }
         let started = Arc::new(Notify::new());
         let dispatcher = tokio::spawn(run(
-            receiver,
+            shutdown_rx,
+            GroupQueueWorker(groups.clone()),
             {
                 let started = started.clone();
                 move |_, _| {
@@ -1494,7 +2117,6 @@ mod tests {
                     }
                 }
             },
-            Instant::now(),
             ReadSchedulerConfig::default(),
             metrics,
             "test",
@@ -1502,12 +2124,17 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             started.notified().await;
             assert_eq!(active.get(), 1);
+            let waiting = groups.slots.clone().acquire_owned();
+            tokio::pin!(waiting);
+            assert!(futures::poll!(&mut waiting).is_pending());
             dispatcher.abort();
             assert!(dispatcher.await.unwrap_err().is_cancelled());
             assert!(result.await.is_err());
+            assert!(waiting.await.is_err());
             assert_eq!(active.get(), 0);
             assert_eq!(pending.get(), 0);
-            assert_eq!(slots.available_permits(), 1);
+            assert!(groups.slots.is_closed());
+            assert_eq!(groups.slots.available_permits(), 1);
         })
         .await
         .unwrap();
@@ -1518,7 +2145,10 @@ mod tests {
         for cancel_all in [false, true] {
             let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
             let pending = metrics.read_scheduler_pending.with_label_values(&["test"]);
-            let slots = Arc::new(Semaphore::new(3));
+            let slots = Arc::new(Semaphore::new(1));
+            let groups = metrics
+                .read_scheduler_groups
+                .with_label_values(&["test", "admitted"]);
             let mut requests = Vec::new();
             let mut responses = Vec::new();
             for start in [0, 4, 8] {
@@ -1529,14 +2159,18 @@ mod tests {
                     response,
                     queued_at: Instant::now(),
                     trace_id: None,
-                    _slot: slots.clone().try_acquire_owned().unwrap(),
                     _pending: ReadGauge::new(&pending),
                     _queued: None,
                 });
                 responses.push(receiver);
             }
-            let group = take_read_group(&mut requests, 12, &metrics, "test");
-            assert!(requests.is_empty());
+            let group = ReadGroup {
+                requests,
+                _credit: (
+                    ReadGauge::new(&groups),
+                    slots.clone().try_acquire_owned().unwrap(),
+                ),
+            };
             let physical_slots = Arc::new(Semaphore::new(1));
             // Force cancellation after planning, before the group's first poll.
             drop(responses.remove(1));
@@ -1552,9 +2186,10 @@ mod tests {
                 .execute(
                     &read,
                     &physical_slots,
-                    physical_slots.clone().acquire_owned().await.unwrap(),
+                    acquire_physical(physical_slots.clone()).await.unwrap(),
                     &metrics,
                     "test",
+                    None,
                 )
                 .await;
             if !cancel_all {
@@ -1569,7 +2204,7 @@ mod tests {
                 if cancel_all { 3 } else { 1 }
             );
             assert_eq!(pending.get(), 0);
-            assert_eq!(slots.available_permits(), 3);
+            assert_eq!(slots.available_permits(), 1);
         }
     }
 
@@ -1632,6 +2267,8 @@ mod tests {
         let slow = scheduler.submit("file", 0..2, None).await.unwrap();
         let valid = scheduler.submit("file", 2..4, None).await.unwrap();
         let invalid = scheduler.submit("file", 4..6, None).await.unwrap();
+        // Normal shutdown drains already admitted work, including range fallback.
+        drop(scheduler);
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), valid)
                 .await
@@ -1646,57 +2283,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ready_reads_dispatch_before_draining_all_input() {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let scheduler = ReadScheduler::new(
-            &metrics,
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_requests: 6.try_into().unwrap(),
-                max_batch_requests: 1.try_into().unwrap(),
-                max_inflight_reads: 1.try_into().unwrap(),
-                ..Default::default()
-            },
-            |_, range| async move {
-                if range.start == 0 {
-                    // The selected range records which requests were visible at selection.
-                    // The scheduler may dequeue more before the spawned read is polled.
-                    assert!(range.end <= 2, "first selected range: {range:?}");
-                }
-                Ok(Bytes::from_static(&b"xxxxxx"[range]))
-            },
-        );
-        let mut responses = Vec::new();
-        for start in 0..6 {
-            responses.push(
-                scheduler
-                    .submit("file", start..start + 1, None)
-                    .await
-                    .unwrap(),
-            );
-        }
-        for response in responses {
-            assert_eq!(response.await.unwrap().unwrap(), "x");
-        }
-    }
-
-    #[tokio::test]
-    async fn pending_neighbors_merge_when_physical_capacity_returns() {
+    async fn bridge_reuses_group_credit_at_capacity() {
         tokio::time::timeout(Duration::from_secs(5), async {
             let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-            let batches = metrics
-                .read_scheduler_batch_size
-                .with_label_values(&["test"]);
             let started = Arc::new(Notify::new());
             let release = Arc::new(Notify::new());
-            let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let calls = Arc::new(Mutex::new(Vec::new()));
             let scheduler = ReadScheduler::new(
                 &metrics,
                 "test",
                 ReadSchedulerConfig {
-                    max_admitted_requests: 5.try_into().unwrap(),
+                    max_admitted_groups: 3.try_into().unwrap(),
                     max_inflight_reads: 1.try_into().unwrap(),
-                    max_batch_requests: 1.try_into().unwrap(),
                     ..Default::default()
                 },
                 {
@@ -1718,53 +2316,260 @@ mod tests {
                     }
                 },
             );
-            // A single request dispatches without waiting for more work.
+            let groups = &scheduler.groups;
             let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
             started.notified().await;
             let a = scheduler.submit("file", 0..2, None).await.unwrap();
-            while batches.get_sample_count() < 2 {
-                tokio::task::yield_now().await;
-            }
-            // A is already dequeued, but must still be available to merge with B.
+            let c = scheduler.submit("file", 4..6, None).await.unwrap();
+            assert_eq!(groups.admitted.get(), 3);
+            let other = scheduler.submit("aaa", 0..1, None);
+            tokio::pin!(other);
+            assert!(futures::poll!(&mut other).is_pending());
+
             let b = scheduler.submit("file", 2..4, None).await.unwrap();
-            let cancelled = scheduler.submit("cancelled", 0..1, None).await.unwrap();
-            while batches.get_sample_count() < 4 {
-                tokio::task::yield_now().await;
-            }
-            drop(cancelled);
-            while scheduler.pending.get() != 3 {
-                tokio::task::yield_now().await;
-            }
-            assert_eq!(scheduler.queued.get(), 2);
-            // Sorting by object must not put this newer request ahead of A+B.
-            let newer = scheduler.submit("aaa", 0..1, None).await.unwrap();
-            while batches.get_sample_count() < 5 {
-                tokio::task::yield_now().await;
-            }
-            assert_eq!(calls.lock().unwrap().len(), 1);
+            let other = other.await.unwrap();
+            assert_eq!(groups.admitted.get(), 3);
+            assert_eq!(groups.queued.get(), 2);
+
+            drop(other);
+            let newer = scheduler.submit("newer", 0..1, None).await.unwrap();
             release.notify_one();
             assert_eq!(busy.await.unwrap().unwrap(), "a");
             assert_eq!(a.await.unwrap().unwrap(), "ab");
             assert_eq!(b.await.unwrap().unwrap(), "cd");
+            assert_eq!(c.await.unwrap().unwrap(), "ef");
             assert_eq!(newer.await.unwrap().unwrap(), "a");
             assert_eq!(
                 *calls.lock().unwrap(),
                 vec![
                     ("busy".to_owned(), 0..1),
-                    ("file".to_owned(), 0..4),
-                    ("aaa".to_owned(), 0..1),
+                    ("file".to_owned(), 0..6),
+                    ("newer".to_owned(), 0..1),
                 ]
             );
-            assert_eq!(scheduler.queued.get(), 0);
+            // Wait for the execution owners to drop their credits after sending results.
+            drop(groups.slots.clone().acquire_many_owned(3).await.unwrap());
+            assert_eq!(groups.queued.get(), 0);
+            assert_eq!(groups.admitted.get(), 0);
             assert_eq!(scheduler.pending.get(), 0);
-            assert_eq!(scheduler.slots.available_permits(), 5);
-            assert_eq!(
-                metrics
-                    .read_scheduler_in_flight
-                    .with_label_values(&["test"])
-                    .get(),
-                0
-            );
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for deferred in [false, true] {
+                // Also cover a cancelled waiter and a G grant that C has not polled.
+                for (extend, cancel, grant) in [
+                    (false, false, false),
+                    (true, false, false),
+                    (true, true, false),
+                    (true, false, true),
+                ] {
+                    let credits = 1 + usize::from(extend) + usize::from(grant);
+                    let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+                    let (calls, mut reads) = mpsc::unbounded_channel();
+                    let release = Arc::new(Notify::new());
+                    let scheduler = Arc::new(ReadScheduler::new(
+                        &metrics,
+                        "test",
+                        ReadSchedulerConfig {
+                            max_admitted_groups: credits.try_into().unwrap(),
+                            max_inflight_reads: 1.try_into().unwrap(),
+                            max_batch_requests: 3.try_into().unwrap(),
+                            max_gap_bytes: 0,
+                            reuse_inflight_reads: true,
+                            ..Default::default()
+                        },
+                        {
+                            let release = release.clone();
+                            move |path, range: Range<usize>| {
+                                let release = release.clone();
+                                let calls = calls.clone();
+                                async move {
+                                    calls.send((path.clone(), range.clone())).unwrap();
+                                    if path == "busy" {
+                                        release.notified().await;
+                                    }
+                                    Ok(Bytes::from_static(&b"abc"[range]))
+                                }
+                            }
+                        },
+                    ));
+                    let groups = &scheduler.groups;
+                    let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
+                    assert_eq!(reads.recv().await.unwrap(), ("busy".to_owned(), 0..1));
+
+                    let mut a = std::pin::pin!(scheduler.submit("file", 0..1, None));
+                    let admitted_a = match futures::poll!(&mut a) {
+                        Poll::Ready(result) if extend => Some(result.unwrap()),
+                        Poll::Pending if !extend => None,
+                        _ => panic!("unexpected admission for A"),
+                    };
+                    let held = grant.then(|| groups.slots.clone().try_acquire_owned().unwrap());
+                    let c_range = if extend { 2..3 } else { 1..2 };
+                    let mut ordinary = None;
+                    let mut staged = None;
+                    if deferred {
+                        let batch = ReadBatch::new(scheduler.clone(), 1);
+                        staged = batch.member().stage(&scheduler, "file", c_range, None);
+                        assert!(staged.is_some());
+                        drop(batch);
+                        while groups
+                            .pending
+                            .lock()
+                            .unwrap()
+                            .waiting
+                            .get("file")
+                            .map_or(0, BTreeMap::len)
+                            < if extend { 1 } else { 2 }
+                        {
+                            tokio::task::yield_now().await;
+                        }
+                    } else {
+                        let mut submit = Box::pin(scheduler.submit("file", c_range, None));
+                        assert!(futures::poll!(&mut submit).is_pending());
+                        ordinary = Some(submit);
+                    }
+                    assert_eq!(groups.slots.available_permits(), 0);
+
+                    if cancel {
+                        drop(ordinary.take());
+                        drop(staged.take());
+                        while groups.pending.lock().unwrap().waiting.contains_key("file") {
+                            tokio::task::yield_now().await;
+                        }
+                    }
+                    let mut unrelated = std::pin::pin!(scheduler.submit("other", 0..1, None));
+                    if grant {
+                        assert!(futures::poll!(&mut unrelated).is_pending());
+                        // The semaphore assigns the returned credit to C, which is
+                        // still suspended. B must return it without waiting for C.
+                        drop(held);
+                        assert_eq!(groups.slots.available_permits(), 0);
+                    }
+                    let b = if extend {
+                        let b = scheduler.submit("file", 1..2, None).await.unwrap();
+                        assert_eq!(groups.slots.available_permits(), 0);
+                        assert!(!groups.pending.lock().unwrap().waiting.contains_key("file"));
+                        Some(b)
+                    } else {
+                        None
+                    };
+                    let other = if grant {
+                        let Poll::Ready(result) = futures::poll!(&mut unrelated) else {
+                            panic!("merging C must release its assigned credit");
+                        };
+                        Some(result.unwrap())
+                    } else {
+                        None
+                    };
+                    assert!(reads.try_recv().is_err());
+                    release.notify_one();
+                    let a = match admitted_a {
+                        Some(a) => a,
+                        None => a.await.unwrap(),
+                    };
+                    // In the ordinary case C has still never been polled since registering.
+                    let end = if extend && !cancel { 3 } else { 2 };
+                    assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..end));
+                    assert_eq!(busy.await.unwrap().unwrap(), "a");
+                    assert_eq!(a.await.unwrap().unwrap(), "a");
+                    if let Some(b) = b {
+                        assert_eq!(b.await.unwrap().unwrap(), "b");
+                    }
+                    if !cancel {
+                        let c = match ordinary {
+                            Some(c) => c.await.unwrap(),
+                            None => staged.unwrap(),
+                        };
+                        assert_eq!(c.await.unwrap().unwrap(), if extend { "c" } else { "b" });
+                    }
+                    if let Some(other) = other {
+                        assert_eq!(reads.recv().await.unwrap(), ("other".to_owned(), 0..1));
+                        assert_eq!(other.await.unwrap().unwrap(), "a");
+                    }
+                    drop(
+                        groups
+                            .slots
+                            .clone()
+                            .acquire_many_owned(credits as u32)
+                            .await
+                            .unwrap(),
+                    );
+                    assert!(reads.try_recv().is_err());
+                    assert!(groups.pending.lock().unwrap().waiting.is_empty());
+                    assert_eq!(groups.admitted.get(), 0);
+                    assert_eq!(scheduler.waiting.get(), 0);
+                    assert_eq!(scheduler.pending.get(), 0);
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_batch_prefix_does_not_hide_a_mergeable_g_waiter() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+            let (calls, mut reads) = mpsc::unbounded_channel();
+            let release = Arc::new(Notify::new());
+            let scheduler = Arc::new(ReadScheduler::new(
+                &metrics,
+                "test",
+                ReadSchedulerConfig {
+                    max_admitted_groups: 2.try_into().unwrap(),
+                    max_inflight_reads: 1.try_into().unwrap(),
+                    max_batch_requests: 4.try_into().unwrap(),
+                    max_read_bytes: 16.try_into().unwrap(),
+                    max_gap_bytes: 4,
+                    ..Default::default()
+                },
+                {
+                    let release = release.clone();
+                    move |path, range: Range<usize>| {
+                        let release = release.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.send(range.clone()).unwrap();
+                            if path == "busy" {
+                                release.notified().await;
+                            }
+                            Ok(Bytes::from_iter(range.map(|offset| offset as u8)))
+                        }
+                    }
+                },
+            ));
+            let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
+            assert_eq!(reads.recv().await.unwrap(), 0..1);
+            let a = scheduler.submit("file", 100..101, None).await.unwrap();
+            let batch = ReadBatch::new(scheduler.clone(), 2);
+            let member = batch.member();
+            let cancelled = member.stage(&scheduler, "file", 81..92, None).unwrap();
+            let c = member.stage(&scheduler, "file", 92..97, None).unwrap();
+            drop(batch);
+            let groups = &scheduler.groups;
+            while !groups.pending.lock().unwrap().waiting.contains_key("file") {
+                tokio::task::yield_now().await;
+            }
+
+            drop(cancelled);
+            let b = scheduler.submit("file", 101..102, None).await.unwrap();
+            assert_eq!(groups.slots.available_permits(), 0);
+            assert!(groups.pending.lock().unwrap().waiting.is_empty());
+            release.notify_one();
+            busy.await.unwrap().unwrap();
+            assert_eq!(reads.recv().await.unwrap(), 92..102);
+            assert_eq!(c.await.unwrap().unwrap().as_ref(), &[92, 93, 94, 95, 96]);
+            assert_eq!(a.await.unwrap().unwrap().as_ref(), &[100]);
+            assert_eq!(b.await.unwrap().unwrap().as_ref(), &[101]);
+            drop(groups.slots.clone().acquire_many_owned(2).await.unwrap());
+            assert!(reads.try_recv().is_err());
+            assert_eq!(groups.admitted.get(), 0);
+            assert_eq!(scheduler.waiting.get(), 0);
         })
         .await
         .unwrap();
@@ -1783,6 +2588,7 @@ mod tests {
                 "test",
                 ReadSchedulerConfig {
                     max_inflight_reads: 1.try_into().unwrap(),
+                    max_admitted_groups: 1.try_into().unwrap(),
                     ..Default::default()
                 },
                 {
@@ -1815,109 +2621,69 @@ mod tests {
             assert_eq!(active.get(), 0);
             assert_eq!(scheduler.pending.get(), 0);
             assert_eq!(scheduler.queued.get(), 0);
+            let next = scheduler.submit("next", 0..1, None).await.unwrap();
+            assert_eq!(next.await.unwrap().unwrap(), "d");
         })
         .await
         .unwrap();
     }
 
-    #[tokio::test]
-    async fn saturated_reads_wait_and_still_coalesce_after_admission() {
-        let started = Arc::new(Notify::new());
-        let release = Arc::new(Notify::new());
-        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let scheduler = ReadScheduler::new(
-            &ObjectStoreMetrics::new(&prometheus::Registry::new()),
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_requests: 2.try_into().unwrap(),
-                ..Default::default()
-            },
-            {
-                let started = started.clone();
-                let release = release.clone();
-                let calls = calls.clone();
-                move |_, range| {
-                    let started = started.clone();
+    #[tokio::test(start_paused = true)]
+    async fn fallback_holds_group_credit_while_physical_capacity_is_available() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+            let (send_call, mut calls) = mpsc::unbounded_channel();
+            let release = Arc::new(Notify::new());
+            let scheduler = ReadScheduler::new(
+                &metrics,
+                "test",
+                ReadSchedulerConfig {
+                    max_admitted_groups: 1.try_into().unwrap(),
+                    max_inflight_reads: 2.try_into().unwrap(),
+                    ..Default::default()
+                },
+                {
                     let release = release.clone();
-                    let calls = calls.clone();
-                    async move {
-                        calls.lock().unwrap().push(range.clone());
-                        if range == (0..4) {
-                            started.notify_one();
-                            release.notified().await;
+                    move |path, range| {
+                        let send_call = send_call.clone();
+                        let release = release.clone();
+                        async move {
+                            send_call.send((path.clone(), range.clone())).unwrap();
+                            if path == "file" && range == (0..2) {
+                                release.notified().await;
+                            }
+                            b"ab".get(range).map(Bytes::from_static).ok_or_else(|| {
+                                ObjectError::read_length_mismatch("past EOF".to_owned())
+                            })
                         }
-                        Ok(Bytes::from_static(&b"abcdefgh"[range]))
                     }
-                }
-            },
-        );
-        let a = scheduler.submit("file", 0..2, None).await.unwrap();
-        let b = scheduler.submit("file", 2..4, None).await.unwrap();
-        started.notified().await;
-        let c = scheduler.submit("file", 4..6, None);
-        let d = scheduler.submit("file", 6..8, None);
-        tokio::pin!(c, d);
-        assert!(futures::poll!(&mut c).is_pending());
-        assert!(futures::poll!(&mut d).is_pending());
-        assert_eq!(scheduler.waiting.get(), 2);
-        assert_eq!(scheduler.pending.get(), 2);
-        assert_eq!(*calls.lock().unwrap(), vec![0..4]);
-        release.notify_one();
-        assert_eq!(a.await.unwrap().unwrap(), "ab");
-        assert_eq!(b.await.unwrap().unwrap(), "cd");
-        // Poll both newly admitted requests before yielding to the dispatcher.
-        // This forces a ready batch without relying on a wall-clock delay.
-        let (c, d) = tokio::join!(c, d);
-        assert_eq!(c.unwrap().await.unwrap().unwrap(), "ef");
-        assert_eq!(d.unwrap().await.unwrap().unwrap(), "gh");
-        assert_eq!(*calls.lock().unwrap(), vec![0..4, 4..8]);
-        assert_eq!(scheduler.waiting.get(), 0);
-        assert_eq!(scheduler.pending.get(), 0);
-        assert_eq!(scheduler.slots.available_permits(), 2);
-        assert_eq!(scheduler.admission_duration.get_sample_count(), 4);
-    }
+                },
+            );
+            let a = scheduler.submit("file", 0..2, None).await.unwrap();
+            let b = scheduler.submit("file", 2..4, None).await.unwrap();
+            assert_eq!(calls.recv().await.unwrap(), ("file".to_owned(), 0..4));
+            assert_eq!(calls.recv().await.unwrap(), ("file".to_owned(), 0..2));
+            assert_eq!(calls.recv().await.unwrap(), ("file".to_owned(), 2..4));
+            assert!(b.await.unwrap().unwrap_err().is_read_range_error());
 
-    #[tokio::test]
-    async fn dispatcher_closure_wakes_admission_waiters() {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let (requests, receiver) = mpsc::unbounded_channel();
-        let scheduler = ReadScheduler {
-            requests,
-            preparation_slots: Arc::new(Semaphore::new(1)),
-            preparing: metrics
-                .read_scheduler_preparing
-                .with_label_values(&["test"]),
-            prepare_duration: metrics.read_scheduler_prepare_duration.clone(),
-            prepared_batch_size: metrics
-                .read_scheduler_prepared_batch_size
-                .with_label_values(&["test"]),
-            media_type: "test",
-            events: metrics.read_scheduler_events.clone(),
-            slots: Arc::new(Semaphore::new(1)),
-            config: ReadSchedulerConfig::default(),
-            pending: metrics.read_scheduler_pending.with_label_values(&["test"]),
-            waiting: metrics.read_scheduler_waiting.with_label_values(&["test"]),
-            queued: metrics.read_scheduler_queued.with_label_values(&["test"]),
-            admission_duration: metrics
-                .read_scheduler_admission_duration
-                .with_label_values(&["test"]),
-        };
-        let slot = scheduler.slots.clone().acquire_owned().await.unwrap();
-        let blocked = scheduler.submit("file", 0..2, None);
-        tokio::pin!(blocked);
-        assert!(futures::poll!(&mut blocked).is_pending());
-        assert_eq!(scheduler.waiting.get(), 1);
-        drop(receiver);
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), blocked)
-                .await
-                .unwrap()
-                .is_err()
-        );
-        assert_eq!(scheduler.waiting.get(), 0);
-        assert_eq!(scheduler.pending.get(), 0);
-        drop(slot);
-        assert_eq!(scheduler.slots.available_permits(), 1);
+            let other = scheduler.submit("other", 0..1, None);
+            tokio::pin!(other);
+            assert!(futures::poll!(&mut other).is_pending());
+            assert_eq!(
+                metrics
+                    .read_scheduler_in_flight
+                    .with_label_values(&["test"])
+                    .get(),
+                1
+            );
+
+            release.notify_one();
+            assert_eq!(a.await.unwrap().unwrap(), "ab");
+            assert_eq!(other.await.unwrap().await.unwrap().unwrap(), "a");
+            assert_eq!(calls.recv().await.unwrap(), ("other".to_owned(), 0..1));
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -1937,7 +2703,7 @@ mod tests {
             &metrics,
             "test",
             ReadSchedulerConfig {
-                max_admitted_requests: 2.try_into().unwrap(),
+                max_admitted_groups: 1.try_into().unwrap(),
                 ..Default::default()
             },
             {
@@ -1957,6 +2723,7 @@ mod tests {
         );
         let first = scheduler.submit("file", 0..2, None).await.unwrap();
         let second = scheduler.submit("file", 2..4, None).await.unwrap();
+        started.notified().await;
         {
             let blocked = scheduler.submit("file", 4..6, None);
             tokio::pin!(blocked);
@@ -1971,7 +2738,6 @@ mod tests {
                 .get(),
             2
         );
-        started.notified().await;
         drop(first);
         assert!(
             tokio::time::timeout(Duration::from_millis(10), cancelled.notified())

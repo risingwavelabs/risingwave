@@ -83,10 +83,14 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
             }
             self.cur_idx = self.sstable_infos.len();
         } else {
-            let table = self
-                .sstable_store
-                .sstable(&self.sstable_infos[idx], &mut self.stats)
-                .await?;
+            let metadata = crate::hummock::SstMetaBatch::current();
+            let table = crate::hummock::SstMetaBatch::sstable_for_iter(
+                metadata.as_deref(),
+                &self.sstable_store,
+                &self.sstable_infos[idx],
+                &mut self.stats,
+            )
+            .await?;
             let sstable_iter = TI::create(
                 table,
                 self.sstable_store.clone(),

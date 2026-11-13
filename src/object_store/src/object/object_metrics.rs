@@ -37,24 +37,23 @@ pub struct ObjectStoreMetrics {
     pub(super) read_in_flight: IntGaugeVec,
     pub(super) read_scheduler_events: IntCounterVec,
     pub(super) read_scheduler_pending: IntGaugeVec,
-    pub(super) read_scheduler_preparing: IntGaugeVec,
-    pub(super) read_scheduler_prepare_duration: HistogramVec,
-    pub(super) read_scheduler_prepared_batch_size: HistogramVec,
+    pub(super) read_scheduler_groups: IntGaugeVec,
     pub(super) read_scheduler_queued: IntGaugeVec,
     pub(super) read_scheduler_in_flight: IntGaugeVec,
     pub(super) read_scheduler_waiting: IntGaugeVec,
     pub(super) read_scheduler_admission_duration: HistogramVec,
-    pub(super) read_scheduler_batch_size: HistogramVec,
+    pub(super) read_scheduler_batch_wait: HistogramVec,
     pub(super) read_requests: GenericCounterVec<AtomicU64>,
     pub(super) read_request_duration: HistogramVec,
     pub(super) read_request_bytes: HistogramVec,
-    pub(super) read_scheduler_gap_bytes: HistogramVec,
+    pub(super) read_scheduler_overread_bytes: IntCounterVec,
     pub(super) read_scheduler_group_size: HistogramVec,
     pub(super) read_scheduler_queue_duration: HistogramVec,
+    pub(super) read_scheduler_physical_duration: HistogramVec,
 }
 
 impl ObjectStoreMetrics {
-    pub(super) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let read_outcomes = register_int_counter_vec_with_registry!(
             "object_store_read_outcomes", "Read completions by layer; attempts are backend invocations, not SDK-internal HTTP retries", &["media_type", "stage", "outcome"], registry).unwrap();
         let read_in_flight = register_int_gauge_vec_with_registry!(
@@ -71,34 +70,17 @@ impl ObjectStoreMetrics {
             registry
         )
         .unwrap();
-        let read_scheduler_preparing = register_int_gauge_vec_with_registry!(
-            "object_store_read_scheduler_preparing",
-            "Reserved window slots before publication, including prepared requests awaiting admission",
-            &["media_type"], registry).unwrap();
-        let read_scheduler_prepare_duration = register_histogram_vec_with_registry!(
-            histogram_opts!(
-                "object_store_read_scheduler_prepare_duration_seconds",
-                "First cold member to window release, excluding admission wait",
-                exponential_buckets(0.000_01, 2.0, 22).unwrap()
-            ),
-            &["media_type", "reason"],
-            registry
-        )
-        .unwrap();
-        let read_scheduler_prepared_batch_size = register_histogram_vec_with_registry!(
-            histogram_opts!(
-                "object_store_read_scheduler_prepared_batch_size",
-                "Cold requests present at window release before admission splitting",
-                exponential_buckets(1.0, 2.0, 16).unwrap()
-            ),
-            &["media_type"],
-            registry
-        )
-        .unwrap();
         let read_scheduler_pending = register_int_gauge_vec_with_registry!(
             "object_store_read_scheduler_pending",
-            "Admitted logical reads, queued or in flight, including requests admitted with preparation permits",
+            "Admitted logical reads, queued or in flight",
             &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_groups = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_groups",
+            "Read groups in group admission mode, either admitted (through completion) or queued (awaiting dispatch)",
+            &["media_type", "stage"],
             registry
         )
         .unwrap();
@@ -129,11 +111,11 @@ impl ObjectStoreMetrics {
             registry
         )
         .unwrap();
-        let read_scheduler_batch_size = register_histogram_vec_with_registry!(
+        let read_scheduler_batch_wait = register_histogram_vec_with_registry!(
             histogram_opts!(
-                "object_store_read_scheduler_batch_size",
-                "Live requests available together in a scheduler dequeue",
-                exponential_buckets(1.0, 2.0, 16).unwrap()
+                "object_store_read_scheduler_batch_wait_seconds",
+                "Time from external read arrival to release of its prefetch batch group",
+                exponential_buckets(0.000_01, 2.0, 18).unwrap()
             ),
             &["media_type"],
             registry
@@ -208,8 +190,13 @@ impl ObjectStoreMetrics {
             registry
         )
         .unwrap();
-        let read_scheduler_gap_bytes = register_histogram_vec_with_registry!(
-            histogram_opts!("object_store_read_scheduler_gap_bytes", "Positive gaps separating same-object ranges within a ready batch; gaps are not read", exponential_buckets(1.0, 2.0, 30).unwrap()), &["media_type"], registry).unwrap();
+        let read_scheduler_overread_bytes = register_int_counter_vec_with_registry!(
+            "object_store_read_scheduler_overread_bytes",
+            "Gap bytes in successful scheduled reads, including holes left by cancelled members",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
         let read_scheduler_group_size = register_histogram_vec_with_registry!(
             histogram_opts!(
                 "object_store_read_scheduler_group_size",
@@ -248,6 +235,17 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
+        let read_scheduler_physical_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_physical_duration_seconds",
+                "Scheduled backend read duration (including retries), or physical permit wait for range-error fallback",
+                exponential_buckets(0.000_01, 2.0, 22).unwrap()
+            ),
+            &["media_type", "stage"],
+            registry
+        )
+        .unwrap();
+
         Self {
             write_bytes,
             read_bytes,
@@ -259,20 +257,19 @@ impl ObjectStoreMetrics {
             read_in_flight,
             read_scheduler_events,
             read_scheduler_pending,
-            read_scheduler_preparing,
-            read_scheduler_prepare_duration,
-            read_scheduler_prepared_batch_size,
+            read_scheduler_groups,
             read_scheduler_queued,
             read_scheduler_in_flight,
             read_scheduler_waiting,
             read_scheduler_admission_duration,
-            read_scheduler_batch_size,
+            read_scheduler_batch_wait,
             read_requests,
             read_request_duration,
             read_request_bytes,
-            read_scheduler_gap_bytes,
+            read_scheduler_overread_bytes,
             read_scheduler_group_size,
             read_scheduler_queue_duration,
+            read_scheduler_physical_duration,
         }
     }
 

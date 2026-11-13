@@ -15,6 +15,7 @@
 use std::assert_matches;
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -30,6 +31,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::stream_plan::InequalityType;
+use risingwave_storage::hummock::SstMetaBatch;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
@@ -990,6 +992,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             ));
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
+        let metadata = side_match.ht.new_iterator_meta_batch();
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row)) = r else {
                 continue;
@@ -1030,6 +1033,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         &mut total_matches,
                         append_only_optimize,
                         entry_state_max_rows,
+                        metadata.as_ref(),
                     )
                 };
             }
@@ -1100,6 +1104,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         total_matches: &'a mut usize,
         append_only_optimize: bool,
         entry_state_max_rows: usize,
+        metadata: Option<&'a Arc<SstMetaBatch>>,
     ) {
         let cache_hit = matches!(cached_lookup_result, CacheResult::Hit(_));
         let mut entry_state: JoinEntryState<E> = JoinEntryState::default();
@@ -1178,7 +1183,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 // Handle rows which are not in cache.
                 let (matched_rows, match_order_key_indices, degree_table) = side_match
                     .ht
-                    .fetch_matched_rows_and_get_degree_table_ref(key)
+                    .fetch_matched_rows_and_get_degree_table_ref(key, metadata)
                     .await?;
 
                 #[for_await]

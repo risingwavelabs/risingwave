@@ -66,6 +66,7 @@ pub use validator::*;
 use value::*;
 
 use self::iterator::HummockIterator;
+pub use self::sst_meta_batch::SstMetaBatch;
 pub use self::sstable_store::*;
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::StoreLocalStatistic;

@@ -15,6 +15,7 @@
 use std::collections::VecDeque;
 use std::ops::Bound::*;
 use std::sync::Arc;
+use std::time::Instant;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use risingwave_hummock_sdk::key::FullKey;
@@ -27,6 +28,7 @@ use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::{PrefetchBlockStream, PrefetchLookup};
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::store::iter_init_profile::SeekAwait;
 use crate::hummock::{BlockEntry, BlockIterator, BlockResponse, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 use crate::store::PrefetchMode;
@@ -57,9 +59,6 @@ pub struct SstableIterator {
     /// Registered neighbor responses, starting at `read_ahead_end - read_ahead.len()`.
     /// Keep the Foyer handles until consumption instead of looking the blocks up again.
     read_ahead: VecDeque<HummockResult<BlockResponse>>,
-    // Only coordinates submission; neighbor handles and block ownership stay above.
-    read_ahead_batch: Option<risingwave_object_store::object::ReadBatch>,
-
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
@@ -182,14 +181,12 @@ impl SstableIterator {
             preload_end_block_idx: 0,
             read_ahead_end: 0,
             read_ahead: VecDeque::new(),
-            read_ahead_batch: None,
             block_start_idx_inclusive,
             block_end_idx_exclusive,
         }
     }
 
     fn discard_read_ahead(&mut self) {
-        self.read_ahead_batch.take();
         if !self.read_ahead.is_empty() {
             self.sstable_store
                 .read_metrics
@@ -243,7 +240,10 @@ impl SstableIterator {
         // When all data are in block cache, it is highly possible that this iterator will stay on a
         // worker thread for a full time. Therefore, we use tokio's unstable API consume_budget to
         // do cooperative scheduling.
+        let profile_seek = SeekAwait::active();
+        let start = profile_seek.then(Instant::now);
         tokio::task::consume_budget().await;
+        SeekAwait::CooperativeBudget.record(start);
 
         if idx >= self.block_end_idx_exclusive {
             self.block_iter = None;
@@ -272,7 +272,10 @@ impl SstableIterator {
         // Try at most once per seek. Even an empty prefetch result must reach the block-get
         // fallback instead of repeatedly recreating a stream without making progress.
         if should_prefetch && idx + 1 < self.preload_end_block_idx {
-            match self.prefetch_blocks(idx).await {
+            let start = profile_seek.then(Instant::now);
+            let prefetched = self.prefetch_blocks(idx).await;
+            SeekAwait::Prefetch.record(start);
+            match prefetched {
                 Ok(mut stream) => {
                     if let PrefetchLookup::Hit(block) = stream.take_block(idx) {
                         prefetched_block = Some(block);
@@ -284,11 +287,14 @@ impl SstableIterator {
                 }
             }
         }
+        let mut read_batch = None;
         if prefetched_block.is_none() && self.options.prefetch == PrefetchMode::Blockwise {
             if idx >= self.read_ahead_end
                 && let Some(register) = self.register_read_ahead(idx)
             {
-                register.await;
+                let start = profile_seek.then(Instant::now);
+                read_batch = register.await;
+                SeekAwait::Prefetch.record(start);
             }
             if !self.read_ahead.is_empty() && idx == self.read_ahead_end - self.read_ahead.len() {
                 self.sstable_store.read_metrics.prefetch_consumed.inc();
@@ -305,7 +311,8 @@ impl SstableIterator {
                             .start_timer();
                         let mut wait = std::pin::pin!(response.wait());
                         let mut first_poll = true;
-                        std::future::poll_fn(|cx| {
+                        let start = profile_seek.then(Instant::now);
+                        let result = std::future::poll_fn(|cx| {
                             let result = wait.as_mut().poll(cx);
                             if first_poll {
                                 // Foyer's need_await() records the original miss, not whether
@@ -320,7 +327,9 @@ impl SstableIterator {
                             }
                             result
                         })
-                        .await
+                        .await;
+                        SeekAwait::Prefetch.record(start);
+                        result
                     }
                     Err(error) => Err(error),
                 };
@@ -345,23 +354,27 @@ impl SstableIterator {
         }
         let block = match prefetched_block {
             Some(block) => block,
-            None => match self
-                .sstable_store
-                .get_with_read_batch(
-                    &self.sst,
-                    idx,
-                    self.options.cache_policy,
-                    &mut self.stats,
-                    self.read_ahead_batch.as_ref(),
-                )
-                .await
-            {
-                Ok(block) => block,
-                Err(error) => {
-                    self.discard_read_ahead();
-                    return Err(error);
+            None => {
+                let start = profile_seek.then(Instant::now);
+                let result = self
+                    .sstable_store
+                    .get_with_read_batch(
+                        &self.sst,
+                        idx,
+                        self.options.cache_policy,
+                        &mut self.stats,
+                        read_batch,
+                    )
+                    .await;
+                SeekAwait::DemandBlock.record(start);
+                match result {
+                    Ok(block) => block,
+                    Err(error) => {
+                        self.discard_read_ahead();
+                        return Err(error);
+                    }
                 }
-            },
+            }
         };
         self.block_iter = Some(BlockIterator::new(block));
         let block_iter = self.block_iter.as_mut().unwrap();
@@ -398,7 +411,11 @@ impl SstableIterator {
     /// Select the window synchronously; allocate a registration future only for real lookahead.
     /// Polling that future registers Foyer responses. The iterator retains the responses, while
     /// Foyer continues to own any started producer shared with other readers.
-    fn register_read_ahead(&mut self, idx: usize) -> Option<impl Future<Output = ()> + Send + '_> {
+    fn register_read_ahead(
+        &mut self,
+        idx: usize,
+    ) -> Option<impl Future<Output = Option<risingwave_object_store::object::ReadBatch>> + Send + '_>
+    {
         use crate::hummock::CachePolicy;
 
         if !matches!(self.options.cache_policy, CachePolicy::Fill(_)) {
@@ -448,19 +465,19 @@ impl SstableIterator {
             return None;
         }
         // Keep registration's async state out of ordinary seek futures. Only a new window
-        // pays for this box, not rejected lookahead or consumption of existing responses.
+        // pays for this box, not consumption of existing responses.
         Some(Box::pin(async move {
-            self.read_ahead_batch = self.sstable_store.store().read_batch(end - idx);
+            let batch = self.sstable_store.store().read_batch(end - idx);
             let span = tracing::debug_span!(target: "state_store_read_batch", "block_read_ahead",
                 object_id = %self.sst.id, head = idx, scan_end = self.block_end_idx_exclusive);
             for next in idx + 1..end {
                 self.read_ahead.push_back(
                     self.sstable_store
-                        .get_block_response(
+                        .get_block_response_with_batch(
                             &self.sst,
                             next,
                             CachePolicy::Fill(foyer::Hint::Low),
-                            self.read_ahead_batch.as_ref(),
+                            batch.as_ref(),
                         )
                         .instrument(span.clone())
                         .await,
@@ -483,6 +500,7 @@ impl SstableIterator {
             tracing::debug!(target: "state_store_read_batch", parent: &span, object_id = %self.sst.id,
                 head = idx, end = self.read_ahead_end, scan_end = self.block_end_idx_exclusive,
                 "blockwise read-ahead window");
+            batch
         }))
     }
 
@@ -587,6 +605,14 @@ impl SstableIteratorType for SstableIterator {
     }
 }
 
+#[cfg(all(
+    test,
+    target_os = "linux",
+    not(madsim),
+    feature = "read-scheduler-replay"
+))]
+mod linux_replay;
+
 #[cfg(test)]
 mod tests {
     use std::collections::Bound;
@@ -653,7 +679,7 @@ mod tests {
                 prefetch: PrefetchMode::Blockwise,
                 ..Default::default()
             });
-            let mut iter = SstableIterator::new(sst, store.clone(), options, &info);
+            let mut iter = SstableIterator::new(sst.clone(), store.clone(), options, &info);
             iter.rewind().await.unwrap();
             if completed_before_consumption {
                 release.notify_one();
@@ -663,9 +689,26 @@ mod tests {
                 let mut consume = std::pin::pin!(iter.seek_idx(1, None));
                 assert!(consume.as_mut().now_or_never().is_none());
                 assert_eq!(store.read_metrics.prefetch_consume_pending.get(), 1);
+                let mut other_reader = std::pin::pin!(async {
+                    store
+                        .get(
+                            &sst,
+                            1,
+                            CachePolicy::default(),
+                            &mut StoreLocalStatistic::default(),
+                        )
+                        .await
+                });
+                let outer_before = store.read_metrics.block_cache_outer_fetch.get();
+                assert!(other_reader.as_mut().now_or_never().is_none());
                 release.notify_one();
                 consume.await.unwrap();
+                drop(other_reader.await.unwrap());
                 existing.await.unwrap();
+                assert_eq!(
+                    store.read_metrics.block_cache_outer_fetch.get(),
+                    outer_before
+                );
             }
             assert_eq!(
                 store.read_metrics.prefetch_consume_ready.get(),
@@ -730,11 +773,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_blockwise_prefetch_flushes_ready_cold_window() {
+        use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+        use risingwave_object_store::object::{
+            InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
+        };
+
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+
+        let registry = prometheus::Registry::new();
+        let object_store = ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(
+            Arc::new(ObjectStoreMetrics::new(&registry)),
+            Arc::new(ObjectStoreConfig::default()),
+        ))
+        .with_read_coalescing();
+        let store = mock_sstable_store_with_object_store(Arc::new(object_store)).await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+        store.clear_block_cache().await.unwrap();
+        let options = Arc::new(SstableIteratorReadOptions {
+            prefetch: PrefetchMode::Blockwise,
+            scan_end_user_key: Some(Excluded(
+                FullKey::decode(&sst.meta.block_metas[3].smallest_key)
+                    .user_key
+                    .copy_into(),
+            )),
+            ..Default::default()
+        });
+        let mut iter = SstableIterator::new(sst.clone(), store.clone(), options, &info);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            iter.rewind().await.unwrap();
+            for index in 1..3 {
+                let key = FullKey::decode(&sst.meta.block_metas[index].smallest_key);
+                iter.seek(key).await.unwrap();
+                assert_eq!(iter.key(), key);
+            }
+        })
+        .await
+        .unwrap();
+        let physical_reads = registry
+            .gather()
+            .into_iter()
+            .find(|family| family.get_name() == "object_store_operation_bytes")
+            .unwrap();
+        let read = physical_reads
+            .get_metric()
+            .iter()
+            .find(|metric| {
+                metric
+                    .get_label()
+                    .iter()
+                    .any(|label| label.get_value() == "read")
+            })
+            .unwrap()
+            .get_histogram();
+        let (first, _) = sst.calculate_block_info(0);
+        let (last, _) = sst.calculate_block_info(2);
+        assert_eq!(read.get_sample_count(), 1);
+        assert_eq!(read.get_sample_sum(), (last.end - first.start) as f64);
+    }
+
+    #[tokio::test]
     async fn test_blockwise_prefetch_window_and_single_flight() {
         use std::time::Duration;
 
         use foyer::HybridCacheProperties;
-        use risingwave_common::config::storage::ReadSchedulerConfig;
         use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
         use risingwave_object_store::object::{
             InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
@@ -747,19 +850,11 @@ mod tests {
 
         let recent: Arc<crate::hummock::RecentFilter<_>> =
             Arc::new(SimpleRecentFilter::new(2, Duration::from_secs(3600)).into());
-        let mut metrics = ObjectStoreMetrics::unused();
-        // Isolate physical-read counts from other tests sharing the global registry.
-        metrics.operation_size = prometheus::HistogramVec::new(
-            prometheus::HistogramOpts::new("test_object_read_bytes", "Physical read bytes"),
-            &["type"],
-        )
-        .unwrap();
-        let metrics = Arc::new(metrics);
         let object_store = ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(
-            metrics.clone(),
+            Arc::new(ObjectStoreMetrics::unused()),
             Arc::new(ObjectStoreConfig {
-                read_scheduler: ReadSchedulerConfig {
-                    batch_prepare_timeout_ms: 5000,
+                read_scheduler: risingwave_common::config::storage::ReadSchedulerConfig {
+                    prefetch_batch_wait_us: 100,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -821,12 +916,7 @@ mod tests {
             ..Default::default()
         });
         let mut iter = SstableIterator::new(sst.clone(), store.clone(), options.clone(), &info);
-        let gets = metrics.operation_size.with_label_values(&["read"]);
-        let before = gets.get_sample_count();
         iter.rewind().await.unwrap();
-        // The cache hit C is excluded. A+B must be visible in one scheduler packet,
-        // even when physical reads execute independently of the dispatcher.
-        assert_eq!(gets.get_sample_count() - before, 1);
         assert_eq!(iter.read_ahead_end, 3);
         // The observer and read-ahead window each hold C. Remove it from the cache so a
         // second lookup at consumption would read the corrupted backing block and fail.

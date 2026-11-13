@@ -6,5 +6,5 @@ max_bytes = 262144
 
 [storage.object_store.read_scheduler]
 max_batch_requests = 16
-max_admitted_requests = 32
+max_admitted_groups = 64
 max_read_bytes = 262144

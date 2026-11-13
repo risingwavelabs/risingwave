@@ -46,12 +46,14 @@ pub mod error;
 pub mod object_metrics;
 
 pub mod prefix;
-mod read_batch;
 mod read_scheduler;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
-pub use read_batch::{ReadBatch, ReadBatchMember};
 use read_scheduler::ReadScheduler;
+#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+#[doc(hidden)]
+pub use read_scheduler::replay;
+pub use read_scheduler::{ReadBatch, ReadBatchMember};
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -325,17 +327,17 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, read(path, range).await)
     }
 
-    pub fn read_batch(&self, count: usize) -> Option<ReadBatch> {
-        dispatch_object_store_enum!(self, |store| store.read_batch(count))
+    pub fn read_batch(&self, max_reads: usize) -> Option<ReadBatch> {
+        dispatch_object_store_enum!(self, |store| store.read_batch(max_reads))
     }
 
     pub async fn read_with_batch(
         &self,
         path: &str,
         range: impl ObjectRangeBounds,
-        member: Option<ReadBatchMember>,
+        batch: Option<ReadBatchMember>,
     ) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read_with_batch(path, range, member).await)
+        object_store_impl_method_body!(self, read_with_batch(path, range, batch).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -706,19 +708,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ))
     }
 
-    pub fn read_batch(&self, count: usize) -> Option<ReadBatch> {
-        ReadBatch::new(self.read_scheduler.as_ref()?.clone(), count)
-    }
-
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         self.read_with_batch(path, range, None).await
     }
 
-    pub async fn read_with_batch(
+    fn read_batch(&self, max_reads: usize) -> Option<ReadBatch> {
+        self.read_scheduler
+            .as_ref()
+            .map(|scheduler| ReadBatch::new(scheduler.clone(), max_reads))
+    }
+
+    async fn read_with_batch(
         &self,
         path: &str,
         range: impl ObjectRangeBounds,
-        member: Option<ReadBatchMember>,
+        batch: Option<ReadBatchMember>,
     ) -> ObjectResult<Bytes> {
         use std::ops::Bound::{Excluded, Included};
 
@@ -763,24 +767,22 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
         let result = match scheduled {
             Some((scheduler, range)) => {
-                let staged = match member {
-                    Some(member) => Box::pin(member.stage(path, range.clone(), trace_id)).await,
-                    None => None,
-                };
-                let response = match staged {
+                let submitted = match batch
+                    .as_ref()
+                    .and_then(|batch| batch.stage(scheduler, path, range.clone(), trace_id))
+                {
                     Some(response) => Ok(response),
                     None => scheduler.submit(path, range, trace_id).await,
                 };
-                match response {
+                match submitted {
                     Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
                     Err(error) => Err(error),
                 }
             }
-            None => {
-                drop(member);
-                self.read_direct(path, range).await
-            }
+            None => self.read_direct(path, range).await,
         };
+        // The batch timer holds a Weak reference. The waiting read keeps its group alive.
+        drop(batch);
         if let Some(request_id) = trace_id {
             let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
             tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,
@@ -812,6 +814,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
             let builder = || async {
                 let mut attempt = self.object_store_metrics.begin_read(media_type, "attempt");
+                #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
+                replay::backend_attempt();
                 let result = self
                     .inner
                     .read(path, range.clone())

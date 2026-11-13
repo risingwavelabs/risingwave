@@ -37,6 +37,7 @@ use risingwave_hummock_sdk::{
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
+    ReadBatch,
 };
 use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
@@ -534,6 +535,16 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
+    ) -> HummockResult<BlockResponse> {
+        self.get_block_response_with_batch(sst, block_index, policy, None)
+            .await
+    }
+
+    pub(crate) async fn get_block_response_with_batch(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
         batch: Option<&risingwave_object_store::object::ReadBatch>,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
@@ -554,21 +565,17 @@ impl SstableStore {
             policy
         };
 
-        // A policy override must resolve outside the preparation barrier too.
-        let registration = if matches!(policy, CachePolicy::Fill(_)) {
-            batch.and_then(|batch| batch.register())
-        } else {
-            None
-        };
-        let (registration, member) = match registration {
-            Some((registration, member)) => (Some(registration), Some(member)),
-            None => (None, None),
-        };
-
         let idx = SstableBlockIndex {
             sst_id: object_id,
             block_idx: block_index as _,
         };
+        // Presence is only a batching hint. A cached or concurrently fetched
+        // block must still go through Foyer's atomic get-or-fetch registration.
+        let batch = batch.filter(|_| {
+            matches!(policy, CachePolicy::Fill(_))
+                && !(self.block_cache.is_hybrid() && self.block_cache.contains(&idx))
+        });
+        let member = batch.map(ReadBatch::member);
 
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
@@ -576,12 +583,13 @@ impl SstableStore {
         // future: fetch block if hybrid cache miss
         let span = tracing::debug_span!(target: "state_store_read_batch", "block_read",
             object_id = %object_id, block = block_index, start = range.start, end = range.end);
+        let fetch_range = range.clone();
         let fetch_block = || {
             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
             async move {
             outer_fetch.inc();
             let block_data = match store
-                .read_with_batch(&data_path, range.clone(), member)
+                .read_with_batch(&data_path, fetch_range.clone(), member)
                 .instrument_await("get_block_response".verbose())
                 .await
             {
@@ -589,7 +597,7 @@ impl SstableStore {
                 Err(e) => {
                     tracing::error!(
                         "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                        range,
+                        fetch_range,
                         object_id,
                         file_size
                     );
@@ -607,10 +615,11 @@ impl SstableStore {
                 let fetch = self.block_cache.get_or_fetch(&idx, || {
                     fetch_block().map(|res| res.map(|block| (block, properties)))
                 });
-                if let Some(registration) = registration {
-                    registration.set_leader(fetch.role() == foyer::GetOrFetchRole::Lead);
-                }
                 if fetch.need_await() {
+                    // A disk-cache follower may still provide the external fallback.
+                    if let Some(batch) = batch {
+                        batch.expect(range);
+                    }
                     self.read_metrics.block_cache_pending.inc();
                 } else {
                     self.read_metrics.block_cache_memory_hit.inc();
@@ -653,22 +662,19 @@ impl SstableStore {
             .await
     }
 
-    /// Register the demand block, close registration, then await only that block.
-    /// A resident demand block must not wait for neighbor disk-cache lookups.
     pub(crate) async fn get_with_read_batch(
         &self,
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
-        batch: Option<&risingwave_object_store::object::ReadBatch>,
+        batch: Option<risingwave_object_store::object::ReadBatch>,
     ) -> HummockResult<BlockHolder> {
         let response = self
-            .get_block_response(sst, block_index, policy, batch)
+            .get_block_response_with_batch(sst, block_index, policy, batch.as_ref())
             .await;
-        if let Some(batch) = batch {
-            batch.seal();
-        }
+        // Release the registered reads before waiting on the demand block.
+        drop(batch);
         let block_response = response?;
         let block_holder = block_response.wait().await?;
         stats.cache_data_block_total += 1;
@@ -1303,6 +1309,98 @@ mod tests {
             SstableStore::get_object_id_from_path(&data_path),
             HummockObjectId::Sstable(object_id.into())
         );
+    }
+
+    #[tokio::test]
+    async fn disk_cache_presence_is_only_a_batching_hint() {
+        use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, PsyncIoEngineConfig};
+        use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+        use risingwave_object_store::object::{
+            InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
+        };
+
+        use super::{Block, BlockEntry, HybridCacheBuilder, SstableBlockIndex};
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+
+        let object_store = Arc::new(
+            ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(
+                Arc::new(ObjectStoreMetrics::unused()),
+                Arc::new(ObjectStoreConfig {
+                    read_scheduler: risingwave_common::config::storage::ReadSchedulerConfig {
+                        prefetch_batch_wait_us: 100,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+            ))
+            .with_read_coalescing(),
+        );
+        let mut store = mock_sstable_store_with_object_store(object_store.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let device = FsDeviceBuilder::new(dir.path())
+            .with_capacity(16 << 20)
+            .build()
+            .unwrap();
+        Arc::get_mut(&mut store).unwrap().block_cache = HybridCacheBuilder::new()
+            .memory(64 << 20)
+            .storage()
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(device)
+                    .with_block_size(1 << 20)
+                    .with_buffer_pool_size(4 << 20),
+            )
+            .build()
+            .await
+            .unwrap();
+        let (sst, _) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+        let key = SstableBlockIndex {
+            sst_id: sst.id,
+            block_idx: 0,
+        };
+        let (range, uncompressed_size) = sst.calculate_block_info(0);
+        let bytes = object_store
+            .read(&store.get_sst_data_path(sst.id), range)
+            .await
+            .unwrap();
+        let cache = store.block_cache();
+        let block = Block::decode(bytes, uncompressed_size).unwrap();
+        drop(cache.storage_writer(key).insert(Box::new(block)).unwrap());
+        cache.storage().wait().await;
+        assert!(cache.contains(&key));
+        assert!(!cache.memory().contains(&key));
+
+        let policy = CachePolicy::Fill(foyer::Hint::Normal);
+        let batch = object_store.read_batch(2).unwrap();
+        let response = store
+            .get_block_response_with_batch(&sst, 0, policy, Some(&batch))
+            .await
+            .unwrap();
+        let from_disk = response.wait().await.unwrap();
+        assert!(matches!(from_disk.entry(), BlockEntry::HybridCache(entry)
+            if entry.source() == foyer::Source::Disk));
+        drop(from_disk);
+        cache.memory().remove(&key);
+        assert!(cache.contains(&key));
+
+        let response = store
+            .get_block_response_with_batch(&sst, 0, policy, Some(&batch))
+            .await
+            .unwrap();
+        // The spawned producer has not been polled on this current-thread
+        // runtime. Remove the disk entry after observing the positive hint.
+        cache.storage().delete(&key);
+        assert!(!cache.contains(&key));
+        let from_remote = tokio::time::timeout(std::time::Duration::from_secs(5), response.wait())
+            .await
+            .expect("a stale positive hint must still read without waiting for the batch to close")
+            .unwrap();
+        assert!(matches!(from_remote.entry(), BlockEntry::HybridCache(entry)
+            if entry.source() == foyer::Source::Outer));
+        drop(batch);
+        drop(from_remote);
+        cache.close().await.unwrap();
     }
 
     #[tokio::test]

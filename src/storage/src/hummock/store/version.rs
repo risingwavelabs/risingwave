@@ -42,6 +42,7 @@ use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::warn;
 
+use super::iter_init_profile::{IterInitProfile, measure_seek};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::change_log::ChangeLogIterator;
@@ -620,6 +621,21 @@ impl HummockVersionReader {
     }
 }
 
+fn profile_iter_filter(
+    sstable: &Sstable,
+    range: &crate::hummock::UserKeyRangeRef<'_>,
+    prefix_hash: u64,
+    stats: &mut StoreLocalStatistic,
+    profile: Option<&mut IterInitProfile>,
+) -> bool {
+    let start = profile.as_ref().map(|_| Instant::now());
+    let matches = hit_sstable_filter(sstable, range, prefix_hash, stats);
+    if let Some((profile, start)) = profile.zip(start) {
+        profile.bloom += start.elapsed();
+    }
+    matches
+}
+
 const SLOW_ITER_FETCH_META_DURATION_SECOND: f64 = 5.0;
 
 impl HummockVersionReader {
@@ -963,11 +979,12 @@ impl HummockVersionReader {
             read_options,
             read_version_tuple,
             None,
+            None,
         )
         .await
     }
 
-    pub async fn iter_with_memtable<'b>(
+    pub(super) async fn iter_with_memtable<'b>(
         &self,
         table_key_range: TableKeyRange,
         epoch: u64,
@@ -976,6 +993,7 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
         memtable_iter: Option<MemTableHummockIterator<'b>>,
+        mut profile: Option<&mut IterInitProfile>,
     ) -> StorageResult<HummockStorageIteratorInner<'b>> {
         let user_key_range_ref = bound_table_key_range(table_id, &table_key_range);
         let user_key_range = (
@@ -986,6 +1004,7 @@ impl HummockVersionReader {
         let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
         let min_epoch = gen_min_epoch(epoch, table_option.retention_seconds);
+        let build_start = profile.as_ref().map(|_| Instant::now());
         self.iter_inner(
             table_key_range,
             epoch,
@@ -996,6 +1015,7 @@ impl HummockVersionReader {
             &committed,
             &mut local_stats,
             &mut factory,
+            profile.as_deref_mut(),
         )
         .await?;
         let merge_iter = factory.build(memtable_iter);
@@ -1007,7 +1027,18 @@ impl HummockVersionReader {
             min_epoch,
             Some(committed),
         );
-        user_iter.rewind().await?;
+        if let Some((profile, start)) = profile.as_deref_mut().zip(build_start) {
+            profile.build = start.elapsed();
+        }
+        if let Some(profile) = profile {
+            let start = Instant::now();
+            let (result, awaits) = measure_seek(user_iter.rewind()).await;
+            result?;
+            profile.seek = start.elapsed();
+            profile.seek_awaits = awaits;
+        } else {
+            user_iter.rewind().await?;
+        }
         Ok(HummockStorageIteratorInner::new(
             user_iter,
             self.state_store_metrics.clone(),
@@ -1045,6 +1076,7 @@ impl HummockVersionReader {
             &committed,
             &mut local_stats,
             &mut factory,
+            None,
         )
         .await?;
         let merge_iter = factory.build(memtable_iter);
@@ -1076,6 +1108,7 @@ impl HummockVersionReader {
         committed: &CommittedVersion,
         local_stats: &mut StoreLocalStatistic,
         factory: &mut F,
+        mut profile: Option<&mut IterInitProfile>,
     ) -> StorageResult<()> {
         {
             fn bound_inner<T>(bound: &Bound<T>) -> Option<&T> {
@@ -1131,18 +1164,27 @@ impl HummockVersionReader {
             mode => mode,
         };
         let sst_read_options = Arc::new(sst_read_options);
+        let metadata = crate::hummock::SstMetaBatch::current();
         for sstable_info in &uncommitted_ssts {
-            let table_holder = self
-                .sstable_store
-                .sstable(sstable_info, local_stats)
-                .await?;
+            let meta_start = profile.as_ref().map(|_| Instant::now());
+            let table_holder = crate::hummock::SstMetaBatch::sstable_for_iter(
+                metadata.as_deref(),
+                &self.sstable_store,
+                sstable_info,
+                local_stats,
+            )
+            .await?;
+            if let Some((profile, start)) = profile.as_deref_mut().zip(meta_start) {
+                profile.sst_meta += start.elapsed();
+            }
 
             if let Some(prefix_hash) = filter_prefix_hash.as_ref()
-                && !hit_sstable_filter(
+                && !profile_iter_filter(
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
                     local_stats,
+                    profile.as_deref_mut(),
                 )
             {
                 continue;
@@ -1184,17 +1226,25 @@ impl HummockVersionReader {
                 } else {
                     let sstable_info = &sstable_infos[0];
 
-                    let sstable = self
-                        .sstable_store
-                        .sstable(sstable_info, local_stats)
-                        .await?;
+                    let meta_start = profile.as_ref().map(|_| Instant::now());
+                    let sstable = crate::hummock::SstMetaBatch::sstable_for_iter(
+                        metadata.as_deref(),
+                        &self.sstable_store,
+                        sstable_info,
+                        local_stats,
+                    )
+                    .await?;
+                    if let Some((profile, start)) = profile.as_deref_mut().zip(meta_start) {
+                        profile.sst_meta += start.elapsed();
+                    }
 
                     if let Some(dist_hash) = filter_prefix_hash.as_ref()
-                        && !hit_sstable_filter(
+                        && !profile_iter_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
+                            profile.as_deref_mut(),
                         )
                     {
                         continue;
@@ -1221,17 +1271,25 @@ impl HummockVersionReader {
                     continue;
                 }
                 for sstable_info in fetch_meta_req {
-                    let sstable = self
-                        .sstable_store
-                        .sstable(sstable_info, local_stats)
-                        .await?;
+                    let meta_start = profile.as_ref().map(|_| Instant::now());
+                    let sstable = crate::hummock::SstMetaBatch::sstable_for_iter(
+                        metadata.as_deref(),
+                        &self.sstable_store,
+                        sstable_info,
+                        local_stats,
+                    )
+                    .await?;
+                    if let Some((profile, start)) = profile.as_deref_mut().zip(meta_start) {
+                        profile.sst_meta += start.elapsed();
+                    }
                     assert_eq!(sstable_info.object_id, sstable.id);
                     if let Some(dist_hash) = filter_prefix_hash.as_ref()
-                        && !hit_sstable_filter(
+                        && !profile_iter_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
+                            profile.as_deref_mut(),
                         )
                     {
                         continue;

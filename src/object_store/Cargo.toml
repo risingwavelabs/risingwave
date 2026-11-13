@@ -12,6 +12,7 @@ ignored = ["aws-credential-types"]
 
 [features]
 test = []
+read-scheduler-replay = []
 
 [dependencies]
 arc-swap = { workspace = true }

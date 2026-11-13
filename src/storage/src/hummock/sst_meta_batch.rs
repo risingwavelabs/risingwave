@@ -13,35 +13,66 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use risingwave_common::config::storage::ReadBatchConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-use super::{HummockResult, SstableStoreRef, TableHolder};
+use super::{HummockResult, SstableStore, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
-/// Ready metadata handles shared by independent key reads in one `MultiGet`.
+tokio::task_local! {
+    static ITER_META_BATCH: Arc<SstMetaBatch>;
+}
+
+/// Ready metadata handles shared by a batch of reads.
 /// Foyer owns loading and single-flight. The batch retains handles until it is dropped.
 /// Active reads can hold their own handles independently of the retention budget.
-pub(super) struct SstMetaBatch {
+pub struct SstMetaBatch {
     config: ReadBatchConfig,
     inner: Mutex<Metadata>,
 }
 
 #[derive(Default)]
 struct Metadata {
+    owner: Option<Weak<SstableStore>>,
     entries: HashMap<HummockSstableObjectId, TableHolder>,
     regular_bytes: usize,
     oversized: Option<TableHolder>,
 }
 
 impl SstMetaBatch {
-    pub(super) fn new(config: ReadBatchConfig) -> Self {
+    pub fn new(config: ReadBatchConfig) -> Self {
         Self {
             config,
             inner: Mutex::new(Metadata::default()),
+        }
+    }
+
+    /// Reuse metadata during iterator construction, including its initial seek.
+    /// The iterator reads the current state normally and does not retain the batch.
+    pub async fn scope<T>(batch: Option<&Arc<Self>>, init: impl Future<Output = T>) -> T {
+        match batch {
+            Some(batch) => ITER_META_BATCH.scope(batch.clone(), init).await,
+            None => init.await,
+        }
+    }
+
+    pub(super) fn current() -> Option<Arc<Self>> {
+        ITER_META_BATCH.try_with(Arc::clone).ok()
+    }
+
+    pub(super) async fn sstable_for_iter(
+        batch: Option<&Self>,
+        store: &SstableStoreRef,
+        info: &SstableInfo,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        match batch {
+            Some(batch) => batch.sstable(store, info, stats).await,
+            None => store.sstable(info, stats).await,
         }
     }
 
@@ -57,20 +88,28 @@ impl SstMetaBatch {
         let object_id = info.object_id;
         let max_entries = self.config.meta_max_entries.get();
         let max_bytes = self.config.meta_max_bytes.get();
-        let (available_bytes, oversized_slot_free) = {
-            let inner = self.inner.lock();
-            let oversized = inner
-                .oversized
-                .as_ref()
-                .filter(|table| table.id == object_id);
-            if let Some(table) = inner.entries.get(&object_id).or(oversized) {
-                stats.cache_meta_batch_ready += 1;
-                return Ok(table.clone());
+        let retention = {
+            let mut inner = self.inner.lock();
+            let owner = inner.owner.get_or_insert_with(|| Arc::downgrade(store));
+            if !std::ptr::eq(owner.as_ptr(), Arc::as_ptr(store)) {
+                None
+            } else {
+                let oversized = inner
+                    .oversized
+                    .as_ref()
+                    .filter(|table| table.id == object_id);
+                if let Some(table) = inner.entries.get(&object_id).or(oversized) {
+                    stats.cache_meta_batch_ready += 1;
+                    return Ok(table.clone());
+                }
+                Some((
+                    (inner.entries.len() < max_entries).then_some(max_bytes - inner.regular_bytes),
+                    inner.oversized.is_none(),
+                ))
             }
-            (
-                (inner.entries.len() < max_entries).then_some(max_bytes - inner.regular_bytes),
-                inner.oversized.is_none(),
-            )
+        };
+        let Some((available_bytes, oversized_slot_free)) = retention else {
+            return store.sstable(info, stats).await;
         };
         let table = store.sstable(info, stats).await?;
         // Foyer already weighed the decoded metadata when it created the entry.
@@ -119,6 +158,50 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_default_test_sstable};
+
+    #[tokio::test]
+    async fn test_iterator_metadata_scope_reuses_handles_from_the_same_store() {
+        let store = mock_sstable_store().await;
+        let other_store = mock_sstable_store().await;
+        let (_, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, store.clone()).await;
+        let (_, other_info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, other_store.clone()).await;
+        let batch = Arc::new(SstMetaBatch::new(ReadBatchConfig {
+            meta_reuse: true,
+            ..Default::default()
+        }));
+
+        let mut stats = StoreLocalStatistic::default();
+        for _ in 0..2 {
+            SstMetaBatch::scope(Some(&batch), async {
+                let current = SstMetaBatch::current();
+                SstMetaBatch::sstable_for_iter(current.as_deref(), &store, &info, &mut stats)
+                    .await
+                    .unwrap();
+            })
+            .await;
+            assert!(SstMetaBatch::current().is_none());
+        }
+        assert_eq!(stats.cache_meta_block_total, 1);
+        assert_eq!(stats.cache_meta_batch_ready, 1);
+
+        let mut other_stats = StoreLocalStatistic::default();
+        SstMetaBatch::scope(Some(&batch), async {
+            let current = SstMetaBatch::current();
+            SstMetaBatch::sstable_for_iter(
+                current.as_deref(),
+                &other_store,
+                &other_info,
+                &mut other_stats,
+            )
+            .await
+            .unwrap();
+        })
+        .await;
+        assert_eq!(other_stats.cache_meta_block_total, 1);
+        assert_eq!(other_stats.cache_meta_batch_ready, 0);
+    }
 
     #[tokio::test]
     async fn test_batch_metadata_retains_completed_foyer_fetch() {

@@ -73,6 +73,7 @@ pub struct HummockStateStoreMetrics {
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
+    pub iter_init_profile_duration: RelabeledHistogramVec,
     pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
@@ -276,6 +277,23 @@ impl HummockStateStoreMetrics {
         let remote_read_time = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             remote_read_time,
+            metric_level,
+        );
+
+        let opts = histogram_opts!(
+            "state_store_iter_init_profile_duration_seconds",
+            "Sampled durations within forward local iterator initialization",
+            state_store_read_time_buckets.clone(),
+        );
+        let iter_init_profile_duration = register_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "latency", "phase"],
+            registry
+        )
+        .unwrap();
+        let iter_init_profile_duration = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Debug,
+            iter_init_profile_duration,
             metric_level,
         );
 
@@ -739,6 +757,7 @@ impl HummockStateStoreMetrics {
             iter_scan_key_counts,
             get_shared_buffer_hit_counts,
             remote_read_time,
+            iter_init_profile_duration,
             iter_fetch_meta_duration,
             iter_fetch_meta_cache_unhits,
             iter_slow_fetch_meta_cache_unhits,
