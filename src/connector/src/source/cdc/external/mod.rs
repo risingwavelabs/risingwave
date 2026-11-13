@@ -59,6 +59,7 @@ pub enum ExternalCdcTableType {
     Postgres,
     SqlServer,
     Mongodb,
+    Oracle,
 }
 
 impl ExternalCdcTableType {
@@ -70,6 +71,7 @@ impl ExternalCdcTableType {
             "postgres-cdc" => Self::Postgres,
             "sqlserver-cdc" => Self::SqlServer,
             "mongodb-cdc" => Self::Mongodb,
+            "oracle-cdc" => Self::Oracle,
             _ => Self::Unspecified,
         }
     }
@@ -79,6 +81,7 @@ impl ExternalCdcTableType {
             Self::Mysql | Self::Mariadb => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
+            Self::Oracle => Ok(OracleExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
             Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
@@ -111,6 +114,9 @@ impl ExternalCdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            Self::Oracle => Ok(ExternalTableReaderImpl::Oracle(
+                OracleExternalTableReader::new(config, schema, pk_indices)?,
+            )),
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
@@ -127,6 +133,7 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
             ExternalCdcTableType::Mariadb => Self::Mariadb,
             ExternalCdcTableType::SqlServer => Self::SqlServer,
             ExternalCdcTableType::Mongodb => Self::Mongodb,
+            ExternalCdcTableType::Oracle => Self::Oracle,
             ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
         }
     }
@@ -140,6 +147,7 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
             PbCdcTableType::Mariadb => Self::Mariadb,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
+            PbCdcTableType::Oracle => Self::Oracle,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -166,10 +174,9 @@ impl SchemaTableName {
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            ExternalCdcTableType::Postgres => {
-                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
-            }
-            ExternalCdcTableType::SqlServer => {
+            ExternalCdcTableType::Postgres
+            | ExternalCdcTableType::Oracle
+            | ExternalCdcTableType::SqlServer => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
             ExternalCdcTableType::Unspecified
@@ -244,6 +251,12 @@ pub struct DebeziumSourceOffset {
     // sql server offset
     pub commit_lsn: Option<String>,
     pub change_lsn: Option<String>,
+    // oracle offset
+    // Oracle's sourceOffset can emit a string txId, which conflicts with the
+    // PostgreSQL txid field above using the same serde name. Oracle offsets are
+    // parsed directly with serde_json::Value instead of declaring this field here;
+    // the comparison SCN is read as a string and converted to u64.
+    // pub decoded_commit_scn: Option<u64>
 }
 
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
