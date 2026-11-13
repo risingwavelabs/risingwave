@@ -124,7 +124,7 @@ For Cloud deployments, the necessary configuration is already done, and you can 
 
 The dumped files will be saved on the target node.
 
-Besides manual dumps, RisingWave deployments on Cloud will also **auto dump** heap profiles when the process memory usage crosses a configured threshold. See `[server.heap_profiling]` section in the configuration file.
+Besides manual dumps, RisingWave deployments on Cloud will also **auto dump** heap profiles when memory usage crosses a configured threshold. The trigger uses cgroup memory usage in containers and falls back to host memory usage if the cgroup reading is unavailable. See the `[server.heap_profiling]` section in the configuration file.
 
 ## Step 2 - Analyze Heap Dump
 

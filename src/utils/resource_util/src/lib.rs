@@ -165,11 +165,11 @@ pub mod memory {
         sys.used_memory() as usize
     }
 
-    /// Returns the total memory used by the system in bytes.
+    /// Returns the total memory used in bytes.
     ///
-    /// If running in container, this function will read the cgroup interface files for the
-    /// memory used, if interface files are not found, will return the memory used in the system
-    /// as default. The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
+    /// In a container, this returns the cgroup's memory usage, including memory charged for
+    /// file cache. If the cgroup usage is unavailable or invalid, this returns the host's
+    /// used memory instead. The cgroup mount point is assumed to be at /sys/fs/cgroup.
     ///
     ///
     /// # Examples
@@ -183,7 +183,13 @@ pub mod memory {
             "memory used",
             super::Controller::Memory,
             get_system_memory_used,
-            get_container_memory_used,
+            |cgroup_version| {
+                let usage_path = match cgroup_version {
+                    super::CgroupVersion::V1 => V1_MEMORY_CURRENT_PATH,
+                    super::CgroupVersion::V2 => V2_MEMORY_CURRENT_PATH,
+                };
+                get_container_memory_used(usage_path)
+            },
         )
     }
 
@@ -225,18 +231,38 @@ pub mod memory {
         Ok(std::cmp::min(value, system))
     }
 
-    /// Returns the memory used in a container if running in a container else returns the system
-    /// memory used.
-    fn get_container_memory_used(
-        cgroup_version: super::CgroupVersion,
-    ) -> Result<usize, std::io::Error> {
-        let usage_path = match cgroup_version {
-            super::CgroupVersion::V1 => V1_MEMORY_CURRENT_PATH,
-            super::CgroupVersion::V2 => V2_MEMORY_CURRENT_PATH,
-        };
-        let system = get_system_memory_used();
-        let value = super::util::read_usize_or_max(usage_path, system)?;
-        Ok(std::cmp::min(value, system))
+    fn get_container_memory_used(usage_path: &str) -> Result<usize, std::io::Error> {
+        // Host used memory can exclude reclaimable cache charged to the cgroup.
+        super::util::read_usize(usage_path)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::io::ErrorKind;
+
+        use super::get_container_memory_used;
+
+        #[test]
+        fn test_container_memory_usage() {
+            let dir = tempfile::tempdir().unwrap();
+            let usage_path = dir.path().join("memory.current");
+            let path = usage_path.to_str().unwrap();
+
+            // An intentionally large counter must be returned without a host-dependent cap.
+            std::fs::write(&usage_path, format!("{}\n", usize::MAX)).unwrap();
+            assert_eq!(get_container_memory_used(path).unwrap(), usize::MAX);
+
+            std::fs::write(&usage_path, "max\n").unwrap();
+            assert_eq!(
+                get_container_memory_used(path).unwrap_err().kind(),
+                ErrorKind::InvalidData
+            );
+            std::fs::remove_file(&usage_path).unwrap();
+            assert_eq!(
+                get_container_memory_used(path).unwrap_err().kind(),
+                ErrorKind::NotFound
+            );
+        }
     }
 }
 
