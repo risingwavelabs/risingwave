@@ -98,41 +98,6 @@ async fn test_read_and_unregister_lifecycle() {
     assert_eq!(current.read(..).await.unwrap(), original);
 }
 
-#[tokio::test]
-async fn test_failed_download_can_be_retried() {
-    let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
-        .await
-        .unwrap();
-    let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.register_objects([object_id]);
-    let token = pin_cache.prepare_refill(object_id).unwrap();
-    assert!(
-        pin_cache
-            .download(object_id, 8, remote_store.clone(), "sst".into())
-            .await
-            .is_err()
-    );
-    // Remote initialization failed before any local upload, so no GC is needed to retry.
-
-    assert!(pin_cache.get(object_id).is_none());
-
-    remote_store
-        .upload("sst", Bytes::from_static(b"complete"))
-        .await
-        .unwrap();
-    let download = pin_cache
-        .download(object_id, 8, remote_store, "sst".into())
-        .await
-        .unwrap();
-    assert!(
-        pin_cache.get(object_id).is_none(),
-        "download alone must not publish"
-    );
-    assert!(pin_cache.publish(token, download));
-    assert!(pin_cache.get(object_id).is_some());
-}
-
 #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_completed_invalid_fs_upload_is_collected() {
@@ -315,7 +280,7 @@ fn test_read_cleanup_on_runtime_shutdown() {
         let _other_shard = cache.shards[0].read_requests.lock();
         {
             // A captured read handle also needs no membership lock in its own shard.
-            let _state = cache.shards[2].state.write();
+            let _state = cache.shards[2].objects.write();
             assert!(
                 futures::executor::block_on(read_handle.get_or_fetch(0, || {
                     assert!(cache.shard(id).read_requests.try_lock().is_some());
@@ -361,26 +326,21 @@ async fn test_other_shard_does_not_block_object_operations() {
     // Hold an unrelated shard until the other thread completes. On timeout, release it
     // before joining so an accidental cross-shard dependency fails instead of hanging.
     let result = std::thread::scope(|scope| {
-        let shard = cache.shard(blocked).state.write();
+        let shard = cache.shard(blocked).objects.write();
         let (tx, rx) = std::sync::mpsc::channel();
         let cache = &cache;
         scope.spawn(move || {
             assert!(cache.is_registered(available));
             assert!(cache.get(available).is_none());
-            let token = cache.prepare_refill(available).unwrap();
             let download = runtime
                 .block_on(cache.download(available, 8, remote, "sst".into()))
                 .unwrap();
-            assert!(cache.publish(token, download));
-            let token = cache.prepare_refill(available).unwrap();
-            cache.revoke_refill(available);
-            assert_ne!(cache.prepare_refill(available), Some(token));
+            assert!(cache.publish(available, download));
             cache.get(available).unwrap().invalidate();
             assert!(cache.get(available).is_none());
             cache.unregister_objects([available]);
             assert!(!cache.is_registered(available));
             cache.register_objects([available]);
-            assert!(cache.prepare_refill(available).is_some());
             tx.send(()).unwrap();
         });
         let result = rx.recv_timeout(Duration::from_secs(5));
@@ -397,23 +357,23 @@ async fn test_object_membership_across_shards() {
         .unwrap();
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
     cache.register_objects(objects);
-    let tokens = objects.map(|id| cache.prepare_refill(id).unwrap());
     let remote = in_memory_object_store();
     remote
         .upload("sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
     for id in objects {
-        download_and_publish_for_test(&cache, remote.clone(), "sst".into(), id, 8)
+        let download = cache
+            .download(id, 8, remote.clone(), "sst".into())
             .await
             .unwrap();
+        assert!(cache.get(id).is_none(), "download alone must not publish");
+        assert!(cache.publish(id, download));
     }
 
-    // Repeated registration, including duplicates in one batch, preserves the publication
-    // and refill identity.
+    // Repeated registration, including duplicates in one batch, preserves the publication.
     let first = cache.get(objects[0]).unwrap();
     cache.register_objects([objects[0], objects[0]]);
-    assert_eq!(cache.prepare_refill(objects[0]), Some(tokens[0]));
     assert!(Arc::ptr_eq(
         &first.file,
         &cache.get(objects[0]).unwrap().file
@@ -423,20 +383,16 @@ async fn test_object_membership_across_shards() {
     cache.unregister_objects([objects[0]]);
     assert!(!cache.is_registered(objects[0]));
     assert!(cache.get(objects[0]).is_none());
-    assert!(cache.prepare_refill(objects[0]).is_none());
     assert_eq!(
         first.read(..).await.unwrap(),
         Bytes::from_static(b"complete")
     );
-    assert_eq!(cache.prepare_refill(objects[1]), Some(tokens[1]));
     assert!(cache.get(objects[1]).is_some());
 
     cache.register_objects([objects[0]]);
-    assert_ne!(cache.prepare_refill(objects[0]), Some(tokens[0]));
     assert!(cache.get(objects[0]).is_none());
     cache.unregister_objects(objects);
     assert!(objects.iter().all(|&id| !cache.is_registered(id)));
-    assert!(objects.iter().all(|&id| cache.prepare_refill(id).is_none()));
     assert!(objects.iter().all(|&id| cache.get(id).is_none()));
 }
 

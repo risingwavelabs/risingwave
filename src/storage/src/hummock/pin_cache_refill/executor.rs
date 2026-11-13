@@ -30,7 +30,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use self::PinCacheRefillAttemptOutcome::{CapacityRejected, Obsolete, PathBusy, Published};
 use super::PinCacheRefillObject;
 use crate::hummock::SstableStoreRef;
-use crate::hummock::pin_cache::{PinCacheDownloadError, PinCacheRefillToken};
+use crate::hummock::pin_cache::PinCacheDownloadError;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 enum PinCacheRefillAttemptOutcome {
@@ -43,7 +43,7 @@ enum PinCacheRefillAttemptOutcome {
 async fn refill_pin_cache_object(
     store: &SstableStoreRef,
     object_size: u64,
-    token: PinCacheRefillToken,
+    object: HummockSstableObjectId,
     permit: OwnedSemaphorePermit,
     work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
 ) -> anyhow::Result<PinCacheRefillAttemptOutcome> {
@@ -51,10 +51,17 @@ async fn refill_pin_cache_object(
         .pin_cache()
         .expect("pin refill requires a local backend");
     // Admission may have been revoked while waiting for the data permit.
-    if cache.prepare_refill(token.object_id()) != Some(token) {
-        return Ok(Obsolete);
+    {
+        let work = work.lock();
+        if !work
+            .get(&object)
+            .is_some_and(|work| work.completion.is_some())
+            || !cache.is_registered(object)
+        {
+            return Ok(Obsolete);
+        }
     }
-    let prepared = match cache.prepare_download(token.object_id(), object_size).await {
+    let prepared = match cache.prepare_download(object, object_size).await {
         Ok(prepared) => prepared,
         Err(PinCacheDownloadError::CapacityRejected) => return Ok(CapacityRejected),
         Err(PinCacheDownloadError::PathBusy) => return Ok(PathBusy),
@@ -68,13 +75,12 @@ async fn refill_pin_cache_object(
         let cache = store
             .pin_cache()
             .expect("pin refill requires a local backend");
-        let object = token.object_id();
         {
             let work = work.lock();
             if !work
                 .get(&object)
                 .is_some_and(|work| work.completion.is_some())
-                || cache.prepare_refill(object) != Some(token)
+                || !cache.is_registered(object)
             {
                 return Ok(Obsolete);
             }
@@ -94,7 +100,7 @@ async fn refill_pin_cache_object(
             drop(download);
             return Ok(Obsolete);
         }
-        Ok(if cache.publish(token, download) {
+        Ok(if cache.publish(object, download) {
             Published
         } else {
             Obsolete
@@ -110,20 +116,20 @@ async fn refill_pin_cache_object(
 struct Work {
     object_size: u64,
     admitted_tables: HashSet<TableId>,
-    cache_token: PinCacheRefillToken,
     completion: Option<oneshot::Sender<bool>>,
 }
 
 /// Downloads each admitted object once under the shared data concurrency limit.
-/// The gate loads metadata and checks ownership before submitting a download.
+/// The Pin refiller checks policy and ownership before submitting a download.
 /// Dropping a waiter leaves its copy running; errors finish without background retries.
 pub(crate) struct PinCacheRefillExecutor {
     // Lock order: executor work -> PinCache shard. Never hold work across await.
-    // Indexes dependencies and waiters for queued and running attempts. Cancellation
-    // closes the waiter but keeps the entry until physical exit to prevent overlapping copies.
+    // Object/table cancellation closes the waiter but keeps its entry until physical exit.
+    // Driver shutdown clears entries, forbidding publication while physical copies drain.
     work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
     // IDs waiting for dispatch; the driver consumes each once and reads its inputs from work.
-    // Dropping the executor's sole sender stops the driver and its unfinished copies.
+    // Driver exit on the drained channel cancels preparation and publication authority.
+    // Submitted physical copies retain their data permits and byte leases until I/O exits.
     jobs: mpsc::UnboundedSender<HummockSstableObjectId>,
     store: SstableStoreRef,
 }
@@ -146,8 +152,7 @@ impl PinCacheRefillExecutor {
         Self { work, jobs, store }
     }
 
-    /// Submits a gate-deduplicated object after metadata and ownership admission.
-    /// The token must have been captured before asynchronous preparation; do not recapture it.
+    /// Submits an object after policy and ownership admission, deduplicating active copies.
     /// Submission is synchronous; the owned future only waits for its result.
     /// True includes published/cached and obsolete work, not a cache-hit guarantee.
     /// False means failure or cancellation, including a duplicate whose previous physical
@@ -156,7 +161,6 @@ impl PinCacheRefillExecutor {
     pub(crate) fn submit(
         &self,
         candidate: &PinCacheRefillObject,
-        cache_token: PinCacheRefillToken,
     ) -> impl Future<Output = bool> + Send + 'static + use<> {
         let cache = self
             .store
@@ -168,10 +172,10 @@ impl PinCacheRefillExecutor {
         if self.jobs.is_closed() || work.contains_key(&object) {
             return Either::Left(ready(false));
         }
-        if cache.prepare_refill(object) != Some(cache_token) {
+        if !cache.is_registered(object) {
             return Either::Left(ready(true));
         }
-        // The gate filters cached objects too; defensively avoid duplicate publication.
+        // The Pin refiller filters cached objects too; defensively avoid duplicate publication.
         if cache.get(object).is_some() {
             return Either::Left(ready(true));
         }
@@ -181,7 +185,6 @@ impl PinCacheRefillExecutor {
             Work {
                 object_size: candidate.source_sst.file_size,
                 admitted_tables: candidate.admitted_tables.clone(),
-                cache_token,
                 completion: Some(sender),
             },
         );
@@ -191,17 +194,10 @@ impl PinCacheRefillExecutor {
         Either::Right(async move { matches!(receiver.await, Ok(true)) })
     }
 
-    /// Withdraws backend membership before completing waiters. Physical attempts retain
-    /// their entries until they exit; an old token can never publish after unregistration.
-    pub(crate) fn unregister_objects(
-        &self,
-        objects: impl IntoIterator<Item = HummockSstableObjectId>,
-    ) {
-        let objects: Vec<_> = objects.into_iter().collect();
-        self.store
-            .pin_cache()
-            .expect("pin refill requires a local backend")
-            .unregister_objects(objects.iter().copied());
+    /// Completes waiters after the CN withdraws backend membership. Physical attempts retain
+    /// their entries until they exit. The handler cancels removed objects before it can
+    /// register them again, and publication checks membership under the index lock.
+    pub(crate) fn cancel_objects(&self, objects: impl IntoIterator<Item = HummockSstableObjectId>) {
         let mut work = self.work.lock();
         for object in objects {
             if let Some(work) = work.get_mut(&object) {
@@ -210,23 +206,14 @@ impl PinCacheRefillExecutor {
         }
     }
 
-    /// The gate identifies changed tables from its authoritative policy/ownership maps.
+    /// CN metadata identifies changed tables from its authoritative policy/ownership maps.
     /// Cancel only dependent downloads; updates never submit jobs or sweep published files.
     pub(crate) fn cancel_tables(&self, changed_tables: &HashSet<TableId>) {
-        let cache = self
-            .store
-            .pin_cache()
-            .expect("pin refill requires a local backend");
         let mut work = self.work.lock();
-        for (object, work) in work.iter_mut() {
-            if work.completion.is_none() || work.admitted_tables.is_disjoint(changed_tables) {
-                continue;
+        for work in work.values_mut() {
+            if !work.admitted_tables.is_disjoint(changed_tables) {
+                work.completion.take();
             }
-            // Stale work cannot revoke another registration's token.
-            if cache.prepare_refill(*object) == Some(work.cache_token) {
-                cache.revoke_refill(*object);
-            }
-            work.completion.take();
         }
     }
 
@@ -243,11 +230,7 @@ impl PinCacheRefillExecutor {
                     let Some(object) = job else {
                         break;
                     };
-                    let (object_size, token) = {
-                        let work = work.lock();
-                        let work = &work[&object];
-                        (work.object_size, work.cache_token)
-                    };
+                    let object_size = work.lock()[&object].object_size;
                     let store = store.clone();
                     let concurrency = concurrency.clone();
                     let work = work.clone();
@@ -257,7 +240,7 @@ impl PinCacheRefillExecutor {
                                 .acquire_owned()
                                 .await
                                 .expect("refill concurrency stays open");
-                            refill_pin_cache_object(&store, object_size, token, permit, work).await
+                            refill_pin_cache_object(&store, object_size, object, permit, work).await
                         })
                         .rw_catch_unwind()
                         .await;

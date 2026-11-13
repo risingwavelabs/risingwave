@@ -29,20 +29,20 @@ use crate::hummock::{HummockError, HummockResult, SstableBlockIndex};
 pub(super) type ReadRequest = Shared<oneshot::Receiver<HummockResult<HybridCachedBlockEntry>>>;
 
 impl PinCacheReadHandle {
-    /// Withdraws this specific publication, preserving registration and refill tokens.
+    /// Withdraws this specific publication, preserving registration.
     /// Use after its file fails to read or decode, or is no longer eligible for local reads.
     /// Call only for this handle's own I/O or decode failure, not an error shared by a fetch.
     pub(crate) fn invalidate(&self) {
-        let mut state = self.pin_cache.shard(self.object_id).state.write();
+        let mut objects = self.pin_cache.shard(self.object_id).objects.write();
         // A late failure must not invalidate a newer publication of the same object.
-        if let Some(object) = state.objects.get_mut(&self.object_id)
+        if let Some(object) = objects.get_mut(&self.object_id)
             && object
                 .published
                 .as_ref()
                 .is_some_and(|file| Arc::ptr_eq(file, &self.file))
         {
             let file = object.unpublish().unwrap();
-            drop(state);
+            drop(objects);
             self.pin_cache.enqueue_delete(file);
         }
     }

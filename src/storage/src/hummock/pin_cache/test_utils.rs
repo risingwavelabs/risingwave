@@ -52,7 +52,7 @@ impl PinCache {
         *self.test_hooks.space_probe.lock() = Some(Arc::new(probe));
     }
 
-    pub(super) fn watch_space_probes_for_test(
+    pub(in crate::hummock) fn watch_space_probes_for_test(
         &self,
     ) -> mpsc::UnboundedReceiver<oneshot::Sender<()>> {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -90,13 +90,11 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     object_id: HummockSstableObjectId,
     object_size: u64,
 ) -> Result<(), super::PinCacheDownloadError> {
-    let token = pin_cache
-        .prepare_refill(object_id)
-        .expect("test object must be registered");
+    assert!(pin_cache.is_registered(object_id));
     let download = pin_cache
         .download(object_id, object_size, remote_store, remote_path)
         .await?;
-    assert!(pin_cache.publish(token, download));
+    assert!(pin_cache.publish(object_id, download));
     Ok(())
 }
 

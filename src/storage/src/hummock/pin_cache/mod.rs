@@ -17,11 +17,8 @@
 //! Callers register referenced objects and unregister obsolete ones at their chosen lifecycle
 //! boundaries. The backend object registry does not track versions; the membership module
 //! independently computes version-derived logical SST references.
-//! A refill captures a `PinCacheRefillToken` with `prepare_refill` before it is queued;
-//! the caller checks it before I/O, and `publish` checks it atomically with the index update.
-//! Each object has an optional published file. The executor owns running attempts; downloads leave the
-//! index unchanged until publication. Revocation changes the admission identity; unregistering
-//! invalidates all object tokens.
+//! Each object has an optional published file. The executor owns refill admission and
+//! cancellation. Publication checks membership under the same lock as the index update.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
 //! GC reclaims withdrawn files after their last reader releases them.
@@ -42,12 +39,12 @@ mod read;
 mod recovery;
 mod refill;
 mod storage;
+pub(crate) use refill::PinCacheDownloadError;
 #[cfg(test)]
 pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use self::refill::PinCacheDownloadError;
 use self::storage::PinCacheStorageState;
 use crate::hummock::SstableBlockIndex;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -64,9 +61,6 @@ struct PinCacheFile {
 
 /// One registered SST object; registration alone does not make it readable or start refill.
 struct PinCacheObject {
-    // Admission identity, shared by queued work and its download. Stable across retries;
-    // replaced on revocation. It is not a version ID or a persisted file sequence.
-    generation: u64,
     published: Option<Arc<PinCacheFile>>,
 }
 
@@ -98,44 +92,8 @@ impl PinCacheObject {
 /// invoking callbacks, or acquiring the cache's storage lock.
 #[derive(Default)]
 struct PinCacheShard {
-    state: RwLock<PinCacheShardState>,
+    objects: RwLock<HashMap<HummockSstableObjectId, PinCacheObject>>,
     read_requests: Mutex<HashMap<SstableBlockIndex, read::ReadRequest>>,
-}
-
-/// One shard's object index and refill generation allocator.
-#[derive(Default)]
-struct PinCacheShardState {
-    objects: HashMap<HummockSstableObjectId, PinCacheObject>,
-    // Never reset on removal: an old token must not match a reintroduced object.
-    next_generation: u64,
-}
-
-impl PinCacheShardState {
-    fn register_object(&mut self, id: HummockSstableObjectId) {
-        self.objects.entry(id).or_insert_with(|| {
-            self.next_generation += 1;
-            PinCacheObject {
-                generation: self.next_generation,
-                published: None,
-            }
-        });
-    }
-
-    fn revoke_refill(&mut self, object_id: HummockSstableObjectId) {
-        if let Some(object) = self.objects.get_mut(&object_id) {
-            self.next_generation += 1;
-            object.generation = self.next_generation;
-        }
-    }
-
-    /// Finds the registered object whose ID and generation both match the token.
-    /// Returns None after unregistration or token revocation, including removal followed by
-    /// re-registration of the same ID. This does not check whether a file is already published.
-    fn object_matching_token(&mut self, token: PinCacheRefillToken) -> Option<&mut PinCacheObject> {
-        self.objects
-            .get_mut(&token.object_id)
-            .filter(|object| object.generation == token.generation)
-    }
 }
 
 /// A local whole-SST cache. The remote object store remains authoritative.
@@ -149,25 +107,10 @@ pub(crate) struct PinCache {
     storage: Mutex<PinCacheStorageState>,
     // Serializes capacity probes/admission with GC path claims and deletion acknowledgment.
     capacity_gate: tokio::sync::Mutex<()>,
+    // Largest physical SST rejected since the worker last took the pressure hint.
     gc_pressure_bytes: AtomicU64,
     #[cfg(test)]
     test_hooks: test_utils::PinCacheTestHooks,
-}
-
-/// Admission captured before queuing a refill. Its identity is private to the issuing cache.
-/// This token reserves no disk space, starts no I/O, and needs no cleanup when discarded.
-/// Copies preserve the same admission for retries; revocation invalidates every copy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PinCacheRefillToken {
-    object_id: HummockSstableObjectId,
-    generation: u64,
-}
-
-impl PinCacheRefillToken {
-    /// The SST whose remote path the caller should use for this refill.
-    pub(crate) fn object_id(&self) -> HummockSstableObjectId {
-        self.object_id
-    }
 }
 
 /// A reference to one published file, retained even after its object leaves the index.
@@ -203,10 +146,10 @@ impl PinCache {
         };
         let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
         for &id in expected_sizes.keys() {
-            let state = pin_cache.shards[Self::shard_index(id, shard_num)]
-                .state
-                .get_mut();
-            state.register_object(id);
+            pin_cache.shards[Self::shard_index(id, shard_num)]
+                .objects
+                .get_mut()
+                .insert(id, PinCacheObject { published: None });
         }
         let metrics = &*GLOBAL_PIN_CACHE_METRICS;
         let objects = pin_cache.store.list("", None, None).await;
@@ -247,8 +190,8 @@ impl PinCache {
         self: &Arc<Self>,
         object_id: HummockSstableObjectId,
     ) -> Option<PinCacheReadHandle> {
-        let state = self.shard(object_id).state.read();
-        let file = Arc::clone(state.objects.get(&object_id)?.published.as_ref()?);
+        let objects = self.shard(object_id).objects.read();
+        let file = Arc::clone(objects.get(&object_id)?.published.as_ref()?);
         Some(PinCacheReadHandle {
             pin_cache: Arc::clone(self),
             object_id,
