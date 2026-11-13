@@ -33,7 +33,7 @@ use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
     BackfillProgressPerVnode, BackfillState, compute_bounds, create_builder,
     get_progress_per_vnode, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
-    persist_state_per_vnode, update_pos_by_vnode,
+    persist_state_per_vnode, snapshot_batch_size, update_pos_by_vnode,
 };
 use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
@@ -245,6 +245,7 @@ where
                             backfill_state.clone(), // FIXME: Use mutable reference instead.
                             paused,
                             &self.rate_limiter,
+                            self.chunk_size,
                         )
                         .map(Either::Right)
                     );
@@ -701,6 +702,7 @@ where
         backfill_state: BackfillState,
         paused: bool,
         rate_limiter: &'a MonitoredRateLimiter,
+        chunk_size: usize,
     ) {
         if paused {
             #[for_await]
@@ -708,11 +710,22 @@ where
                 bail!("BUG: paused stream should not yield");
             }
         } else {
-            // Checked the rate limit is not zero.
+            // Acquire the rate limit once per batch of rows (the size of the chunks built
+            // downstream) rather than per row. The limiter has no burst allowance and every
+            // wait goes through a tokio timer with ~1ms granularity, so per-row waits cap the
+            // throughput at ~1k rows/s per actor regardless of the configured limit.
+            let batch_size = snapshot_batch_size(rate_limiter.rate_limit(), chunk_size) as u64;
+            let mut remaining_quota = 0;
             #[for_await]
             for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
                 let r = r?;
-                rate_limiter.wait(1).await;
+                if r.is_some() {
+                    if remaining_quota == 0 {
+                        rate_limiter.wait(batch_size).await;
+                        remaining_quota = batch_size;
+                    }
+                    remaining_quota -= 1;
+                }
                 yield r;
             }
         }
@@ -948,6 +961,16 @@ mod tests {
         upstream: Executor,
         test_env: &LocalBarrierTestEnv,
     ) -> BoxedMessageStream {
+        build_executor_with_rate_limit(store, upstream, test_env, 1024, RateLimit::Disabled).await
+    }
+
+    async fn build_executor_with_rate_limit(
+        store: MemoryStateStore,
+        upstream: Executor,
+        test_env: &LocalBarrierTestEnv,
+        chunk_size: usize,
+        rate_limit: RateLimit,
+    ) -> BoxedMessageStream {
         let upstream_table = ReplicatedStateTable::<_, BasicSerde>::new_replicated(
             &upstream_table_catalog(),
             store.clone(),
@@ -966,12 +989,58 @@ mod tests {
             vec![0, 1],
             progress,
             Arc::new(StreamingMetrics::unused()),
-            1024,
-            RateLimit::Disabled,
+            chunk_size,
+            rate_limit,
             0.into(),
         )
         .boxed()
         .execute()
+    }
+
+    /// The rate limit must be acquired per chunk, not per row: each per-row wait goes through
+    /// a tokio timer with 1ms granularity, which would cap the snapshot read at ~1k rows/s
+    /// regardless of the configured limit. 1000 rows at 100k rows/s in chunks of 100 take
+    /// ~10ms, while per-row waits would take ~1s. (The limiter uses wall-clock `Instant`, so
+    /// tokio's paused time cannot be used here.)
+    #[tokio::test]
+    async fn test_rate_limit_is_applied_per_chunk() {
+        let store = MemoryStateStore::new();
+        let test_env = LocalBarrierTestEnv::for_test().await;
+        let snapshot_rows = (1..=1000).map(|i| row(i, i * 10)).collect_vec();
+        commit_upstream_rows(&store, test_epoch(1), snapshot_rows.clone()).await;
+
+        // Keep `tx` alive so that the upstream stays pending and the snapshot is read.
+        let (mut tx, source) = MockSource::channel();
+        tx.push_barrier(test_epoch(2), false);
+        let upstream = source.stop_on_finish(false).into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ]),
+            vec![0],
+        );
+        let mut backfill = build_executor_with_rate_limit(
+            store,
+            upstream,
+            &test_env,
+            100,
+            RateLimit::Fixed(100_000.try_into().unwrap()),
+        )
+        .await;
+
+        let start = std::time::Instant::now();
+        let mut rows = vec![];
+        while rows.len() < snapshot_rows.len() {
+            if let Message::Chunk(chunk) = backfill.next().await.unwrap().unwrap() {
+                rows.extend(chunk.rows().map(|(_, row)| row.into_owned_row()));
+            }
+        }
+        assert_eq!(rows, snapshot_rows);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "elapsed: {elapsed:?}"
+        );
     }
 
     /// Pull messages until `num_barriers` barriers are received. Returns the visible rows
