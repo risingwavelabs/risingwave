@@ -1,0 +1,78 @@
+control substitution on
+
+# MySQL BIT(n > 1) mapped to bytea must have the same bytes on the backfill
+# path and on the binlog path (big-endian, ceil(n/8) bytes) when the source
+# opts in with `debezium.bit.bytea.big.endian`.
+# https://github.com/risingwavelabs/risingwave/issues/27488
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_bit_as_bytea_test;
+    CREATE TABLE mysql_bit_as_bytea_test (
+        id INT NOT NULL PRIMARY KEY,
+        b8 BIT(8),
+        b9 BIT(9),
+        b10 BIT(10),
+        b64 BIT(64)
+    );
+    INSERT INTO mysql_bit_as_bytea_test VALUES
+        (1, b'10000001', b'100000001', b'1010', b'1000000000000000000000000000000000000000000000000000000000000001'),
+        (2, NULL, NULL, NULL, NULL);
+"
+
+statement ok
+create source s_mysql_bit_as_bytea with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev',
+  debezium.bit.bytea.big.endian = 'true'
+);
+
+sleep 2s
+
+statement ok
+create table rw_mysql_bit_as_bytea (
+  id INT,
+  b8 BYTEA,
+  b9 BYTEA,
+  b10 BYTEA,
+  b64 BYTEA,
+  primary key (id)
+) from s_mysql_bit_as_bytea table 'risedev.mysql_bit_as_bytea_test';
+
+query TTTTT retry 10 backoff 1s
+select id, b8, b9, b10, b64 from rw_mysql_bit_as_bytea order by id;
+----
+1 \x81 \x0101 \x000a \x8000000000000001
+2 NULL NULL NULL NULL
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_bit_as_bytea_test VALUES
+        (3, b'10000001', b'100000001', b'1010', b'1000000000000000000000000000000000000000000000000000000000000001'),
+        (4, NULL, NULL, NULL, NULL);
+"
+
+query TTTTT retry 10 backoff 1s
+select id, b8, b9, b10, b64 from rw_mysql_bit_as_bytea order by id;
+----
+1 \x81 \x0101 \x000a \x8000000000000001
+2 NULL NULL NULL NULL
+3 \x81 \x0101 \x000a \x8000000000000001
+4 NULL NULL NULL NULL
+
+statement ok
+drop table rw_mysql_bit_as_bytea;
+
+statement ok
+drop source s_mysql_bit_as_bytea cascade;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_bit_as_bytea_test;
+"
