@@ -752,12 +752,6 @@ impl Command {
 }
 
 #[derive(Debug)]
-pub(super) struct ReplaceSinkDrainInfo {
-    pub old_sink_id: SinkId,
-    pub target_epoch: u64,
-}
-
-#[derive(Debug)]
 pub enum PostCollectCommand {
     Command(String),
     DropStreamingJobs,
@@ -766,7 +760,6 @@ pub enum PostCollectCommand {
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
         resolved_split_assignment: SplitAssignment,
-        replace_sink: Option<ReplaceSinkDrainInfo>,
     },
     Reschedule {
         reschedules: HashMap<FragmentId, Reschedule>,

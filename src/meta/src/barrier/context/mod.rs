@@ -22,6 +22,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::{JobId, PartialGraphId};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -80,7 +81,6 @@ impl CreateIndependentStreamingJobCommandInfo {
             },
             cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
             resolved_split_assignment: self.resolved_split_assignment,
-            replace_sink: None,
         }
     }
 }
@@ -112,9 +112,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Run the post-collect work of `command`, carried by the barrier of `epoch`, after the
+    /// barrier has been collected and committed.
     fn post_collect_command(
         &self,
         command: PostCollectCommand,
+        epoch: EpochPair,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     fn notify_creating_job_failed(

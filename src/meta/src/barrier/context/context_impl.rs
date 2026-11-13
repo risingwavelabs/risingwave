@@ -20,6 +20,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::{JobId, PartialGraphId, SinkId};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
@@ -58,7 +59,7 @@ use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_h
 use crate::stream::{RefreshStage, SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
 
-const WAIT_SINK_COMMITS_DRAINED_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const DRAIN_OLD_SINK_COMMITS_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 fn resolve_since_timestamp_log_store_epoch(
     table_id: TableId,
@@ -301,8 +302,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument("post_collect_command({command})")]
-    async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        Box::pin(command.post_collect(self)).await
+    async fn post_collect_command(
+        &self,
+        command: PostCollectCommand,
+        epoch: EpochPair,
+    ) -> MetaResult<()> {
+        Box::pin(command.post_collect(self, epoch)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -633,16 +638,16 @@ impl GlobalBarrierWorkerContextImpl {
     }
 }
 
-async fn wait_old_sink_commits_drained(
+async fn drain_old_sink_coordinator(
     barrier_manager_context: &GlobalBarrierWorkerContextImpl,
     old_sink_id: SinkId,
     target_epoch: u64,
 ) -> MetaResult<()> {
     let wait_result = tokio::time::timeout(
-        WAIT_SINK_COMMITS_DRAINED_TIMEOUT,
+        DRAIN_OLD_SINK_COMMITS_TIMEOUT,
         barrier_manager_context
             .sink_manager
-            .wait_sink_commits_drained(old_sink_id, target_epoch),
+            .drain_and_stop_coordinator(old_sink_id, target_epoch),
     )
     .await;
     let pending_epoch_count = barrier_manager_context
@@ -662,16 +667,16 @@ async fn wait_old_sink_commits_drained(
         .into()),
         Ok(Err(err)) => Err(err
             .context(format!(
-                "failed to wait for old sink commits drained before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+                "failed to drain old sink commits before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
                 old_sink_id, target_epoch, pending_epoch_count,
             ))
             .into()),
         Err(_) => Err(anyhow::anyhow!(
-            "timed out waiting for old sink commits drained before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}, timeout={:?}",
+            "timed out draining old sink commits before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}, timeout={:?}",
             old_sink_id,
             target_epoch,
             pending_epoch_count,
-            WAIT_SINK_COMMITS_DRAINED_TIMEOUT,
+            DRAIN_OLD_SINK_COMMITS_TIMEOUT,
         )
         .into()),
     }
@@ -683,6 +688,7 @@ impl PostCollectCommand {
     pub async fn post_collect(
         self,
         barrier_manager_context: &GlobalBarrierWorkerContextImpl,
+        epoch: EpochPair,
     ) -> MetaResult<()> {
         match self {
             PostCollectCommand::Command(_) => {}
@@ -805,7 +811,6 @@ impl PostCollectCommand {
                 job_type,
                 cross_db_snapshot_backfill_info,
                 resolved_split_assignment,
-                replace_sink,
             } => {
                 match &job_type {
                     CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
@@ -861,6 +866,7 @@ impl PostCollectCommand {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
+                    replace_sink,
                     streaming_job,
                     ..
                 } = info;
@@ -877,19 +883,14 @@ impl PostCollectCommand {
                         None
                     };
 
-                if let Some(replace_sink) = &replace_sink {
-                    // Deleting the old sink object cascades `pending_sink_state`. Wait for the
-                    // coordinator to finish old sink commits, then assert the durable state before
-                    // deleting the old sink object.
-                    wait_old_sink_commits_drained(
-                        barrier_manager_context,
-                        replace_sink.old_sink_id,
-                        replace_sink.target_epoch,
-                    )
-                    .await?;
+                if let Some(old_sink_id) = replace_sink {
+                    // Deleting the old sink object cascades `pending_sink_state`. This barrier is
+                    // the cutover and has been committed to Hummock, so let the old sink's
+                    // coordinator commit its pending epochs up to `epoch.prev` and stop, then
+                    // assert the durable state before deleting the old sink object.
+                    drain_old_sink_coordinator(barrier_manager_context, old_sink_id, epoch.prev)
+                        .await?;
                 }
-
-                let old_sink_id = replace_sink.map(|replace_sink| replace_sink.old_sink_id);
 
                 let old_state_table_ids = barrier_manager_context
                     .metadata_manager
@@ -899,8 +900,8 @@ impl PostCollectCommand {
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
                         Some(&resolved_split_assignment),
-                        old_sink_id.as_ref(),
-                        old_sink_id.is_none(),
+                        replace_sink.as_ref(),
+                        replace_sink.is_none(),
                     )
                     .await?;
 
@@ -928,7 +929,7 @@ impl PostCollectCommand {
                         .await;
                 }
 
-                if let Some(old_sink_id) = old_sink_id {
+                if let Some(old_sink_id) = replace_sink {
                     cleanup_dropped_streaming_jobs(
                         &barrier_manager_context.refresh_manager,
                         &barrier_manager_context.hummock_manager,
