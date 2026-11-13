@@ -14,87 +14,107 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_common::catalog::Schema;
-use tonic::async_trait;
+use anyhow::anyhow;
+use serde_json::Value;
+use url::Url;
 
-use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
-use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
-use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
-use super::elasticsearch_opensearch_config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
-use crate::enforce_secret::EnforceSecret;
-use crate::sink::Result;
+use super::backend::SearchBackend;
+use super::client::SearchClient;
+use super::config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
+use super::sink::SearchSink;
+use crate::sink::{Result, SinkError};
 
 pub const ES_SINK: &str = "elasticsearch";
 
 #[derive(Debug)]
-pub struct ElasticSearchSink {
-    config: ElasticSearchOpenSearchConfig,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-}
+pub struct ElasticSearchBackend;
 
-impl EnforceSecret for ElasticSearchSink {
-    fn enforce_secret<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> crate::error::ConnectorResult<()> {
-        for prop in prop_iter {
-            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
-        }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl TryFrom<SinkParam> for ElasticSearchSink {
-    type Error = SinkError;
-
-    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let schema = param.schema();
-        let pk_indices = param.downstream_pk_or_empty();
-        let config = ElasticSearchConfig::from_btreemap(param.properties)?.inner;
-        Ok(Self {
-            config,
-            schema,
-            pk_indices,
-            is_append_only: param.sink_type.is_append_only(),
-        })
-    }
-}
-
-impl Sink for ElasticSearchSink {
-    type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
+impl SearchBackend for ElasticSearchBackend {
+    type Client = elasticsearch::Elasticsearch;
+    type Config = ElasticSearchConfig;
 
     const SINK_NAME: &'static str = ES_SINK;
+    const SUPPORT_SCHEMA_CHANGE: bool = true;
 
-    fn validate_unknown_fields(&self) -> Result<()> {
-        crate::sink::validate_sink_unknown_fields(&self.config)
+    fn parse_config(properties: BTreeMap<String, String>) -> Result<Self::Config> {
+        ElasticSearchConfig::from_btreemap(properties)
     }
 
-    fn support_schema_change() -> bool {
-        true
+    fn common_config(config: &Self::Config) -> &ElasticSearchOpenSearchConfig {
+        &config.inner
     }
 
-    async fn validate(&self) -> Result<()> {
-        self.config.validate_config(&self.schema)?;
-        let client = self.config.build_client(Self::SINK_NAME)?;
-        client.ping().await?;
+    fn build_client(config: &Self::Config) -> Result<Self::Client> {
+        let config = Self::common_config(config);
+        let url =
+            Url::parse(&config.url).map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
+        config.validate_credentials()?;
+        let mut transport_builder = elasticsearch::http::transport::TransportBuilder::new(
+            elasticsearch::http::transport::SingleNodeConnectionPool::new(url),
+        );
+        if let Some(username) = &config.username
+            && let Some(password) = &config.password
+        {
+            transport_builder = transport_builder.auth(elasticsearch::auth::Credentials::Basic(
+                username.clone(),
+                password.clone(),
+            ));
+        }
+        let transport = transport_builder
+            .build()
+            .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
+        Ok(elasticsearch::Elasticsearch::new(transport))
+    }
+}
+
+pub type ElasticSearchSink = SearchSink<ElasticSearchBackend>;
+
+impl SearchClient for elasticsearch::Elasticsearch {
+    type BulkOperation = elasticsearch::BulkOperation<Value>;
+
+    async fn send(&self, bulks: Vec<Self::BulkOperation>) -> Result<Value> {
+        let result = self
+            .bulk(elasticsearch::BulkParts::None)
+            .body(bulks)
+            .send()
+            .await?;
+        Ok(result.json::<Value>().await?)
+    }
+
+    async fn ping(&self) -> Result<()> {
+        self.ping().send().await?;
         Ok(())
     }
 
-    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        ElasticSearchConfig::from_btreemap(config.clone())?;
-        Ok(())
+    fn new_update(
+        &self,
+        key: String,
+        index: String,
+        retry_on_conflict: i32,
+        routing_column: Option<String>,
+        value: Value,
+    ) -> Self::BulkOperation {
+        let bulk = elasticsearch::BulkOperation::update(key, value)
+            .index(index)
+            .retry_on_conflict(retry_on_conflict);
+        if let Some(routing_column) = routing_column {
+            bulk.routing(routing_column).into()
+        } else {
+            bulk.into()
+        }
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(ElasticSearchOpenSearchSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            Self::SINK_NAME,
-            self.is_append_only,
-        )?
-        .into_log_sinker(self.config.concurrent_requests))
+    fn new_delete(
+        &self,
+        key: String,
+        index: String,
+        routing_column: Option<String>,
+    ) -> Self::BulkOperation {
+        let bulk = elasticsearch::BulkOperation::delete(key).index(index);
+        if let Some(routing_column) = routing_column {
+            bulk.routing(routing_column).into()
+        } else {
+            bulk.into()
+        }
     }
 }
