@@ -261,6 +261,10 @@ impl Strong {
             | ExprType::Array
             | ExprType::ArrayAccess
             | ExprType::Row
+            | ExprType::RowLessThan
+            | ExprType::RowLessThanOrEqual
+            | ExprType::RowGreaterThan
+            | ExprType::RowGreaterThanOrEqual
             | ExprType::ArrayToString
             | ExprType::ArrayRangeAccess
             | ExprType::ArrayCat

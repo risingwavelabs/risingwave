@@ -233,6 +233,12 @@ message ExprNode {
     ROW = 523;
     ARRAY_TO_STRING = 524;
     ARRAY_RANGE_ACCESS = 525;
+    // Comparisons of two row constructors. Unlike `LESS_THAN` and the others on struct values, the
+    // result is NULL when the deciding pair of fields has a NULL.
+    ROW_LESS_THAN = 526;
+    ROW_LESS_THAN_OR_EQUAL = 527;
+    ROW_GREATER_THAN = 528;
+    ROW_GREATER_THAN_OR_EQUAL = 529;
     // Array functions
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
