@@ -14,9 +14,10 @@
 
 use std::collections::HashMap;
 
-use either::Either;
-use futures::stream::{select_all, select_with_strategy};
-use futures::{TryStreamExt, stream};
+use anyhow::anyhow;
+use futures::TryStreamExt;
+use futures::future::{Either, pending, select};
+use futures::stream::select_all;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
@@ -216,7 +217,6 @@ where
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
-            let mut pending_barrier: Option<Barrier> = None;
 
             let metrics = self
                 .metrics
@@ -231,46 +231,56 @@ where
                 // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be
                 // dropped. Then we can write to `upstream_table` on barrier in the
                 // next block.
-                {
-                    let left_upstream = upstream.by_ref().map(Either::Left);
-
+                let barrier = {
                     // Check if stream paused
                     let paused = global_pause
                         || backfill_paused
                         || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
                     // Create the snapshot stream
-                    let right_snapshot = pin!(
-                        Self::make_snapshot_stream(
-                            &upstream_table,
-                            backfill_state.clone(), // FIXME: Use mutable reference instead.
-                            paused,
-                            &self.rate_limiter,
-                        )
-                        .map(Either::Right)
-                    );
+                    let mut right_snapshot = pin!(Self::make_snapshot_stream(
+                        &upstream_table,
+                        backfill_state.clone(), // FIXME: Use mutable reference instead.
+                        paused,
+                        &self.rate_limiter,
+                    ));
 
-                    // Prefer to select upstream, so we can stop snapshot stream as soon as the
-                    // barrier comes.
-                    let mut backfill_stream =
-                        select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
-                            stream::PollNext::Left
-                        });
+                    let barrier = loop {
+                        // Prefer to select upstream, so we can stop snapshot stream as soon as the
+                        // barrier comes. Once the snapshot read completes, keep polling only the
+                        // upstream until the barrier so both EOF paths share the same barrier
+                        // handling logic below.
+                        let either = {
+                            let upstream_next = pin!(upstream.next());
+                            let mut snapshot_stream_ref = right_snapshot.as_mut();
+                            let snapshot_read_complete = snapshot_read_complete;
+                            let snapshot_next = pin!(async move {
+                                if snapshot_read_complete {
+                                    pending().await
+                                } else {
+                                    snapshot_stream_ref.next().await
+                                }
+                            });
 
-                    #[for_await]
-                    for either in &mut backfill_stream {
+                            match select(upstream_next, snapshot_next).await {
+                                Either::Left((msg, _)) => Either::Left(msg),
+                                Either::Right((msg, _)) => Either::Right(msg),
+                            }
+                        };
+
                         match either {
                             // Upstream
                             Either::Left(msg) => {
-                                match msg? {
+                                let msg = msg.transpose()?.ok_or_else(|| {
+                                    anyhow!(
+                                        "upstream ended unexpectedly during arrangement backfill"
+                                    )
+                                })?;
+                                match msg {
                                     Message::Barrier(barrier) => {
-                                        // We have to process the barrier outside of the loop.
-                                        // This is because our state_table reference is still live
-                                        // here, we have to break the loop to drop it,
-                                        // so we can do replication of upstream state_table.
-                                        pending_barrier = Some(barrier);
-
-                                        // Break the for loop and start a new snapshot read stream.
-                                        break;
+                                        // Process the barrier after optionally forcing one snapshot
+                                        // read below, then drop the snapshot stream before mutating
+                                        // `upstream_table`.
+                                        break barrier;
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
@@ -284,59 +294,12 @@ where
                             // Snapshot read
                             Either::Right(msg) => {
                                 has_snapshot_read = true;
-                                match msg? {
+                                match msg.transpose()? {
                                     None => {
-                                        // Consume remaining rows in the builder.
-                                        for (vnode, builder) in &mut builders {
-                                            if let Some(data_chunk) = builder.consume_all() {
-                                                let chunk = Self::handle_snapshot_chunk(
-                                                    data_chunk,
-                                                    *vnode,
-                                                    &pk_in_output_indices,
-                                                    &mut backfill_state,
-                                                    &mut cur_barrier_snapshot_processed_rows,
-                                                    &mut total_snapshot_processed_rows,
-                                                    &self.output_indices,
-                                                )?;
-                                                tracing::trace!(
-                                                    source = "snapshot",
-                                                    state = "finish_backfill_stream",
-                                                    action = "drain_snapshot_buffers",
-                                                    ?vnode,
-                                                    "{:#?}",
-                                                    chunk,
-                                                );
-                                                yield Message::Chunk(chunk);
-                                            }
-                                        }
-
-                                        // End of the snapshot read stream.
-                                        // We should not mark the chunk anymore,
-                                        // otherwise, we will ignore some rows
-                                        // in the buffer. Here we choose to never mark the chunk.
-                                        // Consume with the renaming stream buffer chunk without
-                                        // mark.
-                                        for chunk in upstream_chunk_buffer.drain(..) {
-                                            let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_upstream_processed_rows +=
-                                                chunk_cardinality;
-                                            let chunk = mapping_chunk(chunk, &self.output_indices);
-                                            tracing::trace!(
-                                                source = "upstream",
-                                                state = "finish_backfill_stream",
-                                                action = "drain_upstream_buffer",
-                                                "{:#?}",
-                                                chunk,
-                                            );
-                                            yield Message::Chunk(chunk);
-                                        }
-                                        metrics
-                                            .backfill_snapshot_read_row_count
-                                            .inc_by(cur_barrier_snapshot_processed_rows);
-                                        metrics
-                                            .backfill_upstream_output_row_count
-                                            .inc_by(cur_barrier_upstream_processed_rows);
-                                        break 'backfill_loop;
+                                        // End of the snapshot read stream. Keep polling upstream
+                                        // until the barrier, then use the common barrier handling
+                                        // path to flush all buffered rows and finish backfill.
+                                        snapshot_read_complete = true;
                                     }
                                     Some((vnode, row)) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
@@ -363,7 +326,7 @@ where
                                 }
                             }
                         }
-                    }
+                    };
 
                     // Before processing barrier, if did not snapshot read,
                     // do a snapshot read first.
@@ -377,57 +340,41 @@ where
                     let rate_limit_ready = self.rate_limiter.check(1).is_ok();
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
-                        let (_, snapshot) = backfill_stream.into_inner();
-                        #[for_await]
-                        for msg in snapshot {
-                            let Either::Right(msg) = msg else {
-                                bail!("BUG: snapshot_read contains upstream messages");
-                            };
-                            match msg? {
-                                None => {
-                                    // End of the snapshot read stream.
-                                    // We let the barrier handling logic take care of upstream updates:
-                                    // it must forward all buffered upstream chunks without marking.
-                                    // But we still want to exit backfill loop, so we mark snapshot read complete.
-                                    snapshot_read_complete = true;
-                                    break;
-                                }
-                                Some((vnode, row)) => {
-                                    let builder = builders.get_mut(&vnode).unwrap();
-                                    if let Some(chunk) = builder.append_one_row(row) {
-                                        let chunk = Self::handle_snapshot_chunk(
-                                            chunk,
-                                            vnode,
-                                            &pk_in_output_indices,
-                                            &mut backfill_state,
-                                            &mut cur_barrier_snapshot_processed_rows,
-                                            &mut total_snapshot_processed_rows,
-                                            &self.output_indices,
-                                        )?;
-                                        tracing::trace!(
-                                            source = "snapshot",
-                                            state = "process_backfill_stream",
-                                            action = "snapshot_read_at_least_one",
-                                            "{:#?}",
-                                            chunk,
-                                        );
-                                        yield Message::Chunk(chunk);
-                                    }
-
-                                    break;
+                        let mut snapshot_stream_ref = right_snapshot.as_mut();
+                        match snapshot_stream_ref.next().await.transpose()? {
+                            None => {
+                                // End of the snapshot read stream.
+                                // We let the barrier handling logic take care of upstream updates:
+                                // it must forward all buffered upstream chunks without marking.
+                                // But we still want to exit backfill loop, so we mark snapshot read complete.
+                                snapshot_read_complete = true;
+                            }
+                            Some((vnode, row)) => {
+                                let builder = builders.get_mut(&vnode).unwrap();
+                                if let Some(chunk) = builder.append_one_row(row) {
+                                    let chunk = Self::handle_snapshot_chunk(
+                                        chunk,
+                                        vnode,
+                                        &pk_in_output_indices,
+                                        &mut backfill_state,
+                                        &mut cur_barrier_snapshot_processed_rows,
+                                        &mut total_snapshot_processed_rows,
+                                        &self.output_indices,
+                                    )?;
+                                    tracing::trace!(
+                                        source = "snapshot",
+                                        state = "process_backfill_stream",
+                                        action = "snapshot_read_at_least_one",
+                                        "{:#?}",
+                                        chunk,
+                                    );
+                                    yield Message::Chunk(chunk);
                                 }
                             }
                         }
                     }
-                }
 
-                // Process barrier
-                // When we break out of inner backfill_stream loop, it means we have a barrier.
-                // If there are no updates and there are no snapshots left,
-                // we already finished backfill and should have exited the outer backfill loop.
-                let barrier = match pending_barrier.take() {
-                    Some(barrier) => barrier,
-                    None => bail!("BUG: current_backfill loop exited without a barrier"),
+                    barrier
                 };
 
                 // Process barrier:
@@ -695,7 +642,7 @@ where
         }
     }
 
-    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
+    #[try_stream(ok = (VirtualNode, OwnedRow), error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
@@ -757,10 +704,8 @@ where
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
     ///
-    /// The stream contains pairs of `(VirtualNode, StreamChunk)`.
-    /// The `VirtualNode` is the vnode that the chunk belongs to.
-    /// The `StreamChunk` is the chunk that contains the rows from the vnode.
-    /// If it's `None`, it means the vnode has no more rows for this snapshot read.
+    /// The stream contains pairs of `(VirtualNode, OwnedRow)` and ends when all vnode
+    /// iterators have no more rows for this snapshot read.
     ///
     /// The `snapshot_read_epoch` is supplied as a parameter for `state_table`.
     /// It is required to ensure we read a fully-checkpointed snapshot the **first time**.
@@ -770,7 +715,7 @@ where
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
+    #[try_stream(ok = (VirtualNode, OwnedRow), error = StreamExecutorError)]
     async fn snapshot_read_per_vnode(
         upstream_table: &ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
@@ -820,9 +765,8 @@ where
 
         #[for_await]
         for vnode_and_row in vnode_row_iter {
-            yield Some(vnode_and_row?);
+            yield vnode_and_row?;
         }
-        yield None;
         return Ok(());
     }
 }
@@ -948,6 +892,15 @@ mod tests {
         upstream: Executor,
         test_env: &LocalBarrierTestEnv,
     ) -> BoxedMessageStream {
+        build_executor_with_chunk_size(store, upstream, test_env, 1024).await
+    }
+
+    async fn build_executor_with_chunk_size(
+        store: MemoryStateStore,
+        upstream: Executor,
+        test_env: &LocalBarrierTestEnv,
+        chunk_size: usize,
+    ) -> BoxedMessageStream {
         let upstream_table = ReplicatedStateTable::<_, BasicSerde>::new_replicated(
             &upstream_table_catalog(),
             store.clone(),
@@ -966,7 +919,7 @@ mod tests {
             vec![0, 1],
             progress,
             Arc::new(StreamingMetrics::unused()),
-            1024,
+            chunk_size,
             RateLimit::Disabled,
             0.into(),
         )
@@ -1066,6 +1019,79 @@ mod tests {
             vec![test_epoch(2), test_epoch(3), test_epoch(4)]
         );
         assert_eq!(rows, vec![row(2, 20), row(3, 30), row(4, 40)]);
+    }
+
+    /// The snapshot stream can reach EOF before the barrier arrives. Once that happens, snapshot
+    /// polling is disabled and upstream rows are buffered until the common barrier handling path
+    /// forwards them without marking.
+    #[tokio::test]
+    async fn test_snapshot_eof_waits_for_barrier_and_forwards_upstream() {
+        let store = MemoryStateStore::new();
+        let test_env = LocalBarrierTestEnv::for_test().await;
+        commit_upstream_rows(&store, test_epoch(1), vec![row(1, 10), row(2, 20)]).await;
+
+        let (mut tx, source) = MockSource::channel();
+        tx.send_barrier(Barrier::with_prev_epoch_for_test(
+            test_epoch(2),
+            test_epoch(1),
+        ));
+        let upstream = source.stop_on_finish(false).into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ]),
+            vec![0],
+        );
+        let mut backfill = build_executor_with_chunk_size(store, upstream, &test_env, 2).await;
+
+        let (rows, barrier_epochs) = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            collect_until_barriers(&mut backfill, 1),
+        )
+        .await
+        .expect("initial barrier should be forwarded");
+        assert!(rows.is_empty());
+        assert_eq!(barrier_epochs, vec![test_epoch(2)]);
+
+        let Message::Chunk(snapshot_chunk) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), backfill.next())
+                .await
+                .expect("snapshot row should be emitted")
+                .unwrap()
+                .unwrap()
+        else {
+            panic!("expected the snapshot row");
+        };
+        assert_eq!(
+            snapshot_chunk
+                .rows()
+                .map(|(_, row)| row.into_owned_row())
+                .collect_vec(),
+            vec![row(1, 10), row(2, 20)]
+        );
+
+        // Drive the executor until the snapshot EOF has been observed and it is waiting only for
+        // upstream. No message should be emitted before a barrier arrives.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), backfill.next())
+                .await
+                .is_err()
+        );
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I
+            + 3 30",
+        ));
+        tx.push_barrier(test_epoch(3), false);
+
+        let (rows, barrier_epochs) = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            collect_until_barriers(&mut backfill, 1),
+        )
+        .await
+        .expect("terminal barrier should be forwarded");
+        assert_eq!(rows, vec![row(3, 30)]);
+        assert_eq!(barrier_epochs, vec![test_epoch(3)]);
     }
 
     /// Recover right after the barrier on which the snapshot read completes and the buffered
