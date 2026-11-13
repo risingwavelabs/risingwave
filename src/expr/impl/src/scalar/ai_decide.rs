@@ -18,13 +18,14 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use reqwest::Client;
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::config::AiDecideConfig;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapValue, Scalar, ScalarImpl,
-    StructValue, ToDatumRef,
+    DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapRef, MapType, MapValue,
+    Scalar, ScalarImpl, StructValue, ToDatumRef,
 };
 use risingwave_expr::expr::{
     AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, ValueImpl,
@@ -44,6 +45,7 @@ struct Request<'a> {
 
 struct AiDecide {
     children: [BoxedExpression; 4],
+    headers: Option<BoxedExpression>,
     questions: JsonbVal,
     return_type: DataType,
     schema: QuestionSchema,
@@ -65,11 +67,26 @@ impl std::fmt::Debug for AiDecide {
     async,
     type_infer = "unreachable"
 )]
-fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+#[build_function(
+    "ai_decide(jsonb, varchar, varchar, jsonb, varchar, anymap) -> struct",
+    volatile,
+    async,
+    type_infer = "unreachable"
+)]
+fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let headers = if children.len() == 6 {
+        let headers = children.pop().unwrap();
+        if headers.return_type() != MapType::from_kv(DataType::Varchar, DataType::Varchar).into() {
+            return Err(request_error("headers must be MAP(VARCHAR, VARCHAR)"));
+        }
+        Some(headers)
+    } else {
+        None
+    };
     let children: [BoxedExpression; 5] =
         children.try_into().map_err(|_| ExprError::InvalidParam {
             name: "ai_decide",
-            reason: "expected exactly five arguments".into(),
+            reason: "expected five or six arguments".into(),
         })?;
     let Some(ScalarImpl::Jsonb(questions)) = children[3].eval_const()? else {
         return Err(ExprError::InvalidParam {
@@ -107,6 +124,7 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
     let [state, url, model, _, api_key] = children;
     Ok(AiDecide {
         children: [state, url, model, api_key],
+        headers,
         questions,
         return_type,
         schema,
@@ -120,6 +138,34 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
 fn request_error(message: impl std::fmt::Display) -> ExprError {
     // Do not attach the request, response body, URL, or function arguments to errors.
     ExprError::Custom(format!("ai_decide: {message}"))
+}
+
+/// Validate before entering the retry loop. Never include caller-provided names or
+/// values in errors: either can contain credentials.
+fn request_headers(headers: MapRef<'_>) -> Result<HeaderMap> {
+    let mut result = HeaderMap::new();
+    // HeaderMap's infallible insertion API panics at its capacity limit. Check
+    // capacity first, leaving room for authentication, JSON and transport headers.
+    result
+        .try_reserve(headers.iter().len().saturating_add(8))
+        .map_err(|_| request_error("too many headers"))?;
+    for (name, value) in headers.iter() {
+        let name = HeaderName::from_bytes(name.into_utf8().as_bytes())
+            .map_err(|_| request_error("invalid header name"))?;
+        if name == AUTHORIZATION {
+            return Err(request_error(
+                "headers must not override Authorization from api_key",
+            ));
+        }
+        let value = value.ok_or_else(|| request_error("header values must not be NULL"))?;
+        let mut value = HeaderValue::from_str(value.into_utf8())
+            .map_err(|_| request_error("invalid header value"))?;
+        value.set_sensitive(true);
+        if result.insert(name, value).is_some() {
+            return Err(request_error("duplicate case-insensitive header name"));
+        }
+    }
+    Ok(result)
 }
 
 /// Decode strictly before the result can be persisted. Invalid responses are retried
@@ -230,7 +276,12 @@ impl AiDecide {
         url: &str,
         model: &str,
         api_key: &str,
+        headers: Option<MapRef<'_>>,
     ) -> Result<StructValue> {
+        let headers = headers
+            .map(request_headers)
+            .transpose()?
+            .unwrap_or_default();
         let url = reqwest::Url::parse(url).map_err(|_| request_error("invalid model_url"))?;
         if !matches!(url.scheme(), "http" | "https")
             || !url.username().is_empty()
@@ -244,6 +295,7 @@ impl AiDecide {
             .client
             .post(url)
             .bearer_auth(api_key)
+            .headers(headers)
             .json(&Request {
                 model,
                 state: state.into(),
@@ -334,9 +386,18 @@ impl AiDecide {
         }
     }
 
-    async fn evaluate(&self, args: [DatumRef<'_>; 4]) -> Result<Option<StructValue>> {
+    async fn evaluate(
+        &self,
+        args: [DatumRef<'_>; 4],
+        headers: Option<DatumRef<'_>>,
+    ) -> Result<Option<StructValue>> {
         let [Some(state), Some(url), Some(model), Some(api_key)] = args else {
             return Ok(None);
+        };
+        let headers = match headers {
+            Some(None) => return Ok(None),
+            Some(Some(headers)) => Some(headers.into_map()),
+            None => None,
         };
         // Share permits across concurrent eval/eval_row calls on this expression instance.
         // Retain the permit through retries and backoff; cancellation releases it by drop.
@@ -354,6 +415,7 @@ impl AiDecide {
             url.into_utf8(),
             model.into_utf8(),
             api_key.into_utf8(),
+            headers,
         )
         .await
         .map(Some)
@@ -368,8 +430,8 @@ impl ExpressionInfo for AiDecide {
 
 impl AsyncExpression for AiDecide {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut values = Vec::with_capacity(4);
-        for child in &self.children {
+        let mut values = Vec::with_capacity(4 + usize::from(self.headers.is_some()));
+        for child in self.children.iter().chain(self.headers.iter()) {
             values.push(child.eval_v2(input).await?);
         }
         let mut results = (0..input.capacity())
@@ -379,11 +441,15 @@ impl AsyncExpression for AiDecide {
                     if !input.visibility().is_set(index) {
                         return (index, Ok(None));
                     }
+                    let value_at = |i: usize| match &values[i] {
+                        ValueImpl::Array(array) => array.value_at(index),
+                        ValueImpl::Scalar { value, .. } => value.to_datum_ref(),
+                    };
                     let value = self
-                        .evaluate(std::array::from_fn(|i| match &values[i] {
-                            ValueImpl::Array(array) => array.value_at(index),
-                            ValueImpl::Scalar { value, .. } => value.to_datum_ref(),
-                        }))
+                        .evaluate(
+                            std::array::from_fn(value_at),
+                            self.headers.as_ref().map(|_| value_at(4)),
+                        )
                         .await;
                     (index, value)
                 }
@@ -412,13 +478,14 @@ impl AsyncExpression for AiDecide {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let mut args = Vec::with_capacity(4);
-        for child in &self.children {
+        let mut args = Vec::with_capacity(4 + usize::from(self.headers.is_some()));
+        for child in self.children.iter().chain(self.headers.iter()) {
             args.push(child.eval_row(input).await?);
         }
-        self.evaluate(std::array::from_fn(|i| {
-            args[i].as_ref().map(ScalarImpl::as_scalar_ref_impl)
-        }))
+        self.evaluate(
+            std::array::from_fn(|i| args[i].to_datum_ref()),
+            args.get(4).map(ToDatumRef::to_datum_ref),
+        )
         .await
         .map(|value| value.map(ScalarImpl::Struct))
     }
@@ -467,6 +534,7 @@ mod tests {
 
     fn expression(timeout: Duration) -> AiDecide {
         AiDecide {
+            headers: None,
             schema: test_schema(),
             questions: test_questions(),
             return_type: test_schema().return_type(),
@@ -502,6 +570,121 @@ mod tests {
             .as_struct()
             .value_at(index)
             .map(|value| value.field_at(0).unwrap().into_float64().0)
+    }
+
+    fn header_map(entries: &[(&str, Option<&str>)]) -> MapValue {
+        MapValue::try_from_kv(
+            ListValue::from_iter(entries.iter().map(|(key, _)| *key)),
+            ListValue::from_iter(entries.iter().map(|(_, value)| *value)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn validates_headers_without_disclosing_names_or_values() {
+        for (entries, message) in [
+            (
+                vec![("secret name", Some("secret value"))],
+                "invalid header name",
+            ),
+            (
+                vec![("x-secret", Some("secret\r\nvalue"))],
+                "invalid header value",
+            ),
+            (vec![("x-secret", None)], "header values must not be NULL"),
+            (
+                vec![("aUtHoRiZaTiOn", Some("secret"))],
+                "must not override Authorization",
+            ),
+            (
+                vec![("X-Secret", Some("one")), ("x-secret", Some("two"))],
+                "duplicate case-insensitive",
+            ),
+        ] {
+            let error = request_headers(header_map(&entries).as_scalar_ref())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(message), "{error}");
+            assert!(!error.contains("secret"), "{error}");
+        }
+        let headers = request_headers(
+            header_map(&[("X-Tenant", Some("tenant")), ("X-Empty", Some(""))]).as_scalar_ref(),
+        )
+        .unwrap();
+        assert_eq!(headers["x-tenant"], "tenant");
+        assert!(headers["x-tenant"].is_sensitive());
+        assert_eq!(headers["x-empty"], "");
+        assert!(
+            request_headers(header_map(&[]).as_scalar_ref())
+                .unwrap()
+                .is_empty()
+        );
+        let names: Vec<_> = (0..32768).map(|i| format!("x-{i}")).collect();
+        let large = MapValue::try_from_kv(
+            ListValue::from_iter(names.iter().map(String::as_str)),
+            ListValue::from_iter(std::iter::repeat_n("value", 32768)),
+        )
+        .unwrap();
+        assert!(
+            request_headers(large.as_scalar_ref())
+                .unwrap_err()
+                .to_string()
+                .contains("too many headers")
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_headers_preserve_successes_and_skip_null_or_invisible_rows() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let index = body["state"]["index"].as_u64().unwrap();
+                    assert_eq!(headers["x-tenant"], index.to_string());
+                    assert_eq!(headers["authorization"], "Bearer test-only-key");
+                    Json(json!({"answers":{"q":{"type":"noul","noul":index as f64 / 10.0}}}))
+                }
+            }),
+        ))
+        .await;
+        let mut expr = expression(REQUEST_TIMEOUT);
+        let ty: DataType = MapType::from_kv(DataType::Varchar, DataType::Varchar).into();
+        expr.headers = Some(InputRefExpression::new(ty.clone(), 5).boxed());
+        let mut headers = ty.create_array_builder(8);
+        for index in 0..8 {
+            let value = match index {
+                1..=3 => Some(header_map(&[("authorization", Some("secret"))])),
+                4 => None,
+                6 => Some(header_map(&[("x-tenant", None)])),
+                _ => Some(header_map(&[("x-tenant", Some(&index.to_string()))])),
+            };
+            headers.append(value.map(ScalarImpl::Map));
+        }
+        let (mut columns, visibility) = chunk(&server.url, 8).into_parts();
+        columns.push(headers.finish().into_ref());
+        let input = DataChunk::new(columns, visibility);
+        // Build through the registry, as serialized batch and streaming plans do.
+        let mut children: Vec<_> = expr.children.into_iter().collect();
+        children.insert(
+            3,
+            LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed(),
+        );
+        children.push(expr.headers.unwrap());
+        let expr = build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
+        let Err(ExprError::Multiple(partial, errors)) = expr.eval(&input).await else {
+            panic!("invalid headers must return row errors without retrying");
+        };
+        assert_eq!(errors.into_iter().count(), 2);
+        for index in 0..8 {
+            assert_eq!(
+                score_at(&partial, index),
+                [0, 5, 7].contains(&index).then_some(index as f64 / 10.0)
+            );
+        }
+        assert_eq!(requests.load(Ordering::SeqCst), 3);
     }
 
     #[test]
@@ -580,20 +763,37 @@ mod tests {
             url,
             "test-model",
             "test-only-key",
+            None,
         )
         .await
     }
 
     #[tokio::test]
     async fn scalar_arguments_and_request_contract() {
-        let server = server(Router::new().route("/evaluate", post(|headers: HeaderMap, Json(body): Json<Value>| async move {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let seen = attempts.clone();
+        let server = server(Router::new().route("/evaluate", post(move |headers: HeaderMap, Json(body): Json<Value>| {
+            let attempt = seen.fetch_add(1, Ordering::SeqCst);
+            async move {
             assert_eq!(headers["authorization"], "Bearer test-only-key");
+            assert_eq!(headers["x-api-key"], "test-header-secret");
+            assert_eq!(headers["content-type"], "application/json");
             assert_eq!(body["model"], "test-model");
             assert_eq!(body["state"]["messages"][0], "I received the refund.");
             assert_eq!(body["questions"]["q"]["instructions"], "Resolved?");
-            Json(json!({"answers": {"q": {"type": "noul", "noul": 0.99}}, "unknown_metadata": [1, null, true]}))
-        }))).await;
+            if attempt == 0 {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            Json(json!({"answers": {"q": {"type": "noul", "noul": 0.99}}, "unknown_metadata": [1, null, true]})).into_response()
+        }}))).await;
         let mut expr = expression(REQUEST_TIMEOUT);
+        expr.headers = Some(
+            LiteralExpression::new(
+                MapType::from_kv(DataType::Varchar, DataType::Varchar).into(),
+                Some(header_map(&[("X-Api-Key", Some("test-header-secret"))]).into()),
+            )
+            .boxed(),
+        );
         expr.questions =
             JsonbVal::from(json!({"q": {"type": "noul", "instructions": "Resolved?"}}));
         expr.children = [
@@ -610,6 +810,8 @@ mod tests {
         // would make this assertion fail.
         assert!(format!("{:?}", expr.children[3]).contains("test-only-key"));
         assert!(!format!("{expr:?}").contains("test-only-key"));
+        assert!(format!("{:?}", expr.headers).contains("test-header-secret"));
+        assert!(!format!("{expr:?}").contains("test-header-secret"));
         let output = expr.eval(&DataChunk::new_dummy(3)).await.unwrap();
         for i in 0..3 {
             assert_eq!(score_at(&output, i), Some(0.99));
@@ -618,6 +820,7 @@ mod tests {
             expr.eval_row(&OwnedRow::empty()).await.unwrap(),
             output.datum_at(0)
         );
+        assert_eq!(attempts.load(Ordering::SeqCst), 5);
     }
 
     // Raw HTTP permits deliberately truncated and chunked responses that an HTTP

@@ -26,6 +26,7 @@ class EvaluationServer(ThreadingHTTPServer):
     def __init__(self):
         super().__init__(("127.0.0.1", 0), EvaluationHandler)
         self.calls = []
+        self.headers = []
         self.lock = threading.Lock()
 
     def count(self):
@@ -41,6 +42,7 @@ class EvaluationHandler(BaseHTTPRequestHandler):
             return
         with self.server.lock:
             self.server.calls.append(body)
+            self.server.headers.append(dict(self.headers.items()))
             generation = len(self.server.calls)
         state = body["state"]
         rows = state if isinstance(state, list) else [state]
@@ -106,8 +108,9 @@ def exercise(server):
         ai_score_question('size', 'How many events?', ARRAY['No events', 'One event', 'At least two events'])
     )"""
 
-    def analyze(state):
-        return f"ai_decide({state}, '{url}', 'test-model', {questions}, 'test-key')"
+    def analyze(state, headers=None):
+        extra = f", {headers}" if headers is not None else ""
+        return f"ai_decide({state}, '{url}', 'test-model', {questions}, 'test-key'{extra})"
 
     def states(view, where="", order="id"):
         return f"SELECT (result).signal FROM {view} {where} ORDER BY {order}"
@@ -137,6 +140,48 @@ def exercise(server):
                "SET ai_decide_max_retry_delay_ms = 2; "
                f"SELECT coalesce(({analyze(malformed_state)}).signal, -1)") == ["0"]
     assert server.count() == before + 5, "retry the contract failure until a valid answer"
+
+    # Header maps survive SQL planning/serialization and vary independently per row.
+    sql("CREATE TABLE ai_headers_input (id INT PRIMARY KEY, payload JSONB, headers MAP(VARCHAR, VARCHAR))")
+    sql("INSERT INTO ai_headers_input VALUES "
+        "(1, '{\"message\":\"first\"}', MAP {'X-Tenant-ID': 'one'}), "
+        "(2, '{\"message\":\"second\"}', MAP {'X-Tenant-ID': 'two'}), "
+        "(3, '{}', NULL), (4, '{}', MAP {'Authorization': 'test-conflict'})")
+    sql("FLUSH")
+
+    def check_headers(start, expected):
+        with server.lock:
+            received = sorted((body["state"]["message"], {k.lower(): v for k, v in headers.items()}["x-tenant-id"])
+                              for body, headers in zip(server.calls[start:], server.headers[start:]))
+        assert received == expected, received
+
+    for mode in ["local", "distributed"]:
+        before = server.count()
+        result = sql(f"SET query_mode = {mode}; SET batch_expr_strict_mode = false; "
+                     f"SELECT id, (result).signal FROM (SELECT id, {analyze('payload', 'headers')} AS result "
+                     "FROM ai_headers_input) e ORDER BY id")
+        assert result == ["1|0.1", "2|0.2", "3|", "4|"], result
+        check_headers(before, [("first", "one"), ("second", "two")])
+
+    # Empty maps preserve the five-argument request behavior.
+    before = server.count()
+    assert sql(f"SELECT ({analyze(batch_state, 'MAP {}::map(varchar, varchar)')}).signal") == ["0.1"]
+    assert server.count() == before + 1
+
+    before = server.count()
+    sql(f"CREATE MATERIALIZED VIEW ai_headers AS SELECT id, {analyze('payload', 'headers')} AS result FROM ai_headers_input")
+    wait_rows("SELECT jsonb_build_array(id, (result).signal) FROM ai_headers ORDER BY id",
+              [[1, 0.1], [2, 0.2], [3, None], [4, None]])
+    check_headers(before, [("first", "one"), ("second", "two")])
+    before = server.count()
+    sql("UPDATE ai_headers_input SET headers = MAP {'X-Tenant-ID': 'changed'} WHERE id = 1")
+    sql("FLUSH")
+    check_headers(before, [("first", "changed")])
+    before = server.count()
+    sql("DELETE FROM ai_headers_input")
+    wait_rows("SELECT id FROM ai_headers", [])
+    assert server.count() == before, "deletion with headers reevaluated the remote function"
+    sql("DROP MATERIALIZED VIEW ai_headers; DROP TABLE ai_headers_input")
 
     for append_only in [False, True]:
         sql("CREATE TABLE ai_fields_input (id INT, payload JSONB, enabled BOOLEAN)" + (" APPEND ONLY" if append_only else ""))
@@ -225,9 +270,9 @@ def exercise(server):
 
 
 def cleanup():
-    for view in ["ai_fields", "jev_totals", "jev_direct", "jev_grouped", "jev_over", "jev_window_immediate", "jev_window_closed", "jev_over_closed"]:
+    for view in ["ai_headers", "ai_fields", "jev_totals", "jev_direct", "jev_grouped", "jev_over", "jev_window_immediate", "jev_window_closed", "jev_over_closed"]:
         sql(f"DROP MATERIALIZED VIEW IF EXISTS {view}")
-    for table in ["ai_fields_input", "jev_input", "jev_events"]:
+    for table in ["ai_headers_input", "ai_fields_input", "jev_input", "jev_events"]:
         sql(f"DROP TABLE IF EXISTS {table}")
 
 

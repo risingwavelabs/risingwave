@@ -45,7 +45,8 @@ class Server(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        assert json.loads(self.headers["X-State"]) == body["state"]
         with self.server.lock:
             self.server.calls += 1
             self.server.active += 1
@@ -88,7 +89,7 @@ def cleanup():
 def exercise(server):
     def call(state):
         return (f"ai_decide({state}, 'http://127.0.0.1:{server.server_port}', 'test-model', "
-                "ai_questions(ai_prob_question('q', 'Synthetic question?')), 'test-key')")
+                f"ai_questions(ai_prob_question('q', 'Synthetic question?')), 'test-key', MAP {{'X-State': ({state})::varchar}})")
 
     empty_state = "'{}'::jsonb"
     query = f"SELECT sum(({call('to_jsonb(i)')}).q) FROM generate_series(1, 12) AS t(i)"
@@ -171,7 +172,7 @@ def exercise_row_errors(server):
 
     def call(endpoint, api_key):
         return (f"ai_decide(to_jsonb(id), {endpoint}, 'test-model', "
-                f"ai_questions(ai_prob_question('q', 'Synthetic question?')), {api_key})")
+                f"ai_questions(ai_prob_question('q', 'Synthetic question?')), {api_key}, MAP {{'X-State': id::varchar}})")
 
     expected = ["1|0.5", "2|-1", "3|-1", "4|0.5"]
     for mode in ["local", "distributed"]:
