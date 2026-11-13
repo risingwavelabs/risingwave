@@ -49,8 +49,11 @@ use crate::opts::StorageOpts;
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
-    /// Timeout for each backend refill attempt, excluding queued Pin events.
+    /// Timeout for each backend refill attempt, excluding pending Pin batches.
     pub timeout: Duration,
+
+    /// Maximum version events merged into one Pin Cache refill batch.
+    pub pin_cache_max_batch_size: usize,
 
     /// Data file cache refill levels.
     pub data_refill_levels: HashSet<u32>,
@@ -92,6 +95,7 @@ impl CacheRefillConfig {
 
         Self {
             timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            pin_cache_max_batch_size: options.cache_refill_pin_cache_max_batch_size.max(1),
             data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             meta_refill_concurrency: options.cache_refill_meta_refill_concurrency,
@@ -165,7 +169,7 @@ impl CacheRefiller {
                 .collect();
             refiller.start_cache_refill(
                 &deltas,
-                new_pinned_version,
+                new_pinned_version.clone(),
                 version_deltas,
                 &admitted_pin_tables,
             )
@@ -188,10 +192,11 @@ impl CacheRefiller {
                     if let Err(error) = foyer {
                         tracing::warn!(error = %error.as_report(), "Foyer refill task failed; using remote fallback");
                     }
-                    let _ = pin;
+                    pin.unwrap_or(true)
                 }
                 None => {
                     (&mut *foyer).await.unwrap();
+                    true
                 }
             }
         }

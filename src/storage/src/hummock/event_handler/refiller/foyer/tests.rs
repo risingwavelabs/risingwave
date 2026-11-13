@@ -911,9 +911,11 @@ async fn test_l0_refill_after_truncation_uses_serving_ownership() {
     fixture.sstable_store.clear_block_cache().await.unwrap();
     let condition =
         refiller.start_cache_refill(infos.clone(), &target, Some(&[raw]), &cache_metadata.read());
-    tokio::time::timeout(Duration::from_secs(5), condition)
-        .await
-        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), condition)
+            .await
+            .unwrap()
+    );
     for block_idx in 0..fixture.sst.block_count() {
         let key = super::SstableBlockIndex {
             sst_id: fixture.sst.id,
