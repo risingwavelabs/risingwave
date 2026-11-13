@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
@@ -28,7 +27,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
+public class PostgresValidator extends CdcSourceValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
     private static final int CDC_TABLE_TYPE =
             Catalog.Table.CdcTableType.CDC_TABLE_TYPE_POSTGRES.getNumber();
@@ -78,7 +77,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var dbHost = userProps.get(DbzConnectorConfig.HOST);
         var dbPort = userProps.get(DbzConnectorConfig.PORT);
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
+        var jdbcUrl = PostgresCdcSource.getJdbcUrl(dbHost, dbPort, dbName);
 
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
@@ -90,20 +89,22 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         // 3. Test-only parameter 'test.only.force.rds' (for backward compatibility)
         this.isAwsRds =
                 Boolean.parseBoolean(
-                                userProps.getOrDefault(DbzConnectorConfig.PG_IS_AWS_RDS, "false"))
+                                userProps.getOrDefault(
+                                        PostgresDbzConnectorConfig.IS_AWS_RDS, "false"))
                         || dbHost.contains(AWS_RDS_HOST)
                         || userProps
-                                .getOrDefault(DbzConnectorConfig.PG_TEST_ONLY_FORCE_RDS, "false")
+                                .getOrDefault(
+                                        PostgresDbzConnectorConfig.TEST_ONLY_FORCE_RDS, "false")
                                 .equalsIgnoreCase("true");
         this.dbName = dbName;
         this.user = user;
-        this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
+        this.schemaName = userProps.get(DbzConnectorConfig.SCHEMA_NAME);
         this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
-        this.pubName = userProps.get(DbzConnectorConfig.PG_PUB_NAME);
-        this.slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
+        this.pubName = userProps.get(PostgresDbzConnectorConfig.PUB_NAME);
+        this.slotName = userProps.get(PostgresDbzConnectorConfig.SLOT_NAME);
 
         this.pubAutoCreate =
-                userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+                userProps.get(PostgresDbzConnectorConfig.PUB_CREATE).equalsIgnoreCase("true");
         this.isCdcSourceJob = isCdcSourceJob;
         try {
             this.pgVersion = jdbcConnection.getMetaData().getDatabaseMajorVersion();
@@ -422,7 +423,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 LOG.info(
                         "creating cdc source job: publication '{}' doesn't exist, creating...",
                         pubName);
-                DbzSourceUtils.createPostgresPublicationInValidate(userProps);
+                PostgresCdcSource.createPublication(userProps);
                 LOG.info("creating cdc source job: publication '{}' created successfully", pubName);
             }
             return;

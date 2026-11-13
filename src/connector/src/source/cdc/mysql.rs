@@ -26,6 +26,7 @@ use crate::source::cdc::{
 // ------- Runtime flags -------
 
 impl CdcSourceRuntimeFlags for Mysql {
+    const CAN_AUTO_SCHEMA_CHANGE: bool = true;
     const CAN_BACKFILL: bool = true;
     const CAN_USE_TRANSACTION_METADATA: bool = true;
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;

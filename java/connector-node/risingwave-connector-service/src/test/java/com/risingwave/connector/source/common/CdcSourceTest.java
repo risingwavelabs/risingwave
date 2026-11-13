@@ -22,20 +22,25 @@ import static org.junit.Assert.assertTrue;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import java.lang.management.ManagementFactory;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.management.ObjectName;
 import org.junit.Test;
 
-public class DbzSourceUtilsTest {
+public class CdcSourceTest {
+    private static CdcSource postgresSource() {
+        return CdcSourceFactory.createSource(SourceTypeE.POSTGRES, 1, null, Map.of(), false, false);
+    }
+
     @Test(timeout = 5000)
     public void receiverClosureCancelsLongReadinessWait() throws Exception {
         var polls = new AtomicInteger();
         assertFalse(
-                DbzSourceUtils.waitForStreamingRunning(
-                        SourceTypeE.POSTGRES,
-                        "startup_cancellation_test",
-                        3600,
-                        () -> polls.incrementAndGet() < 2));
+                postgresSource()
+                        .waitForStreamingRunning(
+                                "startup_cancellation_test",
+                                3600,
+                                () -> polls.incrementAndGet() < 2));
         assertTrue(polls.get() >= 2);
     }
 
@@ -44,14 +49,14 @@ public class DbzSourceUtilsTest {
         assertThrows(
                 InterruptedException.class,
                 () ->
-                        DbzSourceUtils.waitForStreamingRunning(
-                                SourceTypeE.POSTGRES,
-                                "startup_interruption_test",
-                                3600,
-                                () -> {
-                                    Thread.currentThread().interrupt();
-                                    return true;
-                                }));
+                        postgresSource()
+                                .waitForStreamingRunning(
+                                        "startup_interruption_test",
+                                        3600,
+                                        () -> {
+                                            Thread.currentThread().interrupt();
+                                            return true;
+                                        }));
     }
 
     @Test(timeout = 5000)
@@ -63,11 +68,11 @@ public class DbzSourceUtilsTest {
         server.registerMBean(new StreamingMetrics(), name);
         try {
             assertFalse(
-                    DbzSourceUtils.waitForStreamingRunning(
-                            SourceTypeE.POSTGRES, "startup_ready_test", 3600, () -> false));
+                    postgresSource()
+                            .waitForStreamingRunning("startup_ready_test", 3600, () -> false));
             assertTrue(
-                    DbzSourceUtils.waitForStreamingRunning(
-                            SourceTypeE.POSTGRES, "startup_ready_test", 3600, () -> true));
+                    postgresSource()
+                            .waitForStreamingRunning("startup_ready_test", 3600, () -> true));
         } finally {
             server.unregisterMBean(name);
         }
@@ -76,8 +81,21 @@ public class DbzSourceUtilsTest {
     @Test(timeout = 5000)
     public void readinessStillTimesOut() throws Exception {
         assertFalse(
-                DbzSourceUtils.waitForStreamingRunning(
-                        SourceTypeE.POSTGRES, "startup_timeout_test", 0, () -> true));
+                postgresSource().waitForStreamingRunning("startup_timeout_test", 0, () -> true));
+    }
+
+    @Test
+    public void offsetCommitOnCheckpointFollowsTheReaderProperty() {
+        var key = "cdc.source.needs.offset.commit.on.checkpoint";
+        assertTrue(
+                CdcSourceFactory.createSource(
+                                SourceTypeE.POSTGRES, 1, null, Map.of(key, "true"), false, false)
+                        .needsOffsetCommitOnCheckpoint());
+        assertFalse(
+                CdcSourceFactory.createSource(
+                                SourceTypeE.POSTGRES, 1, null, Map.of(key, "false"), false, false)
+                        .needsOffsetCommitOnCheckpoint());
+        assertFalse(postgresSource().needsOffsetCommitOnCheckpoint());
     }
 
     public interface StreamingMetricsMBean {

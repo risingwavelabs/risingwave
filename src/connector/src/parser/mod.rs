@@ -50,12 +50,14 @@ pub use self::postgres::{
 pub use self::sql_server::{ScalarImplTiberiusWrapper, SqlServerRowDecoder};
 pub use self::unified::Access;
 pub use self::unified::json::{
-    BigintUnsignedHandlingMode, JsonAccess, TimeHandling, TimestampHandling, TimestamptzHandling,
+    BigintUnsignedHandlingMode, JsonAccess, NumericHandling, TimeHandling, TimestampHandling,
+    TimestamptzHandling,
 };
 use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
+use crate::source::cdc::CdcSourceType;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageEventStream, SourceChunkStream, SourceColumnDesc, SourceColumnType,
@@ -607,8 +609,15 @@ impl ByteStreamSourceParserImpl {
                 Ok(Self::Plain(parser))
             }
             (ProtocolProperties::Debezium(_), _) => {
-                let parser =
-                    DebeziumParser::new(parser_config.specific, rw_columns, source_ctx).await?;
+                let numeric_handling =
+                    CdcSourceType::from(&source_ctx.connector_props).debezium_numeric_handling();
+                let parser = DebeziumParser::new(
+                    parser_config.specific,
+                    rw_columns,
+                    source_ctx,
+                    numeric_handling,
+                )
+                .await?;
                 Ok(Self::Debezium(parser))
             }
             (ProtocolProperties::Maxwell, _) => {

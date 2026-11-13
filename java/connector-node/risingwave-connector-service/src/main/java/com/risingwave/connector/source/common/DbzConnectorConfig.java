@@ -16,33 +16,23 @@
 
 package com.risingwave.connector.source.common;
 
-import com.mongodb.ConnectionString;
-import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
-import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
-import io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource;
-import io.debezium.connector.mongodb.MongoDbConnectorConfig;
-import io.debezium.heartbeat.DatabaseHeartbeatImpl;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
-import java.util.regex.Pattern;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DbzConnectorConfig {
+/**
+ * The Debezium configuration of one {@link CdcSource}, resolved from the common {@code
+ * debezium.properties}, the connector's own template, and the WITH options of the source.
+ */
+public abstract class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
-
-    private static final String WAIT_FOR_STREAMING_START_TIMEOUT_SECS =
-            "cdc.source.wait.streaming.start.timeout";
 
     private static final String QUEUE_MAX_MEMORY_RATIO = "queue.memory.ratio";
     public static final double MIN_QUEUE_MAX_MEMORY_RATIO = 0.01;
@@ -55,366 +45,55 @@ public class DbzConnectorConfig {
     public static final String PASSWORD = "password";
 
     public static final String DB_NAME = "database.name";
+    public static final String SCHEMA_NAME = "schema.name";
     public static final String TABLE_NAME = "table.name";
-
-    /* MySQL configs */
-    public static final String MYSQL_SERVER_ID = "server.id";
-    public static final String MYSQL_SSL_MODE = "ssl.mode";
-
-    /* Postgres configs */
-    public static final String PG_SLOT_NAME = "slot.name";
-    public static final String PG_PUB_NAME = "publication.name";
-    public static final String PG_PUB_CREATE = "publication.create.enable";
-    public static final String PG_SCHEMA_NAME = "schema.name";
-    public static final String PG_SSL_ROOT_CERT = "ssl.root.cert";
-    public static final String PG_IS_AWS_RDS = "postgres.is.aws.rds";
-    public static final String PG_TEST_ONLY_FORCE_RDS = "test.only.force.rds";
-
-    /* Sql Server configs */
-    public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
-    public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
-
-    /* Oracle configs */
-    public static final String ORACLE_PDB_NAME = "database.pdb.name";
-    public static final String ORACLE_SCHEMA_NAME = "schema.name";
-    public static final String ORACLE_HEARTBEAT_TABLE_NAME = "heartbeat.table.name";
 
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
-    private static final String MYSQL_CONFIG_FILE = "mysql.properties";
-    private static final String MARIADB_CONFIG_FILE = "risingwave-mariadb.properties";
-    private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
-    private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
-    private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
-    private static final String ORACLE_CONFIG_FILE = "oracle.properties";
 
-    private static final String DBZ_PROPERTY_PREFIX = "debezium.";
+    public static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
-    public static final String HEARTBEAT_ACTION_QUERY_KEY =
-            DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
     public static final String HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY =
             "heartbeat.table.auto.initialize";
 
-    private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
-    private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
-
-    public static class MongoDb {
-        public static final String MONGO_URL = "mongodb.url";
-        public static final String MONGO_COLLECTION_NAME = "collection.name";
-
-        private static final String DATABASE_GROUP = "database";
-        private static final Pattern LITERAL_COLLECTION_LIST_PATTERN =
-                Pattern.compile(
-                        "(?:\\A|[ ]*,[ ]*)"
-                                + "(?<database>[A-Za-z_][A-Za-z0-9_-]*)\\."
-                                + "(?<collection>[A-Za-z_][A-Za-z0-9_-]*)");
-        private static final Set<String> RAW_FILTER_OPTIONS_DISABLING_INFERENCE =
-                Set.of(
-                        DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.DATABASE_INCLUDE_LIST.name(),
-                        DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.DATABASE_EXCLUDE_LIST.name(),
-                        DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.FILTERS_MATCH_MODE.name());
-    }
-
-    private static Map<String, String> extractDebeziumProperties(
-            Map<String, String> userProperties) {
-        // retain only debezium properties if any
-        var dbzProps = new HashMap<String, String>();
-        for (var entry : userProperties.entrySet()) {
-            var key = entry.getKey();
-            if (key.startsWith(DBZ_PROPERTY_PREFIX)) {
-                // remove the prefix
-                dbzProps.put(key.substring(DBZ_PROPERTY_PREFIX.length()), entry.getValue());
-            }
-        }
-        return dbzProps;
-    }
-
-    private final long sourceId;
-    private final SourceTypeE sourceType;
+    protected final long sourceId;
+    protected final String startOffset;
+    protected final Map<String, String> userProps;
+    protected final boolean snapshotDone;
+    protected final boolean isCdcSourceJob;
+    protected final boolean isBackfillSource;
+    private final StringSubstitutor substitutor;
     private final Properties resolvedDbzProps;
-    private final boolean isBackfillSource;
-    private final int waitStreamingStartTimeout;
 
-    public long getSourceId() {
-        return sourceId;
-    }
-
-    public SourceTypeE getSourceType() {
-        return sourceType;
-    }
-
-    public Properties getResolvedDebeziumProps() {
-        return resolvedDbzProps;
-    }
-
-    public boolean isBackfillSource() {
-        return isBackfillSource;
-    }
-
-    public int getWaitStreamingStartTimeout() {
-        return waitStreamingStartTimeout;
-    }
-
-    public static String normalizeMariaDbSslMode(String sslMode) {
-        return switch (sslMode) {
-            case "disabled" -> "disable";
-            case "preferred" ->
-                    throw new IllegalArgumentException(
-                            "MariaDB CDC does not support ssl.mode 'preferred'; use 'required',"
-                                    + " 'verify-ca', or 'verify-full'");
-            case "required" -> "trust";
-            default -> sslMode;
-        };
-    }
-
-    public static String mariaDbSslMode(Map<String, String> userProps) {
-        return normalizeMariaDbSslMode(
-                userProps.getOrDefault(
-                        MYSQL_SSL_MODE,
-                        userProps.getOrDefault("debezium.database.sslmode", "disabled")));
-    }
-
-    public static String mariaDbSslRootCert(Map<String, String> userProps) {
-        return userProps.getOrDefault(
-                "ssl.root.cert", userProps.get("debezium.database.sslrootcert"));
-    }
-
-    public DbzConnectorConfig(
-            SourceTypeE source,
-            long sourceId,
-            String startOffset,
-            Map<String, String> userProps,
-            boolean snapshotDone,
-            boolean isCdcSourceJob) {
-
-        var substitutionProps = new HashMap<>(userProps);
-        substitutionProps.put("source.id", Long.toString(sourceId));
-        StringSubstitutor substitutor = new StringSubstitutor(substitutionProps);
-        var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
-        var isCdcBackfill =
-                null != userProps.get(SNAPSHOT_MODE_KEY)
-                        && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
-        var waitStreamingStartTimeout =
-                Integer.parseInt(
-                        userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "60"));
-
+    protected DbzConnectorConfig(CdcSource source) {
+        this.sourceId = source.getSourceId();
+        this.startOffset = source.getStartOffset();
+        this.userProps = source.getUserProps();
+        this.snapshotDone = source.isSnapshotDone();
+        this.isCdcSourceJob = source.isCdcSourceJob();
+        this.isBackfillSource = source.isBackfillSource();
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={},"
-                        + " isCdcBackfill={}, isCdcSourceJob={}, waitStreamingStartTimeout={}",
-                source,
+                "Building the Debezium config: source={}, sourceId={}, startOffset={},"
+                        + " snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={},"
+                        + " waitStreamingStartTimeout={}, needsOffsetCommitOnCheckpoint={}",
+                source.getSourceType(),
                 sourceId,
                 startOffset,
                 snapshotDone,
-                isCdcBackfill,
+                isBackfillSource,
                 isCdcSourceJob,
-                waitStreamingStartTimeout);
+                source.getWaitStreamingStartTimeout(),
+                source.needsOffsetCommitOnCheckpoint());
 
-        if (source == SourceTypeE.MYSQL || source == SourceTypeE.MARIADB) {
-            var mysqlProps =
-                    initiateDbConfig(
-                            source == SourceTypeE.MARIADB ? MARIADB_CONFIG_FILE : MYSQL_CONFIG_FILE,
-                            substitutor);
+        var substitutionProps = new HashMap<>(userProps);
+        substitutionProps.put("source.id", Long.toString(sourceId));
+        this.substitutor = new StringSubstitutor(substitutionProps);
 
-            if (source == SourceTypeE.MARIADB) {
-                mysqlProps.setProperty("database.ssl.mode", mariaDbSslMode(userProps));
-                var rootCert = mariaDbSslRootCert(userProps);
-                if (rootCert != null) {
-                    mysqlProps.setProperty("driver.serverSslCert", rootCert);
-                    mysqlProps.setProperty(
-                            MariaDbStreamingChangeEventSource.SSL_ROOT_CERT_CONFIG, rootCert);
-                }
-            }
-
-            // Enable schema history for all MySQL CDC modes to handle schema changes properly
-            mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
-            mysqlProps.setProperty(OpendalSchemaHistory.MAX_RECORDS_PER_FILE_CONFIG, "2048");
-
-            if (isCdcBackfill) {
-                // disable snapshot locking at all
-                mysqlProps.setProperty("snapshot.locking.mode", "none");
-                // If cdc backfill enabled, the source only emit incremental changes, so we must
-                // rewind to the given offset and continue binlog reading from there
-                if (null != startOffset && !startOffset.isBlank()) {
-                    mysqlProps.setProperty("snapshot.mode", "custom");
-                    mysqlProps.setProperty(
-                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-                } else {
-                    // read upstream table schemas and emit incremental changes only
-                    mysqlProps.setProperty("snapshot.mode", "no_data");
-                }
-            } else {
-                // if snapshot phase is finished and offset is specified, we will continue binlog
-                // reading from the given offset
-                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    // 'snapshot.mode=no_data' is used when binlog offset is specified.
-                    // Since we use persistent schema history, we only need to snapshot schema when
-                    // no offset is passed, restore directly from schema history when offset is
-                    // available.
-                    mysqlProps.setProperty("snapshot.mode", "custom");
-                    mysqlProps.setProperty(
-                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-                }
-            }
-
-            dbzProps.putAll(mysqlProps);
-
-            if (isCdcSourceJob) {
-                // remove table filtering for the shared MySQL source, since we
-                // allow user to ingest tables in different database
-                LOG.info("Disable table filtering for the shared MySQL source");
-                dbzProps.remove("table.include.list");
-            }
-
-        } else if (source == SourceTypeE.POSTGRES) {
-            var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
-
-            // disable publication auto creation if needed
-            var pubAutoCreate =
-                    Boolean.parseBoolean(
-                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
-            if (!pubAutoCreate) {
-                postgresProps.setProperty("publication.autocreate.mode", "disabled");
-            }
-            if (isCdcBackfill) {
-                // skip the initial snapshot for cdc backfill
-                postgresProps.setProperty("snapshot.mode", "no_data");
-
-                // if startOffset is specified, we should continue
-                // reading changes from the given offset
-                if (null != startOffset && !startOffset.isBlank()) {
-                    postgresProps.setProperty(
-                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-                }
-
-            } else {
-                // if snapshot phase is finished and offset is specified, we will continue reading
-                // changes from the given offset
-                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    postgresProps.setProperty("snapshot.mode", "no_data");
-                    postgresProps.setProperty(
-                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-                }
-            }
-
-            // adapt value of sslmode to the expected value
-            var sslMode = postgresProps.getProperty("database.sslmode");
-            if (sslMode != null) {
-                switch (sslMode) {
-                    case "disabled":
-                        sslMode = "disable";
-                        break;
-                    case "preferred":
-                        sslMode = "prefer";
-                        break;
-                    case "required":
-                        sslMode = "require";
-                        break;
-                }
-                postgresProps.setProperty("database.sslmode", sslMode);
-            }
-
-            dbzProps.putAll(postgresProps);
-
-            if (isCdcSourceJob) {
-                // remove table filtering for the shared Postgres source, since we
-                // allow user to ingest tables in different schemas
-                LOG.info("Disable table filtering for the shared Postgres source");
-                dbzProps.remove("table.include.list");
-            }
-
-            if (userProps.containsKey(PG_SSL_ROOT_CERT)) {
-                dbzProps.setProperty("database.sslrootcert", userProps.get(PG_SSL_ROOT_CERT));
-            }
-        } else if (source == SourceTypeE.MONGODB) {
-            var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
-
-            // if snapshot phase is finished and offset is specified, we will continue reading
-            // changes from the given offset
-            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                mongodbProps.setProperty("snapshot.mode", "no_data");
-                mongodbProps.setProperty(
-                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-            }
-
-            var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
-            var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
-            var hasRawFilterOverride =
-                    MongoDb.RAW_FILTER_OPTIONS_DISABLING_INFERENCE.stream()
-                            .anyMatch(userProps::containsKey);
-            if (!hasRawFilterOverride) {
-                inferMongoDatabaseList(collection)
-                        .ifPresent(
-                                databaseList -> {
-                                    mongodbProps.setProperty(
-                                            MongoDbConnectorConfig.DATABASE_INCLUDE_LIST.name(),
-                                            databaseList);
-                                    mongodbProps.setProperty(
-                                            MongoDbConnectorConfig.FILTERS_MATCH_MODE.name(),
-                                            MongoDbConnectorConfig.FiltersMatchMode.LITERAL
-                                                    .getValue());
-                                    LOG.info(
-                                            "Inferred MongoDB database include list '{}' and"
-                                                    + " literal filter match mode from collection list"
-                                                    + " '{}'",
-                                            databaseList,
-                                            collection);
-                                });
-            }
-
-            var connectionStr = new ConnectionString(mongodbUrl);
-            var connectorName =
-                    String.format(
-                            "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);
-            mongodbProps.setProperty("name", connectorName);
-
-            dbzProps.putAll(mongodbProps);
-        } else if (source == SourceTypeE.SQL_SERVER) {
-            var sqlServerProps = initiateDbConfig(SQL_SERVER_CONFIG_FILE, substitutor);
-            // disable snapshot locking at all
-            sqlServerProps.setProperty("snapshot.locking.mode", "none");
-
-            if (isCdcBackfill) {
-                // if startOffset is specified, we should continue
-                // reading changes from the given offset
-                if (null != startOffset && !startOffset.isBlank()) {
-                    // skip the initial snapshot for cdc backfill
-                    sqlServerProps.setProperty("snapshot.mode", "recovery");
-                    sqlServerProps.setProperty(
-                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-                } else {
-                    sqlServerProps.setProperty("snapshot.mode", "no_data");
-                }
-            } else {
-                // if snapshot phase is finished and offset is specified, we will continue reading
-                // changes from the given offset
-                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    sqlServerProps.setProperty("snapshot.mode", "recovery");
-                    sqlServerProps.setProperty(
-                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-                }
-            }
-            dbzProps.putAll(sqlServerProps);
-            if (isCdcSourceJob) {
-                // remove table filtering for the shared Sql Server source, since we
-                // allow user to ingest tables in different schemas
-                LOG.info("Disable table filtering for the shared Sql Server source");
-                dbzProps.remove("table.include.list");
-            }
-        } else if (source == SourceTypeE.ORACLE) {
-            var oracleProps = initiateDbConfig(ORACLE_CONFIG_FILE, substitutor);
-            var heartbeatTable =
-                    OracleHeartbeatTable.parse(userProps.get(ORACLE_HEARTBEAT_TABLE_NAME));
-            oracleProps.setProperty(
-                    DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME,
-                    heartbeatTable.actionQuery());
-            dbzProps.putAll(oracleProps);
-            if (isCdcSourceJob) {
-                // A shared Oracle source captures tables from multiple schemas in one PDB.
-                LOG.info("Disable table filtering for the shared Oracle source");
-                dbzProps.remove("table.include.list");
-            }
-        } else {
-            throw new RuntimeException("unsupported source type: " + source);
+        var dbzProps = loadPropertiesTemplate(DBZ_CONFIG_FILE);
+        customizeDebeziumProperties(dbzProps);
+        if (isCdcSourceJob) {
+            LOG.info("Disable table filtering for the shared {} source", source.getSourceType());
+            dbzProps.remove("table.include.list");
         }
         var otherProps = extractDebeziumProperties(userProps);
         for (var entry : otherProps.entrySet()) {
@@ -433,36 +112,31 @@ public class DbzConnectorConfig {
                                 / 1024
                         : 0);
 
-        this.sourceId = sourceId;
-        this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
-        this.isBackfillSource = isCdcBackfill;
-        this.waitStreamingStartTimeout = waitStreamingStartTimeout;
     }
 
-    private static Optional<String> inferMongoDatabaseList(String collectionList) {
-        if (collectionList == null) {
-            return Optional.empty();
-        }
-
-        var matcher = MongoDb.LITERAL_COLLECTION_LIST_PATTERN.matcher(collectionList);
-        var databases = new LinkedHashSet<String>();
-        var matchedUntil = 0;
-        while (matcher.find()) {
-            if (matcher.start() != matchedUntil) {
-                return Optional.empty();
-            }
-            databases.add(matcher.group(MongoDb.DATABASE_GROUP));
-            matchedUntil = matcher.end();
-        }
-
-        if (databases.isEmpty() || matchedUntil != collectionList.length()) {
-            return Optional.empty();
-        }
-        return Optional.of(String.join(",", databases));
+    public Properties getResolvedDebeziumProps() {
+        return resolvedDbzProps;
     }
 
-    private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
+    /**
+     * Adds the connector's settings to {@code dbzProps}, which already holds the common settings of
+     * {@code debezium.properties}. The constructor calls it once, before the user-supplied {@code
+     * debezium.*} options are merged, so those options never override what it sets. Implementations
+     * read the source through the protected fields of this class and must not keep their own
+     * fields, because the call happens before a subclass constructor body runs.
+     */
+    protected abstract void customizeDebeziumProperties(Properties dbzProps);
+
+    protected boolean hasStartOffset() {
+        return startOffset != null && !startOffset.isBlank();
+    }
+
+    /**
+     * Loads a {@code .properties} template from the classpath and replaces its {@code ${...}}
+     * placeholders with the WITH options of the source.
+     */
+    protected Properties loadPropertiesTemplate(String fileName) {
         var dbProps = new Properties();
         try (var input = getClass().getClassLoader().getResourceAsStream(fileName)) {
             assert input != null;
@@ -474,6 +148,20 @@ public class DbzConnectorConfig {
             throw new RuntimeException("failed to load config file " + fileName, e);
         }
         return dbProps;
+    }
+
+    private static Map<String, String> extractDebeziumProperties(
+            Map<String, String> userProperties) {
+        // retain only debezium properties if any
+        var dbzProps = new HashMap<String, String>();
+        for (var entry : userProperties.entrySet()) {
+            var key = entry.getKey();
+            if (key.startsWith(DBZ_PROPERTY_PREFIX)) {
+                // remove the prefix
+                dbzProps.put(key.substring(DBZ_PROPERTY_PREFIX.length()), entry.getValue());
+            }
+        }
+        return dbzProps;
     }
 
     /**

@@ -19,7 +19,7 @@ package com.risingwave.connector.source;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.CdcSourceFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -132,7 +132,9 @@ public class MongoDbConnectorConfigTest {
         userProperties.putAll(additionalProperties);
 
         var config =
-                new DbzConnectorConfig(SourceTypeE.MONGODB, 1, null, userProperties, false, false);
+                CdcSourceFactory.createConfig(
+                        CdcSourceFactory.createSource(
+                                SourceTypeE.MONGODB, 1, null, userProperties, false, false));
         return config.getResolvedDebeziumProps().entrySet().stream()
                 .collect(
                         Collectors.toMap(

@@ -1,0 +1,75 @@
+# `transactional` and `cdc.source.needs.offset.commit.on.checkpoint` are set by RisingWave itself,
+# and `auto.schema.change` is accepted only by the connectors that can apply the resulting DDL
+# events. All checks run before the upstream database is contacted.
+
+statement error 'transactional' cannot be set
+create source mysql_transactional with (
+  connector = 'mysql-cdc',
+  transactional = 'true'
+) format plain encode json;
+
+statement error 'transactional' cannot be set
+create source postgres_transactional with (
+  connector = 'postgres-cdc',
+  transactional = 'false'
+) format plain encode json;
+
+statement error 'transactional' cannot be set
+create table mongodb_transactional (_id jsonb primary key, payload jsonb) with (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'mydb.orders',
+  transactional = 'true'
+) format debezium_mongo encode json;
+
+statement error 'cdc.source.needs.offset.commit.on.checkpoint' cannot be set
+create source postgres_offset_commit with (
+  connector = 'postgres-cdc',
+  cdc.source.needs.offset.commit.on.checkpoint = 'false'
+) format plain encode json;
+
+statement error 'cdc.source.needs.offset.commit.on.checkpoint' cannot be set
+create source mysql_offset_commit with (
+  connector = 'mysql-cdc',
+  cdc.source.needs.offset.commit.on.checkpoint = 'true'
+) format plain encode json;
+
+statement error auto schema change for connector sqlserver-cdc
+create source sqlserver_auto_schema_change with (
+  connector = 'sqlserver-cdc',
+  auto.schema.change = 'true'
+) format plain encode json;
+
+statement error auto schema change for connector mongodb-cdc
+create table mongodb_auto_schema_change (_id jsonb primary key, payload jsonb) with (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'mydb.orders',
+  auto.schema.change = 'true'
+) format debezium_mongo encode json;
+
+# A SECRET value is filled into the connector properties only at runtime, after these checks.
+
+statement ok
+create secret cdc_option_guards_secret with (backend = 'meta') as 'true';
+
+statement error 'transactional' cannot be set
+create source mysql_transactional_secret with (
+  connector = 'mysql-cdc',
+  transactional = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement error 'cdc.source.needs.offset.commit.on.checkpoint' cannot be set
+create source postgres_offset_commit_secret with (
+  connector = 'postgres-cdc',
+  cdc.source.needs.offset.commit.on.checkpoint = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement error 'auto.schema.change' cannot be provided as a SECRET
+create source mysql_auto_schema_change_secret with (
+  connector = 'mysql-cdc',
+  auto.schema.change = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement ok
+drop secret cdc_option_guards_secret;

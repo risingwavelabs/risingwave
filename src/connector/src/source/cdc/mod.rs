@@ -44,9 +44,10 @@ pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::parser::NumericHandling;
 use crate::source::cdc::external::SchemaTableName;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
-use crate::{for_all_classified_sources, impl_cdc_source_type};
+use crate::{dispatch_cdc_source_type, for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
@@ -63,6 +64,8 @@ pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_i
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
+pub const CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY: &str =
+    "cdc.source.needs.offset.commit.on.checkpoint";
 pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
@@ -94,12 +97,22 @@ pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
     /// When true, a shared source sets Debezium's `provide.transaction.metadata`, so that all rows
     /// of one upstream transaction go into a single chunk.
     const CAN_USE_TRANSACTION_METADATA: bool = false;
+    /// When true, the connector accepts `auto.schema.change = true`, which makes Debezium emit
+    /// schema change events that RisingWave applies to the CDC tables of the source. Set it only
+    /// when Debezium consumes the option for the connector and RisingWave can apply the resulting
+    /// DDL events.
+    const CAN_AUTO_SCHEMA_CHANGE: bool = false;
     /// When true, the source executor waits for a non-empty split offset before reporting the
     /// initial CDC offset.
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = false;
     /// When true, the consumed offset is committed back to the upstream database on each
-    /// checkpoint via a JNI call.
+    /// checkpoint via a JNI call. The CDC reader passes the flag to the Java engine, which then
+    /// holds back Debezium's acknowledgement of each record until that commit.
     const NEEDS_OFFSET_COMMIT_ON_CHECKPOINT: bool = false;
+    /// When true, the Debezium JSON parser accepts a numeric value that arrives as a JSON string,
+    /// such as `"42"` for an integer column or `"123.45"` for a decimal column, and converts it to
+    /// the column type instead of rejecting it.
+    const NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING: bool = false;
 }
 
 /// Checks the `CREATE` and `ALTER` statements of a CDC source connector.
@@ -342,6 +355,19 @@ impl CdcSourceType {
             CdcSourceType::SqlServer => "SQL Server",
             CdcSourceType::Oracle => "Oracle",
             CdcSourceType::Unspecified => "Unspecified",
+        }
+    }
+
+    /// Returns how the Debezium JSON parser handles the numeric values in the change events of
+    /// this connector.
+    pub fn debezium_numeric_handling(&self) -> NumericHandling {
+        NumericHandling::Relax {
+            string_parsing: dispatch_cdc_source_type!(
+                self,
+                T,
+                T::NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING,
+                false
+            ),
         }
     }
 }

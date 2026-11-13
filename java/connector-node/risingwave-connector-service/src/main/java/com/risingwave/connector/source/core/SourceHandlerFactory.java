@@ -18,7 +18,7 @@ package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.CdcSourceFactory;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,9 +33,9 @@ public abstract class SourceHandlerFactory {
             Map<String, String> userProps,
             boolean snapshotDone,
             boolean isCdcSourceJob) {
-        var config =
-                new DbzConnectorConfig(
+        var cdcSource =
+                CdcSourceFactory.createSource(
                         source, sourceId, startOffset, userProps, snapshotDone, isCdcSourceJob);
-        return new DbzSourceHandler(config);
+        return new DbzSourceHandler(cdcSource, CdcSourceFactory.createConfig(cdcSource));
     }
 }

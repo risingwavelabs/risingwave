@@ -17,6 +17,7 @@
 package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.SourceHandler;
+import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
@@ -30,9 +31,11 @@ import org.slf4j.LoggerFactory;
 public class DbzSourceHandler implements SourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
 
+    private final CdcSource source;
     private final DbzConnectorConfig config;
 
-    public DbzSourceHandler(DbzConnectorConfig config) {
+    public DbzSourceHandler(CdcSource source, DbzConnectorConfig config) {
+        this.source = source;
         this.config = config;
     }
 
@@ -54,7 +57,7 @@ public class DbzSourceHandler implements SourceHandler {
                     if (Context.current().isCancelled()) {
                         LOG.info(
                                 "Engine#{}: Connection broken detected, stop the engine",
-                                config.getSourceId());
+                                source.getSourceId());
                         runner.stop();
                         return;
                     }
@@ -67,12 +70,12 @@ public class DbzSourceHandler implements SourceHandler {
                                         .poll(500, TimeUnit.MILLISECONDS);
                         if (resp != null) {
                             ConnectorNodeMetrics.incSourceRowsReceived(
-                                    config.getSourceType().toString(),
-                                    String.valueOf(config.getSourceId()),
+                                    source.getSourceType().toString(),
+                                    String.valueOf(source.getSourceId()),
                                     resp.getEventsCount());
                             LOG.debug(
                                     "Engine#{}: emit one chunk {} events to network ",
-                                    config.getSourceId(),
+                                    source.getSourceId(),
                                     resp.getEventsCount());
                             responseObserver.onNext(resp);
                         }
@@ -88,7 +91,7 @@ public class DbzSourceHandler implements SourceHandler {
 
     @Override
     public void startSource(ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
-        var runner = DbzCdcEngineRunner.newCdcEngineRunner(config, responseObserver);
+        var runner = DbzCdcEngineRunner.newCdcEngineRunner(source, config, responseObserver);
         if (runner == null) {
             responseObserver.onCompleted();
             return;
@@ -97,7 +100,7 @@ public class DbzSourceHandler implements SourceHandler {
         try {
             // Start the engine
             runner.start();
-            LOG.info("Start consuming events of table {}", config.getSourceId());
+            LOG.info("Start consuming events of table {}", source.getSourceId());
 
             final OnReadyHandler onReadyHandler = new OnReadyHandler(runner, responseObserver);
 
@@ -111,7 +114,7 @@ public class DbzSourceHandler implements SourceHandler {
             try {
                 runner.stop();
             } catch (Exception e) {
-                LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+                LOG.warn("Failed to stop Engine#{}", source.getSourceId(), e);
             }
         }
     }

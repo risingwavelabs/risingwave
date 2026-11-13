@@ -22,6 +22,8 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.source.common.CdcSource;
+import com.risingwave.connector.source.common.CdcSourceFactory;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -32,8 +34,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 public class DbzCdcEngineRunnerTest {
-    private static DbzConnectorConfig config() {
-        return new DbzConnectorConfig(
+    private static CdcSource source() {
+        return CdcSourceFactory.createSource(
                 SourceTypeE.POSTGRES,
                 27413,
                 null,
@@ -54,9 +56,10 @@ public class DbzCdcEngineRunnerTest {
 
     @Test(timeout = 10000)
     public void receiverClosureDuringStartupAllowsEngineCleanup() throws Exception {
-        var config = config();
-        var engine = new WaitingEngine(config);
-        var runner = new DbzCdcEngineRunner(config, engine);
+        var source = source();
+        var config = CdcSourceFactory.createConfig(source);
+        var engine = new WaitingEngine(source, config);
+        var runner = new DbzCdcEngineRunner(source, config, engine);
         var receiverOpen = new AtomicBoolean(true);
         var polling = new CountDownLatch(1);
         try (var executor = Executors.newSingleThreadExecutor()) {
@@ -94,9 +97,10 @@ public class DbzCdcEngineRunnerTest {
 
     @Test(timeout = 10000)
     public void stopDuringStartupDoesNotRestoreRunningState() throws Exception {
-        var config = config();
-        var engine = new WaitingEngine(config);
-        var runner = new DbzCdcEngineRunner(config, engine);
+        var source = source();
+        var config = CdcSourceFactory.createConfig(source);
+        var engine = new WaitingEngine(source, config);
+        var runner = new DbzCdcEngineRunner(source, config, engine);
         try (var executor = Executors.newSingleThreadExecutor()) {
             var startup = executor.submit(() -> runner.start());
             try {
@@ -115,10 +119,11 @@ public class DbzCdcEngineRunnerTest {
 
     @Test(timeout = 10000)
     public void stopFailureStillInterruptsEngineThread() throws Exception {
-        var config = config();
-        var engine = new WaitingEngine(config);
+        var source = source();
+        var config = CdcSourceFactory.createConfig(source);
+        var engine = new WaitingEngine(source, config);
         engine.failStop = true;
-        var runner = new DbzCdcEngineRunner(config, engine);
+        var runner = new DbzCdcEngineRunner(source, config, engine);
         try {
             assertFalse(runner.start(() -> false));
             assertTrue(engine.started.await(5, TimeUnit.SECONDS));
@@ -138,12 +143,8 @@ public class DbzCdcEngineRunnerTest {
         final AtomicInteger stopCalls = new AtomicInteger();
         boolean failStop;
 
-        WaitingEngine(DbzConnectorConfig config) {
-            super(
-                    config.getSourceType(),
-                    config.getSourceId(),
-                    config.getResolvedDebeziumProps(),
-                    (success, message, error) -> {});
+        WaitingEngine(CdcSource source, DbzConnectorConfig config) {
+            super(source, config, (success, message, error) -> {});
         }
 
         @Override
