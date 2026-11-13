@@ -243,10 +243,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
         let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
             let mut prefix_stripped_paths = Vec::new();
-            let mut stream = object_store
-                .list(&dir, None, None)
-                .await
-                .map_err(|e| anyhow!(e))?;
+            let mut stream = object_store.list(&dir).await.map_err(|e| anyhow!(e))?;
             use futures::StreamExt;
             while let Some(obj) = stream.next().await {
                 let obj = obj.map_err(|e| anyhow!(e))?;
@@ -292,10 +289,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
         JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
             let mut keys = Vec::new();
-            let mut stream = object_store
-                .list(&dir, None, None)
-                .await
-                .map_err(|e| anyhow!(e))?;
+            let mut stream = object_store.list(&dir).await.map_err(|e| anyhow!(e))?;
             use futures::StreamExt;
             while let Some(obj) = stream.next().await {
                 let obj = obj.map_err(|e| anyhow!(e))?;

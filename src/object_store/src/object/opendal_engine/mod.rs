@@ -15,9 +15,11 @@
 pub mod opendal_object_store;
 
 use opendal::Operator;
-use opendal::layers::ConcurrentLimitLayer;
 pub use opendal_object_store::*;
 use risingwave_common::config::ObjectStoreConfig;
+
+mod concurrent_limit;
+use concurrent_limit::ConcurrentLimitLayer;
 
 #[cfg(feature = "hdfs-backend")]
 pub mod hdfs;

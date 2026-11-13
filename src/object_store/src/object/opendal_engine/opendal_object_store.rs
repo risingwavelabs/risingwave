@@ -253,17 +253,8 @@ impl ObjectStore for OpendalObjectStore {
         Ok(())
     }
 
-    async fn list(
-        &self,
-        prefix: &str,
-        start_after: Option<String>,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
-        let mut object_lister = self.op.lister_with(prefix).recursive(true);
-        if let Some(start_after) = start_after {
-            object_lister = object_lister.start_after(&start_after);
-        }
-        let object_lister = object_lister.await?;
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let object_lister = self.op.lister_with(prefix).recursive(true).await?;
 
         let op = self.op.clone();
         let stream = object_lister.then(move |object| {
@@ -271,7 +262,7 @@ impl ObjectStore for OpendalObjectStore {
             async move { Self::listed_object_metadata(&op, object?).await }
         });
 
-        Ok(stream.take(limit.unwrap_or(usize::MAX)).boxed())
+        Ok(stream.boxed())
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -730,12 +721,46 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list(prefix, None, None)
+            .list(prefix)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_list_allows_stat_and_delete_with_concurrency_limit() {
+        let mut store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        let config = ObjectStoreConfig {
+            req_concurrency_limit: 1,
+            ..Default::default()
+        };
+        store.op = super::super::new_operator(&config, store.op);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for id in 0..4 {
+                store
+                    .upload(&format!("prefix/{id}.data"), Bytes::from_static(b"data"))
+                    .await
+                    .unwrap();
+            }
+            let mut objects = store.list("prefix/").await.unwrap();
+            let mut seen = std::collections::HashSet::new();
+            while let Some(object) = objects.next().await {
+                // Memory listing needs the adapter's stat fallback to get metadata.
+                let object = object.unwrap();
+                assert_eq!(object.total_size, 4);
+                assert!(seen.insert(object.key.clone()));
+                store.metadata(&object.key).await.unwrap();
+                store.delete_objects(&[object.key]).await.unwrap();
+            }
+            assert_eq!(seen.len(), 4);
+            // Even an exhausted but still-live lister must not hold the permit.
+            assert!(list_all("prefix/", &store).await.is_empty());
+            drop(objects);
+        })
+        .await
+        .expect("listing, stat, and deletion must share a single permit without deadlock");
     }
 
     #[tokio::test]
