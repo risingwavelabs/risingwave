@@ -460,6 +460,10 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+# Backport C23 string search fixes and use C17 for bundled Kerberos on modern GCC/glibc.
+krb5-src = { git = "https://github.com/risingwavelabs/krb5-src.git", rev = "a8ecc9a93a3e202a6c9993fb2fb0f901b3b59806" }
+# Use explicit prototypes and ANSI C definitions in bundled SASL for C23 compilers.
+sasl2-sys = { git = "https://github.com/risingwavelabs/rust-sasl.git", rev = "230097ce18ffde26d511f58f32eff23039c48522" }
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
 foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }

@@ -8520,9 +8520,8 @@ dependencies = [
 
 [[package]]
 name = "krb5-src"
-version = "0.3.2+1.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44cd3b7e7735d48bc3793837041294f2eb747bd0f63bbc081e89972abb9e48fb"
+version = "0.3.4"
+source = "git+https://github.com/risingwavelabs/krb5-src.git?rev=a8ecc9a93a3e202a6c9993fb2fb0f901b3b59806#a8ecc9a93a3e202a6c9993fb2fb0f901b3b59806"
 dependencies = [
  "duct",
 ]
@@ -16408,8 +16407,7 @@ dependencies = [
 [[package]]
 name = "sasl2-sys"
 version = "0.1.22+2.1.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f2a7f7efd9fc98b3a9033272df10709f5ee3fa0eabbd61a527a3a1ed6bd3c6"
+source = "git+https://github.com/risingwavelabs/rust-sasl.git?rev=230097ce18ffde26d511f58f32eff23039c48522#230097ce18ffde26d511f58f32eff23039c48522"
 dependencies = [
  "cc",
  "duct",
