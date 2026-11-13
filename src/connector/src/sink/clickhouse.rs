@@ -46,10 +46,9 @@ use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
 };
 
-const QUERY_ENGINE: &str =
-    "select distinct ?fields from system.tables where database = ? and name = ?";
-const QUERY_COLUMN: &str =
-    "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
+mod distributed;
+mod metadata;
+
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 
 const ALLOW_EXPERIMENTAL_JSON_TYPE: &str = "allow_experimental_json_type";
@@ -91,7 +90,7 @@ impl EnforceSecret for ClickHouseCommon {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum ClickHouseEngine {
     MergeTree,
     ReplacingMergeTree(Option<String>),
@@ -578,7 +577,7 @@ impl Sink for ClickHouseSink {
         let client = self.config.common.build_client()?;
 
         let (clickhouse_column, clickhouse_engine) =
-            query_column_engine_from_ck(client, &self.config).await?;
+            query_column_engine_from_ck(client, &self.config, &self.schema).await?;
         if clickhouse_engine.is_shared_tree() {
             risingwave_common::license::Feature::ClickHouseSharedEngine
                 .check_available()
@@ -670,7 +669,7 @@ impl ClickHouseSinkWriter {
         let client = config.common.build_client()?;
 
         let (clickhouse_column, clickhouse_engine) =
-            query_column_engine_from_ck(client.clone(), &config).await?;
+            query_column_engine_from_ck(client.clone(), &config, &schema).await?;
 
         let column_correct_map: Result<HashMap<String, ClickHouseSchemaFeature>> =
             clickhouse_column
@@ -838,7 +837,7 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 }
 
-#[derive(ClickHouseRow, Deserialize, Clone)]
+#[derive(ClickHouseRow, Deserialize, Clone, Debug, PartialEq, Eq)]
 struct SystemColumn {
     name: String,
     r#type: String,
@@ -882,38 +881,107 @@ struct ClickhouseQueryEngine {
     #[expect(dead_code)]
     name: String,
     engine: String,
+    /// Engine name and arguments, used to resolve Distributed table targets.
+    engine_full: String,
     create_table_query: String,
+}
+
+/// Check all written columns against the Distributed table before removing
+/// generated sign/delete columns from the sink schema metadata.
+fn check_distributed_columns(
+    schema: &Schema,
+    engine: &ClickHouseEngine,
+    outer_columns: &[SystemColumn],
+    inner_columns: &[SystemColumn],
+) -> Result<()> {
+    let written_columns = build_fields_name_type_from_schema(schema)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .chain(engine.get_sign_name())
+        .chain(engine.get_delete_col());
+    for name in written_columns {
+        let find_column = |columns: &[SystemColumn], table_kind| {
+            columns
+                .iter()
+                .find(|column| column.name == name)
+                .map(|column| column.r#type.clone())
+                .ok_or_else(|| {
+                    SinkError::ClickHouse(format!(
+                        "Column {name:?} is missing from the {table_kind} table"
+                    ))
+                })
+        };
+        let outer_type = find_column(outer_columns, "Distributed")?;
+        let inner_type = find_column(inner_columns, "underlying local")?;
+        if outer_type != inner_type {
+            return Err(SinkError::ClickHouse(format!(
+                "Column {name:?} has type {outer_type:?} in the Distributed table but {inner_type:?} in the underlying local table"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn query_column_engine_from_ck(
     client: ClickHouseClient,
     config: &ClickHouseConfig,
+    schema: &Schema,
 ) -> Result<(Vec<SystemColumn>, ClickHouseEngine)> {
-    let query_engine = QUERY_ENGINE;
-    let query_column = QUERY_COLUMN;
+    let (columns, engine) =
+        metadata::query_table_metadata(&client, &config.common.database, &config.common.table)
+            .await?;
 
-    let clickhouse_engine = client
-        .query(query_engine)
-        .bind(config.common.database.clone())
-        .bind(config.common.table.clone())
-        .fetch_all::<ClickhouseQueryEngine>()
-        .await?;
-    let mut clickhouse_column = client
-        .query(query_column)
-        .bind(config.common.database.clone())
-        .bind(config.common.table.clone())
-        .bind("position")
-        .fetch_all::<SystemColumn>()
-        .await?;
-    if clickhouse_engine.is_empty() || clickhouse_column.is_empty() {
-        return Err(SinkError::ClickHouse(format!(
-            "table {:?}.{:?} is not find in clickhouse",
-            config.common.database, config.common.table
-        )));
-    }
-
-    let clickhouse_engine =
-        ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap(), config)?;
+    let (mut clickhouse_column, clickhouse_engine) = if engine.engine == "Distributed" {
+        let distributed_context = |err: SinkError| {
+            SinkError::ClickHouse(format!(
+                "Cannot resolve Distributed table {:?}.{:?}: {}",
+                config.common.database,
+                config.common.table,
+                err.to_report_string()
+            ))
+        };
+        let current_database = client
+            .query("SELECT currentDatabase()")
+            .fetch_one::<String>()
+            .await
+            .map_err(SinkError::from)
+            .map_err(distributed_context)?;
+        let distributed::DistributedTable {
+            cluster,
+            mut database,
+            table,
+        } = distributed::parse_distributed_table(&engine.engine_full, &current_database)
+            .map_err(distributed_context)?;
+        if database.is_empty() {
+            let cluster_databases = client
+                .query("SELECT DISTINCT default_database FROM system.clusters WHERE cluster = ?")
+                .bind(&cluster)
+                .fetch_all::<String>()
+                .await
+                .map_err(SinkError::from)
+                .map_err(distributed_context)?;
+            database = distributed::resolve_default_database(&cluster, &cluster_databases)
+                .map_err(distributed_context)?;
+        }
+        let inner_context = |err: SinkError| {
+            distributed_context(SinkError::ClickHouse(format!(
+                "Underlying local table {database:?}.{table:?}: {}",
+                err.to_report_string()
+            )))
+        };
+        let (inner_columns, inner_engine) =
+            metadata::query_cluster_metadata(&client, &cluster, &database, &table, config)
+                .await
+                .map_err(inner_context)?;
+        check_distributed_columns(schema, &inner_engine, &columns, &inner_columns)
+            .map_err(inner_context)?;
+        (inner_columns, inner_engine)
+    } else {
+        (
+            columns,
+            ClickHouseEngine::from_query_engine(&engine, config)?,
+        )
+    };
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))

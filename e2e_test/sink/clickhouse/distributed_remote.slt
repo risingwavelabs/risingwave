@@ -1,0 +1,109 @@
+control substitution on
+
+statement ok
+DROP TABLE IF EXISTS ck_dist_remote_input CASCADE;
+
+# The shard is a separate ClickHouse instance; only it owns the storage tables.
+system ok retry 30 backoff 1s
+CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --query="SELECT 1" > /dev/null
+
+system ok
+clickhouse --multiquery --query="
+DROP TABLE IF EXISTS rw_dist_remote_append;
+DROP TABLE IF EXISTS rw_dist_remote_replace;
+"
+
+system ok
+CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --multiquery --query="
+DROP DATABASE IF EXISTS rw_distributed_remote_target;
+CREATE DATABASE rw_distributed_remote_target;
+CREATE TABLE rw_distributed_remote_target.append_local (id Int32, payload Int32) ENGINE = MergeTree ORDER BY id;
+CREATE TABLE rw_distributed_remote_target.replace_local (id Int32, payload Int32, ver UInt64, deleted UInt8) ENGINE = ReplacingMergeTree(ver, deleted) ORDER BY id;
+"
+
+# Explicit schemas avoid CREATE TABLE AS requiring the storage table on the router.
+# Cover both an explicit remote database and the cluster's default database.
+system ok
+clickhouse --multiquery --query="
+CREATE TABLE rw_dist_remote_append (id Int32, payload Int32) ENGINE = Distributed(rw_sink_remote_test, rw_distributed_remote_target, append_local, cityHash64(id));
+CREATE TABLE rw_dist_remote_replace (id Int32, payload Int32, ver UInt64, deleted UInt8) ENGINE = Distributed(rw_sink_remote_test, '', replace_local, cityHash64(id));
+"
+
+# Guard against accidentally exercising the same-instance metadata lookup again.
+system ok
+clickhouse --query="SELECT count() FROM system.tables WHERE database = 'rw_distributed_remote_target' AND name IN ('append_local', 'replace_local')"
+----
+0
+
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE ck_dist_remote_input (id INT PRIMARY KEY, payload INT, ver BIGINT);
+
+statement ok
+CREATE SINK ck_dist_remote_append AS SELECT id, payload FROM ck_dist_remote_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'append-only',
+    force_append_only = 'true',
+    clickhouse.table = 'rw_dist_remote_append',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+CREATE SINK ck_dist_remote_replace AS SELECT id, payload, ver FROM ck_dist_remote_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'id',
+    clickhouse.table = 'rw_dist_remote_replace',
+    clickhouse.delete.column = 'deleted',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+INSERT INTO ck_dist_remote_input VALUES (1, 10, 1), (2, 20, 1);
+
+statement ok
+FLUSH;
+
+# Poll storage on the shard directly because Distributed forwarding is asynchronous.
+system ok retry 30 backoff 1s
+test "$(CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --query="SELECT arraySort(groupArray((id, payload))) FROM rw_distributed_remote_target.append_local")" = '[(1,10),(2,20)]'
+
+system ok retry 30 backoff 1s
+test "$(CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --query="SELECT arraySort(groupArray((id, payload, ver, deleted))) FROM rw_distributed_remote_target.replace_local FINAL")" = '[(1,10,1,0),(2,20,1,0)]'
+
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload))) FROM rw_dist_remote_append")" = '[(1,10),(2,20)]'
+
+statement ok
+DROP SINK ck_dist_remote_append;
+
+statement ok
+UPDATE ck_dist_remote_input SET payload = 11, ver = 2 WHERE id = 1;
+
+statement ok
+DELETE FROM ck_dist_remote_input WHERE id = 2;
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --query="SELECT arraySort(groupArray((id, payload, ver))) FROM rw_distributed_remote_target.replace_local FINAL WHERE deleted = 0")" = '[(1,11,2)]'
+
+# FINAL must also expose the updated result through the router.
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, ver))) FROM rw_dist_remote_replace FINAL WHERE deleted = 0")" = '[(1,11,2)]'
+
+statement ok
+DROP SINK ck_dist_remote_replace;
+
+statement ok
+DROP TABLE ck_dist_remote_input;
+
+system ok
+clickhouse --multiquery --query="DROP TABLE rw_dist_remote_append; DROP TABLE rw_dist_remote_replace;"
+
+system ok
+CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --query="DROP DATABASE rw_distributed_remote_target"

@@ -1,0 +1,17 @@
+<clickhouse>
+    <!-- A single-server cluster exercises Distributed routing and clusterAllReplicas. -->
+    <remote_servers>
+        <rw_sink_test>
+            <shard>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                    <user from_env="CLICKHOUSE_USER" />
+                    <password from_env="CLICKHOUSE_PASSWORD" />
+                    <!-- Deliberately different from the sink session database. -->
+                    <default_database>rw_distributed_target</default_database>
+                </replica>
+            </shard>
+        </rw_sink_test>
+    </remote_servers>
+</clickhouse>
