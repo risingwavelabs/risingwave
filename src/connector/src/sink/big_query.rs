@@ -553,6 +553,11 @@ impl Sink for BigQuerySink {
 
     crate::impl_validate_sink_unknown_fields!();
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        BigQueryConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
@@ -1148,7 +1153,7 @@ mod test {
         CHANGE_SEQUENCE_NUMBER, CHANGE_TYPE, ChangeSequenceClock, StorageWriterClient,
         build_protobuf_descriptor_pool, build_protobuf_schema,
     };
-    use crate::sink::{SINK_TYPE_APPEND_ONLY, validate_sink_unknown_fields};
+    use crate::sink::{SINK_TYPE_APPEND_ONLY, Sink, validate_sink_unknown_fields};
 
     #[tokio::test]
     async fn test_type_check() {
@@ -1306,17 +1311,25 @@ mod test {
 
     #[test]
     fn test_change_sequence_number_option() {
+        // `ALTER SINK` passes the merged properties and the altered ones.
+        let alter = |value: &str| {
+            let alter_props = BTreeMap::from([(
+                "bigquery.change_sequence_number".to_owned(),
+                value.to_owned(),
+            )]);
+            BigQuerySink::validate_alter_config_change(
+                &sink_properties("upsert", &[("bigquery.change_sequence_number", value)]),
+                &alter_props,
+            )
+        };
         assert!(sink_config("upsert", &[]).change_sequence_number);
         for (value, expected) in [("true", true), ("false", false)] {
             let config = sink_config("upsert", &[("bigquery.change_sequence_number", value)]);
             assert_eq!(config.change_sequence_number, expected);
             validate_sink_unknown_fields(&config).unwrap();
+            alter(value).unwrap();
         }
-        BigQueryConfig::from_btreemap(sink_properties(
-            "upsert",
-            &[("bigquery.change_sequence_number", "yes")],
-        ))
-        .unwrap_err();
+        alter("yes").unwrap_err();
         check_sink_allow_alter_on_fly_fields(
             BIGQUERY_SINK,
             &["bigquery.change_sequence_number".to_owned()],
