@@ -246,7 +246,7 @@ impl MqttSinkWriter {
                 SinkEncode::Json => RowEncoderWrapper::Json(JsonEncoder::new(
                     schema.clone(),
                     None,
-                    DateHandlingMode::FromCe,
+                    DateHandlingMode::from_options(&format_desc.options)?,
                     TimestampHandlingMode::Milli,
                     timestamptz_mode,
                     TimeHandlingMode::Milli,

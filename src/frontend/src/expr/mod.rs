@@ -293,6 +293,10 @@ impl ExprImpl {
         is_impure(self)
     }
 
+    pub fn needs_materialization(&self) -> bool {
+        needs_materialization(self)
+    }
+
     /// Count `Now`s in the expression.
     pub fn count_nows(&self) -> usize {
         let mut visitor = CountNow::default();

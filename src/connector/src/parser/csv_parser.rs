@@ -91,7 +91,6 @@ impl CsvParser {
             DataType::Int64 => parse!(v, i64)?.into(),
             DataType::Float32 => parse!(v, f32)?.into(),
             DataType::Float64 => parse!(v, f64)?.into(),
-            // FIXME: decimal should have more precision than f64
             DataType::Decimal => parse!(v, Decimal)?.into(),
             DataType::Varchar => v.into(),
             DataType::Date => parse!(v, Date)?.into(),

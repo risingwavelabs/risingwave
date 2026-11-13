@@ -428,6 +428,7 @@ impl FragmentTypeFlag {
         [
             FragmentTypeFlag::SourceScan,
             FragmentTypeFlag::StreamScan,
+            FragmentTypeFlag::StreamCdcScan,
             FragmentTypeFlag::LocalityProvider,
         ]
         .into_iter()
@@ -626,5 +627,15 @@ mod tests {
         for flag in FRAGMENT_TYPE_FLAG_LIST {
             assert_eq!(FragmentTypeFlag::try_from(flag as u32).unwrap(), flag);
         }
+    }
+
+    #[test]
+    fn test_backfill_rate_limit_fragments_include_cdc_scan() {
+        // `ALTER TABLE ... SET BACKFILL_RATE_LIMIT` on a CDC table must reach the
+        // `StreamCdcScan` fragment, otherwise meta reports "stream scan node not found".
+        assert!(
+            FragmentTypeFlag::backfill_rate_limit_fragments()
+                .any(|f| f == FragmentTypeFlag::StreamCdcScan)
+        );
     }
 }

@@ -39,7 +39,7 @@ use iceberg::writer::base_writer::position_delete_file_writer::{
 use iceberg::writer::delta_writer::{DELETE_OP, DeltaWriterBuilder, INSERT_OP};
 use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
-    DefaultFileNameGenerator, DefaultLocationGenerator,
+    DefaultFileNameGenerator, DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
 };
 use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
 use iceberg::writer::task_writer::TaskWriter;
@@ -61,8 +61,9 @@ use uuid::Uuid;
 
 use super::prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use super::{
-    GLOBAL_SINK_METRICS, IcebergCommitResult, IcebergConfig, PARQUET_CREATED_BY, SinkError,
-    SinkWriterParam, create_and_validate_table_impl,
+    GLOBAL_SINK_METRICS, IcebergCommitResult, IcebergConfig, PARQUET_CREATED_BY,
+    PkIndexDataFileLocator, PkIndexDataFileNameGenerator, SinkError, SinkWriterParam,
+    create_and_validate_table_impl,
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkParam};
@@ -81,7 +82,61 @@ enum ProjectIdxVec {
 }
 
 type DataFileWriterBuilderType =
-    DataFileWriterBuilder<ParquetWriterBuilder, DefaultLocationGenerator, DefaultFileNameGenerator>;
+    DataFileWriterBuilder<ParquetWriterBuilder, DataFileLocationGenerator, DataFileNameGenerator>;
+
+/// Data file location: the iceberg default layout, or the flat uuid layout of pk-index sinks that
+/// store file uuids in their PK index.
+#[derive(Clone)]
+enum DataFileLocationGenerator {
+    Default(DefaultLocationGenerator),
+    PkIndex(PkIndexDataFileLocator),
+}
+
+impl LocationGenerator for DataFileLocationGenerator {
+    fn generate_location(
+        &self,
+        partition_key: Option<&iceberg::spec::PartitionKey>,
+        file_name: &str,
+    ) -> String {
+        match self {
+            Self::Default(generator) => generator.generate_location(partition_key, file_name),
+            Self::PkIndex(generator) => generator.generate_location(partition_key, file_name),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum DataFileNameGenerator {
+    Default(DefaultFileNameGenerator),
+    PkIndex(PkIndexDataFileNameGenerator),
+}
+
+impl FileNameGenerator for DataFileNameGenerator {
+    fn generate_file_name(&self) -> String {
+        match self {
+            Self::Default(generator) => generator.generate_file_name(),
+            Self::PkIndex(generator) => generator.generate_file_name(),
+        }
+    }
+}
+
+fn default_data_file_generators(
+    table: &Table,
+    actor_id: String,
+    unique_uuid_suffix: Uuid,
+) -> Result<(DataFileLocationGenerator, DataFileNameGenerator)> {
+    Ok((
+        DataFileLocationGenerator::Default(
+            DefaultLocationGenerator::new(table.metadata())
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
+        ),
+        DataFileNameGenerator::Default(DefaultFileNameGenerator::new(
+            actor_id,
+            Some(unique_uuid_suffix.to_string()),
+            iceberg::spec::DataFileFormat::Parquet,
+        )),
+    ))
+}
 /// The concrete V2 position-delete Parquet writer builder type, shared by the
 /// iceberg sink writer and the pk-index position-delete merger.
 pub type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
@@ -386,19 +441,22 @@ impl IcebergSinkWriterInner {
             .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 
+        let (location_generator, file_name_generator) = if config.pk_index_stores_file_uuid() {
+            (
+                DataFileLocationGenerator::PkIndex(PkIndexDataFileLocator::new(table.metadata())?),
+                DataFileNameGenerator::PkIndex(PkIndexDataFileNameGenerator),
+            )
+        } else {
+            default_data_file_generators(&table, actor_id.to_string(), unique_uuid_suffix)?
+        };
         let parquet_writer_builder =
             ParquetWriterBuilder::new(parquet_writer_properties, schema.clone());
         let rolling_builder = RollingFileWriterBuilder::new(
             parquet_writer_builder,
             (config.target_file_size_mb() * 1024 * 1024) as usize,
             table.file_io().clone(),
-            DefaultLocationGenerator::new(table.metadata())
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-            DefaultFileNameGenerator::new(
-                writer_param.actor_id.to_string(),
-                Some(unique_uuid_suffix.to_string()),
-                iceberg::spec::DataFileFormat::Parquet,
-            ),
+            location_generator,
+            file_name_generator,
         );
         let data_file_builder = DataFileWriterBuilder::new(rolling_builder);
         let monitored_builder = MonitoredGeneralWriterBuilder::new(
@@ -521,19 +579,16 @@ impl IcebergSinkWriterInner {
             .build();
 
         let data_file_builder = {
+            let (location_generator, file_name_generator) =
+                default_data_file_generators(&table, actor_id.to_string(), unique_uuid_suffix)?;
             let parquet_writer_builder =
                 ParquetWriterBuilder::new(parquet_writer_properties.clone(), schema.clone());
             let rolling_writer_builder = RollingFileWriterBuilder::new(
                 parquet_writer_builder,
                 (config.target_file_size_mb() * 1024 * 1024) as usize,
                 table.file_io().clone(),
-                DefaultLocationGenerator::new(table.metadata())
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                DefaultFileNameGenerator::new(
-                    writer_param.actor_id.to_string(),
-                    Some(unique_uuid_suffix.to_string()),
-                    iceberg::spec::DataFileFormat::Parquet,
-                ),
+                location_generator,
+                file_name_generator,
             );
             DataFileWriterBuilder::new(rolling_writer_builder)
         };

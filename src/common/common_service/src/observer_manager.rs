@@ -121,7 +121,10 @@ where
             }
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) | Info::SessionParam(_) => true,
-            Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
+            // It carries the whole limit table, so applying it after the snapshot in queue order
+            // ends at the latest limits.
+            Info::HummockWriteLimits(_) => true,
+            Info::Snapshot(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
             Info::ClusterResource(_) => true,
@@ -305,6 +308,7 @@ mod tests {
         initialized: bool,
         table_refill_runtime_config_versions: Vec<u64>,
         database_notifications: usize,
+        write_limits_versions: Vec<u64>,
     }
 
     impl ObserverState for TestObserverState {
@@ -318,6 +322,10 @@ mod tests {
                     self.table_refill_runtime_config_versions.push(resp.version)
                 }
                 Info::Database(_) => self.database_notifications += 1,
+                Info::HummockWriteLimits(_) => {
+                    assert!(self.initialized);
+                    self.write_limits_versions.push(resp.version);
+                }
                 info => panic!("unexpected notification: {info:?}"),
             }
         }
@@ -389,5 +397,28 @@ mod tests {
             vec![11]
         );
         assert_eq!(observer_manager.observer_states.database_notifications, 0);
+    }
+
+    #[tokio::test]
+    async fn test_keep_write_limits_before_snapshot() {
+        let rx = TestChannel {
+            messages: VecDeque::from([
+                notification(1, Info::HummockWriteLimits(Default::default())),
+                notification(2, Info::HummockWriteLimits(Default::default())),
+                notification(0, Info::Snapshot(Default::default())),
+            ]),
+        };
+        let mut observer_manager = ObserverManager {
+            rx,
+            client: TestClient,
+            observer_states: TestObserverState::default(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        assert_eq!(
+            observer_manager.observer_states.write_limits_versions,
+            vec![1, 2]
+        );
     }
 }

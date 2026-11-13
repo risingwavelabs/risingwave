@@ -23,3 +23,22 @@ pub use arrow_58_schema as arrow_schema;
 pub use arrow_impl::{
     FromArrow, ToArrow, is_parquet_field_match_source_schema, is_parquet_schema_match_source_schema,
 };
+
+use crate::array::{ArrayError, DataChunk};
+use crate::types::DataType;
+
+struct DefaultArrowConvert;
+
+impl FromArrow for DefaultArrowConvert {}
+
+/// Converts an Arrow 58 record batch to a [`DataChunk`] with the default conversion rules.
+pub fn from_arrow58_record_batch(
+    batch: &arrow_array::RecordBatch,
+) -> Result<DataChunk, ArrayError> {
+    DefaultArrowConvert.from_record_batch(batch)
+}
+
+/// Converts an Arrow 58 field to a [`DataType`] with the default conversion rules.
+pub fn from_arrow58_field(field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
+    DefaultArrowConvert.from_field(field)
+}

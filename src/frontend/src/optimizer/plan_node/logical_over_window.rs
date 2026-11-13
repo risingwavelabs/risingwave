@@ -611,7 +611,7 @@ impl PredicatePushdown for LogicalOverWindow {
             .collect();
         remain_cols.grow(self.schema().len());
 
-        let (remain_pred, pushed_pred) = predicate.split_disjoint(&remain_cols);
+        let (remain_pred, pushed_pred) = predicate.split_pushable(&remain_cols);
         gen_filter_and_pushdown(self, remain_pred, pushed_pred, ctx)
     }
 }
