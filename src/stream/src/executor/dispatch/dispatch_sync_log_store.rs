@@ -530,7 +530,6 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_stream_chunk_eq, gen_test_log_store_table,
     };
-    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, BarrierInner as Barrier};
     use crate::task::ActorId;
@@ -551,9 +550,9 @@ mod tests {
         let actor_id = ActorId::new(ACTOR_ID);
         let downstream_actor = ActorId::new(DOWNSTREAM_ACTOR_ID);
         let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
-        let (down_tx, mut down_rx) = channel_for_test();
+        let (result_sender, receiver) = tokio::sync::oneshot::channel();
         new_output_request_tx
-            .send((downstream_actor, NewOutputRequest::Local(down_tx)))
+            .send((downstream_actor, NewOutputRequest::Local(result_sender)))
             .unwrap();
 
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
@@ -634,6 +633,7 @@ mod tests {
             .unwrap();
         assert_eq!(observed1.epoch.curr, test_epoch(1));
 
+        let mut down_rx = receiver.await.unwrap().unwrap();
         let msg = timeout(Duration::from_secs(1), down_rx.recv())
             .await
             .unwrap()

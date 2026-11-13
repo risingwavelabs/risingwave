@@ -249,7 +249,9 @@ impl MergeExecutor {
             inputs
                 .into_iter()
                 .enumerate()
-                .map(|(idx, input)| LocalInput::new(input, ActorId::new(idx as u32)).boxed_input())
+                .map(|(idx, input)| {
+                    LocalInput::for_test(input, ActorId::new(idx as u32)).boxed_input()
+                })
                 .collect(),
             &metrics,
             &actor_ctx,
@@ -315,7 +317,6 @@ where
             self.local_barrier_manager,
             self.metrics.clone(),
             self.fragment_id,
-            self.actor_context.config.clone(),
         );
 
         loop {
@@ -506,9 +507,9 @@ mod tests {
     use crate::executor::exchange::input::{ActorInput, LocalInput, RemoteInput};
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
+    use crate::task::TEST_PARTIAL_GRAPH_ID;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
-    use crate::task::{NewOutputRequest, TEST_PARTIAL_GRAPH_ID};
 
     fn build_test_chunk(size: u64) -> StreamChunk {
         let ops = vec![Op::Insert; size as usize];
@@ -520,7 +521,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let (tx, rx) = channel_for_test();
-        let input = LocalInput::new(rx, 1.into()).boxed_input();
+        let input = LocalInput::for_test(rx, 1.into()).boxed_input();
         let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
@@ -788,11 +789,8 @@ mod tests {
                 .take_pending_new_output_requests(upstream_actor_id)
                 .await;
             assert_eq!(requests.len(), 1);
-            let (actor_id, request) = requests.pop().unwrap();
+            let (actor_id, tx) = requests.pop().unwrap();
             assert_eq!(actor_id, downstream_actor_id);
-            let NewOutputRequest::Local(tx) = request else {
-                unreachable!()
-            };
             tx
         }
 
@@ -919,7 +917,6 @@ mod tests {
                     fragment_id,
                     &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
-                    actor_ctx.config.clone(),
                 )
                 .await
             }))
@@ -1003,11 +1000,8 @@ mod tests {
                         .take_pending_new_output_requests(upstream_id)
                         .await;
                     assert_eq!(output_requests.len(), 1);
-                    let (downstream_actor_id, request) = output_requests.pop().unwrap();
+                    let (downstream_actor_id, tx) = output_requests.pop().unwrap();
                     assert_eq!(downstream_actor_id, actor_id);
-                    let NewOutputRequest::Local(tx) = request else {
-                        unreachable!()
-                    };
                     txs.insert(upstream_id, tx);
                 }
             };
@@ -1043,6 +1037,7 @@ mod tests {
 
     struct FakeExchangeService {
         rpc_called: Arc<AtomicBool>,
+        record_permit_acked: Arc<AtomicBool>,
     }
 
     fn exchange_client_test_barrier() -> crate::executor::Barrier {
@@ -1055,13 +1050,33 @@ mod tests {
 
         async fn get_stream(
             &self,
-            _request: Request<Streaming<GetStreamRequest>>,
+            request: Request<Streaming<GetStreamRequest>>,
         ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
+            let record_permit_acked = self.record_permit_acked.clone();
+            tokio::spawn(async move {
+                use risingwave_pb::task_service::get_stream_request::Value;
+                use risingwave_pb::task_service::permits;
+
+                let mut request = request.into_inner();
+                assert_matches!(
+                    request.next().await.unwrap().unwrap().value,
+                    Some(Value::Get(
+                        risingwave_pb::task_service::get_stream_request::Get { .. }
+                    ))
+                );
+                assert_matches!(
+                    request.next().await.unwrap().unwrap().value,
+                    Some(Value::AddPermits(PbPermits {
+                        value: Some(permits::Value::Record(40))
+                    }))
+                );
+                record_permit_acked.store(true, Ordering::SeqCst);
+            });
             // send stream_chunk
             let stream_chunk = StreamChunk::default().to_protobuf();
-            tx.send(Ok(GetStreamResponse {
+            let mut response = GetStreamResponse {
                 message: Some(PbStreamMessageBatch {
                     stream_message_batch: Some(
                         risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::StreamChunk(
@@ -1070,9 +1085,12 @@ mod tests {
                     ),
                 }),
                 permits: Some(PbPermits::default()),
-            }))
-            .await
-            .unwrap();
+            };
+            tx.send(Ok(response.clone())).await.unwrap();
+            response.permits = Some(PbPermits {
+                value: Some(risingwave_pb::task_service::permits::Value::Record(40)),
+            });
+            tx.send(Ok(response)).await.unwrap();
             // send barrier
             let barrier = exchange_client_test_barrier();
             tx.send(Ok(GetStreamResponse {
@@ -1096,6 +1114,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
+        let record_permit_acked = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
 
@@ -1103,6 +1122,7 @@ mod tests {
         let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
         let exchange_svc = StreamExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
+            record_permit_acked: record_permit_acked.clone(),
         });
         let cp_server_run = server_run.clone();
         let join_handle = tokio::spawn(async move {
@@ -1129,7 +1149,6 @@ mod tests {
                 (0.into(), 0.into()),
                 (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
-                Arc::new(StreamingConfig::default()),
             )
             .await
             .unwrap()
@@ -1139,12 +1158,24 @@ mod tests {
 
         pin_mut!(remote_input);
 
-        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-            let (ops, columns, visibility) = chunk.into_inner();
-            assert!(ops.is_empty());
-            assert!(columns.is_empty());
-            assert!(visibility.is_empty());
-        });
+        for i in 0..2 {
+            assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+                let (ops, columns, visibility) = chunk.into_inner();
+                assert!(ops.is_empty());
+                assert!(columns.is_empty());
+                assert!(visibility.is_empty());
+            });
+            if i == 0 {
+                assert!(!record_permit_acked.load(Ordering::SeqCst));
+            }
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !record_permit_acked.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(1));
         });

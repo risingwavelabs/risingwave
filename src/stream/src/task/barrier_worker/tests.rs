@@ -81,10 +81,7 @@ async fn test_reject_exchange_request_with_stale_partial_graph_term() -> StreamR
             partial_graph_id: TEST_PARTIAL_GRAPH_ID,
             term_id: "stale".to_owned(),
             ids: (1.into(), 2.into()),
-            request: TakeReceiverRequest::Remote {
-                result_sender,
-                upstream_fragment_id: 1.into(),
-            },
+            request: NewOutputRequest::Remote(result_sender),
         })
         .await?;
 
@@ -135,10 +132,7 @@ async fn test_filter_buffered_exchange_requests_by_partial_graph_term() -> Strea
                     partial_graph_id: TEST_PARTIAL_GRAPH_ID,
                     term_id,
                     ids: (upstream_actor_id, 3.into()),
-                    request: TakeReceiverRequest::Remote {
-                        result_sender,
-                        upstream_fragment_id: 1.into(),
-                    },
+                    request: NewOutputRequest::Remote(result_sender),
                 })
                 .await
                 .unwrap()
@@ -163,10 +157,44 @@ async fn test_filter_buffered_exchange_requests_by_partial_graph_term() -> Strea
         .unwrap();
 
     assert!(stale_request.await.unwrap().is_err());
-    assert!(matching_request.await.unwrap().is_ok());
     let pending = test_env.take_pending_new_output_requests(2.into()).await;
+    assert!(matching_request.await.unwrap().is_ok());
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].0, ActorId::from(3));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_pending_local_subscription_fails_on_reset() -> StreamResult<()> {
+    let test_env = LocalBarrierTestEnv::for_test().await;
+    let upstream_graph = PartialGraphId::new(123);
+    let receiver = test_env
+        .local_barrier_manager
+        .register_local_upstream_output(2.into(), 1.into(), upstream_graph);
+    test_env.flush_all_events().await;
+    test_env
+        .request_tx
+        .send(Ok(StreamingControlStreamRequest {
+            request: Some(
+                streaming_control_stream_request::Request::ResetPartialGraphs(
+                    ResetPartialGraphsRequest {
+                        partial_graph_ids: vec![upstream_graph],
+                    },
+                ),
+            ),
+        }))
+        .unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(1), receiver)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("partial graph reset")
+    );
     Ok(())
 }
 

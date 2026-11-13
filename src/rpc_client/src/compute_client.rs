@@ -105,6 +105,8 @@ impl ComputeClient {
             .into_inner())
     }
 
+    /// Open an exchange stream. Return received permit credits verbatim through the returned
+    /// sender; record ACK batching is controlled by the upstream.
     pub async fn get_stream(
         &self,
         up_actor_id: ActorId,
