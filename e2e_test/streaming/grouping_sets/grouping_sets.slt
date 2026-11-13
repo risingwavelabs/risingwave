@@ -29,6 +29,20 @@ select * from v_flag_only;
 4
 
 statement ok
+create materialized view v_brand as
+SELECT brand, sum(sales) AS s FROM items_sold GROUP BY GROUPING SETS ((brand), ());
+
+query TI rowsort
+select * from v_brand;
+----
+Bar 20
+Foo 30
+NULL 50
+
+statement ok
+drop materialized view v_brand;
+
+statement ok
 drop materialized view v_flag_only;
 
 statement ok
@@ -36,3 +50,187 @@ drop materialized view v;
 
 statement ok
 drop table items_sold;
+
+statement ok
+create table empty_grouping_input (v int);
+
+statement ok
+create materialized view empty_single as
+SELECT count(*) AS c, sum(v) AS s FROM empty_grouping_input WHERE v < 0 GROUP BY GROUPING SETS (());
+
+statement ok
+create materialized view empty_duplicate as
+SELECT count(*) AS c, count(v) AS cv, sum(v) AS s, count(distinct v) AS d,
+       count(*) FILTER (WHERE v < -2) AS f
+FROM empty_grouping_input WHERE v < 0 GROUP BY GROUPING SETS ((), ());
+
+statement ok
+create materialized view empty_mixed as
+SELECT v, grouping(v, v) AS g, count(*) AS c, sum(v) AS s
+FROM empty_grouping_input GROUP BY GROUPING SETS ((), (v), ());
+
+statement ok
+create materialized view empty_rollup as
+SELECT v, grouping(v) AS g, count(*) AS c FROM empty_grouping_input GROUP BY ROLLUP(v);
+
+statement ok
+create materialized view empty_cube as
+SELECT v, grouping(v) AS g, count(*) AS c FROM empty_grouping_input GROUP BY CUBE(v);
+
+statement ok
+create materialized view empty_having as
+SELECT count(*) AS c FROM empty_grouping_input WHERE v < 0 GROUP BY GROUPING SETS ((), ()) HAVING count(*) = 0;
+
+statement ok
+create materialized view empty_no_agg as
+SELECT 7 AS c FROM empty_grouping_input GROUP BY GROUPING SETS ((), ());
+
+statement ok
+flush;
+
+query II
+select * from empty_single;
+----
+0 NULL
+
+query IIIII rowsort
+select * from empty_duplicate;
+----
+0 0 NULL 0 0
+0 0 NULL 0 0
+
+query IIII rowsort
+select * from empty_mixed;
+----
+NULL 3 0 NULL
+NULL 3 0 NULL
+
+query III
+select * from empty_rollup;
+----
+NULL 1 0
+
+query III
+select * from empty_cube;
+----
+NULL 1 0
+
+query I rowsort
+select * from empty_having;
+----
+0
+0
+
+query I rowsort
+select * from empty_no_agg;
+----
+7
+7
+
+statement ok
+insert into empty_grouping_input values (20);
+
+query IIIII rowsort
+select * from empty_duplicate;
+----
+0 0 NULL 0 0
+0 0 NULL 0 0
+
+statement ok
+insert into empty_grouping_input values (-2), (-2), (NULL);
+
+query II
+select * from empty_single;
+----
+2 -4
+
+query IIIII rowsort
+select * from empty_duplicate;
+----
+2 2 -4 1 0
+2 2 -4 1 0
+
+query IIII rowsort
+select * from empty_mixed;
+----
+-2 0 2 -4
+20 0 1 20
+NULL 0 1 NULL
+NULL 3 4 16
+NULL 3 4 16
+
+query I
+select * from empty_having;
+----
+
+query I rowsort
+select * from empty_no_agg;
+----
+7
+7
+
+statement ok
+delete from empty_grouping_input;
+
+query II
+select * from empty_single;
+----
+0 NULL
+
+query IIIII rowsort
+select * from empty_duplicate;
+----
+0 0 NULL 0 0
+0 0 NULL 0 0
+
+query IIII rowsort
+select * from empty_mixed;
+----
+NULL 3 0 NULL
+NULL 3 0 NULL
+
+query III
+select * from empty_rollup;
+----
+NULL 1 0
+
+query III
+select * from empty_cube;
+----
+NULL 1 0
+
+query I rowsort
+select * from empty_having;
+----
+0
+0
+
+query I rowsort
+select * from empty_no_agg;
+----
+7
+7
+
+statement ok
+drop materialized view empty_no_agg;
+
+statement ok
+drop materialized view empty_having;
+
+statement ok
+drop materialized view empty_cube;
+
+statement ok
+drop materialized view empty_rollup;
+
+statement ok
+drop materialized view empty_mixed;
+
+statement ok
+drop materialized view empty_duplicate;
+
+statement ok
+drop materialized view empty_single;
+
+statement ok
+drop table empty_grouping_input;

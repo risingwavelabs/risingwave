@@ -37,13 +37,7 @@ impl Rule<Logical> for ExpandToProjectRule {
 
         // if `column_subsets` len equals 1, convert it into a project
         let mut exprs = Vec::with_capacity(expand.base.schema().len());
-        // Add original input column first
-        for i in 0..input.schema().len() {
-            exprs.push(ExprImpl::InputRef(
-                InputRef::new(i, input.schema()[i].data_type()).into(),
-            ));
-        }
-        // Add column sets
+        // Match Expand's schema: expanded columns, original columns, then the flag.
         for i in 0..input.schema().len() {
             let expr = if column_subset.contains(&i) {
                 ExprImpl::InputRef(InputRef::new(i, input.schema()[i].data_type()).into())
@@ -51,6 +45,11 @@ impl Rule<Logical> for ExpandToProjectRule {
                 ExprImpl::literal_null(input.schema()[i].data_type())
             };
             exprs.push(expr);
+        }
+        for i in 0..input.schema().len() {
+            exprs.push(ExprImpl::InputRef(
+                InputRef::new(i, input.schema()[i].data_type()).into(),
+            ));
         }
         // Add flag
         exprs.push(ExprImpl::literal_bigint(0));

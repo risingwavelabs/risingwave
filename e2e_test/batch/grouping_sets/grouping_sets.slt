@@ -22,5 +22,116 @@ SELECT count(*) FROM items_sold GROUP BY GROUPING SETS ((), ());
 4
 4
 
+query TI rowsort
+SELECT brand, sum(sales) FROM items_sold GROUP BY GROUPING SETS ((brand), ());
+----
+Bar 20
+Foo 30
+NULL 50
+
+query TI rowsort
+SELECT brand, sum(sales) FROM items_sold GROUP BY GROUPING SETS ((brand));
+----
+Bar 20
+Foo 30
+
 statement ok
 drop table items_sold;
+
+statement ok
+create table empty_grouping_input (v int);
+
+query III
+SELECT count(*), count(v), sum(v) FROM empty_grouping_input GROUP BY GROUPING SETS (());
+----
+0 0 NULL
+
+query III rowsort
+SELECT count(*), count(v), sum(v) FROM empty_grouping_input GROUP BY GROUPING SETS ((), ());
+----
+0 0 NULL
+0 0 NULL
+
+query IIIIIII rowsort
+SELECT v, grouping(v, v), count(*), count(v), sum(v), count(distinct v), count(*) FILTER (WHERE v < 0)
+FROM empty_grouping_input GROUP BY GROUPING SETS ((), (v), ());
+----
+NULL 3 0 0 NULL 0 0
+NULL 3 0 0 NULL 0 0
+
+query I rowsort
+SELECT count(*) FROM empty_grouping_input GROUP BY GROUPING SETS ((), ()) HAVING count(*) = 0;
+----
+0
+0
+
+query I
+SELECT count(*) FROM empty_grouping_input GROUP BY GROUPING SETS ((), ()) HAVING count(*) > 0;
+----
+
+query I rowsort
+SELECT 7 FROM empty_grouping_input GROUP BY GROUPING SETS ((), ());
+----
+7
+7
+
+query II rowsort
+SELECT v, grouping(v) FROM empty_grouping_input GROUP BY GROUPING SETS ((v), ());
+----
+NULL 1
+
+query III
+SELECT v, grouping(v), count(*) FROM empty_grouping_input GROUP BY ROLLUP(v);
+----
+NULL 1 0
+
+query III
+SELECT v, grouping(v), count(*) FROM empty_grouping_input GROUP BY CUBE(v);
+----
+NULL 1 0
+
+statement ok
+insert into empty_grouping_input values (20);
+
+query I rowsort
+SELECT count(*) FROM empty_grouping_input WHERE v < 0 GROUP BY GROUPING SETS ((), ());
+----
+0
+0
+
+statement ok
+insert into empty_grouping_input values (-2), (-2), (NULL);
+
+query IIIIIII rowsort
+SELECT v, grouping(v, v), count(*), count(v), sum(v), count(distinct v), count(*) FILTER (WHERE v < 0)
+FROM empty_grouping_input GROUP BY GROUPING SETS ((), (v), ());
+----
+-2 0 2 2 -4 1 2
+20 0 1 1 20 1 0
+NULL 0 1 0 NULL 0 0
+NULL 3 4 3 16 2 2
+NULL 3 4 3 16 2 2
+
+query III rowsort
+SELECT count(*), count(v), sum(v) FROM empty_grouping_input WHERE v < 0 GROUP BY GROUPING SETS ((), ());
+----
+2 2 -4
+2 2 -4
+
+statement ok
+delete from empty_grouping_input;
+
+query III rowsort
+SELECT v, grouping(v), count(*) FROM empty_grouping_input GROUP BY GROUPING SETS ((v), (), ());
+----
+NULL 1 0
+NULL 1 0
+
+query III rowsort
+SELECT count(*), count(v), sum(v) FROM empty_grouping_input WHERE false GROUP BY GROUPING SETS ((), ());
+----
+0 0 NULL
+0 0 NULL
+
+statement ok
+drop table empty_grouping_input;
