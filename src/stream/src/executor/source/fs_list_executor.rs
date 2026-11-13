@@ -39,13 +39,14 @@ where
     let new_backoff = || exponential_backoff(Duration::from_secs(1), 2, Duration::from_secs(10));
     let mut backoff = new_backoff();
     loop {
+        let mut has_progress = false;
         let error = match build_stream() {
             Ok(stream) => {
                 pin_mut!(stream);
                 loop {
                     match stream.next().await {
                         Some(Ok(chunk)) => {
-                            backoff = new_backoff();
+                            has_progress = true;
                             yield chunk;
                         }
                         Some(Err(error)) => break error,
@@ -55,6 +56,9 @@ where
             }
             Err(error) => error,
         };
+        if has_progress {
+            backoff = new_backoff();
+        }
         let delay = backoff.next().unwrap();
         tracing::warn!(error = %error.as_report(), ?delay, "file listing failed, retrying");
         // Sleep in the data stream so barriers and pause/resume remain responsive.
