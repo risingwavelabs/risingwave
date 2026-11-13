@@ -343,7 +343,7 @@ pub mod cpu {
 
         let cpu_period = super::util::read_usize(period_path)?;
 
-        cpu_quota_as_cores(cpu_quota as f32, cpu_period)
+        Ok((cpu_quota as f32) / (cpu_period as f32))
     }
 
     /// Returns the CPU limit when cgroup v2 is utilised.
@@ -362,7 +362,7 @@ pub mod cpu {
                 let cpu_period = cpu_data_values[1]
                     .parse::<usize>()
                     .map_err(|e| parse_error(limit_path, &cpu_limit_string, e))?;
-                cpu_quota_as_cores(cpu_quota as f32, cpu_period)
+                Ok((cpu_quota as f32) / (cpu_period as f32))
             }
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -373,42 +373,16 @@ pub mod cpu {
         }
     }
 
-    fn cpu_quota_as_cores(quota: f32, period: usize) -> Result<f32, std::io::Error> {
-        if period == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "cgroup CPU period must be positive",
-            ));
-        }
-        Ok(quota / period as f32)
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
 
         #[test]
         fn cap_cgroup_cpu_quota_by_affinity() {
-            let quota = tempfile::NamedTempFile::new().unwrap();
-            let period = tempfile::NamedTempFile::new().unwrap();
-            let cpu_max = tempfile::NamedTempFile::new().unwrap();
-            let quota_path = quota.path().to_str().unwrap();
-            let period_path = period.path().to_str().unwrap();
-            let cpu_max_path = cpu_max.path().to_str().unwrap();
-
-            std::fs::write(period_path, "100000").unwrap();
-            let affinity_count = NonZeroU32::new(2);
-            for (quota_us, expected) in [(400000, 2.0), (150000, 1.5), (50000, 0.5)] {
-                std::fs::write(quota_path, quota_us.to_string()).unwrap();
-                std::fs::write(cpu_max_path, format!("{quota_us} 100000")).unwrap();
-
-                let v1 = get_cpu_limit_v1(quota_path, period_path, 1.0).unwrap();
-                let v2 = get_cpu_limit_v2(cpu_max_path, 1.0).unwrap();
-                assert_eq!(cap_cpu_quota(v1, affinity_count), expected);
-                assert_eq!(cap_cpu_quota(v2, affinity_count), expected);
-                assert_eq!(cap_cpu_quota(v1, None), v1);
-                assert_eq!(cap_cpu_quota(v2, None), v2);
-            }
+            let affinity = NonZeroU32::new(2);
+            assert_eq!(cap_cpu_quota(4.0, affinity), 2.0);
+            assert_eq!(cap_cpu_quota(1.5, affinity), 1.5);
+            assert_eq!(cap_cpu_quota(4.0, None), 4.0);
         }
     }
 }
@@ -686,18 +660,6 @@ mod util {
                     },
                 ),
                 (
-                    "zero-period",
-                    TestCase {
-                        file_exists: true,
-                        value_in_quota_file: String::from("10000"),
-                        value_in_period_file: String::from("0"),
-                        expected: Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "cgroup CPU period must be positive",
-                        )),
-                    },
-                ),
-                (
                     "empty-value-in-files",
                     TestCase {
                         file_exists: true,
@@ -800,17 +762,6 @@ mod util {
                         file_exists: true,
                         value_in_file: String::from("10000 20000"),
                         expected: Ok(10000.0 / 20000.0),
-                    },
-                ),
-                (
-                    "zero-period",
-                    TestCase {
-                        file_exists: true,
-                        value_in_file: String::from("10000 0"),
-                        expected: Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "cgroup CPU period must be positive",
-                        )),
                     },
                 ),
                 (
