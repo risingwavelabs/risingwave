@@ -14011,7 +14011,6 @@ dependencies = [
  "either",
  "futures",
  "futures-async-stream",
- "futures-util",
  "iceberg",
  "itertools 0.14.0",
  "linkme",
@@ -14053,7 +14052,6 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
- "bytes",
  "criterion",
  "either",
  "foyer",
@@ -14066,7 +14064,6 @@ dependencies = [
  "linkme",
  "madsim-tokio",
  "mysql_async",
- "opendal 0.58.1",
  "prometheus",
  "rand 0.9.5",
  "risingwave_batch",
@@ -14086,7 +14083,6 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "tracing",
- "uuid",
  "workspace-hack",
 ]
 
