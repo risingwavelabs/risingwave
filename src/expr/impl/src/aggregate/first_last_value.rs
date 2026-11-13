@@ -88,7 +88,7 @@ fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
     internal,
     type_infer = "|args| Ok(args[0].clone())"
 )]
-fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
+fn internal_last_seen_value<T>(state: Option<T>, input: Option<T>, retract: bool) -> Option<T> {
     if retract { state } else { input }
 }
 
