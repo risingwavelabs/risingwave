@@ -37,7 +37,6 @@ use crate::monitor::BatchSpillMetrics;
 pub const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
 const RW_MANAGED_SPILL_DIR: &str = "rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
-const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
 
 #[derive(Clone)]
 pub enum SpillBackend {
@@ -90,11 +89,12 @@ impl SpillOp {
         op.delete_with("/").recursive(true).await
     }
 
+    /// Writes are sequential. With `concurrent`, opendal's Fs writer queues up to 8192 chunks per
+    /// file, holding their buffers and file handles, without making the disk any faster.
     pub async fn writer_with(&self, name: &str) -> Result<opendal::Writer> {
         Ok(self
             .op
             .writer_with(name)
-            .concurrent(DEFAULT_IO_CONCURRENT_TASK)
             .chunk(DEFAULT_IO_BUFFER_SIZE)
             .await?)
     }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -632,7 +631,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     agg_datums.push(encode_state);
                 }
                 let agg_state_row = OwnedRow::from_iter(agg_datums.into_iter());
-                let hash_code = agg_spill_manager.spill_build_hasher.hash_one(key);
+                // Must match the partition of the group's remaining input rows, which are hashed
+                // by their key columns below.
+                let hash_code = key_row.hash(agg_spill_manager.spill_build_hasher).value();
                 agg_spill_manager
                     .write_agg_state_row(key_row.chain(agg_state_row), hash_code)
                     .await?;
@@ -1089,24 +1090,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_spill_hash_agg() {
-        let src_exec = Box::new(MockExecutor::with_chunk(
-            DataChunk::from_pretty(
-                "i i i
-                 0 1 1
-                 1 1 1
-                 0 0 1
-                 1 1 2
-                 1 0 1
-                 0 0 2
-                 1 1 3
-                 0 1 2",
-            ),
-            Schema::new(vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int64),
-            ]),
+        let mut src_exec = MockExecutor::new(Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]));
+        // The executor spills its states after the first chunk, and the second chunk updates the
+        // same groups, so each group's state and its remaining rows must share a partition.
+        src_exec.add(DataChunk::from_pretty(
+            "i i i
+             0 1 1
+             1 1 1
+             0 0 1
+             1 1 2",
         ));
+        src_exec.add(DataChunk::from_pretty(
+            "i i i
+             1 0 1
+             0 0 2
+             1 1 3
+             0 1 2",
+        ));
+        let src_exec = Box::new(src_exec);
 
         let agg_call = AggCall {
             kind: PbAggKind::Sum as i32,
