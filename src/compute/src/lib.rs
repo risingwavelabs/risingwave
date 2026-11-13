@@ -140,6 +140,12 @@ pub struct ComputeNodeOpts {
     #[override_opts(path = storage.meta_file_cache.dir)]
     pub meta_file_cache_dir: Option<String>,
 
+    /// Path to the local pin-cache directory, exclusive to this node and cluster.
+    /// Left empty to disable pin cache.
+    #[clap(long, hide = true, env = "RW_PIN_CACHE_DIR")]
+    #[override_opts(path = storage.pin_cache_dir)]
+    pub pin_cache_dir: Option<String>,
+
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, hide = true, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
