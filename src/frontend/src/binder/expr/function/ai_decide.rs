@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{DataType, Datum, JsonbVal, MapType, ScalarImpl, ScalarRefImpl};
 use risingwave_expr::scalar::ai_decide::QuestionSchema;
 use serde_json::{Map, Value, json};
 
@@ -47,8 +47,8 @@ fn literal(value: Value) -> ExprImpl {
 }
 
 pub(super) fn bind(mut inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
-    if inputs.len() != 5 {
-        return Err(invalid("ai_decide expects exactly five arguments"));
+    if !matches!(inputs.len(), 5 | 6) {
+        return Err(invalid("ai_decide expects five or six arguments"));
     }
     for (index, ty) in [
         DataType::Jsonb,
@@ -61,6 +61,10 @@ pub(super) fn bind(mut inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
     .enumerate()
     {
         inputs[index].cast_implicit_mut(&ty)?;
+    }
+    if let Some(headers) = inputs.get_mut(5) {
+        headers
+            .cast_implicit_mut(&MapType::from_kv(DataType::Varchar, DataType::Varchar).into())?;
     }
     let questions = json_constant(&inputs[3], "ai_decide questions")?;
     let schema = QuestionSchema::parse(&questions).map_err(|e| invalid(e.to_string()))?;

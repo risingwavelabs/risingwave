@@ -141,7 +141,7 @@
     Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', ai_questions(ai_prob_question('q', 'Resolved?')))
 
     Caused by:
-      Invalid input syntax: ai_decide expects exactly five arguments
+      Invalid input syntax: ai_decide expects five or six arguments
 - name: mixed append-only projections isolate a shared conditional AI result
   sql: |
     CREATE TABLE contexts (id INT, state JSONB, enabled BOOLEAN) APPEND ONLY;
@@ -195,7 +195,7 @@
     Failed to bind expression: ai_decide(state, 'http://127.0.0.1:1/evaluate', 'test-model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST('{"max_concurrency":16}' AS JSONB))
 
     Caused by:
-      Invalid input syntax: ai_decide expects exactly five arguments
+      cannot cast type "jsonb" to "map(character varying,character varying)" in Implicit context
 - name: mixed question constructors infer named nested fields
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
@@ -311,3 +311,69 @@
 
     Caused by:
       Invalid input syntax: Invalid parameter ai_decide questions: question "q": type must be noul, choice or score
+- name: optional header map supports row values and redacts credentials
+  sql: |
+    CREATE TABLE contexts (state JSONB, tenant VARCHAR);
+    SELECT ai_decide(state, 'http://127.0.0.1:1/evaluate', 'test-model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key',
+      MAP {'X-Tenant-ID': tenant, 'X-Api-Key': 'planner-header-secret'}) FROM contexts;
+  logical_plan: |-
+    LogicalProject { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", "<redacted>") as $expr1] }
+    └─LogicalScan { table: contexts, columns: [contexts.state, contexts.tenant, contexts._row_id, contexts._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", "<redacted>") as $expr1] }
+      └─BatchScan { table: contexts, columns: [contexts.state, contexts.tenant], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ai_decide, contexts._row_id(hidden)], stream_key: [contexts._row_id], pk_columns: [contexts._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [$expr1, contexts._row_id] }
+      └─StreamMaterializedExprs { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", "<redacted>") as $expr1] }
+        └─StreamTableScan { table: contexts, columns: [contexts.state, contexts.tenant, contexts._row_id], stream_scan_type: SnapshotBackfill, stream_key: [contexts._row_id], pk: [_row_id], dist: UpstreamHashShard(contexts._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [ai_decide, contexts._row_id(hidden)], stream_key: [contexts._row_id], pk_columns: [contexts._row_id], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [$expr1, contexts._row_id] }
+        └── StreamMaterializedExprs { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", "<redacted>") as $expr1] }
+            ├── tables: [ MaterializedExprs: 0 ]
+            └── StreamTableScan { table: contexts, columns: [contexts.state, contexts.tenant, contexts._row_id], stream_scan_type: SnapshotBackfill, stream_key: [contexts._row_id], pk: [_row_id], dist: UpstreamHashShard(contexts._row_id) }
+                ├── tables: [ StreamScan: 1 ]
+                ├── Upstream
+                └── BatchPlanNode
+
+    Table 0 { columns: [ contexts_state, contexts_tenant, contexts__row_id, $expr1, _rw_timestamp ], primary key: [ $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+
+    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ ai_decide, contexts._row_id, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+
+- name: header values must be strings
+  sql: |
+    SELECT ai_decide('{}'::jsonb, 'url', 'model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {'X-Tenant-ID': 42});
+  binder_error: |
+    Failed to bind expression: ai_decide(CAST('{}' AS JSONB), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {'X-Tenant-ID': 42})
+
+    Caused by these errors (recent errors listed first):
+      1: cannot cast type "map(character varying,integer)" to "map(character varying,character varying)"
+      2: cannot cast map value
+      3: cannot cast type "integer" to "character varying" in Implicit context
+- name: header keys must be strings
+  sql: |
+    SELECT ai_decide('{}'::jsonb, 'url', 'model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {42: 'tenant'});
+  binder_error: |
+    Failed to bind expression: ai_decide(CAST('{}' AS JSONB), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {42: 'tenant'})
+
+    Caused by these errors (recent errors listed first):
+      1: cannot cast type "map(integer,character varying)" to "map(character varying,character varying)"
+      2: cannot cast map key
+      3: cannot cast type "integer" to "character varying" in Implicit context
+- name: more than six arguments is rejected
+  sql: |
+    SELECT ai_decide('{}'::jsonb, 'url', 'model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {'X-Tenant-ID': 'tenant'}, 1);
+  binder_error: |
+    Failed to bind expression: ai_decide(CAST('{}' AS JSONB), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {'X-Tenant-ID': 'tenant'}, 1)
+
+    Caused by:
+      Invalid input syntax: ai_decide expects five or six arguments
