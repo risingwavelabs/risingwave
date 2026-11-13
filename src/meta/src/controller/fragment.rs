@@ -50,7 +50,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
-use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping};
+use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping, SubscribeType};
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -66,7 +66,9 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
+use crate::barrier::{
+    SharedActorInfos, SharedActorInfosInner, SharedFragmentInfo, SnapshotBackfillInfo,
+};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph,
@@ -79,7 +81,9 @@ use crate::controller::utils::{
     resolve_no_shuffle_actor_mapping,
 };
 use crate::error::MetaError;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
+use crate::manager::{
+    ActiveStreamingWorkerNodes, LocalNotification, NotificationManager, SnapshotSubscription,
+};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
@@ -196,6 +200,7 @@ impl NotificationManager {
     /// instead of barrier-driven actor set changes.
     pub(crate) fn notify_streaming_fragment_mapping(
         &self,
+        state: &mut SharedActorInfosInner,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
     ) {
@@ -204,7 +209,9 @@ impl NotificationManager {
         }
         // notify all fragment mappings to frontend.
         for fragment_mapping in fragment_mappings {
-            self.notify_frontend_without_version(
+            self.notify_part(
+                state,
+                SubscribeType::Frontend,
                 operation,
                 NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
             );
@@ -1217,8 +1224,13 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+    /// The worker slot mappings of all streaming fragments, for a snapshot.
+    pub fn get_worker_slot_mappings(
+        &self,
+        subscription: &mut SnapshotSubscription,
+    ) -> Vec<PbFragmentWorkerSlotMapping> {
         let guard = self.env.shared_actor_info.read_guard();
+        subscription.start_forwarding(&*guard);
         guard
             .iter_over_fragments()
             .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
