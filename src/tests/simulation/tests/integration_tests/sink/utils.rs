@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::iter::once;
 use std::mem::take;
@@ -73,6 +73,7 @@ pub struct TestSinkStoreInner {
     epochs: Vec<u64>,
     checkpoint_count: usize,
     err_count: usize,
+    schema_changes: BTreeMap<u64, PbSinkSchemaChange>,
 }
 
 #[derive(Clone)]
@@ -88,6 +89,7 @@ impl TestSinkStore {
                 epochs: Vec::new(),
                 checkpoint_count: 0,
                 err_count: 0,
+                schema_changes: BTreeMap::new(),
             })),
         }
     }
@@ -157,6 +159,20 @@ impl TestSinkStore {
         self.inner().err_count
     }
 
+    pub fn schema_changes(&self) -> Vec<PbSinkSchemaChange> {
+        self.inner().schema_changes.values().cloned().collect()
+    }
+
+    fn commit_schema_change(&self, epoch: u64, change: PbSinkSchemaChange) -> Result<()> {
+        let mut inner = self.inner();
+        if let Some(previous) = inner.schema_changes.get(&epoch) {
+            assert_eq!(previous, &change);
+        } else {
+            inner.schema_changes.insert(epoch, change);
+        }
+        Ok(())
+    }
+
     pub async fn wait_for_count(&self, count: usize) -> anyhow::Result<()> {
         let mut prev_count = 0;
         let mut has_printed = false;
@@ -214,7 +230,7 @@ impl SinkWriter for TestWriter {
         }
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.len(), 2);
+            assert!(row.len() >= 2);
             let id = row.datum_at(0).unwrap().into_int32();
             let name = row.datum_at(1).unwrap().into_utf8().to_string();
             self.store.insert(id, name);
@@ -280,6 +296,7 @@ pub struct CoordinatedTestWriter {
     err_rate: Arc<AtomicU32>,
     staging: HashMap<i32, Vec<String>>,
     staging_store: StagingDataStore,
+    data_types: Vec<DataType>,
 }
 
 #[async_trait]
@@ -297,9 +314,10 @@ impl SinkWriter for CoordinatedTestWriter {
             self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
         }
+        assert_eq!(chunk.data_types(), self.data_types);
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.len(), 2);
+            assert!(row.len() >= 2);
             let id = row.datum_at(0).unwrap().into_int32();
             let name = row.datum_at(1).unwrap().into_utf8().to_string();
             self.staging.entry(id).or_default().push(name);
@@ -340,6 +358,15 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
         Ok(())
     }
 
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> risingwave_connector::sink::Result<()> {
+        self.store.commit_schema_change(epoch, schema_change)?;
+        Ok(())
+    }
+
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
@@ -371,6 +398,15 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
 #[async_trait]
 impl TwoPhaseCommitCoordinator for TestCoordinator {
     async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+        Ok(())
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> risingwave_connector::sink::Result<()> {
+        self.store.commit_schema_change(epoch, schema_change)?;
         Ok(())
     }
 
@@ -557,6 +593,7 @@ pub struct SimulationTestSink {
     pub store: TestSinkStore,
     pub parallelism_counter: Arc<AtomicUsize>,
     pub err_rate: Arc<AtomicU32>,
+    coordinator_err_rate: Arc<AtomicU32>,
     barrier_delay_ms: Option<(Arc<AtomicU64>, u64)>,
 }
 
@@ -586,6 +623,7 @@ impl SimulationTestSink {
     pub fn register_new(test_type: TestSinkType) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
         let err_rate = Arc::new(AtomicU32::new(0));
+        let coordinator_err_rate = Arc::new(AtomicU32::new(0));
         let store = TestSinkStore::new();
         let barrier_delay_ms = match &test_type {
             TestSinkType::SlowBarrier(delay) => Some((
@@ -615,6 +653,11 @@ impl SimulationTestSink {
                                 err_rate: err_rate.clone(),
                                 staging_store: staging_store.clone(),
                                 staging: Default::default(),
+                                data_types: param
+                                    .columns
+                                    .iter()
+                                    .map(|column| column.data_type.clone())
+                                    .collect(),
                             };
                             async move {
                                 let log_sinker =
@@ -633,7 +676,7 @@ impl SimulationTestSink {
                         }
                     },
                     {
-                        let err_rate = err_rate.clone();
+                        let err_rate = coordinator_err_rate.clone();
                         let store = store.clone();
                         let staging_store = staging_store.clone();
                         move |_, _| {
@@ -666,6 +709,11 @@ impl SimulationTestSink {
                                 err_rate: err_rate.clone(),
                                 staging_store: staging_store.clone(),
                                 staging: Default::default(),
+                                data_types: param
+                                    .columns
+                                    .iter()
+                                    .map(|column| column.data_type.clone())
+                                    .collect(),
                             };
                             async move {
                                 let log_sinker =
@@ -684,7 +732,7 @@ impl SimulationTestSink {
                         }
                     },
                     {
-                        let err_rate = err_rate.clone();
+                        let err_rate = coordinator_err_rate.clone();
                         let store = store.clone();
                         let staging_store = staging_store.clone();
                         move |_, _| {
@@ -841,6 +889,7 @@ impl SimulationTestSink {
             parallelism_counter,
             store,
             err_rate,
+            coordinator_err_rate,
             barrier_delay_ms,
         }
     }
@@ -853,6 +902,12 @@ impl SimulationTestSink {
     pub fn set_err_rate(&self, err_rate: f64) {
         let err_rate = u32::MAX as f64 * err_rate;
         self.err_rate.store(err_rate as _, Relaxed);
+        self.coordinator_err_rate.store(err_rate as _, Relaxed);
+    }
+
+    pub fn set_coordinator_err_rate(&self, err_rate: f64) {
+        let err_rate = u32::MAX as f64 * err_rate;
+        self.coordinator_err_rate.store(err_rate as _, Relaxed);
     }
 
     fn random_err(err_rate: &AtomicU32) -> bool {

@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID,
     ROW_ID_COLUMN_NAME,
 };
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
@@ -560,6 +561,9 @@ impl StreamSink {
         } else {
             CreateType::Foreground
         };
+        if properties.is_iceberg_connector() {
+            properties.insert(SCHEMA_VERSION_PROPERTY.to_owned(), "0".to_owned());
+        }
         let (mut properties, secret_refs) = properties.into_parts();
         if let Some(target_table) = &target_table
             && target_table_requires_row_level_conflict_handling(target_table)
@@ -842,8 +846,8 @@ impl StreamSink {
         Ok(downstream_pk_indices)
     }
 
-    /// The table schema is: | epoch | seq id | row op | sink columns |
-    /// Pk is: | epoch | seq id |
+    /// The table schema is: | epoch | seq id | vnode | row op | sink columns | schema version |
+    /// Pk is: | epoch | seq id | vnode |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
@@ -989,6 +993,8 @@ impl StreamNode for StreamSink {
             table: Some(table.to_internal_table_prost()),
             log_store_type: self.log_store_type as i32,
             rate_limit: self.base.ctx().overwrite_options().sink_rate_limit,
+            log_store_schema_version: 0,
+            log_store_schema_history: vec![],
         }))
     }
 }

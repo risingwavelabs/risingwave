@@ -16,6 +16,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use anyhow::Result;
+use risingwave_pb::stream_plan::sink_schema_change::PbOp;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 use tokio::time::sleep;
 
@@ -208,4 +209,153 @@ async fn test_schema_change_kv_log_store_value_indices() -> Result<()> {
     session.run("drop table test_table").await?;
 
     Ok(())
+}
+
+/// A failing decoupled sink must not hold up schema replacement or checkpoints of another job in
+/// the same database. Keep the sink failing across two schema changes, then let it drain all
+/// versions of its retained log.
+#[tokio::test]
+async fn test_schema_change_with_continuously_failing_sink() -> Result<()> {
+    test_schema_change_with_failing_sink(TestSinkType::SinkWriter).await
+}
+
+#[tokio::test]
+async fn test_schema_change_with_failing_single_phase_coordinator() -> Result<()> {
+    test_schema_change_with_failing_sink(TestSinkType::SinglePhaseCoordinatedSink).await
+}
+
+#[tokio::test]
+async fn test_schema_change_with_failing_two_phase_coordinator() -> Result<()> {
+    test_schema_change_with_failing_sink(TestSinkType::TwoPhaseCoordinatedSink).await
+}
+
+async fn test_schema_change_with_failing_sink(test_type: TestSinkType) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(180), async {
+        let mut cluster = start_schema_change_test_cluster().await?;
+        let coordinator_failure = matches!(
+            &test_type,
+            TestSinkType::SinglePhaseCoordinatedSink | TestSinkType::TwoPhaseCoordinatedSink
+        );
+        let test_sink = SimulationTestSink::register_new(test_type);
+        let mut session = cluster.start_session();
+        session.run("set streaming_parallelism = 1").await?;
+        session.run("set sink_decouple = true").await?;
+        session
+            .run("create table schema_input (id int primary key, name varchar)")
+            .await?;
+        session
+            .run("create table independent_input (id int primary key)")
+            .await?;
+        session
+            .run("create materialized view independent_mv as select count(*) as n from independent_input")
+            .await?;
+        session
+            .run(
+                "create sink failing_schema_sink from schema_input with \
+                 (connector = 'test', type = 'upsert', auto.schema.change = 'true')",
+            )
+            .await?;
+
+        if coordinator_failure {
+            // Writers may stage rows, but the downstream commit must keep failing.
+            test_sink.set_coordinator_err_rate(1.0);
+        } else {
+            test_sink.set_err_rate(1.0);
+        }
+        session
+            .run("insert into schema_input values (1, 'old')")
+            .await?;
+        test_sink.store.wait_for_err(1).await?;
+        let initial_error_count = test_sink.store.err_count();
+
+        for (column, values) in [
+            ("age", "(2, 'middle', 20)"),
+            ("score", "(3, 'new', 30, 300)"),
+        ] {
+            session
+                .run(format!("alter table schema_input add column {column} int"))
+                .await?;
+            let description = session.run("describe failing_schema_sink").await?;
+            anyhow::ensure!(description.contains(column), "{description}");
+            session
+                .run(format!("insert into schema_input values {values}"))
+                .await?;
+
+            let mut previous_epoch: u64 = session
+                .run(
+                    "select committed_epoch from rw_catalog.rw_hummock_snapshot \
+                     where table_id = 'independent_mv'::regclass",
+                )
+                .await?
+                .trim()
+                .parse()?;
+            for _ in 0..3 {
+                session
+                    .run("insert into independent_input select coalesce(max(id), 0) + 1 from independent_input")
+                    .await?;
+                // FLUSH waits for a checkpoint, not just for rows to become visible in memory.
+                session.run("flush").await?;
+                let epoch: u64 = session
+                    .run(
+                        "select committed_epoch from rw_catalog.rw_hummock_snapshot \
+                         where table_id = 'independent_mv'::regclass",
+                    )
+                    .await?
+                    .trim()
+                    .parse()?;
+                anyhow::ensure!(epoch > previous_epoch, "unrelated MV checkpoint stalled");
+                previous_epoch = epoch;
+            }
+        }
+        anyhow::ensure!(
+            session.run("select n from independent_mv").await?.trim() == "6",
+            "unrelated MV stopped receiving rows"
+        );
+        anyhow::ensure!(test_sink.store.id_count() == 0);
+        test_sink
+            .store
+            .wait_for_err(initial_error_count + 1)
+            .await?;
+
+        // Old rows, both markers, and new rows must remain consumable after the failure ends.
+        test_sink.set_err_rate(0.0);
+        test_sink.store.wait_for_count(3).await?;
+        session.run("flush").await?;
+        test_sink
+            .store
+            .check_result_rows(&[(1, "old"), (2, "middle"), (3, "new")])?;
+        if coordinator_failure {
+            let changes = test_sink.store.schema_changes();
+            let original_schemas: Vec<_> = changes
+                .iter()
+                .map(|change| {
+                    change
+                        .original_schema
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            anyhow::ensure!(
+                original_schemas == [vec!["id", "name"], vec!["id", "name", "age"]],
+                "schema changes were lost, reordered or committed with the wrong original schema: {changes:?}"
+            );
+            for (change, expected_column) in changes.iter().zip(["age", "score"]) {
+                let Some(PbOp::AddColumns(added)) = &change.op else {
+                    anyhow::bail!("expected an add-column schema change: {change:?}");
+                };
+                anyhow::ensure!(
+                    added.fields.len() == 1 && added.fields[0].name == expected_column,
+                    "wrong column in schema change: {change:?}"
+                );
+            }
+        }
+        session.run("drop sink failing_schema_sink").await?;
+        session.run("drop table schema_input").await?;
+        session.run("drop materialized view independent_mv").await?;
+        session.run("drop table independent_input").await?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("schema change or an unrelated checkpoint stalled"))?
 }

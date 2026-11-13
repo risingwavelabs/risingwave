@@ -150,6 +150,11 @@ pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 /// log store.
 pub const RISINGWAVE_ICEBERG_COMMIT_EPOCH: &str = "risingwave.commit.epoch";
 
+/// Snapshot summary property containing `<sink id>:<log-store schema version>` of the committed
+/// rows. Unlike column names or Iceberg schema IDs, this identifies progress through repeated
+/// add/drop schema changes, including when a sink is recreated.
+pub const RISINGWAVE_ICEBERG_SCHEMA_VERSION: &str = "risingwave.schema.version";
+
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
     /// Reads the data of the system catalog table.

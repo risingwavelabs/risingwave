@@ -258,6 +258,20 @@ impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
         Ok(())
     }
 
+    /// Write a checkpoint barrier after which the log store moves to the next schema version.
+    pub(crate) fn write_schema_change_barrier(&mut self, epoch: u64) -> LogStoreResult<()> {
+        for vnode in self.inner.serde.vnodes().iter_vnodes() {
+            let (key, value) = self
+                .inner
+                .serde
+                .serialize_schema_change_barrier(epoch, vnode);
+            self.flush_info
+                .flush_one(key.estimated_size() + value.estimated_size());
+            self.inner.state_store.insert(key, value, None)?;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn finish(self) -> LogStoreResult<(FlushInfo, Option<Bitmap>)> {
         self.inner.state_store.flush().await?;
         Ok((
@@ -409,6 +423,8 @@ mod tests {
         let KvLogStoreItem::Barrier {
             vnodes,
             is_checkpoint: true,
+            schema_version: 0,
+            schema_change: None,
         } = last_item
         else {
             unreachable!()

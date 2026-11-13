@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -576,15 +575,14 @@ impl CatalogController {
             .unwrap_or_default();
 
         let info = self.env.shared_actor_infos().read_guard();
-        let SharedFragmentInfo { actors, .. } = info
-            .get_fragment(fragment_model.fragment_id as _)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Failed to retrieve fragment description: fragment {} (job_id {}) not found in shared actor info",
-                    fragment_model.fragment_id,
-                    fragment_model.job_id
-                )
-            });
+        let Some(SharedFragmentInfo { actors, .. }) =
+            info.get_fragment(fragment_model.fragment_id as _)
+        else {
+            return Err(MetaError::unavailable(format!(
+                "shared actor info missing for fragment {} (job_id {}) while describing fragment",
+                fragment_model.fragment_id, fragment_model.job_id
+            )));
+        };
 
         let parallelism_policy = Self::format_fragment_parallelism_policy(
             fragment_model.distribution_type,
@@ -693,33 +691,34 @@ impl CatalogController {
         );
 
         let shared_info = self.env.shared_actor_infos();
-        let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
-        let get_fragment_actors = |fragment_id: FragmentId| async move {
-            let result: MetaResult<FragmentActorInfo> = try {
-                let read_guard = shared_info.read_guard();
-
-                let fragment = read_guard.get_fragment(fragment_id as _).unwrap();
-
-                (
-                    fragment.distribution_type,
-                    Arc::new(
-                        fragment
-                            .actors
-                            .iter()
-                            .map(|(actor_id, actor_info)| {
-                                (
-                                    *actor_id,
-                                    actor_info
-                                        .vnode_bitmap
-                                        .as_ref()
-                                        .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
-                                )
-                            })
-                            .collect(),
-                    ),
-                )
-            };
-            result
+        let mut fragment_actor_cache: HashMap<FragmentId, Option<FragmentActorInfo>> =
+            HashMap::new();
+        let mut get_fragment_actors = |fragment_id: FragmentId| -> Option<FragmentActorInfo> {
+            fragment_actor_cache
+                .entry(fragment_id)
+                .or_insert_with(|| {
+                    let read_guard = shared_info.read_guard();
+                    let fragment = read_guard.get_fragment(fragment_id as _)?;
+                    Some((
+                        fragment.distribution_type,
+                        Arc::new(
+                            fragment
+                                .actors
+                                .iter()
+                                .map(|(actor_id, actor_info)| {
+                                    (
+                                        *actor_id,
+                                        actor_info
+                                            .vnode_bitmap
+                                            .as_ref()
+                                            .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                    ))
+                })
+                .clone()
         };
 
         let mut actor_dispatchers_map: HashMap<_, HashMap<_, Vec<_>>> = HashMap::new();
@@ -732,27 +731,20 @@ impl CatalogController {
             output_type_mapping,
         } in fragment_relations
         {
-            let (source_fragment_distribution, source_fragment_actors) = {
-                let (distribution, actors) = {
-                    match fragment_actor_cache.entry(source_fragment_id) {
-                        Entry::Occupied(entry) => entry.into_mut(),
-                        Entry::Vacant(entry) => {
-                            entry.insert(get_fragment_actors(source_fragment_id).await?)
-                        }
-                    }
-                };
-                (*distribution, actors.clone())
+            let Some((source_fragment_distribution, source_fragment_actors)) =
+                get_fragment_actors(source_fragment_id)
+            else {
+                return Err(MetaError::unavailable(format!(
+                    "shared actor info missing for fragment {source_fragment_id} while resolving dispatchers"
+                )));
             };
-            let (target_fragment_distribution, target_fragment_actors) = {
-                let (distribution, actors) = {
-                    match fragment_actor_cache.entry(target_fragment_id) {
-                        Entry::Occupied(entry) => entry.into_mut(),
-                        Entry::Vacant(entry) => {
-                            entry.insert(get_fragment_actors(target_fragment_id).await?)
-                        }
-                    }
-                };
-                (*distribution, actors.clone())
+            // Fragment relations are committed to the meta store before the barrier worker
+            // publishes the actors of a job being created or replaced. Until then, the upstream
+            // actors have no dispatcher to this fragment at runtime.
+            let Some((target_fragment_distribution, target_fragment_actors)) =
+                get_fragment_actors(target_fragment_id)
+            else {
+                continue;
             };
             let output_mapping = PbDispatchOutputMapping {
                 indices: output_indices.into_u32_array(),
@@ -1007,7 +999,9 @@ impl CatalogController {
         let mut actor_map = HashMap::with_capacity(fragment_ids.len());
         for fragment_id in fragment_ids {
             let fragment_info = guard.get_fragment(*fragment_id as _).ok_or_else(|| {
-                anyhow!("fragment {} not found in shared actor info", fragment_id)
+                MetaError::unavailable(format!(
+                    "shared actor info missing for fragment {fragment_id} while listing actors"
+                ))
             })?;
 
             let actors = fragment_info

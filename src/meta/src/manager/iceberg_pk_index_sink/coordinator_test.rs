@@ -60,6 +60,7 @@ fn writer_metadata(
     data_files: Vec<SerializedDataFile>,
 ) -> SinkMetadata {
     SinkMetadata::try_from(&IcebergCommitResult {
+        log_store_schema_version: None,
         schema_id,
         partition_spec_id,
         data_files,

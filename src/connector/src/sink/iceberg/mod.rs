@@ -42,6 +42,7 @@ pub use metadata::*;
 pub use pk_index_file::*;
 pub use position_delete::*;
 use risingwave_common::bail;
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::license::Feature;
 use tokio::sync::mpsc::UnboundedSender;
 pub use writer::*;
@@ -79,7 +80,9 @@ impl TryFrom<SinkParam> for IcebergSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = IcebergConfig::from_btreemap(param.properties.clone())?;
+        let mut properties = param.properties.clone();
+        properties.remove(SCHEMA_VERSION_PROPERTY);
+        let config = IcebergConfig::from_btreemap(properties)?;
         IcebergSink::new(config, param)
     }
 }

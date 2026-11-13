@@ -26,19 +26,19 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{ArrayVec, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::value_encoding;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, ValueRowDeserializer, ValueRowSerializer,
-};
+use risingwave_common::util::value_encoding::log_store::deserialize_header;
+use risingwave_common::util::value_encoding::{BasicDeserializer, BasicSerde, ValueRowSerializer};
 use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::key::{TableKey, next_key};
 use risingwave_pb::catalog::Table;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -48,7 +48,7 @@ use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
     Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType,
-    SeqId,
+    SchemaVersion, SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = risingwave_common::constants::log_store::INSERT_OP_CODE;
@@ -57,6 +57,31 @@ const UPDATE_INSERT_OP_CODE: RowOpCodeType = 3;
 const UPDATE_DELETE_OP_CODE: RowOpCodeType = 4;
 const BARRIER_OP_CODE: RowOpCodeType = 5;
 const CHECKPOINT_BARRIER_OP_CODE: RowOpCodeType = 6;
+/// A checkpoint barrier after which the sink moves to the next schema version.
+const SCHEMA_CHANGE_BARRIER_OP_CODE: RowOpCodeType = 7;
+
+/// An older schema of the log store. Rows written under it may still be in the log store.
+#[derive(Clone, Debug)]
+pub(crate) struct LogStoreSchemaHistoryEntry {
+    pub version: SchemaVersion,
+    /// The log store table under this version. Only columns and value indices are used.
+    pub table: Table,
+    /// The schema change that moves the log store from this version to the next one.
+    pub schema_change: PbSinkSchemaChange,
+}
+
+struct PayloadSchema {
+    version: SchemaVersion,
+    deserializer: BasicDeserializer,
+    /// `None` for the current version.
+    schema_change: Option<PbSinkSchemaChange>,
+}
+
+impl PayloadSchema {
+    fn data_types(&self) -> &[DataType] {
+        self.deserializer.data_types()
+    }
+}
 
 struct ReadInfo {
     read_size: usize,
@@ -98,6 +123,7 @@ enum LogStoreRowOp {
     },
     Barrier {
         is_checkpoint: bool,
+        is_schema_change: bool,
     },
 }
 
@@ -115,6 +141,7 @@ enum LogStoreOp {
     },
     Barrier {
         is_checkpoint: bool,
+        is_schema_change: bool,
     },
 }
 
@@ -135,6 +162,7 @@ enum AlignedLogStoreOp {
     Barrier {
         vnodes: Arc<Bitmap>,
         is_checkpoint: bool,
+        is_schema_change: bool,
     },
 }
 
@@ -150,7 +178,13 @@ impl From<LogStoreRowOp> for LogStoreOp {
                 }
                 Self::Row { seq_id, op, row }
             }
-            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier { is_checkpoint },
+            LogStoreRowOp::Barrier {
+                is_checkpoint,
+                is_schema_change,
+            } => Self::Barrier {
+                is_checkpoint,
+                is_schema_change,
+            },
         }
     }
 }
@@ -182,6 +216,15 @@ pub(crate) struct LogStoreRowSerde {
     payload_schema: Vec<DataType>,
 
     pk_info: &'static KvLogStorePkInfo,
+
+    /// Deserializer of the predefined columns, which are the same in all schema versions.
+    predefined_deserializer: Arc<BasicDeserializer>,
+
+    /// Schema version of the rows written by this serde.
+    schema_version: SchemaVersion,
+
+    /// Payload schemas of older versions in ascending version order, followed by the current one.
+    payload_schemas: Arc<[PayloadSchema]>,
 }
 
 impl LogStoreRowSerde {
@@ -214,6 +257,7 @@ impl LogStoreRowSerde {
 
         let data_types = input_value_indices
             .iter()
+            .filter(|idx| table_columns[**idx].name != SCHEMA_VERSION_COLUMN_NAME)
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect_vec();
 
@@ -225,7 +269,15 @@ impl LogStoreRowSerde {
             assert_eq!(schema_data_type, log_store_data_type);
         }
 
+        let predefined_deserializer = Arc::new(BasicDeserializer::new(
+            data_types[..predefined_column_len].to_vec(),
+        ));
         let payload_schema = data_types[predefined_column_len..].to_vec();
+        let payload_schemas = Arc::from([PayloadSchema {
+            version: 0,
+            deserializer: BasicDeserializer::new(payload_schema.clone()),
+            schema_change: None,
+        }]);
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
 
@@ -259,7 +311,133 @@ impl LogStoreRowSerde {
             vnodes,
             payload_schema,
             pk_info,
+            predefined_deserializer,
+            schema_version: 0,
+            payload_schemas,
         }
+    }
+
+    /// Set the schema version of the rows written by this serde, and the older schemas whose rows
+    /// may still be in the log store.
+    pub(crate) fn with_schema_history(
+        mut self,
+        schema_version: SchemaVersion,
+        history: &[LogStoreSchemaHistoryEntry],
+    ) -> LogStoreResult<Self> {
+        if schema_version != 0 && self.row_serde.log_store_header.is_none() {
+            return Err(anyhow!(
+                "versioned log store needs an explicit schema version column"
+            ));
+        }
+        let predefined_column_len = self.pk_info.predefined_column_len();
+        let mut payload_schemas = Vec::with_capacity(history.len() + 1);
+        for entry in history {
+            if entry.version >= schema_version {
+                return Err(anyhow!(
+                    "schema history version {} is not older than current version {}",
+                    entry.version,
+                    schema_version
+                ));
+            }
+            if let Some(PayloadSchema { version, .. }) = payload_schemas.last()
+                && *version >= entry.version
+            {
+                return Err(anyhow!(
+                    "schema history versions are not ascending: {} then {}",
+                    version,
+                    entry.version
+                ));
+            }
+            let data_types = entry
+                .table
+                .value_indices
+                .iter()
+                .filter(|idx| {
+                    entry
+                        .table
+                        .columns
+                        .get(**idx as usize)
+                        .and_then(|col| col.column_desc.as_ref())
+                        .is_none_or(|col| col.name != SCHEMA_VERSION_COLUMN_NAME)
+                })
+                .map(|idx| {
+                    let column = entry.table.columns.get(*idx as usize).ok_or_else(|| {
+                        anyhow!(
+                            "invalid value index {} in log store schema version {}",
+                            idx,
+                            entry.version
+                        )
+                    })?;
+                    Ok::<_, anyhow::Error>(DataType::from(
+                        column
+                            .column_desc
+                            .as_ref()
+                            .and_then(|desc| desc.column_type.as_ref())
+                            .ok_or_else(|| anyhow!("missing column type in log store schema"))?,
+                    ))
+                })
+                .try_collect::<_, Vec<_>, _>()?;
+            if data_types.len() < predefined_column_len
+                || data_types[..predefined_column_len]
+                    != self.predefined_deserializer.data_types()[..]
+            {
+                return Err(anyhow!(
+                    "predefined columns of log store schema version {} do not match: {:?}",
+                    entry.version,
+                    data_types
+                ));
+            }
+            payload_schemas.push(PayloadSchema {
+                version: entry.version,
+                deserializer: BasicDeserializer::new(data_types[predefined_column_len..].to_vec()),
+                schema_change: Some(entry.schema_change.clone()),
+            });
+        }
+        payload_schemas.push(PayloadSchema {
+            version: schema_version,
+            deserializer: BasicDeserializer::new(self.payload_schema.clone()),
+            schema_change: None,
+        });
+        self.schema_version = schema_version;
+        self.payload_schemas = payload_schemas.into();
+        Ok(self)
+    }
+
+    pub(crate) fn schema_version(&self) -> SchemaVersion {
+        self.schema_version
+    }
+
+    fn payload_schema_of(&self, version: SchemaVersion) -> LogStoreResult<&PayloadSchema> {
+        self.payload_schemas
+            .iter()
+            .rev()
+            .find(|schema| schema.version == version)
+            .ok_or_else(|| {
+                anyhow!(
+                    "unknown log store schema version {}. known versions: {:?}",
+                    version,
+                    self.payload_schemas
+                        .iter()
+                        .map(|schema| schema.version)
+                        .collect_vec()
+                )
+            })
+    }
+
+    fn payload_data_types_of(&self, version: SchemaVersion) -> LogStoreResult<&[DataType]> {
+        self.payload_schemas
+            .iter()
+            .find(|schema| schema.version == version)
+            .map(PayloadSchema::data_types)
+            .ok_or_else(|| anyhow!("unknown log store schema version {}", version))
+    }
+
+    /// The schema change that moves the log store from `version` to the next version.
+    fn schema_change_of(&self, version: SchemaVersion) -> Option<PbSinkSchemaChange> {
+        self.payload_schemas
+            .iter()
+            .find(|schema| schema.version == version)
+            .and_then(|schema| schema.schema_change.clone())
     }
 
     pub(crate) fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
@@ -306,7 +484,14 @@ impl LogStoreRowSerde {
         let extended_row_for_vnode = (&pk).chain([Some(ScalarImpl::Int16(op_code))]).chain(&row);
         let vnode = self.compute_vnode(&extended_row_for_vnode);
         let pk = (self.pk_info.compute_pk)(vnode, encoded_epoch, Some(seq_id));
-        let extended_row = (&pk).chain([Some(ScalarImpl::Int16(op_code))]).chain(&row);
+        let version = ArrayVec::from_array_len(
+            [Some(ScalarImpl::Int64(self.schema_version.into()))],
+            usize::from(self.row_serde.log_store_header.is_some()),
+        );
+        let extended_row = (&pk)
+            .chain([Some(ScalarImpl::Int16(op_code))])
+            .chain(&row)
+            .chain(version);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (vnode, key_bytes, value_bytes)
@@ -318,17 +503,38 @@ impl LogStoreRowSerde {
         vnode: VirtualNode,
         is_checkpoint: bool,
     ) -> (TableKey<Bytes>, Bytes) {
-        let pk = (self.pk_info.compute_pk)(vnode, Self::encode_epoch(epoch), None);
-
         let op_code = if is_checkpoint {
             CHECKPOINT_BARRIER_OP_CODE
         } else {
             BARRIER_OP_CODE
         };
+        self.serialize_barrier_inner(epoch, vnode, op_code)
+    }
 
+    /// Serialize a checkpoint barrier after which the sink moves to the next schema version.
+    pub(crate) fn serialize_schema_change_barrier(
+        &self,
+        epoch: u64,
+        vnode: VirtualNode,
+    ) -> (TableKey<Bytes>, Bytes) {
+        self.serialize_barrier_inner(epoch, vnode, SCHEMA_CHANGE_BARRIER_OP_CODE)
+    }
+
+    fn serialize_barrier_inner(
+        &self,
+        epoch: u64,
+        vnode: VirtualNode,
+        op_code: RowOpCodeType,
+    ) -> (TableKey<Bytes>, Bytes) {
+        let pk = (self.pk_info.compute_pk)(vnode, Self::encode_epoch(epoch), None);
+        let version = ArrayVec::from_array_len(
+            [Some(ScalarImpl::Int64(self.schema_version.into()))],
+            usize::from(self.row_serde.log_store_header.is_some()),
+        );
         let extended_row = (&pk)
             .chain([Some(ScalarImpl::Int16(op_code))])
-            .chain(OwnedRow::new(vec![None; self.payload_schema.len()]));
+            .chain(OwnedRow::new(vec![None; self.payload_schema.len()]))
+            .chain(version);
         let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, vnode);
         let value_bytes = self.row_serde.serialize(extended_row).into();
         (key_bytes, value_bytes)
@@ -371,10 +577,18 @@ impl LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
-    fn deserialize(&self, value_bytes: &[u8]) -> value_encoding::Result<(Epoch, LogStoreRowOp)> {
-        let row_data = self.row_serde.deserialize(value_bytes)?;
+    /// Returns the epoch, the schema version and the op of the row.
+    fn deserialize(
+        &self,
+        value_bytes: &[u8],
+    ) -> LogStoreResult<(Epoch, SchemaVersion, LogStoreRowOp)> {
+        let mut value_bytes = value_bytes;
+        // Both legacy v0 values and values with the explicit version header can coexist.
+        let version = deserialize_header(&mut value_bytes)?;
+        let mut row_data = Vec::with_capacity(self.pk_info.predefined_column_len());
+        self.predefined_deserializer
+            .deserialize_to(&mut value_bytes, &mut row_data)?;
 
-        let payload_row = OwnedRow::new(row_data[self.pk_info.predefined_column_len()..].to_vec());
         let epoch = Self::decode_epoch(
             *row_data[self.pk_info.epoch_column_index]
                 .as_ref()
@@ -390,43 +604,45 @@ impl LogStoreRowSerde {
             .as_ref()
             .unwrap()
             .as_int16();
+        let payload_schema = self.payload_schema_of(version)?;
+
+        let decode_row = |value_bytes: &mut &[u8]| -> LogStoreResult<(SeqId, OwnedRow)> {
+            let seq_id = seq_id.ok_or_else(|| anyhow!("seq_id should be present for all rows"))?;
+            let mut payload = Vec::with_capacity(payload_schema.data_types().len());
+            payload_schema
+                .deserializer
+                .deserialize_to(value_bytes, &mut payload)?;
+            Ok((seq_id, OwnedRow::new(payload)))
+        };
+        let barrier =
+            |is_checkpoint: bool, is_schema_change: bool| -> LogStoreResult<LogStoreRowOp> {
+                if seq_id.is_some() {
+                    return Err(anyhow!("barrier row should not have seq_id"));
+                }
+                Ok(LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    is_schema_change,
+                })
+            };
 
         let op = match row_op_code {
-            INSERT_OP_CODE => LogStoreRowOp::Row {
-                seq_id: seq_id.expect("seq_id should be present for all rows"),
-                op: Op::Insert,
-                row: payload_row,
-            },
-            DELETE_OP_CODE => LogStoreRowOp::Row {
-                seq_id: seq_id.expect("seq_id should be present for all rows"),
-                op: Op::Delete,
-                row: payload_row,
-            },
-            UPDATE_INSERT_OP_CODE => LogStoreRowOp::Row {
-                seq_id: seq_id.expect("seq_id should be present for all rows"),
-                op: Op::UpdateInsert,
-                row: payload_row,
-            },
-            UPDATE_DELETE_OP_CODE => LogStoreRowOp::Row {
-                seq_id: seq_id.expect("seq_id should be present for all rows"),
-                op: Op::UpdateDelete,
-                row: payload_row,
-            },
-            BARRIER_OP_CODE => {
-                assert!(row_data[self.pk_info.seq_id_column_index].is_none());
-                LogStoreRowOp::Barrier {
-                    is_checkpoint: false,
-                }
+            INSERT_OP_CODE | DELETE_OP_CODE | UPDATE_INSERT_OP_CODE | UPDATE_DELETE_OP_CODE => {
+                let (seq_id, row) = decode_row(&mut value_bytes)?;
+                let op = match row_op_code {
+                    INSERT_OP_CODE => Op::Insert,
+                    DELETE_OP_CODE => Op::Delete,
+                    UPDATE_INSERT_OP_CODE => Op::UpdateInsert,
+                    UPDATE_DELETE_OP_CODE => Op::UpdateDelete,
+                    _ => unreachable!(),
+                };
+                LogStoreRowOp::Row { seq_id, op, row }
             }
-            CHECKPOINT_BARRIER_OP_CODE => {
-                assert!(row_data[self.pk_info.seq_id_column_index].is_none());
-                LogStoreRowOp::Barrier {
-                    is_checkpoint: true,
-                }
-            }
-            _ => unreachable!("invalid row op code: {}", row_op_code),
+            BARRIER_OP_CODE => barrier(false, false)?,
+            CHECKPOINT_BARRIER_OP_CODE => barrier(true, false)?,
+            SCHEMA_CHANGE_BARRIER_OP_CODE => barrier(true, true)?,
+            _ => return Err(anyhow!("invalid row op code: {}", row_op_code)),
         };
-        Ok((epoch, op))
+        Ok((epoch, payload_schema.version, op))
     }
 
     pub(crate) async fn deserialize_stream_chunk<I: StateStoreReadIter>(
@@ -452,6 +668,13 @@ impl LogStoreRowSerde {
             let epoch = row.row_meta.epoch;
             let op = row.op;
             let row_size = row.row_meta.size;
+            if row.row_meta.version != self.schema_version {
+                return Err(anyhow!(
+                    "flushed row schema version {} does not match current version {}",
+                    row.row_meta.version,
+                    self.schema_version
+                ));
+            }
             match (epoch, op) {
                 (epoch, LogStoreOp::Row { op, row, .. }) => {
                     if epoch != expected_epoch {
@@ -535,6 +758,7 @@ enum StreamState {
         read_size: usize,
         curr_epoch: u64,
         is_checkpoint: bool,
+        is_schema_change: bool,
     },
     /// All parallelism has reached the barrier, and the barrier is emitted.
     BarrierEmitted { prev_epoch: u64 },
@@ -544,10 +768,14 @@ pub(crate) enum KvLogStoreItem {
     StreamChunk {
         chunk: StreamChunk,
         progress: HashMap<VirtualNode, SeqId>,
+        schema_version: SchemaVersion,
     },
     Barrier {
         vnodes: Arc<Bitmap>,
         is_checkpoint: bool,
+        schema_version: SchemaVersion,
+        /// Set when the log store moves to the next schema version after this barrier.
+        schema_change: Option<PbSinkSchemaChange>,
     },
 }
 
@@ -613,6 +841,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
         let mut ops = Vec::with_capacity(chunk_size);
+        let mut chunk_version = self.serde.schema_version;
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
 
@@ -627,13 +856,32 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         pin_mut!(this);
 
         let mut read_info = ReadInfo::new();
-        while let Some(row) = this.next_op().await? {
+        let mut next_row = this.next_op().await?;
+        while let Some(row) = next_row.take() {
             let epoch = row.epoch;
             let row_op = row.op;
             let row_read_size = row.size;
+            let row_version = row.version;
             match row_op {
                 AlignedLogStoreOp::Row { vnode, seq_id, .. }
                 | AlignedLogStoreOp::Update { vnode, seq_id, .. } => {
+                    if row_version != chunk_version {
+                        // The schema version only changes across barriers, which have flushed the
+                        // pending rows of the previous version.
+                        if !ops.is_empty() {
+                            return Err(anyhow!(
+                                "schema version changes from {} to {} within epoch {}",
+                                chunk_version,
+                                row_version,
+                                epoch
+                            ));
+                        }
+                        data_chunk_builder = DataChunkBuilder::new(
+                            this.serde.payload_data_types_of(row_version)?.to_vec(),
+                            chunk_size,
+                        );
+                        chunk_version = row_version;
+                    }
                     if let Some(previous_seq_id) = progress.insert(vnode, seq_id) {
                         assert!(previous_seq_id < seq_id);
                     }
@@ -653,6 +901,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
                                 progress: take(&mut progress),
+                                schema_version: chunk_version,
                             },
                         );
                     }
@@ -671,6 +920,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
                                 progress: take(&mut progress),
+                                schema_version: chunk_version,
                             },
                         );
                     }
@@ -684,6 +934,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
                                 progress: take(&mut progress),
+                                schema_version: chunk_version,
                             },
                         );
                     }
@@ -691,6 +942,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                 AlignedLogStoreOp::Barrier {
                     vnodes,
                     is_checkpoint,
+                    is_schema_change,
                 } => {
                     read_info.read_one_row(row_read_size);
                     read_info.report(&this.metrics);
@@ -701,18 +953,44 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
                                 progress: take(&mut progress),
+                                schema_version: chunk_version,
                             },
                         );
                     }
+                    let schema_change = if is_schema_change {
+                        // A marker can survive a replacement that recovery later abandons. The
+                        // schema version is then reused by a retry, so history alone cannot tell
+                        // which marker actually changes the schema. Inspect the next aligned item,
+                        // including barriers of empty epochs. At the end of the historical log,
+                        // the current actor's schema is the schema of the following buffered data.
+                        next_row = this.next_op().await?;
+                        let next_version = next_row
+                            .as_ref()
+                            .map_or(this.serde.schema_version, |row| row.version);
+                        if next_version > row_version {
+                            this.serde.schema_change_of(row_version)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     yield (
                         epoch,
                         KvLogStoreItem::Barrier {
                             vnodes,
                             is_checkpoint,
+                            schema_version: row_version,
+                            schema_change,
                         },
-                    )
+                    );
+                    if is_schema_change {
+                        // Process the lookahead item without polling again, even if it is EOF.
+                        continue;
+                    }
                 }
             }
+            next_row = this.next_op().await?;
         }
     }
 }
@@ -738,6 +1016,7 @@ mod stream_de {
         pub vnode: VirtualNode,
         pub epoch: u64,
         pub size: usize,
+        pub version: SchemaVersion,
     }
 
     #[derive(Debug)]
@@ -745,6 +1024,7 @@ mod stream_de {
         pub op: AlignedLogStoreOp,
         pub epoch: Epoch,
         pub size: usize,
+        pub version: SchemaVersion,
     }
 
     #[derive(Debug)]
@@ -769,14 +1049,22 @@ mod stream_de {
         serde: LogStoreRowSerde,
     ) -> LogStoreItemStream<S> {
         may_merge_update(
-            iter.into_stream(move |(key, value)| -> StorageResult<RawLogStoreRow> {
-                let size = key.user_key.table_key.len() + value.len();
-                let (epoch, op) = serde.deserialize(value)?;
-                let row_meta = RowMeta { vnode, epoch, size };
-                tracing::trace!(?row_meta, ?op, "read_row");
-                Ok(RawLogStoreRow { op, row_meta })
-            })
-            .map_err(Into::into),
+            iter.into_stream(
+                move |(key, value)| -> StorageResult<LogStoreResult<RawLogStoreRow>> {
+                    let size = key.user_key.table_key.len() + value.len();
+                    Ok(serde.deserialize(value).map(|(epoch, version, op)| {
+                        let row_meta = RowMeta {
+                            vnode,
+                            epoch,
+                            size,
+                            version,
+                        };
+                        tracing::trace!(?row_meta, ?op, "read_row");
+                        RawLogStoreRow { op, row_meta }
+                    }))
+                },
+            )
+            .map(|result| result.map_err(anyhow::Error::from).and_then(|row| row)),
         )
         .boxed()
         // The `boxed` call was unnecessary in usual build. But when doing cargo doc,
@@ -814,6 +1102,7 @@ mod stream_de {
                             vnode: row_meta.vnode,
                             epoch: row_meta.epoch,
                             size: (row_meta.size + next_row_meta.size),
+                            version: row_meta.version,
                         };
                         yield LogStoreRow {
                             op: LogStoreOp::Update {
@@ -990,6 +1279,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             let vnode = row_meta.vnode;
             let decoded_epoch = row_meta.epoch;
             let size = row_meta.size;
+            let version = row_meta.version;
             self.may_init_epoch(decoded_epoch)?;
             match row.op {
                 LogStoreOp::Row { seq_id, op, row } => {
@@ -1004,6 +1294,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         op,
                         size,
                         epoch: decoded_epoch,
+                        version,
                     };
                     return Ok(Some(row));
                 }
@@ -1023,10 +1314,14 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         op,
                         size,
                         epoch: decoded_epoch,
+                        version,
                     };
                     return Ok(Some(row));
                 }
-                LogStoreOp::Barrier { is_checkpoint } => {
+                LogStoreOp::Barrier {
+                    is_checkpoint,
+                    is_schema_change,
+                } => {
                     self.check_is_checkpoint(is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
@@ -1039,14 +1334,16 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             },
                         );
 
-                        let (mut aligned_vnodes, mut read_size) = match old_state {
-                            StreamState::BarrierAligning {
-                                aligned_vnodes,
-                                read_size,
-                                ..
-                            } => (aligned_vnodes, read_size),
-                            _ => (BitmapBuilder::zeroed(self.serde.vnodes().len()), 0),
-                        };
+                        let (mut aligned_vnodes, mut read_size, aligned_is_schema_change) =
+                            match old_state {
+                                StreamState::BarrierAligning {
+                                    aligned_vnodes,
+                                    read_size,
+                                    is_schema_change,
+                                    ..
+                                } => (aligned_vnodes, read_size, is_schema_change),
+                                _ => (BitmapBuilder::zeroed(self.serde.vnodes().len()), 0, false),
+                            };
                         aligned_vnodes.set(vnode.to_index(), true);
                         read_size += size;
 
@@ -1059,7 +1356,9 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             op: AlignedLogStoreOp::Barrier {
                                 vnodes: Arc::new(aligned_vnodes.finish()),
                                 is_checkpoint,
+                                is_schema_change: aligned_is_schema_change || is_schema_change,
                             },
+                            version,
                         }));
                     } else {
                         match &mut self.stream_state {
@@ -1068,9 +1367,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                                 read_size,
                                 curr_epoch,
                                 is_checkpoint: current_is_checkpoint,
+                                is_schema_change: current_is_schema_change,
                             } => {
                                 aligned_vnodes.set(vnode.to_index(), true);
                                 *read_size += size;
+                                *current_is_schema_change |= is_schema_change;
                                 if curr_epoch != &decoded_epoch {
                                     return Err(anyhow!(
                                         "current epoch {} does not match with decoded epoch {}",
@@ -1095,6 +1396,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                                     read_size: size,
                                     curr_epoch: decoded_epoch,
                                     is_checkpoint,
+                                    is_schema_change,
                                 };
                             }
                         }
@@ -1179,6 +1481,131 @@ mod tests {
     const EPOCH0: u64 = test_epoch(1);
     const EPOCH1: u64 = test_epoch(2);
     const EPOCH2: u64 = test_epoch(3);
+
+    #[test]
+    fn test_explicit_schema_versions_and_legacy_rows() {
+        use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+        use risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME;
+        use risingwave_common::types::ScalarImpl;
+
+        #[expect(deprecated)]
+        let pk_infos: [&'static KvLogStorePkInfo; 2] = [
+            &crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO,
+            &KV_LOG_STORE_V2_INFO,
+        ];
+        for pk_info in pk_infos {
+            let legacy_table = gen_test_log_store_table(pk_info);
+            let mut table = legacy_table.clone();
+            for (column, (name, _)) in table.columns[..pk_info.predefined_column_len()]
+                .iter_mut()
+                .zip_eq(pk_info.predefined_columns)
+            {
+                column.column_desc.as_mut().unwrap().name = (*name).to_owned();
+            }
+            let id = table.columns.len() as i32;
+            table.columns.push(
+                ColumnCatalog::hidden(ColumnDesc::named(
+                    SCHEMA_VERSION_COLUMN_NAME,
+                    ColumnId::new(id),
+                    DataType::Int64,
+                ))
+                .to_protobuf(),
+            );
+            table.value_indices.push(id);
+            let new_serde = |version| {
+                LogStoreRowSerde::new(
+                    &table,
+                    Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                    pk_info,
+                )
+                .with_schema_history(version, &[])
+                .unwrap()
+            };
+            let reader = new_serde(u32::MAX)
+                .with_schema_history(
+                    u32::MAX,
+                    &[
+                        super::LogStoreSchemaHistoryEntry {
+                            version: 0,
+                            table: legacy_table.clone(),
+                            schema_change: Default::default(),
+                        },
+                        super::LogStoreSchemaHistoryEntry {
+                            version: 4096,
+                            table: table.clone(),
+                            schema_change: Default::default(),
+                        },
+                    ],
+                )
+                .unwrap();
+            let payload = OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(42)),
+                Some(ScalarImpl::Utf8("payload".into())),
+            ]);
+            for version in [0, 4096, u32::MAX] {
+                let writer = new_serde(version);
+                for (op, code) in [
+                    (Op::Insert, 1),
+                    (Op::Delete, 2),
+                    (Op::UpdateInsert, 3),
+                    (Op::UpdateDelete, 4),
+                ] {
+                    let (_, _, bytes) = writer.serialize_data_row(EPOCH1, 0, op, &payload);
+                    let (epoch, decoded_version, row) = reader.deserialize(&bytes).unwrap();
+                    assert_eq!((epoch, decoded_version), (EPOCH1, version));
+                    let LogStoreRowOp::Row {
+                        op: decoded_op,
+                        row,
+                        ..
+                    } = row
+                    else {
+                        panic!("expected data row")
+                    };
+                    assert_eq!(decoded_op, op);
+                    assert_eq!(row, payload);
+                    let mut raw = bytes.as_ref();
+                    assert_eq!(super::deserialize_header(&mut raw).unwrap(), version);
+                    let mut metadata = Vec::new();
+                    writer
+                        .predefined_deserializer
+                        .deserialize_to(raw, &mut metadata)
+                        .unwrap();
+                    assert_eq!(
+                        metadata[pk_info.row_op_column_index],
+                        Some(ScalarImpl::Int16(code))
+                    );
+                }
+                for schema_change in [false, true] {
+                    let (_, bytes) = if schema_change {
+                        writer.serialize_schema_change_barrier(EPOCH1, VirtualNode::ZERO)
+                    } else {
+                        writer.serialize_barrier(EPOCH1, VirtualNode::ZERO, true)
+                    };
+                    let (_, decoded_version, row) = reader.deserialize(&bytes).unwrap();
+                    assert_eq!(decoded_version, version);
+                    assert!(matches!(row, LogStoreRowOp::Barrier {
+                        is_checkpoint: true, is_schema_change,
+                    } if is_schema_change == schema_change));
+                }
+            }
+            let legacy_writer = LogStoreRowSerde::new(
+                &legacy_table,
+                Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                pk_info,
+            );
+            let (_, _, bytes) = legacy_writer.serialize_data_row(EPOCH1, 0, Op::Insert, &payload);
+            assert_eq!(bytes[0], 1);
+            assert_eq!(reader.deserialize(&bytes).unwrap().1, 0);
+            let (_, _, bytes) = new_serde(4095).serialize_data_row(EPOCH1, 0, Op::Insert, &payload);
+            assert!(
+                reader
+                    .deserialize(&bytes)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unknown log store schema version 4095")
+            );
+        }
+    }
 
     fn assert_value_eq(expected: AlignedLogStoreOp, actual: AlignedLogStoreOp) {
         match (expected, actual) {
@@ -1272,8 +1699,9 @@ mod tests {
             let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
-            let (decoded_epoch, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, version, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
+            assert_eq!(version, 0);
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
@@ -1291,7 +1719,14 @@ mod tests {
         let (key, encoded_barrier) = serde.serialize_barrier(epoch, SINGLETON_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_barrier).unwrap() {
-            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (
+                decoded_epoch,
+                0,
+                LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    is_schema_change: false,
+                },
+            ) => {
                 assert!(!is_checkpoint);
                 assert_eq!(decoded_epoch, epoch);
             }
@@ -1311,8 +1746,9 @@ mod tests {
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
-            let (decoded_epoch, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, version, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
+            assert_eq!(version, 0);
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
@@ -1331,7 +1767,14 @@ mod tests {
             serde.serialize_barrier(epoch, SINGLETON_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_checkpoint_barrier).unwrap() {
-            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (
+                decoded_epoch,
+                0,
+                LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    is_schema_change: false,
+                },
+            ) => {
                 assert_eq!(decoded_epoch, epoch);
                 assert!(is_checkpoint);
             }
@@ -1630,6 +2073,7 @@ mod tests {
         let actual = AlignedLogStoreOp::Barrier {
             is_checkpoint: true,
             vnodes: Arc::new(Bitmap::ones(0)),
+            is_schema_change: false,
         };
         assert_value_eq(actual, op);
 
@@ -1676,6 +2120,7 @@ mod tests {
         let actual = AlignedLogStoreOp::Barrier {
             is_checkpoint: false,
             vnodes: Arc::new(Bitmap::ones(0)),
+            is_schema_change: false,
         };
         assert_value_eq(actual, op);
 
@@ -1721,6 +2166,7 @@ mod tests {
         let actual = AlignedLogStoreOp::Barrier {
             is_checkpoint: true,
             vnodes: Arc::new(Bitmap::ones(0)),
+            is_schema_change: false,
         };
         assert_value_eq(actual, op);
 

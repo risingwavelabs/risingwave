@@ -117,9 +117,10 @@
     │   ├── t1_v3: character varying
     │   ├── t1_v5: numeric
     │   ├── t1_v4: bigint
+    │   ├── _rw_log_store_schema_version: bigint
     │   └── _rw_timestamp: timestamp with time zone
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 4, 5 ]
     ├── read pk prefix len hint: 0
     └── vnode column idx: 2
@@ -169,9 +170,10 @@
     │   ├── t1_v2: double precision
     │   ├── t1_v3: character varying
     │   ├── t1_v5: numeric
+    │   ├── _rw_log_store_schema_version: bigint
     │   └── _rw_timestamp: timestamp with time zone
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 6, 7 ]
     ├── read pk prefix len hint: 0
     └── vnode column idx: 2

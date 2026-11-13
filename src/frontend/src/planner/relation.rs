@@ -16,15 +16,16 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use iceberg::spec::{Operation, TableMetadata};
+use iceberg::spec::{Operation, Snapshot, TableMetadata};
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH,
-    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
+    RISINGWAVE_ICEBERG_ROW_ID, RISINGWAVE_ICEBERG_SCHEMA_VERSION, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, encode_epoch,
+    EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, SCHEMA_VERSION_COLUMN_NAME,
+    SCHEMA_VERSION_PROPERTY, encode_epoch,
 };
 use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
@@ -46,7 +47,6 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::cdc::derive_connect_properties_for_cdc_table;
-use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
@@ -56,6 +56,7 @@ use crate::optimizer::plan_node::{
     LogicalUnion, LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
+use crate::optimizer::{IcebergSnapshotInfo, IcebergTableState};
 use crate::planner::{PlanFor, Planner};
 use crate::scheduler::ReadSnapshot;
 use crate::utils::{ColIndexMapping, Condition};
@@ -351,11 +352,13 @@ impl Planner {
         )?;
 
         if read_pending_log_store {
-            let snapshot_info = self.fetch_current_snapshot_info(&logical_source)?;
+            let table_state = self.fetch_current_table_state(&logical_source)?;
             // A table without a snapshot has no committed rows, so all log-store rows are
             // pending. For an existing snapshot without a RisingWave epoch marker, fall back to
             // Iceberg-only reads to avoid returning duplicates from legacy/external snapshots.
-            let committed_epoch = match snapshot_info {
+            // Also fall back while rows written before a schema change may still be pending.
+            let committed_epoch = match table_state.snapshot {
+                _ if !table_state.schema_settled => None,
                 None => Some(None),
                 Some(IcebergSnapshotInfo {
                     commit_epoch: Some(epoch),
@@ -369,6 +372,7 @@ impl Planner {
                     logical_iceberg_intermediate_scan.schema(),
                     &logical_source.core.column_catalog,
                     committed_epoch,
+                    table_state.snapshot,
                 )?
             {
                 logical_iceberg_intermediate_scan = LogicalUnion::create(
@@ -836,14 +840,18 @@ source: {:?}",
         &self,
         source: &LogicalSource,
     ) -> Result<Option<IcebergSnapshotInfo>> {
+        Ok(self.fetch_current_table_state(source)?.snapshot)
+    }
+
+    fn fetch_current_table_state(&self, source: &LogicalSource) -> Result<IcebergTableState> {
         let mut map = self.ctx.iceberg_snapshot_info_map();
         let catalog = source.source_catalog().ok_or_else(|| {
             crate::error::ErrorCode::InternalError(
                 "Iceberg source must have a valid source catalog".to_owned(),
             )
         })?;
-        if let Some(&snapshot_info) = map.get(&catalog.id) {
-            return Ok(snapshot_info);
+        if let Some(&table_state) = map.get(&catalog.id) {
+            return Ok(table_state);
         }
 
         #[cfg(madsim)]
@@ -863,24 +871,34 @@ source: {:?}",
                 .into());
             };
 
-            let snapshot_info = tokio::task::block_in_place(|| {
+            let table_state = tokio::task::block_in_place(|| {
                 crate::utils::FRONTEND_RUNTIME.block_on(async {
                     prop.load_table().await.map(|table| {
                         let metadata = table.metadata();
-                        metadata
-                            .current_snapshot()
-                            .map(|snapshot| IcebergSnapshotInfo {
-                                snapshot_id: snapshot.snapshot_id(),
-                                commit_epoch: risingwave_iceberg_commit_epoch(
-                                    metadata,
-                                    snapshot.snapshot_id(),
-                                ),
-                            })
+                        IcebergTableState {
+                            snapshot: metadata.current_snapshot().map(|snapshot| {
+                                IcebergSnapshotInfo {
+                                    snapshot_id: snapshot.snapshot_id(),
+                                    commit_epoch: risingwave_iceberg_commit_epoch(
+                                        metadata,
+                                        snapshot.snapshot_id(),
+                                    ),
+                                    schema_version: risingwave_iceberg_schema_version(
+                                        metadata,
+                                        snapshot.snapshot_id(),
+                                    ),
+                                }
+                            }),
+                            schema_settled: iceberg_schema_settled(
+                                metadata,
+                                &source.core.column_catalog,
+                            ),
+                        }
                     })
                 })
             })?;
-            map.insert(catalog.id, snapshot_info);
-            Ok(snapshot_info)
+            map.insert(catalog.id, table_state);
+            Ok(table_state)
         }
     }
 
@@ -892,11 +910,12 @@ source: {:?}",
         target_schema: &Schema,
         source_columns: &[ColumnCatalog],
         committed_epoch: Option<u64>,
+        snapshot: Option<IcebergSnapshotInfo>,
     ) -> Result<Option<PlanRef>> {
         let Some(sink_name) = table_catalog.iceberg_sink_name() else {
             return Ok(None);
         };
-        let log_store_table = {
+        let (log_store_table, sink_id, schema_version) = {
             let catalog_reader = self.ctx.session_ctx().env().catalog_reader().read_guard();
             let Ok(schema) =
                 catalog_reader.get_schema_by_id(table_catalog.database_id, table_catalog.schema_id)
@@ -906,7 +925,11 @@ source: {:?}",
             let Some(sink) = schema.get_created_sink_by_name(&sink_name) else {
                 return Ok(None);
             };
-            schema
+            let schema_version = sink
+                .properties
+                .get(SCHEMA_VERSION_PROPERTY)
+                .map(|version| version.parse::<u32>());
+            let table = schema
                 .iter_internal_table()
                 .find(|table| {
                     table.job_id == Some(sink.id.as_job_id())
@@ -919,11 +942,27 @@ source: {:?}",
                             .iter()
                             .any(|column| column.name() == ROW_OP_COLUMN_NAME)
                 })
-                .cloned()
+                .cloned();
+            let Some(table) = table else {
+                return Ok(None);
+            };
+            let schema_version = match schema_version {
+                Some(Ok(version)) => Some(version),
+                // Released legacy logs cannot have schema history without the version column.
+                None if !table
+                    .columns()
+                    .iter()
+                    .any(|col| col.name() == SCHEMA_VERSION_COLUMN_NAME) =>
+                {
+                    Some(0)
+                }
+                _ => None,
+            };
+            (table, sink.id.as_raw_id(), schema_version)
         };
-        let Some(log_store_table) = log_store_table else {
+        if !iceberg_log_store_schema_settled(sink_id, schema_version, snapshot) {
             return Ok(None);
-        };
+        }
 
         let Some(epoch_idx) = log_store_table
             .columns()
@@ -1038,22 +1077,92 @@ source: {:?}",
     }
 }
 
+/// A data snapshot in the current version proves that all earlier schema boundaries and their
+/// rows have been committed. A metadata-only change, equal column names, or a different sink's
+/// snapshot cannot establish this. Missing progress conservatively disables pending-log reads,
+/// except before the first snapshot in v0, when there cannot be any historical schemas.
+fn iceberg_log_store_schema_settled(
+    sink_id: u32,
+    current_version: Option<u32>,
+    snapshot: Option<IcebergSnapshotInfo>,
+) -> bool {
+    current_version.is_some_and(|version| match snapshot {
+        None => version == 0,
+        Some(snapshot) => snapshot.schema_version == Some((sink_id, version)),
+    })
+}
+
+/// Whether the source columns and current Iceberg snapshot are structurally consistent.
+///
+/// After a schema change, rows written with the old schema stay in the sink log store until the
+/// sink commits them. The sink applies the Iceberg schema change only after all old rows are
+/// committed, so a mismatch requires committed-only reads. A match is not sufficient: repeated
+/// add/drop changes can restore the same names. `iceberg_log_store_schema_settled` separately
+/// verifies the committed sink ID and log-store schema version before planning a log-store scan.
+fn iceberg_schema_settled(metadata: &TableMetadata, columns: &[ColumnCatalog]) -> bool {
+    let iceberg_fields = metadata
+        .current_schema()
+        .as_struct()
+        .fields()
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let visible_columns_in_iceberg = columns
+        .iter()
+        .filter(|column| !column.is_hidden)
+        .all(|column| iceberg_fields.contains(column.name()));
+    let iceberg_fields_in_rw = iceberg_fields.iter().all(|name| {
+        *name == RISINGWAVE_ICEBERG_ROW_ID
+            || *name == ROW_ID_COLUMN_NAME
+            || columns.iter().any(|column| column.name() == *name)
+    });
+    if !visible_columns_in_iceberg || !iceberg_fields_in_rw {
+        return false;
+    }
+    let single_schema = metadata.schemas_iter().len() == 1;
+    match metadata.current_snapshot() {
+        Some(snapshot) => match snapshot.schema_id() {
+            Some(schema_id) => schema_id == metadata.current_schema_id(),
+            None => single_schema,
+        },
+        None => single_schema,
+    }
+}
 /// Find the latest known RisingWave commit boundary. A `replace` snapshot never changes table
 /// contents, so its boundary is always its parent's. Any marker on it is ignored: compaction copies
 /// the marker of the snapshot it planned against, but commits on top of the latest head, so a sink
 /// commit that lands in between makes the copied marker stale. We deliberately stop at any other
 /// unmarked operation: an external or legacy append cannot be assigned a safe log-store boundary.
 fn risingwave_iceberg_commit_epoch(metadata: &TableMetadata, snapshot_id: i64) -> Option<u64> {
-    let mut snapshot = metadata.snapshot_by_id(snapshot_id)?;
-    while snapshot.summary().operation == Operation::Replace {
-        snapshot = metadata.snapshot_by_id(snapshot.parent_snapshot_id()?)?;
-    }
-    snapshot
+    risingwave_iceberg_commit_snapshot(metadata, snapshot_id)?
         .summary()
         .additional_properties
         .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH)?
         .parse()
         .ok()
+}
+
+fn risingwave_iceberg_schema_version(
+    metadata: &TableMetadata,
+    snapshot_id: i64,
+) -> Option<(u32, u32)> {
+    let (sink_id, version) = risingwave_iceberg_commit_snapshot(metadata, snapshot_id)?
+        .summary()
+        .additional_properties
+        .get(RISINGWAVE_ICEBERG_SCHEMA_VERSION)?
+        .split_once(':')?;
+    Some((sink_id.parse().ok()?, version.parse().ok()?))
+}
+
+fn risingwave_iceberg_commit_snapshot(
+    metadata: &TableMetadata,
+    snapshot_id: i64,
+) -> Option<&Snapshot> {
+    let mut snapshot = metadata.snapshot_by_id(snapshot_id)?;
+    while snapshot.summary().operation == Operation::Replace {
+        snapshot = metadata.snapshot_by_id(snapshot.parent_snapshot_id()?)?;
+    }
+    Some(snapshot)
 }
 
 fn resolve_current_cdc_table_desc(
@@ -1079,6 +1188,22 @@ mod tests {
     };
 
     use super::*;
+
+    fn schema_progress_settled(
+        sink_id: u32,
+        current_version: Option<u32>,
+        committed_version: Option<(u32, u32)>,
+    ) -> bool {
+        iceberg_log_store_schema_settled(
+            sink_id,
+            current_version,
+            Some(IcebergSnapshotInfo {
+                snapshot_id: 1,
+                commit_epoch: Some(42),
+                schema_version: committed_version,
+            }),
+        )
+    }
 
     #[test]
     fn test_risingwave_commit_epoch_inherits_only_across_replace_snapshots() {
@@ -1177,6 +1302,201 @@ mod tests {
             .build()
     }
 
+    #[test]
+    fn test_iceberg_schema_settled_after_schema_change() {
+        use risingwave_common::catalog::{ColumnDesc, ColumnId};
+
+        let rw_columns = |names: &[&str]| {
+            let mut columns = names
+                .iter()
+                .enumerate()
+                .map(|(idx, name)| {
+                    ColumnCatalog::visible(ColumnDesc::named(
+                        *name,
+                        ColumnId::new(idx as i32),
+                        DataType::Int64,
+                    ))
+                })
+                .collect_vec();
+            columns.push(ColumnCatalog::hidden(ColumnDesc::named(
+                "_rw_hidden",
+                ColumnId::new(names.len() as i32),
+                DataType::Int64,
+            )));
+            columns
+        };
+
+        // No schema change.
+        let metadata = metadata_with_schemas(&[&["id"]], Some(Some(0)));
+        assert!(iceberg_schema_settled(&metadata, &rw_columns(&["id"])));
+        let metadata = metadata_with_schemas(&[&["id"]], None);
+        assert!(iceberg_schema_settled(&metadata, &rw_columns(&["id"])));
+
+        // Columns added in RisingWave but the sink has not applied them to Iceberg yet.
+        let metadata = metadata_with_schemas(&[&["id"]], Some(Some(0)));
+        assert!(!iceberg_schema_settled(
+            &metadata,
+            &rw_columns(&["id", "age"])
+        ));
+
+        // Columns dropped in RisingWave but the sink has not applied them to Iceberg yet.
+        let metadata = metadata_with_schemas(&[&["id", "age"]], Some(Some(0)));
+        assert!(!iceberg_schema_settled(&metadata, &rw_columns(&["id"])));
+
+        // Schema change committed, but no snapshot was written with the new schema yet.
+        let metadata = metadata_with_schemas(&[&["id"], &["id", "age"]], Some(Some(0)));
+        assert!(!iceberg_schema_settled(
+            &metadata,
+            &rw_columns(&["id", "age"])
+        ));
+        let metadata = metadata_with_schemas(&[&["id"], &["id", "age"]], None);
+        assert!(!iceberg_schema_settled(
+            &metadata,
+            &rw_columns(&["id", "age"])
+        ));
+        let metadata = metadata_with_schemas(&[&["id"], &["id", "age"]], Some(None));
+        assert!(!iceberg_schema_settled(
+            &metadata,
+            &rw_columns(&["id", "age"])
+        ));
+
+        // A snapshot was written with the new schema.
+        let metadata = metadata_with_schemas(&[&["id"], &["id", "age"]], Some(Some(1)));
+        assert!(iceberg_schema_settled(
+            &metadata,
+            &rw_columns(&["id", "age"])
+        ));
+
+        // The Iceberg row id column is not a RisingWave source column.
+        let metadata = metadata_with_schemas(&[&["id", RISINGWAVE_ICEBERG_ROW_ID]], Some(Some(0)));
+        assert!(iceberg_schema_settled(&metadata, &rw_columns(&["id"])));
+
+        // During an outage, DROP a followed by ADD a restores the same names but not the
+        // log-store layout or the column identity. The downstream snapshot is still at v0.
+        let metadata = metadata_with_schemas(&[&["id", "a", "b"]], Some(Some(0)));
+        assert!(iceberg_schema_settled(
+            &metadata,
+            &rw_columns(&["id", "b", "a"])
+        ));
+        assert!(!schema_progress_settled(7, Some(2), Some((7, 0))));
+        assert!(!schema_progress_settled(7, Some(2), Some((7, 1))));
+        assert!(schema_progress_settled(7, Some(2), Some((7, 2))));
+        assert!(!schema_progress_settled(7, Some(2), Some((8, 2))));
+        assert!(!schema_progress_settled(7, Some(2), Some((7, 3))));
+        assert!(!schema_progress_settled(7, Some(2), None));
+        assert!(!schema_progress_settled(7, None, Some((7, 2))));
+        assert!(!schema_progress_settled(7, Some(0), None));
+        assert!(schema_progress_settled(
+            7,
+            Some(u32::MAX),
+            Some((7, u32::MAX))
+        ));
+        // Preserve initial pending-row reads without a snapshot only when v0 is known.
+        assert!(iceberg_log_store_schema_settled(7, Some(0), None));
+        assert!(!iceberg_log_store_schema_settled(7, Some(2), None));
+        assert!(!iceberg_log_store_schema_settled(7, None, None));
+    }
+
+    #[test]
+    fn test_schema_progress_ignores_stale_compaction_markers() {
+        let properties = |version: &str| {
+            HashMap::from([
+                (RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "42".to_owned()),
+                (
+                    RISINGWAVE_ICEBERG_SCHEMA_VERSION.to_owned(),
+                    version.to_owned(),
+                ),
+            ])
+        };
+        let metadata = metadata_with_current(vec![
+            snapshot(1, None, Operation::Append, properties("7:0")),
+            snapshot(2, Some(1), Operation::Append, properties("7:2")),
+            snapshot(3, Some(2), Operation::Replace, properties("7:0")),
+        ]);
+        assert_eq!(
+            risingwave_iceberg_schema_version(&metadata, 3),
+            Some((7, 2))
+        );
+        assert!(schema_progress_settled(
+            7,
+            Some(2),
+            risingwave_iceberg_schema_version(&metadata, 3),
+        ));
+        for marker in ["", "7", "7:-1", "7:4294967296", "bad:2", "7:2:3"] {
+            let metadata = metadata_with_current(vec![snapshot(
+                1,
+                None,
+                Operation::Append,
+                properties(marker),
+            )]);
+            assert_eq!(risingwave_iceberg_schema_version(&metadata, 1), None);
+        }
+        let metadata = metadata_with_current(vec![
+            snapshot(1, None, Operation::Append, properties("7:2")),
+            snapshot(2, Some(1), Operation::Append, HashMap::new()),
+        ]);
+        assert_eq!(risingwave_iceberg_schema_version(&metadata, 2), None);
+    }
+
+    /// `snapshot_schema_id`: `None` for no snapshot, `Some(None)` for a snapshot without a schema
+    /// id.
+    fn metadata_with_schemas(
+        schemas: &[&[&str]],
+        snapshot_schema_id: Option<Option<i32>>,
+    ) -> TableMetadata {
+        let iceberg_schema = |schema_id: i32, names: &[&str]| {
+            IcebergSchema::builder()
+                .with_schema_id(schema_id)
+                .with_fields(
+                    names
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, name)| {
+                            NestedField::new(
+                                idx as i32 + 1,
+                                *name,
+                                Type::Primitive(PrimitiveType::Long),
+                                false,
+                            )
+                            .into()
+                        })
+                        .collect_vec(),
+                )
+                .build()
+                .unwrap()
+        };
+        let mut builder = TableMetadataBuilder::new(
+            iceberg_schema(0, schemas[0]),
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            "s3://warehouse/db/table".to_owned(),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap();
+        for (schema_id, names) in schemas.iter().enumerate().skip(1) {
+            builder = builder
+                .add_current_schema(iceberg_schema(schema_id as i32, names))
+                .unwrap();
+        }
+        if let Some(schema_id) = snapshot_schema_id {
+            let snapshot = Snapshot::builder()
+                .with_snapshot_id(1)
+                .with_sequence_number(1)
+                .with_timestamp_ms(1)
+                .with_manifest_list("/snap-1.avro")
+                .with_summary(Summary {
+                    operation: Operation::Append,
+                    additional_properties: HashMap::new(),
+                });
+            let snapshot = match schema_id {
+                Some(schema_id) => snapshot.with_schema_id(schema_id).build(),
+                None => snapshot.build(),
+            };
+            builder = builder.set_branch_snapshot(snapshot, MAIN_BRANCH).unwrap();
+        }
+        builder.build().unwrap().metadata
+    }
     #[test]
     fn test_resolve_current_cdc_table_desc_replaces_stale_properties() {
         let desc = CdcTableDesc {

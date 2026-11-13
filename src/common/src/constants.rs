@@ -40,6 +40,9 @@ pub mod log_store {
     pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
     pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
     pub const VNODE_COLUMN_NAME: &str = "kv_log_store_vnode";
+    pub const SCHEMA_VERSION_COLUMN_NAME: &str = "_rw_log_store_schema_version";
+    /// Internal sink property published atomically with its refreshed log-store schema.
+    pub const SCHEMA_VERSION_PROPERTY: &str = "_rw_log_store_schema_version";
 
     pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
     pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;

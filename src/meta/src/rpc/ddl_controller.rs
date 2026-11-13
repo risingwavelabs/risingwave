@@ -1769,6 +1769,19 @@ impl DdlController {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
+                            log_store_schema_version: match sink
+                                .new_fragment
+                                .nodes
+                                .node_body
+                                .as_ref()
+                            {
+                                Some(NodeBody::Sink(node))
+                                    if sink.new_log_store_table.is_some() =>
+                                {
+                                    Some(node.log_store_schema_version)
+                                }
+                                _ => None,
+                            },
                             new_log_store_table: sink.new_log_store_table.clone(),
                         })
                         .collect()
