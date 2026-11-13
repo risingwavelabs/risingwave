@@ -299,6 +299,7 @@ high_priority_ratio_in_percent = ""
 prefetch_buffer_capacity_mb = ""
 max_cached_recent_versions_number = 60
 max_prefetch_block_number = 16
+sstable_meta_fetch_concurrency = 1
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
 compactor_memory_limit_mb = ""
