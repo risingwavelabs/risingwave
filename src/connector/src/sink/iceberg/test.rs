@@ -1032,7 +1032,7 @@ mod coordinator_recovery {
     use iceberg::{NamespaceIdent, TableIdent};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
     use risingwave_common::id::SinkId;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, ListType, MapType, StructType};
     use risingwave_pb::plan_common::PbField;
     use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
     use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
@@ -1228,5 +1228,74 @@ mod coordinator_recovery {
             "unexpected error: {}",
             err.as_report()
         );
+    }
+
+    fn collect_field_ids(field: &NestedField, ids: &mut Vec<i32>) {
+        ids.push(field.id);
+        match field.field_type.as_ref() {
+            Type::Struct(struct_type) => struct_type
+                .fields()
+                .iter()
+                .for_each(|field| collect_field_ids(field, ids)),
+            Type::List(list_type) => collect_field_ids(&list_type.element_field, ids),
+            Type::Map(map_type) => {
+                collect_field_ids(&map_type.key_field, ids);
+                collect_field_ids(&map_type.value_field, ids);
+            }
+            _ => {}
+        }
+    }
+
+    /// Nested fields of added columns must get fresh IDs. The arrow conversion numbers fields from
+    /// 1, so without renumbering, the element of `tags` reuses an existing column's ID and the
+    /// commit fails with `Found duplicate 'field.id'`.
+    #[tokio::test]
+    async fn test_add_nested_columns_assigns_fresh_field_ids() {
+        let original = [
+            ("id", DataType::Int32),
+            ("v1", DataType::Int64),
+            ("v2", DataType::Varchar),
+        ];
+        let added = [
+            ("tags", DataType::List(ListType::new(DataType::Varchar))),
+            (
+                "attrs",
+                DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+            ),
+            (
+                "info",
+                DataType::Struct(StructType::new([
+                    ("a", DataType::Int32),
+                    ("b", DataType::List(ListType::new(DataType::Int64))),
+                ])),
+            ),
+        ];
+        let changed = [original.as_slice(), added.as_slice()].concat();
+        let (table_name, _table) = register_table(&[
+            (1, "id", PrimitiveType::Int),
+            (2, "v1", PrimitiveType::Long),
+            (3, "v2", PrimitiveType::String),
+        ]);
+        let param = sink_param(&table_name, &changed);
+        let config = IcebergConfig::from_btreemap(param.properties.clone()).unwrap();
+
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        coordinator
+            .commit_schema_change(1, add_columns_change(&original, &added))
+            .await
+            .unwrap();
+
+        let table = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap();
+        let schema = table.metadata().current_schema();
+        let mut ids = vec![];
+        for field in schema.as_struct().fields() {
+            collect_field_ids(field, &mut ids);
+        }
+        // tags, tags.element, attrs, attrs.key, attrs.value, info, info.a, info.b, info.b.element
+        assert_eq!(ids, (1..=12).collect::<Vec<_>>());
+        assert_eq!(table.metadata().last_column_id(), 12);
     }
 }
