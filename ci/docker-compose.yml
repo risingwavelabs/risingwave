@@ -600,6 +600,8 @@ services:
 
   clickhouse-server:
     image: clickhouse/clickhouse-server:26.9
+    volumes:
+      - ./clickhouse-conf/distributed.xml:/etc/clickhouse-server/config.d/rw-distributed.xml:ro
     ports:
       - "8123:8123"
       - "9000:9000"

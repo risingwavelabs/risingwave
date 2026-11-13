@@ -326,6 +326,26 @@ mod tests {
     }
 
     #[test]
+    fn test_distributed_empty_database_rejects_ambiguous_defaults() {
+        for databases in [
+            vec![],
+            vec!["".to_owned()],
+            vec!["db1".to_owned(), "".to_owned()],
+            vec!["db1".to_owned(), "db2".to_owned()],
+        ] {
+            let err = resolve_default_database("logs", &databases)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("logs"), "{err}");
+            if databases.is_empty() {
+                assert!(err.contains("was not found in system.clusters"), "{err}");
+            } else {
+                assert!(err.contains("empty or inconsistent"), "{err}");
+            }
+        }
+    }
+
+    #[test]
     fn test_distributed_quoted_escapes() {
         for (engine, database, table) in [
             (

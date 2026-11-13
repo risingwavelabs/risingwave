@@ -38,7 +38,7 @@ export RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON="connector='clickhouse',clickhouse
 export PATH="${PWD}/e2e_test/commands:${PWD}:${PATH}"
 
 echo "--- testing sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse/*.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill

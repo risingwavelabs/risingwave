@@ -1,0 +1,188 @@
+control substitution on
+
+statement ok
+DROP TABLE IF EXISTS ck_dist_input CASCADE;
+
+system ok
+clickhouse --multiquery --query="
+DROP TABLE IF EXISTS rw_dist_nested;
+DROP TABLE IF EXISTS rw_dist_bad;
+DROP TABLE IF EXISTS rw_dist_append;
+DROP TABLE IF EXISTS rw_dist_replace;
+DROP TABLE IF EXISTS rw_dist_collapse;
+DROP TABLE IF EXISTS rw_dist_append_local;
+DROP DATABASE IF EXISTS rw_distributed_target;
+CREATE DATABASE rw_distributed_target;
+CREATE TABLE rw_dist_append_local (id Int32, payload Int32) ENGINE = MergeTree ORDER BY id;
+CREATE TABLE rw_distributed_target.replacing (id Int32, payload Int32, ver UInt64, deleted UInt8) ENGINE = ReplacingMergeTree(ver, deleted) ORDER BY id;
+CREATE TABLE rw_distributed_target.collapsing (id Int32, payload Int32, sign Int8) ENGINE = CollapsingMergeTree(sign) ORDER BY id;
+CREATE TABLE rw_dist_append AS rw_dist_append_local ENGINE = Distributed(rw_sink_test, currentDatabase(), rw_dist_append_local, cityHash64(id, payload));
+CREATE TABLE rw_dist_replace AS rw_distributed_target.replacing ENGINE = Distributed('rw_sink_test', 'rw_distributed_target', 'replacing', cityHash64(id));
+CREATE TABLE rw_dist_collapse AS rw_distributed_target.collapsing ENGINE = Distributed(rw_sink_test, '', collapsing, cityHash64(id));
+"
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE ck_dist_input (id INT PRIMARY KEY, payload INT, ver BIGINT);
+
+statement ok
+CREATE SINK ck_dist_replace AS SELECT id, payload, ver FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'id',
+    clickhouse.table = 'rw_dist_replace',
+    clickhouse.delete.column = 'deleted',
+    commit_checkpoint_interval = '1'
+);
+
+# An empty database argument must resolve to the cluster default, not currentDatabase().
+statement ok
+CREATE SINK ck_dist_collapse AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'id',
+    clickhouse.table = 'rw_dist_collapse',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+CREATE SINK ck_dist_append AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'append-only',
+    force_append_only = 'true',
+    clickhouse.table = 'rw_dist_append',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+INSERT INTO ck_dist_input VALUES (1, 10, 1), (2, 20, 1);
+
+statement ok
+FLUSH;
+
+# Poll both the routing table and the storage table: Distributed forwarding is asynchronous.
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload))) FROM rw_dist_append")" = '[(1,10),(2,20)]' && test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload))) FROM rw_dist_append_local")" = '[(1,10),(2,20)]'
+
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, ver, deleted))) FROM rw_distributed_target.replacing FINAL")" = '[(1,10,1,0),(2,20,1,0)]'
+
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, sign))) FROM rw_distributed_target.collapsing FINAL")" = '[(1,10,1),(2,20,1)]'
+
+statement ok
+DROP SINK ck_dist_append;
+
+statement ok
+UPDATE ck_dist_input SET payload = 11, ver = 2 WHERE id = 1;
+
+statement ok
+DELETE FROM ck_dist_input WHERE id = 2;
+
+statement ok
+FLUSH;
+
+# FINAL applies replacement/collapse without depending on background merge timing.
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, ver))) FROM rw_distributed_target.replacing FINAL WHERE deleted = 0")" = '[(1,11,2)]'
+
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, sign))) FROM rw_distributed_target.collapsing FINAL")" = '[(1,11,1)]'
+
+statement ok
+DROP SINK ck_dist_replace;
+
+statement ok
+DROP SINK ck_dist_collapse;
+
+# A Distributed wrapper must not grant upsert capability to an ordinary MergeTree.
+statement error If you want to use upsert
+CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_append'
+);
+
+statement error must set a .*clickhouse.delete.column
+CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_replace'
+);
+
+statement error pk is not match
+CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'payload', clickhouse.table = 'rw_dist_replace',
+    clickhouse.delete.column = 'deleted'
+);
+
+# The outer schema must accept every written column, including generated columns.
+system ok
+clickhouse --query="CREATE TABLE rw_dist_bad (id Int32) ENGINE = Distributed(rw_sink_test, currentDatabase(), rw_dist_append_local, id)"
+
+statement error Column .*payload.* is missing from the Distributed table
+CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'append-only', force_append_only = 'true', clickhouse.table = 'rw_dist_bad'
+);
+
+system ok
+clickhouse --multiquery --query="DROP TABLE rw_dist_bad; CREATE TABLE rw_dist_bad (id Int32, payload String) ENGINE = Distributed(rw_sink_test, currentDatabase(), rw_dist_append_local, id)"
+
+statement error Column .*payload.* has type .*String.* in the Distributed table but .*Int32.* in the underlying local table
+CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'append-only', force_append_only = 'true', clickhouse.table = 'rw_dist_bad'
+);
+
+system ok
+clickhouse --multiquery --query="DROP TABLE rw_dist_bad; CREATE TABLE rw_dist_bad (id Int32, payload Int32, ver UInt64) ENGINE = Distributed(rw_sink_test, rw_distributed_target, replacing, id)"
+
+statement error Column .*deleted.* is missing from the Distributed table
+CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_bad',
+    clickhouse.delete.column = 'deleted'
+);
+
+system ok
+clickhouse --multiquery --query="DROP TABLE rw_dist_bad; CREATE TABLE rw_dist_bad (id Int32, payload Int32, sign UInt8) ENGINE = Distributed(rw_sink_test, rw_distributed_target, collapsing, id)"
+
+statement error Column .*sign.* has type .*UInt8.* in the Distributed table but .*Int8.* in the underlying local table
+CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_bad'
+);
+
+system ok
+clickhouse --query="CREATE TABLE rw_dist_nested AS rw_dist_append ENGINE = Distributed(rw_sink_test, currentDatabase(), rw_dist_append, id)"
+
+statement error Nested Distributed tables are not supported
+CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'append-only', force_append_only = 'true', clickhouse.table = 'rw_dist_nested'
+);
+
+system ok
+clickhouse --multiquery --query="DROP TABLE rw_dist_bad; CREATE TABLE rw_dist_bad (id Int32, payload Int32) ENGINE = Distributed(rw_sink_test, rw_distributed_target, missing_table, id)"
+
+statement error Target table not found on cluster replica
+CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'append-only', force_append_only = 'true', clickhouse.table = 'rw_dist_bad'
+);
+
+statement ok
+DROP TABLE ck_dist_input;
+
+system ok
+clickhouse --multiquery --query="
+DROP TABLE rw_dist_nested;
+DROP TABLE rw_dist_bad;
+DROP TABLE rw_dist_append;
+DROP TABLE rw_dist_replace;
+DROP TABLE rw_dist_collapse;
+DROP TABLE rw_dist_append_local;
+DROP DATABASE rw_distributed_target;
+"
