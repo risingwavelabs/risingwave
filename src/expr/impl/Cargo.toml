@@ -50,6 +50,7 @@ openssl = { workspace = true }
 prometheus = "0.14"
 rand = { workspace = true }
 regex = { workspace = true }
+reqwest = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -77,6 +78,7 @@ zstd = { version = "0.13", default-features = false, optional = true }
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+axum = { workspace = true }
 criterion = { workspace = true }
 expect-test = "1"
 hex-literal = "1.1.0"
