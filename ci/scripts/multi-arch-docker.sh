@@ -17,11 +17,12 @@ export PATH=$PATH:/var/lib/buildkite-agent/.local/bin
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
+source docker/cpu-target.sh
 
 
 arches=()
 
-if [ "${SKIP_TARGET_AMD64:-false}" != "true" ]; then
+if [[ "$RW_TARGET_CPU" == generic && "${SKIP_TARGET_AMD64:-false}" != true ]]; then
   arches+=("x86_64")
 fi
 
@@ -29,16 +30,21 @@ if [ "${SKIP_TARGET_AARCH64:-false}" != "true" ]; then
   arches+=("aarch64")
 fi
 
+if [[ "${#arches[@]}" == 0 ]]; then
+  echo "No image architecture selected" >&2
+  exit 1
+fi
+
 echo "--- arches: ${arches[*]}"
 
 # push images to gchr
 function pushGchr() {
-  GHCRTAG="${ghcraddr}:$1"
+  GHCRTAG="${ghcraddr}:$1${cpu_suffix}"
   echo "push to gchr, image tag: ${GHCRTAG}"
   args=()
   for arch in "${arches[@]}"
   do
-    args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" )
+    args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}${cpu_suffix}" )
   done
   docker manifest create --insecure "$GHCRTAG" "${args[@]}"
   docker manifest push --insecure "$GHCRTAG"
@@ -46,12 +52,12 @@ function pushGchr() {
 
 # push images to dockerhub
 function pushDockerhub() {
-  DOCKERTAG="${dockerhubaddr}:$1"
+  DOCKERTAG="${dockerhubaddr}:$1${cpu_suffix}"
   echo "push to dockerhub, image tag: ${DOCKERTAG}"
   args=()
   for arch in "${arches[@]}"
   do
-    args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
+    args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}${cpu_suffix}" )
   done
   docker manifest create --insecure "$DOCKERTAG" "${args[@]}"
   docker manifest push --insecure "$DOCKERTAG"
@@ -85,14 +91,14 @@ echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
 if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
   echo "--- retag docker image"
-  echo "push to gchr, image tag: ${ghcraddr}:${NEW_IMAGE_TAG}"
+  echo "push to gchr, image tag: ${ghcraddr}:${NEW_IMAGE_TAG}${cpu_suffix}"
   args=()
   for arch in "${arches[@]}"
   do
-    args+=( --amend "${ghcraddr}:${NEW_IMAGE_TAG}-${arch}" )
+    args+=( --amend "${ghcraddr}:${NEW_IMAGE_TAG}-${arch}${cpu_suffix}" )
   done
-  docker manifest create --insecure "${ghcraddr}:${NEW_IMAGE_TAG}" "${args[@]}"
-  docker manifest push --insecure "${ghcraddr}:${NEW_IMAGE_TAG}"
+  docker manifest create --insecure "${ghcraddr}:${NEW_IMAGE_TAG}${cpu_suffix}" "${args[@]}"
+  docker manifest push --insecure "${ghcraddr}:${NEW_IMAGE_TAG}${cpu_suffix}"
   exit 0
 fi
 
@@ -155,7 +161,7 @@ echo "--- delete the manifest images from dockerhub"
 args=()
 for arch in "${arches[@]}"
 do
-  args+=( "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
+  args+=( "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}${cpu_suffix}" )
 done
 docker run --rm lumir/remove-dockerhub-tag \
   --user "risingwavelabs" --password "$DOCKER_TOKEN" "${args[@]}"
