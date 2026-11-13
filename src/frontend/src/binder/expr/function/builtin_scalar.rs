@@ -799,6 +799,7 @@ impl Binder {
 
                 // AI model functions
                 ("ai_decide", raw(|_, inputs| super::ai_decide::bind(inputs))),
+                ("ai_extract", raw(|_, inputs| super::ai_extract::bind(inputs))),
                 ("ai_questions", raw(|_, inputs| super::ai_decide::questions(inputs))),
                 ("ai_prob_question", raw(|_, inputs| super::ai_decide::question("noul", inputs))),
                 ("ai_choice_question", raw(|_, inputs| super::ai_decide::question("choice", inputs))),

@@ -14958,6 +14958,7 @@ dependencies = [
  "risingwave_common_estimate_size",
  "risingwave_expr_macro",
  "risingwave_pb",
+ "serde_json",
  "smallvec",
  "static_assertions",
  "thiserror 2.0.17",

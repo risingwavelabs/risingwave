@@ -1,0 +1,68 @@
+# SQL NULL arguments do not make a request, even with an invalid endpoint.
+query T
+SELECT ai_extract(NULL::varchar, 'invalid', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key');
+----
+NULL
+
+query T
+SELECT CASE WHEN false THEN cardinality((ai_extract('text', 'invalid', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key')).person) ELSE 0 END;
+----
+0
+
+# Request-construction errors follow ordinary strictness.
+statement ok
+SET batch_expr_strict_mode = true;
+
+statement error ai_extract: invalid model_url
+SELECT coalesce(cardinality((ai_extract('text', 'invalid', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key')).person), 0);
+
+statement ok
+SET batch_expr_strict_mode = false;
+
+query R
+SELECT coalesce(cardinality((ai_extract('text', 'invalid', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key')).person), -1);
+----
+-1
+
+statement ok
+SET batch_expr_strict_mode = true;
+
+statement error content must not be empty or whitespace
+SELECT ai_extract('  ', 'http://127.0.0.1:1', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key');
+
+statement ok
+SET batch_expr_strict_mode TO DEFAULT;
+
+# A NULL map skips evaluation; header errors are local expression errors.
+query T
+SELECT ai_extract('text', 'invalid', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key', NULL::map(varchar, varchar));
+----
+NULL
+
+statement ok
+SET batch_expr_strict_mode = true;
+
+statement error headers must not override Authorization
+SELECT ai_extract('text', 'http://127.0.0.1:1', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key', MAP {'aUtHoRiZaTiOn': 'test-conflict'});
+
+statement error header values must not be NULL
+SELECT ai_extract('text', 'http://127.0.0.1:1', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key', MAP {'X-Tenant-ID': NULL::varchar});
+
+statement error invalid header name
+SELECT ai_extract('text', 'http://127.0.0.1:1', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key', MAP {'invalid name': 'test-value'});
+
+statement error invalid header value
+SELECT ai_extract('text', 'http://127.0.0.1:1', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key', MAP {'X-Tenant-ID': E'test\nvalue'});
+
+statement error duplicate case-insensitive header name
+SELECT ai_extract('text', 'http://127.0.0.1:1', 'test-model', '{"task":"entities","labels":["person"],"word_splitter":"char"}'::jsonb, 'test-key', MAP {'X-Tenant': 'one', 'x-tenant': 'two'});
+
+statement ok
+SET batch_expr_strict_mode TO DEFAULT;
+
+# The fixture uses a real local HTTP server and psql, which cannot run under madsim.
+skipif madsim
+system ok
+python3 e2e_test/streaming/ai_extract_http.py
+----
+ai_extract HTTP integration passed

@@ -371,6 +371,7 @@ impl Strong {
             | ExprType::RwEpochToTs
             | ExprType::OpenaiEmbedding
             | ExprType::AiDecide
+            | ExprType::AiExtract
             | ExprType::HasDatabasePrivilege
             | ExprType::Random
             | ExprType::ClockTimestamp

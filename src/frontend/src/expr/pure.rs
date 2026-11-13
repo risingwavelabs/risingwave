@@ -407,6 +407,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
             | Type::AiDecide
+            | Type::AiExtract
             | Type::HasDatabasePrivilege
             | Type::Random
             | Type::ClockTimestamp

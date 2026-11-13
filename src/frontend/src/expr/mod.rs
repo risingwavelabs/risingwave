@@ -1057,6 +1057,14 @@ impl ExprImpl {
                     .try_collect()?,
                 ret_type,
             ))),
+            RexNode::AiExtract(node) => Self::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                ExprType::AiExtract,
+                node.children
+                    .iter()
+                    .map(Self::from_expr_proto)
+                    .try_collect()?,
+                ret_type,
+            ))),
             RexNode::Now(_) => Self::Now(Box::new(Now {})),
             RexNode::SecretRef(sr) => Self::SecretRef(Box::new(SecretRef {
                 secret_id: sr.secret_id.into(),
