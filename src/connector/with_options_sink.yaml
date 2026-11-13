@@ -115,6 +115,15 @@ BigQueryConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: bigquery.change_sequence_number
+    field_type: bool
+    comments: |-
+      Write `_CHANGE_SEQUENCE_NUMBER` on upsert rows, so that `BigQuery` applies the changes of
+      each key in the order they are sent. Once a table has rows written with it, turning it off
+      makes `BigQuery` ignore later changes to those rows.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
 ClickHouseConfig:
   fields:
   - name: clickhouse.url
