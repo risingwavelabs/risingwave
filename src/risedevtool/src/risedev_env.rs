@@ -119,6 +119,27 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::Cassandra(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let datacenter = &c.datacenter;
+                let url = format!("{host}:{port}");
+                writeln!(env, r#"CQLSH_HOST="{host}""#).unwrap();
+                writeln!(env, r#"CQLSH_PORT="{port}""#).unwrap();
+                writeln!(env, r#"CASSANDRA_DATACENTER="{datacenter}""#).unwrap();
+                writeln!(env, r#"RISEDEV_CASSANDRA_URL="{url}""#).unwrap();
+                if c.user_managed {
+                    let cqlsh = c.cqlsh.as_deref().unwrap_or("cqlsh");
+                    writeln!(env, r#"CASSANDRA_CQLSH="{cqlsh}""#).unwrap();
+                } else {
+                    writeln!(env, r#"CASSANDRA_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_CASSANDRA_WITH_OPTIONS_COMMON="connector='cassandra',cassandra.url='{url}',cassandra.datacenter='{datacenter}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::ClickHouse(c) => {
                 let host = &c.address;
                 let http_port = &c.http_port;
