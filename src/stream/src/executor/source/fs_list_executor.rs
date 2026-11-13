@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::anyhow;
 use either::Either;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_common::util::retry::exponential_backoff;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -25,6 +28,39 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use super::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
+
+/// Recover both stream construction and page errors without blocking the barrier stream.
+#[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+async fn retry_list_stream<F, S>(mut build_stream: F)
+where
+    F: FnMut() -> StreamExecutorResult<S>,
+    S: Stream<Item = StreamExecutorResult<StreamChunk>>,
+{
+    let new_backoff = || exponential_backoff(Duration::from_secs(1), 2, Duration::from_secs(10));
+    let mut backoff = new_backoff();
+    loop {
+        let error = match build_stream() {
+            Ok(stream) => {
+                pin_mut!(stream);
+                loop {
+                    match stream.next().await {
+                        Some(Ok(chunk)) => {
+                            backoff = new_backoff();
+                            yield chunk;
+                        }
+                        Some(Err(error)) => break error,
+                        None => return Ok(()),
+                    }
+                }
+            }
+            Err(error) => error,
+        };
+        let delay = backoff.next().unwrap();
+        tracing::warn!(error = %error.as_report(), ?delay, "file listing failed, retrying");
+        // Sleep in the data stream so barriers and pause/resume remain responsive.
+        tokio::time::sleep(delay).await;
+    }
+}
 
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -68,7 +104,6 @@ impl<S: StateStore> FsListExecutor<S> {
     }
 
     fn build_chunked_paginate_stream(
-        &self,
         source_desc: &SourceDesc,
     ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>> + use<S>> {
         let stream = source_desc
@@ -116,18 +151,15 @@ impl<S: StateStore> FsListExecutor<S> {
                 )
             })?;
 
-        let mut core = self.stream_source_core;
-
         // Build source description from the builder.
-        let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
+        let source_desc_builder: SourceDescBuilder =
+            self.stream_source_core.source_desc_builder.take().unwrap();
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        // Return the ownership of `stream_source_core` to the source executor.
-        self.stream_source_core = core;
-
-        let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc)?;
+        let chunked_paginate_stream =
+            retry_list_stream(move || Self::build_chunked_paginate_stream(&source_desc));
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
@@ -140,34 +172,28 @@ impl<S: StateStore> FsListExecutor<S> {
         yield Message::Barrier(barrier);
 
         while let Some(msg) = stream.next().await {
-            match msg {
-                Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
-                    stream.replace_data_stream(self.build_chunked_paginate_stream(&source_desc)?);
-                }
-                Ok(msg) => match msg {
-                    // Barrier arrives.
-                    Either::Left(msg) => match &msg {
-                        Message::Barrier(barrier) => {
-                            if let Some(mutation) = barrier.mutation.as_deref() {
-                                match mutation {
-                                    Mutation::Pause => stream.pause_stream(),
-                                    Mutation::Resume => stream.resume_stream(),
-                                    _ => (),
-                                }
+            match msg? {
+                // Barrier arrives.
+                Either::Left(msg) => match &msg {
+                    Message::Barrier(barrier) => {
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => stream.pause_stream(),
+                                Mutation::Resume => stream.resume_stream(),
+                                _ => (),
                             }
-
-                            // Propagate the barrier.
-                            yield msg;
                         }
-                        // Only barrier can be received.
-                        _ => unreachable!(),
-                    },
-                    // Chunked FsPage arrives.
-                    Either::Right(chunk) => {
-                        yield Message::Chunk(chunk);
+
+                        // Propagate the barrier.
+                        yield msg;
                     }
+                    // Only barrier can be received.
+                    _ => unreachable!(),
                 },
+                // Chunked FsPage arrives.
+                Either::Right(chunk) => {
+                    yield Message::Chunk(chunk);
+                }
             }
         }
     }
@@ -185,5 +211,132 @@ impl<S: StateStore> Debug for FsListExecutor<S> {
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
             .finish()
+    }
+}
+
+// These tests use Tokio's paused clock, which is not available under madsim.
+#[cfg(all(test, not(madsim)))]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use assert_matches::assert_matches;
+    use futures::{FutureExt, stream};
+    use risingwave_common::util::epoch::test_epoch;
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    fn list_error() -> StreamExecutorError {
+        StreamExecutorError::connector_error(anyhow!("permanent listing error"))
+    }
+
+    async fn check_retry_backoff(fail_on_build: bool) {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let available = Arc::new(AtomicBool::new(false));
+        let data_stream = retry_list_stream({
+            let attempts = attempts.clone();
+            let available = available.clone();
+            move || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                if available.load(Ordering::SeqCst) {
+                    Ok(stream::once(async { Ok(StreamChunk::default()) })
+                        .chain(stream::pending())
+                        .boxed())
+                } else if fail_on_build {
+                    Err(list_error())
+                } else {
+                    Ok(stream::once(async { Err(list_error()) }).boxed())
+                }
+            }
+        });
+        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
+        let mut reader = StreamReaderWithPause::<true, _>::new(
+            barrier_to_message_stream(barrier_rx).boxed(),
+            data_stream,
+        );
+
+        assert!(reader.next().now_or_never().is_none());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        for (i, delay) in [1, 2, 4, 8, 10, 10].into_iter().enumerate() {
+            // A pending retry must not prevent the executor from forwarding barriers.
+            barrier_tx
+                .send(Barrier::new_test_barrier(test_epoch(i as u64 + 1)))
+                .unwrap();
+            assert_matches!(
+                reader.next().now_or_never(),
+                Some(Some(Ok(Either::Left(Message::Barrier(_)))))
+            );
+
+            tokio::time::advance(Duration::from_secs(delay) - Duration::from_millis(1)).await;
+            assert!(reader.next().now_or_never().is_none());
+            assert_eq!(attempts.load(Ordering::SeqCst), i + 1);
+
+            tokio::time::advance(Duration::from_millis(1)).await;
+            assert!(reader.next().now_or_never().is_none());
+            assert_eq!(attempts.load(Ordering::SeqCst), i + 2);
+        }
+
+        // Restoring storage while paused must not start another listing until resume.
+        available.store(true, Ordering::SeqCst);
+        reader.pause_stream();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(reader.next().now_or_never().is_none());
+        assert_eq!(attempts.load(Ordering::SeqCst), 7);
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(7)))
+            .unwrap();
+        assert_matches!(
+            reader.next().now_or_never(),
+            Some(Some(Ok(Either::Left(Message::Barrier(_)))))
+        );
+        reader.resume_stream();
+        assert_matches!(
+            reader.next().now_or_never(),
+            Some(Some(Ok(Either::Right(_))))
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 8);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_listing_creation_errors_back_off() {
+        check_retry_backoff(true).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_listing_page_errors_back_off() {
+        check_retry_backoff(false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_listing_progress_resets_backoff() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let stream = retry_list_stream({
+            let attempts = attempts.clone();
+            move || {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                Ok(stream::iter(if attempt < 2 {
+                    vec![Err(list_error())]
+                } else {
+                    vec![Ok(StreamChunk::default()), Err(list_error())]
+                }))
+            }
+        });
+        pin_mut!(stream);
+
+        assert!(stream.next().now_or_never().is_none());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(stream.next().now_or_never().is_none());
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_matches!(stream.next().now_or_never(), Some(Some(Ok(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+
+        // A page error after a successful item still waits before restarting the listing.
+        assert!(stream.next().now_or_never().is_none());
+        tokio::time::advance(Duration::from_millis(999)).await;
+        assert!(stream.next().now_or_never().is_none());
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        tokio::time::advance(Duration::from_millis(1)).await;
+        assert_matches!(stream.next().now_or_never(), Some(Some(Ok(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
     }
 }
