@@ -1,0 +1,90 @@
+control substitution on
+
+# A source backfill reader that reaches a partition EOF after the backfill entered SourceCachingUp
+# must not move SourceCachingUp forward: the rows it read after that point were dropped, so the
+# shared source must still emit them to the new materialized view.
+
+statement ok
+set background_ddl = false;
+
+system ok
+rpk topic delete test_backfill_progress_after_caching_up || true
+
+system ok
+rpk topic create test_backfill_progress_after_caching_up -p 1
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_backfill_progress_after_caching_up --partitions 0 --messages-per-partition 10 --num-transactions 10
+
+statement ok
+create source backfill_caching_up_src (k varchar, v int)
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_backfill_progress_after_caching_up',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view backfill_caching_up_live as select * from backfill_caching_up_src;
+
+query I retry 3 backoff 5s
+select count(*) from backfill_caching_up_live;
+----
+100
+
+# The shared source stops emitting, so the new backfill reads past it to the end of the partition.
+statement ok
+alter source backfill_caching_up_src set source_rate_limit to 0;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set backfill_rate_limit = 0;
+
+# The backfill reader is built now, so its target offset is the end of the first 100 rows.
+statement ok
+create materialized view backfill_caching_up_new as select * from backfill_caching_up_src;
+
+statement ok
+set backfill_rate_limit = default;
+
+statement ok
+set background_ddl = false;
+
+sleep 3s
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_backfill_progress_after_caching_up --partitions 0 --messages-per-partition 10 --num-transactions 10
+
+# The backfill reader reads all 200 rows: it emits up to the first new row, drops the rest and
+# reaches the partition EOF while the shared source is still paused.
+statement ok
+alter materialized view backfill_caching_up_new set backfill_rate_limit to default;
+
+sleep 5s
+
+statement ok
+alter source backfill_caching_up_src set source_rate_limit to default;
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_backfill_progress_after_caching_up --partitions 0 --messages-per-partition 10 --num-transactions 10
+
+statement ok
+wait;
+
+query I retry 3 backoff 5s
+select count(*) from backfill_caching_up_live;
+----
+300
+
+query I retry 3 backoff 5s
+select count(*) from backfill_caching_up_new;
+----
+300
+
+statement ok
+drop source backfill_caching_up_src cascade;
+
+system ok
+rpk topic delete test_backfill_progress_after_caching_up
