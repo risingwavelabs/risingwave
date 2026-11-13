@@ -398,7 +398,10 @@ impl StreamActorManager {
 
         risingwave_expr::scalar::ai_decide::with_config_async(
             actor_context.config.ai_decide.clone(),
-            create_executor(executor_params, node, store),
+            risingwave_expr::scalar::ai_extract::with_config_async(
+                actor_context.config.ai_extract.clone(),
+                create_executor(executor_params, node, store),
+            ),
         )
         .await
     }

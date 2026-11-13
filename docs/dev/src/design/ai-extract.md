@@ -37,6 +37,7 @@ SELECT id, ai_extract(
 FROM documents;
 
 SELECT id, (extraction).person FROM extracted_entities;
+SELECT id, ((extraction).person[1]).text AS first_person FROM extracted_entities;
 ```
 
 `labels` is a nonempty list of distinct, nonempty names. Each named result field
@@ -94,6 +95,7 @@ from the text. Optional `threshold` is a finite number in [0, 1]. Omission leave
 the threshold to the service. Unknown specification keys are rejected, including
 keys that could replace the separately supplied model or text. Endpoint-specific
 model and input-size limits still apply; RisingWave never truncates input to fit.
+Empty or whitespace-only content is a local input error.
 
 Entity responses have the following shape:
 

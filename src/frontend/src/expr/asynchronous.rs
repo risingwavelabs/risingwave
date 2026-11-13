@@ -115,6 +115,47 @@ mod tests {
     }
 
     #[test]
+    fn ai_extract_and_its_lazy_parent_are_async() {
+        let result_type =
+            risingwave_expr::scalar::ai_extract::ExtractionSchema::parse(&JsonbVal::from(
+                serde_json::json!({"task":"entities","labels":["person"],"word_splitter":"char"}),
+            ))
+            .unwrap()
+            .return_type();
+        let decide: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::AiExtract,
+            vec![
+                InputRef::new(0, DataType::Varchar).into(),
+                ExprImpl::literal_varchar("http://127.0.0.1:1/evaluate".into()),
+                ExprImpl::literal_varchar("test-model".into()),
+                ExprImpl::literal_jsonb(JsonbVal::from(serde_json::json!({
+                    "task":"entities","labels":["person"],"word_splitter":"char"
+                }))),
+                ExprImpl::literal_varchar("test-key".into()),
+            ],
+            result_type.clone(),
+        )
+        .into();
+        let conditional = FunctionCall::new_unchecked(
+            ExprType::Case,
+            vec![
+                InputRef::new(1, DataType::Boolean).into(),
+                decide.clone(),
+                ExprImpl::literal_null(result_type.clone()),
+            ],
+            result_type,
+        )
+        .into();
+        for expr in [decide, conditional] {
+            assert!(expr.is_async());
+            assert!(matches!(
+                build_from_prost(&expr.to_expr_proto()).unwrap(),
+                BoxedExpression::Async(_)
+            ));
+        }
+    }
+
+    #[test]
     fn classification_matches_built_expressions() {
         let sleep: ExprImpl = FunctionCall::new_unchecked(
             ExprType::PgSleep,

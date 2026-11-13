@@ -450,6 +450,30 @@ pub struct SessionConfig {
     #[parameter(default = None)]
     ai_decide_max_concurrency: OptionConfig<u32>,
 
+    /// `AI_EXTRACT`: Timeout of each HTTP attempt in milliseconds. Must be positive. Unset inherits execution defaults.
+    #[parameter(default = None, check_hook = check_ai_decide_positive)]
+    ai_extract_request_timeout_ms: OptionConfig<u32>,
+
+    /// `AI_EXTRACT`: Maximum exponential retry delay in milliseconds. Zero disables the delay. Unset inherits execution defaults.
+    #[parameter(default = None)]
+    ai_extract_max_retry_delay_ms: OptionConfig<u32>,
+
+    /// `AI_EXTRACT`: Initial exponential retry delay in milliseconds. Zero disables the delay. Unset inherits execution defaults.
+    #[parameter(default = None)]
+    ai_extract_retry_delay_ms: OptionConfig<u32>,
+
+    /// `AI_EXTRACT`: Maximum server Retry-After delay in milliseconds. Zero disables that delay. Unset inherits execution defaults.
+    #[parameter(default = None)]
+    ai_extract_max_retry_after_ms: OptionConfig<u32>,
+
+    /// `AI_EXTRACT`: Maximum response body size in bytes before JSON decoding. Must be positive. Unset inherits execution defaults.
+    #[parameter(default = None, check_hook = check_ai_decide_positive)]
+    ai_extract_max_response_bytes: OptionConfig<u32>,
+
+    /// `AI_EXTRACT`: Maximum logical requests per expression instance, shared across chunks and held through retries. Zero means unlimited; actors do not share this limit. Unset inherits execution defaults.
+    #[parameter(default = None)]
+    ai_extract_max_concurrency: OptionConfig<u32>,
+
     /// Run DDL statements in background
     #[parameter(default = false)]
     background_ddl: bool,
@@ -764,6 +788,43 @@ impl SessionConfig {
         }
     }
 
+    /// Resolve batch execution settings; streaming jobs use their persisted override instead.
+    pub fn ai_extract_config(&self) -> crate::config::AiDecideConfig {
+        let defaults = crate::config::AiDecideConfig::default();
+        crate::config::AiDecideConfig {
+            request_timeout_ms: self
+                .ai_extract_request_timeout_ms
+                .as_ref()
+                .copied()
+                .unwrap_or(defaults.request_timeout_ms),
+            max_retry_delay_ms: self
+                .ai_extract_max_retry_delay_ms
+                .as_ref()
+                .copied()
+                .unwrap_or(defaults.max_retry_delay_ms),
+            retry_delay_ms: self
+                .ai_extract_retry_delay_ms
+                .as_ref()
+                .copied()
+                .unwrap_or(defaults.retry_delay_ms),
+            max_retry_after_ms: self
+                .ai_extract_max_retry_after_ms
+                .as_ref()
+                .copied()
+                .unwrap_or(defaults.max_retry_after_ms),
+            max_response_bytes: self
+                .ai_extract_max_response_bytes
+                .as_ref()
+                .copied()
+                .unwrap_or(defaults.max_response_bytes),
+            max_concurrency: self
+                .ai_extract_max_concurrency
+                .as_ref()
+                .copied()
+                .unwrap_or(defaults.max_concurrency),
+        }
+    }
+
     /// Generate an initial override for the streaming config from the session config.
     pub fn to_initial_streaming_config_override(
         &self,
@@ -841,6 +902,30 @@ impl SessionConfig {
             (
                 "streaming.ai_decide.max_concurrency",
                 self.ai_decide_max_concurrency.as_ref(),
+            ),
+            (
+                "streaming.ai_extract.request_timeout_ms",
+                self.ai_extract_request_timeout_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_extract.max_retry_delay_ms",
+                self.ai_extract_max_retry_delay_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_extract.retry_delay_ms",
+                self.ai_extract_retry_delay_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_extract.max_retry_after_ms",
+                self.ai_extract_max_retry_after_ms.as_ref(),
+            ),
+            (
+                "streaming.ai_extract.max_response_bytes",
+                self.ai_extract_max_response_bytes.as_ref(),
+            ),
+            (
+                "streaming.ai_extract.max_concurrency",
+                self.ai_extract_max_concurrency.as_ref(),
             ),
         ] {
             if let Some(value) = value {
@@ -940,6 +1025,72 @@ mod test {
             merge_streaming_config_section(
                 &StreamingConfig::default(),
                 "[streaming.ai_decide]\nunknown = 1"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_ai_extract_session_and_job_config() {
+        let mut session = SessionConfig::default();
+        assert_eq!(
+            session.ai_extract_config(),
+            crate::config::AiDecideConfig::default()
+        );
+        assert_eq!(session.to_initial_streaming_config_override().unwrap(), "");
+        for (key, value) in [
+            ("request_timeout_ms", 500),
+            ("max_retry_delay_ms", 2),
+            ("retry_delay_ms", 0),
+            ("max_retry_after_ms", 0),
+            ("max_response_bytes", 4096),
+            ("max_concurrency", 3),
+        ] {
+            session
+                .set(&format!("ai_extract_{key}"), value.to_string(), &mut ())
+                .unwrap();
+        }
+        assert_eq!(
+            session.ai_decide_config(),
+            crate::config::AiDecideConfig::default()
+        );
+        let effective = merge_streaming_config_section(
+            &StreamingConfig::default(),
+            &session.to_initial_streaming_config_override().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(effective.ai_extract, session.ai_extract_config());
+        assert_eq!(effective.ai_extract.max_concurrency, 3);
+        assert_eq!(
+            crate::config::AiDecideConfig::from(risingwave_pb::expr::AiDecideConfig::from(
+                &effective.ai_extract
+            )),
+            effective.ai_extract
+        );
+        for key in ["request_timeout_ms", "max_response_bytes"] {
+            assert!(
+                session
+                    .set(&format!("ai_extract_{key}"), "0".to_owned(), &mut ())
+                    .is_err()
+            );
+            assert!(
+                merge_streaming_config_section(
+                    &StreamingConfig::default(),
+                    &format!("[streaming.ai_extract]\n{key} = 0")
+                )
+                .is_err()
+            );
+            // Session deserialization bypasses SET validation; job creation must still reject it.
+            let mut json = serde_json::to_value(&session).unwrap();
+            json[format!("ai_extract_{key}")] = serde_json::Value::String("0".to_owned());
+            let invalid: SessionConfig = serde_json::from_value(json).unwrap();
+            assert!(invalid.to_initial_streaming_config_override().is_err());
+        }
+        assert!(
+            merge_streaming_config_section(
+                &StreamingConfig::default(),
+                "[streaming.ai_extract]\nunknown = 1"
             )
             .is_err()
         );

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod ai_decide;
+mod ai_extract;
+mod ai_inference;
 mod ai_model;
 mod arithmetic_op;
 mod array;

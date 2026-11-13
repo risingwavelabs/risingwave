@@ -24,13 +24,14 @@ use risingwave_common::config::AiDecideConfig;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapRef, MapType, MapValue,
-    Scalar, ScalarImpl, StructValue, ToDatumRef,
+    DataType, Datum, DatumRef, F64, JsonbVal, ListValue, MapRef, MapType, MapValue, Scalar,
+    ScalarImpl, ScalarRefImpl, StructValue, ToDatumRef,
 };
 use risingwave_expr::expr::{
     AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, ValueImpl,
 };
 use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
+use risingwave_expr::scalar::ai_extract::ExtractionSchema;
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
 use tokio::sync::Semaphore;
@@ -43,21 +44,35 @@ struct Request<'a> {
     questions: jsonbb::ValueRef<'a>,
 }
 
-struct AiDecide {
+#[derive(Debug)]
+enum ResponseSchema {
+    Decide(QuestionSchema),
+    Extract(ExtractionSchema),
+}
+
+#[derive(Serialize)]
+struct ExtractRequest<'a> {
+    model: &'a str,
+    text: &'a str,
+    #[serde(flatten)]
+    specification: jsonbb::ValueRef<'a>,
+}
+
+struct AiInference {
     children: [BoxedExpression; 4],
     headers: Option<BoxedExpression>,
-    questions: JsonbVal,
+    definition: JsonbVal,
     return_type: DataType,
-    schema: QuestionSchema,
+    schema: ResponseSchema,
     client: Client,
     config: AiDecideConfig,
     request_permits: Option<Semaphore>,
 }
 
-impl std::fmt::Debug for AiDecide {
+impl std::fmt::Debug for AiInference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Arguments may contain credentials or customer state.
-        f.debug_struct("AiDecide").finish_non_exhaustive()
+        f.debug_struct("AiInference").finish_non_exhaustive()
     }
 }
 
@@ -73,44 +88,102 @@ impl std::fmt::Debug for AiDecide {
     async,
     type_infer = "unreachable"
 )]
-fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    build_ai(return_type, children, false)
+}
+
+#[build_function(
+    "ai_extract(varchar, varchar, varchar, jsonb, varchar) -> struct",
+    volatile,
+    async,
+    type_infer = "unreachable"
+)]
+#[build_function(
+    "ai_extract(varchar, varchar, varchar, jsonb, varchar, anymap) -> struct",
+    volatile,
+    async,
+    type_infer = "unreachable"
+)]
+fn build_extract(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    build_ai(return_type, children, true)
+}
+
+fn build_ai(
+    return_type: DataType,
+    mut children: Vec<BoxedExpression>,
+    extract: bool,
+) -> Result<BoxedExpression> {
+    let name = if extract { "ai_extract" } else { "ai_decide" };
+    let error = |reason| ExprError::InvalidParam { name, reason };
     let headers = if children.len() == 6 {
         let headers = children.pop().unwrap();
         if headers.return_type() != MapType::from_kv(DataType::Varchar, DataType::Varchar).into() {
-            return Err(request_error("headers must be MAP(VARCHAR, VARCHAR)"));
+            return Err(function_error(
+                name,
+                "headers must be MAP(VARCHAR, VARCHAR)",
+            ));
         }
         Some(headers)
     } else {
         None
     };
-    let children: [BoxedExpression; 5] =
-        children.try_into().map_err(|_| ExprError::InvalidParam {
-            name: "ai_decide",
-            reason: "expected five or six arguments".into(),
-        })?;
-    let Some(ScalarImpl::Jsonb(questions)) = children[3].eval_const()? else {
+    let children: [BoxedExpression; 5] = children
+        .try_into()
+        .map_err(|_| error("expected five or six arguments".into()))?;
+    let Some(ScalarImpl::Jsonb(definition)) = children[3].eval_const()? else {
         return Err(ExprError::InvalidParam {
-            name: "ai_decide questions",
+            name: if extract {
+                "ai_extract specification"
+            } else {
+                "ai_decide questions"
+            },
             reason: "must be constant non-null JSONB".into(),
         });
     };
-    let schema = QuestionSchema::parse(&questions)?;
-    if return_type != schema.return_type() {
-        return Err(ExprError::InvalidParam {
-            name: "ai_decide",
-            reason: "return type does not match fixed questions".into(),
-        });
+    let (schema, expected_type, config) = if extract {
+        let schema = ExtractionSchema::parse(&definition)?;
+        let ty = schema.return_type();
+        (
+            ResponseSchema::Extract(schema),
+            ty,
+            risingwave_expr::scalar::ai_extract::config(),
+        )
+    } else {
+        let schema = QuestionSchema::parse(&definition)?;
+        let ty = schema.return_type();
+        (
+            ResponseSchema::Decide(schema),
+            ty,
+            risingwave_expr::scalar::ai_decide::config(),
+        )
+    };
+    if return_type != expected_type {
+        return Err(error(
+            if extract {
+                "return type does not match fixed specification"
+            } else {
+                "return type does not match fixed questions"
+            }
+            .into(),
+        ));
     }
-    let config = risingwave_expr::scalar::ai_decide::config();
     config
         .validate()
         .map_err(|reason| ExprError::InvalidParam {
-            name: "ai_decide config",
-            reason: reason.into(),
+            name: if extract {
+                "ai_extract config"
+            } else {
+                "ai_decide config"
+            },
+            reason: reason.replace("ai_decide", name).into(),
         })?;
     if config.max_concurrency as usize > Semaphore::MAX_PERMITS {
         return Err(ExprError::InvalidParam {
-            name: "ai_decide_max_concurrency",
+            name: if extract {
+                "ai_extract_max_concurrency"
+            } else {
+                "ai_decide_max_concurrency"
+            },
             reason: "exceeds semaphore capacity".into(),
         });
     }
@@ -120,12 +193,12 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         .timeout(Duration::from_millis(config.request_timeout_ms.into()))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| request_error("could not initialize HTTP client"))?;
-    let [state, url, model, _, api_key] = children;
-    Ok(AiDecide {
-        children: [state, url, model, api_key],
+        .map_err(|_| function_error(name, "could not initialize HTTP client"))?;
+    let [content, url, model, _, api_key] = children;
+    Ok(AiInference {
+        children: [content, url, model, api_key],
         headers,
-        questions,
+        definition,
         return_type,
         schema,
         client,
@@ -135,6 +208,11 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
     .boxed())
 }
 
+fn function_error(name: &str, message: impl std::fmt::Display) -> ExprError {
+    // Never include request/response bodies, URLs, credentials or arbitrary headers.
+    ExprError::Custom(format!("{name}: {message}"))
+}
+
 fn request_error(message: impl std::fmt::Display) -> ExprError {
     // Do not attach the request, response body, URL, or function arguments to errors.
     ExprError::Custom(format!("ai_decide: {message}"))
@@ -142,7 +220,8 @@ fn request_error(message: impl std::fmt::Display) -> ExprError {
 
 /// Validate before entering the retry loop. Never include caller-provided names or
 /// values in errors: either can contain credentials.
-fn request_headers(headers: MapRef<'_>) -> Result<HeaderMap> {
+fn validate_headers(headers: MapRef<'_>, name: &str) -> Result<HeaderMap> {
+    let request_error = |reason: &str| function_error(name, reason);
     let mut result = HeaderMap::new();
     // HeaderMap's infallible insertion API panics at its capacity limit. Check
     // capacity first, leaving room for authentication, JSON and transport headers.
@@ -166,6 +245,11 @@ fn request_headers(headers: MapRef<'_>) -> Result<HeaderMap> {
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+fn request_headers(headers: MapRef<'_>) -> Result<HeaderMap> {
+    validate_headers(headers, "ai_decide")
 }
 
 /// Decode strictly before the result can be persisted. Invalid responses are retried
@@ -269,40 +353,59 @@ fn decode_response(response: JsonbVal, schema: &QuestionSchema) -> Result<Struct
     Ok(StructValue::new(fields))
 }
 
-impl AiDecide {
+impl AiInference {
+    fn name(&self) -> &'static str {
+        match self.schema {
+            ResponseSchema::Decide(_) => "ai_decide",
+            ResponseSchema::Extract(_) => "ai_extract",
+        }
+    }
+
+    fn error(&self, message: impl std::fmt::Display) -> ExprError {
+        function_error(self.name(), message)
+    }
+
     async fn request(
         &self,
-        state: JsonbRef<'_>,
+        content: ScalarRefImpl<'_>,
         url: &str,
         model: &str,
         api_key: &str,
         headers: Option<MapRef<'_>>,
     ) -> Result<StructValue> {
         let headers = headers
-            .map(request_headers)
+            .map(|headers| validate_headers(headers, self.name()))
             .transpose()?
             .unwrap_or_default();
-        let url = reqwest::Url::parse(url).map_err(|_| request_error("invalid model_url"))?;
+        let url = reqwest::Url::parse(url).map_err(|_| self.error("invalid model_url"))?;
         if !matches!(url.scheme(), "http" | "https")
             || !url.username().is_empty()
             || url.password().is_some()
         {
-            return Err(request_error(
-                "model_url must be an HTTP(S) URL without embedded credentials",
-            ));
+            return Err(self.error("model_url must be an HTTP(S) URL without embedded credentials"));
         }
-        let request = self
-            .client
-            .post(url)
-            .bearer_auth(api_key)
-            .headers(headers)
-            .json(&Request {
+        let builder = self.client.post(url).bearer_auth(api_key).headers(headers);
+        let builder = match &self.schema {
+            ResponseSchema::Decide(_) => builder.json(&Request {
                 model,
-                state: state.into(),
-                questions: self.questions.as_scalar_ref().into(),
-            })
+                state: content.into_jsonb().into(),
+                questions: self.definition.as_scalar_ref().into(),
+            }),
+            ResponseSchema::Extract(_) => {
+                let text = content.into_utf8();
+                if text.trim().is_empty() {
+                    return Err(self.error("content must not be empty or whitespace"));
+                }
+                builder.json(&ExtractRequest {
+                    model,
+                    text,
+                    specification: self.definition.as_scalar_ref().into(),
+                })
+            }
+        };
+        let request = builder
             .build()
-            .map_err(|_| request_error("could not build HTTP request"))?;
+            .map_err(|_| self.error("could not build HTTP request"))?;
         let mut backoff_ms = self
             .config
             .retry_delay_ms
@@ -317,7 +420,7 @@ impl AiDecide {
                     .execute(request.try_clone().expect("JSON body is cloneable"))
                     .await
                     .map_err(|err| {
-                        request_error(if err.is_timeout() {
+                        self.error(if err.is_timeout() {
                             "HTTP request timed out"
                         } else {
                             "HTTP transport failed"
@@ -334,10 +437,10 @@ impl AiDecide {
                         delay = Duration::from_secs(seconds)
                             .min(Duration::from_millis(self.config.max_retry_after_ms.into()));
                     }
-                    return Err(request_error(format!("HTTP {status}")));
+                    return Err(self.error(format!("HTTP {status}")));
                 }
                 let too_large = || {
-                    request_error(format!(
+                    self.error(format!(
                         "response exceeds {} bytes",
                         self.config.max_response_bytes
                     ))
@@ -352,7 +455,7 @@ impl AiDecide {
                 while let Some(chunk) = response
                     .chunk()
                     .await
-                    .map_err(|_| request_error("HTTP response body read failed"))?
+                    .map_err(|_| self.error("HTTP response body read failed"))?
                 {
                     if chunk.len()
                         > (self.config.max_response_bytes as usize).saturating_sub(bytes.len())
@@ -363,8 +466,13 @@ impl AiDecide {
                 }
                 let json = jsonbb::Value::from_text(&bytes)
                     .map(JsonbVal::from)
-                    .map_err(|_| request_error("successful response is not valid JSON"))?;
-                decode_response(json, &self.schema)
+                    .map_err(|_| self.error("successful response is not valid JSON"))?;
+                match &self.schema {
+                    ResponseSchema::Decide(schema) => decode_response(json, schema),
+                    ResponseSchema::Extract(schema) => {
+                        super::ai_extract::decode_response(json, schema, content.into_utf8())
+                    }
+                }
             }
             .await;
             match result {
@@ -374,7 +482,7 @@ impl AiDecide {
                         LazyLock::new(LogSuppressor::default);
                     if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         // Only sanitized errors: never log credentials, URL or payloads.
-                        tracing::error!(error = %error, ?delay, suppressed_count, "AI_DECIDE request failed, retrying");
+                        tracing::error!(error = %error, ?delay, suppressed_count, function = self.name(), "AI request failed, retrying");
                     }
                 }
             }
@@ -411,7 +519,7 @@ impl AiDecide {
             None => None,
         };
         self.request(
-            state.into_jsonb(),
+            state,
             url.into_utf8(),
             model.into_utf8(),
             api_key.into_utf8(),
@@ -422,13 +530,13 @@ impl AiDecide {
     }
 }
 
-impl ExpressionInfo for AiDecide {
+impl ExpressionInfo for AiInference {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 }
 
-impl AsyncExpression for AiDecide {
+impl AsyncExpression for AiInference {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut values = Vec::with_capacity(4 + usize::from(self.headers.is_some()));
         for child in self.children.iter().chain(self.headers.iter()) {
@@ -532,11 +640,11 @@ mod tests {
         Server { url, task }
     }
 
-    fn expression(timeout: Duration) -> AiDecide {
-        AiDecide {
+    fn expression(timeout: Duration) -> AiInference {
+        AiInference {
             headers: None,
-            schema: test_schema(),
-            questions: test_questions(),
+            schema: ResponseSchema::Decide(test_schema()),
+            definition: test_questions(),
             return_type: test_schema().return_type(),
             children: [0, 1, 2, 4].map(|i| {
                 let ty = if i == 0 {
@@ -757,9 +865,11 @@ mod tests {
         }
     }
 
-    async fn call(expr: &AiDecide, url: &str) -> Result<StructValue> {
+    async fn call(expr: &AiInference, url: &str) -> Result<StructValue> {
         expr.request(
-            JsonbVal::from(json!({"messages": ["I received the refund."]})).as_scalar_ref(),
+            JsonbVal::from(json!({"messages": ["I received the refund."]}))
+                .as_scalar_ref()
+                .into(),
             url,
             "test-model",
             "test-only-key",
@@ -794,7 +904,7 @@ mod tests {
             )
             .boxed(),
         );
-        expr.questions =
+        expr.definition =
             JsonbVal::from(json!({"q": {"type": "noul", "instructions": "Resolved?"}}));
         expr.children = [
             LiteralExpression::new(
@@ -1113,6 +1223,90 @@ mod tests {
             unreachable!()
         };
         legacy.function_type = ExprType::AiDecide as i32;
+        legacy.rex_node = Some(RexNode::FuncCall(FunctionCall {
+            children: payload.children,
+        }));
+        assert!(build_from_prost(&legacy).is_ok());
+        assert!(with_config(invalid, || build_from_prost(&legacy)).is_err());
+        assert!(build_from_prost(&node).is_err());
+        // Recovery rebuilds all nested calls with the current job/global config.
+        assert!(with_config(AiDecideConfig::default(), || build_from_prost(&node)).is_ok());
+        assert!(build_from_prost(&node).is_err());
+    }
+
+    fn extract_spec() -> JsonbVal {
+        json!({"task":"entities","labels":["person"],"word_splitter":"char"}).into()
+    }
+
+    fn configured_extract_node(config: Option<&AiDecideConfig>) -> risingwave_pb::expr::ExprNode {
+        use risingwave_common::util::value_encoding::DatumToProtoExt;
+        use risingwave_pb::expr::expr_node::RexNode;
+        use risingwave_pb::expr::{AiExtractNode, ExprNode};
+
+        let children = (0..5)
+            .map(|i| ExprNode {
+                return_type: Some(if i == 3 {
+                    DataType::Jsonb.to_protobuf()
+                } else {
+                    DataType::Varchar.to_protobuf()
+                }),
+                rex_node: Some(if i == 3 {
+                    RexNode::Constant(Some(ScalarImpl::from(extract_spec())).to_protobuf())
+                } else {
+                    RexNode::InputRef(i)
+                }),
+                ..Default::default()
+            })
+            .collect();
+        ExprNode {
+            function_type: ExprType::Unspecified as i32,
+            return_type: Some(
+                ExtractionSchema::parse(&extract_spec())
+                    .unwrap()
+                    .return_type()
+                    .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::AiExtract(AiExtractNode {
+                children,
+                config: config.map(Into::into),
+            })),
+        }
+    }
+
+    #[test]
+    fn extract_config_and_streaming_override_apply_to_nested_calls() {
+        use risingwave_expr::expr::build_from_prost;
+        use risingwave_expr::scalar::ai_extract::with_config;
+        use risingwave_pb::expr::expr_node::RexNode;
+        use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+        let invalid = AiDecideConfig {
+            request_timeout_ms: 0,
+            ..Default::default()
+        };
+        let node = ExprNode {
+            function_type: ExprType::Coalesce as i32,
+            return_type: Some(
+                ExtractionSchema::parse(&extract_spec())
+                    .unwrap()
+                    .return_type()
+                    .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![
+                    configured_extract_node(None),
+                    configured_extract_node(Some(&invalid)),
+                ],
+            })),
+        };
+        // The first child's defaults must not leak to its sibling's explicit config.
+        assert!(build_from_prost(&configured_extract_node(None)).is_ok());
+        // Registry construction also supports the ordinary function-call payload.
+        let mut legacy = configured_extract_node(None);
+        let Some(RexNode::AiExtract(payload)) = legacy.rex_node.take() else {
+            unreachable!()
+        };
+        legacy.function_type = ExprType::AiExtract as i32;
         legacy.rex_node = Some(RexNode::FuncCall(FunctionCall {
             children: payload.children,
         }));
