@@ -25,7 +25,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
 use itertools::Itertools;
-use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use parking_lot::{Mutex, RecursiveRwLock, RwLock, RwLockReadGuard};
 use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -217,7 +217,7 @@ impl FrontendEnv {
     pub fn mock() -> Self {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
-        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let catalog = Arc::new(RecursiveRwLock::new(Catalog::default()));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(
@@ -225,7 +225,7 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog);
-        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let user_info_manager = Arc::new(RecursiveRwLock::new(UserInfoManager::default()));
         let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
@@ -355,7 +355,7 @@ impl FrontendEnv {
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
-        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let catalog = Arc::new(RecursiveRwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx.clone(),
@@ -383,7 +383,7 @@ impl FrontendEnv {
             config.batch.max_batch_queries_per_frontend_node,
         );
 
-        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let user_info_manager = Arc::new(RecursiveRwLock::new(UserInfoManager::default()));
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
@@ -423,6 +423,7 @@ impl FrontendEnv {
         meta_client.activate(&frontend_address).await?;
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
+        risingwave_connector::init_connector_metrics(config.server.metrics_level);
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
         let spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
@@ -641,7 +642,7 @@ impl FrontendEnv {
     }
 
     pub fn session_params_snapshot(&self) -> SessionConfig {
-        self.session_params.read_recursive().clone()
+        self.session_params.read().clone()
     }
 
     /// Get a reference to the Prometheus client if available.
@@ -1441,7 +1442,11 @@ impl SessionImpl {
     }
 
     pub fn is_barrier_read(&self) -> bool {
-        match self.config().visibility_mode() {
+        let config = self.config();
+        if config.query_epoch().0.is_some() || config.batch_read_latest_committed() {
+            return false;
+        }
+        match config.visibility_mode() {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,

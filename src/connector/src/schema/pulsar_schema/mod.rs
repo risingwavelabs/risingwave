@@ -16,4 +16,4 @@ mod client;
 mod schema;
 
 pub use client::{Client, PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig};
-pub use schema::{PulsarSchemaInfo, PulsarSchemaVersion};
+pub use schema::{PulsarSchema, PulsarSchemaInfo, PulsarSchemaVersion, parse_partitioned_topic};

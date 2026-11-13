@@ -74,6 +74,41 @@ select f();
 statement ok
 drop function f;
 
+
+# A parameter referenced inside a lateral subquery of the body, called with a column argument.
+statement ok
+create table t0 (x int);
+
+statement ok
+insert into t0 values (1), (2), (3);
+
+statement ok
+create table a (a1 int);
+
+statement ok
+insert into a values (-3), (-2), (-1), (0), (null);
+
+statement ok
+create function f3(v int) returns bigint language sql as $$ select count(*) from t0, lateral (select x + v as s) l where s > 0 $$;
+
+query II rowsort
+select a1, f3(a1) from a;
+----
+-1 2
+-2 1
+-3 0
+0 3
+NULL 0
+
+statement ok
+drop function f3;
+
+statement ok
+drop table a;
+
+statement ok
+drop table t0;
+
 statement ok
 CREATE FUNCTION jsonb_values_at(data jsonb, grouping_keys TEXT[])
   RETURNS TEXT[]

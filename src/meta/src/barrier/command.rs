@@ -22,6 +22,7 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
+use risingwave_connector::sink::iceberg::IcebergCommitResult;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -604,6 +605,22 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// Apply a completed Iceberg data-file compaction to the pk-index sink graph.
+    ApplyIcebergPkIndexCompaction {
+        sink_id: SinkId,
+        task_id: risingwave_pb::id::IcebergCompactionTaskId,
+        overwrite: IcebergPkIndexCompactionOverwrite,
+    },
+}
+
+#[derive(Clone, educe::Educe)]
+#[educe(Debug)]
+pub struct IcebergPkIndexCompactionOverwrite {
+    #[educe(Debug(ignore))]
+    pub output_result: IcebergCommitResult,
+    pub input_file_paths: Vec<String>,
+    pub read_snapshot_id: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -708,6 +725,12 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::ApplyIcebergPkIndexCompaction {
+                sink_id, task_id, ..
+            } => write!(
+                f,
+                "ApplyIcebergPkIndexCompaction: sink={sink_id} task={task_id}"
             ),
         }
     }
@@ -888,6 +911,7 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             iceberg_pk_index_sink_metadata,
+            table_change_log_progress,
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos = match &barrier_info.post_collect_command {
@@ -972,6 +996,8 @@ impl Command {
         }
         task.iceberg_pk_index_pre_commit_metadata
             .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
+        info.table_change_log_progress
+            .extend(table_change_log_progress);
     }
 }
 

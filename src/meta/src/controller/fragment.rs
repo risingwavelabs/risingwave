@@ -1166,6 +1166,7 @@ impl CatalogController {
 
     pub async fn list_actor_info(
         &self,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
         let inner = self.inner.read().await;
 
@@ -1177,6 +1178,12 @@ impl CatalogController {
                 .column_as(object::Column::Oid, "job_id")
                 .column_as(object::Column::SchemaId, "schema_id")
                 .column_as(object::Column::ObjType, "type")
+                .filter(
+                    database_id
+                        // Unknown IDs outside the catalog's i32 range must not overflow.
+                        .map(|id| object::Column::DatabaseId.eq(i64::from(id.as_raw_id())))
+                        .unwrap_or_else(|| SimpleExpr::from(true)),
+                )
                 .into_tuple()
                 .all(&inner.db)
                 .await?;

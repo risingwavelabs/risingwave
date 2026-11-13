@@ -466,7 +466,17 @@ impl CandidateMatcher for DefineMatcher<'_> {
         pos: usize,
         labels: &[String],
     ) -> StreamExecutorResult<bool> {
-        let match_start = pos - labels.len();
+        // `labels` covers the rows before the candidate (see the trait contract), so it is never
+        // longer than `pos`. A caller that broke that would, without overflow checks, wrap
+        // `match_start` past the buffer; refuse the candidate instead and say so.
+        let Some(match_start) = pos.checked_sub(labels.len()) else {
+            crate::consistency::consistency_panic!(
+                pos,
+                labels = labels.len(),
+                "MATCH_RECOGNIZE candidate has more bound labels than preceding rows",
+            );
+            return Ok(false);
+        };
         // A pattern variable with no DEFINE matches every row; one with a DEFINE must satisfy it.
         if let Some(def) = self.defines.get(var) {
             let synthetic: Vec<Datum> = def
@@ -1365,7 +1375,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             &metrics,
                         )
                         .await?;
-                        let evicted = (rows_before - run.rows.len()) as u64;
+                        // Eviction only shrinks the buffer; saturate rather than wrap a counter
+                        // should that ever stop holding.
+                        let evicted = rows_before.saturating_sub(run.rows.len()) as u64;
                         metrics.match_recognize_evicted_rows_count.inc_by(evicted);
                         retained_rows -= evicted as i64;
                         // Captured while the entry is still borrowed; the removal below needs the
@@ -1477,7 +1489,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         .await?;
                         metrics
                             .match_recognize_evicted_rows_count
-                            .inc_by((rows_before - run.rows.len()) as u64);
+                            .inc_by(rows_before.saturating_sub(run.rows.len()) as u64);
                         if run.rows.is_empty() {
                             emptied.push(pk.clone());
                         }
@@ -2219,5 +2231,44 @@ mod tests {
             let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
             assert!(gate(&pattern, "xn", 0, 1, true).await);
         }
+    }
+
+    /// A candidate with more bound labels than preceding rows breaks the `CandidateMatcher`
+    /// contract; previously `pos - labels.len()` wrapped into a match start past the buffer.
+    /// Under strict consistency (the default) the breach panics; non-strict refuses the candidate.
+    #[tokio::test]
+    #[should_panic(expected = "inconsistency")]
+    async fn more_labels_than_rows_is_reported_not_wrapped() {
+        let rows = buffered(&[1, 2]);
+        let defines = HashMap::new();
+        let matcher = DefineMatcher {
+            rows: &rows,
+            defines: &defines,
+            within: None,
+        };
+        let _ = matcher.matches("a", 1, &labels("aaa")).await;
+    }
+
+    /// Non-strict: the same breach refuses the candidate instead of reading past the buffer.
+    #[tokio::test]
+    async fn non_strict_more_labels_than_rows_refuses_the_candidate() {
+        let config = risingwave_common::config::StreamingConfig {
+            unsafe_disable_strict_consistency: true,
+            ..Default::default()
+        };
+        crate::CONFIG
+            .scope(Arc::new(config), async {
+                let rows = buffered(&[1, 2]);
+                let defines = HashMap::new();
+                let matcher = DefineMatcher {
+                    rows: &rows,
+                    defines: &defines,
+                    within: None,
+                };
+                assert!(!matcher.matches("a", 1, &labels("aaa")).await.unwrap());
+                // A well-formed question on the same matcher still answers normally.
+                assert!(matcher.matches("a", 1, &labels("a")).await.unwrap());
+            })
+            .await;
     }
 }

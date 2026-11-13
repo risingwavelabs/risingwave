@@ -127,6 +127,19 @@ impl CatalogController {
                     ).into());
                 }
             }
+
+            // A table owns its source, and deleting the source also deletes the table row through
+            // a foreign key.
+            if obj.obj_type == ObjectType::Source
+                && let Some(source) = Source::find_by_id(obj.oid.as_source_id()).one(&txn).await?
+                && let Some(table_id) = source.optional_associated_table_id
+                && !removed_object_ids.contains(&table_id.as_object_id())
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "cannot drop source \"{}\": it belongs to table {table_id}, use DROP TABLE instead",
+                    source.name
+                )));
+            }
         }
 
         // Load all objects that belong to the dropped objects before deletion. Cascaded rows are
@@ -163,20 +176,15 @@ impl CatalogController {
             })
             .collect();
 
-        // Iceberg sinks (and the pk-index subset) can be user-created with arbitrary
+        // Iceberg sinks can be user-created with arbitrary
         // names, so unlike the iceberg-table cleanup above, identify them by
         // inspecting properties rather than by name prefix.
         let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
-        let mut removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Vec::new();
         for object_info in &removed_catalog_models {
-            if let PbObjectInfo::Sink(sink) = object_info {
-                if crate::manager::iceberg_compaction::is_iceberg_sink(&sink.properties) {
-                    removed_iceberg_sink_ids.push(sink.id);
-                }
-                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
-                {
-                    removed_iceberg_pk_index_sink_ids.push(sink.id);
-                }
+            if let PbObjectInfo::Sink(sink) = object_info
+                && crate::manager::iceberg_compaction::is_iceberg_sink(&sink.properties)
+            {
+                removed_iceberg_sink_ids.push(sink.id);
             }
         }
 
@@ -346,7 +354,6 @@ impl CatalogController {
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
                 removed_iceberg_sink_ids,
-                removed_iceberg_pk_index_sink_ids,
             },
             version,
         ))

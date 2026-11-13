@@ -55,7 +55,6 @@ use crate::barrier::{
     BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::manager::MetaOpts;
 use crate::model::StreamJobActorsToCreate;
 use crate::notification::{CollectionNotifier, NotifierStarter};
 use crate::stream::ExtendedFragmentBackfillOrder;
@@ -248,9 +247,13 @@ fn add_initial_partial_graph(
     )
 }
 
-fn snapshot_backfill_max_pending_barrier_num(opts: &MetaOpts) -> usize {
-    opts.in_flight_barrier_nums
-        .saturating_mul(opts.snapshot_backfill_barrier_amplification_factor.max(1))
+/// The maximum number of upstream barriers a snapshot backfill partial graph may queue before
+/// the upstream is back-pressured.
+pub fn snapshot_backfill_max_pending_barrier_num(
+    in_flight_barrier_nums: usize,
+    snapshot_backfill_barrier_amplification_factor: usize,
+) -> usize {
+    in_flight_barrier_nums.saturating_mul(snapshot_backfill_barrier_amplification_factor.max(1))
 }
 
 #[derive(Debug)]
@@ -584,7 +587,7 @@ impl IndependentCheckpointJobControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         epoch: u64,
-    ) {
+    ) -> MetaResult<()> {
         match self {
             Self::Running {
                 status: IndependentCheckpointJobStatus::Ready,
@@ -604,7 +607,7 @@ impl IndependentCheckpointJobControl {
                 status: IndependentCheckpointJobStatus::Ready,
                 job: IndependentCheckpointJob::IcebergV3(j),
                 ..
-            } => j.ack_completed(partial_graph_manager, epoch),
+            } => j.ack_completed(partial_graph_manager, epoch)?,
             Self::Running {
                 status: IndependentCheckpointJobStatus::Initial { .. },
                 ..
@@ -616,6 +619,7 @@ impl IndependentCheckpointJobControl {
                 // The partial graph has already been reset, so skip the ack.
             }
         }
+        Ok(())
     }
 
     pub(crate) fn on_partial_graph_reset(self) -> Vec<PbSubscriptionUpstreamInfo> {

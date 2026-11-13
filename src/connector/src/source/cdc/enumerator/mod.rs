@@ -15,19 +15,16 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use itertools::Itertools;
 use mysql_async::Row;
 use mysql_async::prelude::*;
 use prost::Message;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{LabelGuardedIntGauge, LabelGuardedIntGaugeVec};
-use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
@@ -37,27 +34,28 @@ use tokio_postgres::types::PgLsn;
 use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_from_properties};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
-use crate::source::cdc::external::mysql::build_mysql_connection_pool;
+use crate::source::cdc::external::mysql::{
+    build_mariadb_connection_pool, build_mysql_connection_pool,
+};
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
+    CdcProperties, CdcSourceTypeTrait, DebeziumCdcSplit, Mariadb, Mongodb, Mysql, Oracle, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
 };
 use crate::source::monitor::metrics::EnumeratorMetrics;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
-pub const DATABASE_SERVERS_KEY: &str = "database.servers";
-
 #[derive(Debug)]
 pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     /// The `source_id` in the catalog
     source_id: SourceId,
-    worker_node_addrs: Vec<HostAddr>,
     metrics: Arc<EnumeratorMetrics>,
     pg_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
     pg_cdc_confirmed_flush_lsn: Option<LabelGuardedIntGauge>,
     mysql_cdc_binlog_file_seq_min: Option<LabelGuardedIntGauge>,
     mysql_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
+    mariadb_cdc_binlog_file_seq_min: Option<LabelGuardedIntGauge>,
+    mariadb_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_min_lsn: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
     /// Properties specified in the WITH clause by user for database connection
@@ -85,17 +83,6 @@ where
         props: CdcProperties<T>,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<Self> {
-        let server_addrs = props
-            .properties
-            .get(DATABASE_SERVERS_KEY)
-            .map(|s| {
-                s.split(',')
-                    .map(HostAddr::from_str)
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()?
-            .unwrap_or_default();
-
         assert_eq!(
             props.get_source_type_pb(),
             SourceType::from(T::source_type())
@@ -153,12 +140,13 @@ where
         tracing::debug!("validate cdc source properties success");
         Ok(Self {
             source_id,
-            worker_node_addrs: server_addrs,
             metrics: context.metrics.clone(),
             pg_cdc_upstream_max_lsn: None,
             pg_cdc_confirmed_flush_lsn: None,
             mysql_cdc_binlog_file_seq_min: None,
             mysql_cdc_binlog_file_seq_max: None,
+            mariadb_cdc_binlog_file_seq_min: None,
+            mariadb_cdc_binlog_file_seq_max: None,
             sqlserver_cdc_upstream_min_lsn: None,
             sqlserver_cdc_upstream_max_lsn: None,
             properties: properties_arc,
@@ -510,11 +498,6 @@ impl DebeziumSplitEnumerator<Mysql> {
             .properties
             .get("password")
             .ok_or_else(|| anyhow::anyhow!("missing `password` in CDC properties"))?;
-        let database = self
-            .properties
-            .get("database.name")
-            .ok_or_else(|| anyhow::anyhow!("missing `database.name` in CDC properties"))?;
-
         // Get SSL mode configuration (default to Disabled if not specified)
         let ssl_mode = self
             .properties
@@ -522,9 +505,9 @@ impl DebeziumSplitEnumerator<Mysql> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
 
-        // Build MySQL connection pool with proper SSL configuration
-        let pool =
-            build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
+        // SHOW BINARY LOGS is server-wide. Do not select a default database: database.name
+        // can be a comma-separated list for a shared source.
+        let pool = build_mysql_connection_pool(hostname, port, username, password, None, ssl_mode);
         let mut conn = pool
             .get_conn()
             .await
@@ -570,8 +553,136 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
             None,
+        )]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Mariadb> {
+    type CdcSourceType = Mariadb;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id.as_raw_id(),
             None,
         )]
+    }
+}
+
+impl DebeziumSplitEnumerator<Mariadb> {
+    async fn monitor_mariadb_binlog_files(&mut self) -> ConnectorResult<()> {
+        let hostname = self.properties.get("hostname").ok_or_else(|| {
+            anyhow!("missing required property 'hostname' for MariaDB CDC source")
+        })?;
+        let port = self
+            .properties
+            .get("port")
+            .ok_or_else(|| anyhow!("missing required property 'port' for MariaDB CDC source"))?;
+        let binlog_files = query_mariadb_binlog_files(&self.properties)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to query binlog files for MariaDB CDC source {} ({}:{})",
+                    self.source_id, hostname, port
+                )
+            })?;
+        let labels = vec![
+            self.source_id.to_string(),
+            hostname.to_owned(),
+            port.to_owned(),
+        ];
+        if let Some((oldest_file, _)) = binlog_files.first()
+            && let Some(seq) = extract_binlog_file_seq(oldest_file)
+        {
+            get_or_create_guarded_int_gauge(
+                &mut self.mariadb_cdc_binlog_file_seq_min,
+                &self.metrics.mariadb_cdc_binlog_file_seq_min,
+                &labels,
+            )
+            .set(seq as i64);
+        }
+        if let Some((newest_file, _)) = binlog_files.last()
+            && let Some(seq) = extract_binlog_file_seq(newest_file)
+        {
+            get_or_create_guarded_int_gauge(
+                &mut self.mariadb_cdc_binlog_file_seq_max,
+                &self.metrics.mariadb_cdc_binlog_file_seq_max,
+                &labels,
+            )
+            .set(seq as i64);
+        }
+        Ok(())
+    }
+}
+
+async fn query_mariadb_binlog_files(
+    properties: &BTreeMap<String, String>,
+) -> ConnectorResult<Vec<(String, u64)>> {
+    let hostname = properties
+        .get("hostname")
+        .ok_or_else(|| anyhow!("missing `hostname` in CDC properties"))?;
+    let port = properties
+        .get("port")
+        .ok_or_else(|| anyhow!("missing `port` in CDC properties"))?
+        .parse::<u16>()
+        .context("failed to parse `port` as a u16")?;
+    let username = properties
+        .get("username")
+        .ok_or_else(|| anyhow!("missing `username` in CDC properties"))?;
+    let password = properties
+        .get("password")
+        .ok_or_else(|| anyhow!("missing `password` in CDC properties"))?;
+    let ssl_mode = properties
+        .get("ssl.mode")
+        .or_else(|| properties.get("debezium.database.sslmode"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(SslMode::Preferred);
+    let ssl_root_cert = properties
+        .get("ssl.root.cert")
+        .or_else(|| properties.get("debezium.database.sslrootcert"))
+        .map(String::as_str);
+    // SHOW BINARY LOGS is server-wide. `database.name` can contain multiple databases.
+    let pool = build_mariadb_connection_pool(
+        hostname,
+        port,
+        username,
+        password,
+        None,
+        ssl_mode,
+        ssl_root_cert,
+    );
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("failed to connect to MariaDB")?;
+    let rows: Vec<Row> = conn
+        .query("SHOW BINARY LOGS")
+        .await
+        .context("failed to execute `SHOW BINARY LOGS`")?;
+    let result = rows
+        .into_iter()
+        .map(|mut row| -> ConnectorResult<(String, u64)> {
+            let name = row
+                .take_opt::<String, _>(0)
+                .transpose()
+                .context("failed to decode MariaDB binlog name")?
+                .ok_or_else(|| anyhow!("missing MariaDB binlog name"))?;
+            let size = row
+                .take_opt::<u64, _>(1)
+                .transpose()
+                .context("failed to decode MariaDB binlog size")?
+                .ok_or_else(|| anyhow!("missing MariaDB binlog size"))?;
+            Ok((name, size))
+        })
+        .collect::<ConnectorResult<Vec<_>>>()?;
+    drop(conn);
+    pool.disconnect().await.ok();
+    Ok(result)
+}
+
+#[async_trait]
+impl CdcMonitor for DebeziumSplitEnumerator<Mariadb> {
+    async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
+        self.monitor_mariadb_binlog_files().await
     }
 }
 
@@ -592,7 +703,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
             None,
-            None,
         )]
     }
 }
@@ -606,23 +716,6 @@ impl CdcMonitor for DebeziumSplitEnumerator<Postgres> {
     }
 }
 
-impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
-    type CdcSourceType = Citus;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        self.worker_node_addrs
-            .iter()
-            .enumerate()
-            .map(|(id, addr)| {
-                DebeziumCdcSplit::<Self::CdcSourceType>::new(
-                    id as u32,
-                    None,
-                    Some(addr.to_string()),
-                )
-            })
-            .collect_vec()
-    }
-}
 impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
     type CdcSourceType = Mongodb;
 
@@ -630,7 +723,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
         // CDC source only supports single split
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
-            None,
             None,
         )]
     }
@@ -643,7 +735,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
             None,
-            None,
         )]
     }
 }
@@ -654,7 +745,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Oracle> {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
-            None,
             None,
         )]
     }

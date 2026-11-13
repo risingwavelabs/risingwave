@@ -70,7 +70,6 @@ pub struct DdlServiceImpl {
     env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
@@ -97,15 +96,13 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
-            sink_manager.clone(),
-            iceberg_compaction_manager.clone(),
+            sink_manager,
             iceberg_pk_index_sink_manager.clone(),
         )
         .await;
         Self {
             env,
             metadata_manager,
-            sink_manager,
             ddl_controller,
             meta_metrics,
             iceberg_compaction_manager,
@@ -499,12 +496,6 @@ impl DdlService for DdlServiceImpl {
         };
 
         let version = self.ddl_controller.run_command(command).await?;
-
-        self.sink_manager
-            .stop_sink_coordinators_for_jobs(vec![sink_id.as_job_id()])
-            .await;
-        self.iceberg_compaction_manager
-            .clear_iceberg_maintenance_by_sink_id(sink_id);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -1786,6 +1777,31 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn remove_iceberg_table_orphan_files(
+        &self,
+        request: Request<RemoveIcebergTableOrphanFilesRequest>,
+    ) -> Result<Response<RemoveIcebergTableOrphanFilesResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = req.sink_id;
+
+        let orphan_file_count = self
+            .iceberg_compaction_manager
+            .remove_orphan_files(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to remove orphan files for sink {}: {}",
+                    sink_id,
+                    e.as_report()
+                ))
+            })?;
+
+        Ok(Response::new(RemoveIcebergTableOrphanFilesResponse {
+            status: None,
+            orphan_file_count,
+        }))
+    }
+
     async fn create_iceberg_table(
         &self,
         request: Request<CreateIcebergTableRequest>,
@@ -2041,7 +2057,10 @@ fn normalize_cdc_auto_schema_change_column_names(
     cdc_table_type: PbCdcTableType,
     original_columns_by_name: &HashMap<String, ColumnCatalog>,
 ) -> TableSchemaChange {
-    if cdc_table_type != PbCdcTableType::Mysql {
+    if !matches!(
+        cdc_table_type,
+        PbCdcTableType::Mysql | PbCdcTableType::Mariadb
+    ) {
         return table_change;
     }
 

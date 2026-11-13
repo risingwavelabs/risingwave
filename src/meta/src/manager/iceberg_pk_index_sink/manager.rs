@@ -12,23 +12,73 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::anyhow;
+use arc_swap::ArcSwap;
 use parking_lot::RwLock;
 use risingwave_common::id::{JobId, PartialGraphId};
+use risingwave_connector::connector_common::{
+    IcebergCommittedSnapshot, IcebergSinkCompactionUpdate,
+};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
-use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
 
-use super::IcebergPkIndexPreCommitMetadata;
 use super::committed_epoch::PartialGraphCommittedEpochs;
 use super::coordinator::IcebergPkIndexSinkCoordinator;
+use super::{IcebergPkIndexPreCommitMetadata, build_iceberg_config, is_iceberg_pk_index_sink};
+use crate::controller::catalog::CatalogControllerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 
 type CoordinatorRef = Arc<Mutex<IcebergPkIndexSinkCoordinator>>;
+
+/// Scheduling holds this registration, not an independent copy of sink liveness.
+pub(crate) struct IcebergPkIndexSinkRegistration {
+    ready: AtomicBool,
+    config: ArcSwap<IcebergConfig>,
+}
+
+impl std::fmt::Debug for IcebergPkIndexSinkRegistration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IcebergPkIndexSinkRegistration")
+            .field("ready", &self.is_ready())
+            .finish_non_exhaustive()
+    }
+}
+
+impl IcebergPkIndexSinkRegistration {
+    pub(crate) fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn config(&self) -> Arc<IcebergConfig> {
+        self.config.load_full()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(config: IcebergConfig) -> Arc<Self> {
+        Arc::new(Self {
+            ready: AtomicBool::new(true),
+            config: ArcSwap::from_pointee(config),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retire_for_test(&self) {
+        self.ready.store(false, Ordering::Release);
+    }
+}
+
+struct RegisteredSink {
+    partial_graph_id: PartialGraphId,
+    registration: Arc<IcebergPkIndexSinkRegistration>,
+    coordinator: Option<CoordinatorRef>,
+}
 
 /// Manager for the Iceberg pk-index sink path, cheap to clone.
 #[derive(Clone)]
@@ -37,65 +87,169 @@ pub struct IcebergPkIndexSinkManager {
 }
 
 struct ManagerInner {
-    db: DatabaseConnection,
-    /// `sink_id -> (partial_graph_id, coordinator)`. Read on every pre-commit/commit/wait (only to
-    /// clone out the ref / read the partial graph id, never held across an await); written only by
-    /// register/unregister/reset, which are rare control-plane events. The `partial_graph_id` is the
-    /// graph whose committed epoch the sink's merger waits on (its database main graph today; an
-    /// independent job's graph in the future — see `committed_epoch`).
-    coordinators: RwLock<HashMap<SinkId, (PartialGraphId, CoordinatorRef)>>,
+    catalog_controller: CatalogControllerRef,
+    compaction_manager: IcebergCompactionManagerRef,
+    /// A registration exists before async initialization starts. Completion can only fill that
+    /// same live entry. Registry -> compaction is the control-plane lock order; neither lock is
+    /// held across coordinator I/O.
+    coordinators: RwLock<HashMap<SinkId, RegisteredSink>>,
     /// Per-partial-graph committed-epoch cursor. A cursor entry exists exactly while a partial graph has
-    /// a registered pk-index sink: created by `ensure` in `register_sink` and dropped by `remove` in
-    /// `unregister_jobs` (and `clear` in `reset`), all under the `coordinators` write lock. Advanced on
+    /// a registered pk-index sink: created in `register_sink` and removed on retirement or recovery,
+    /// all under the `coordinators` write lock. Advanced on
     /// every checkpoint completion via `advance_committed_epochs` (a no-op for partial graphs with no
     /// registered sink).
     committed_epochs: PartialGraphCommittedEpochs,
+    compaction_stat_tx: UnboundedSender<IcebergSinkCompactionUpdate>,
 }
 
 impl IcebergPkIndexSinkManager {
-    pub fn new(db: DatabaseConnection) -> Self {
+    pub fn new(
+        catalog_controller: CatalogControllerRef,
+        compaction_manager: IcebergCompactionManagerRef,
+        compaction_stat_tx: UnboundedSender<IcebergSinkCompactionUpdate>,
+    ) -> Self {
         IcebergPkIndexSinkManager {
             inner: Arc::new(ManagerInner {
-                db,
+                catalog_controller,
+                compaction_manager,
                 coordinators: RwLock::new(HashMap::new()),
                 committed_epochs: PartialGraphCommittedEpochs::default(),
+                compaction_stat_tx,
             }),
         }
     }
 
-    /// Register an Iceberg pk-index sink so its commit coordinator is ready to receive epoch reports. Builds and
-    /// fully initializes the coordinator (loading the iceberg table and draining any recovered pending
-    /// commits) BEFORE inserting it, so a successful return means the sink is ready to serve. Idempotent:
-    /// registering the same `sink_id` replaces the existing coordinator.
+    /// Reserve a live catalog-backed registration before loading/replaying the coordinator.
+    /// Retirement, replacement, failure or cancellation prevents late initialization from
+    /// installing a new coordinator. Graph readiness is published separately by Barrier.
     pub async fn register_sink(
         &self,
         sink_id: SinkId,
         partial_graph_id: PartialGraphId,
-        iceberg_config: IcebergConfig,
     ) -> anyhow::Result<()> {
-        // Initialize (load + recover + drain) outside the map lock; this is the slow, fallible part.
-        let coordinator =
-            IcebergPkIndexSinkCoordinator::init(sink_id, iceberg_config, self.inner.db.clone())
-                .await?;
+        self.register_sink_with(
+            sink_id,
+            partial_graph_id,
+            IcebergPkIndexSinkCoordinator::init,
+        )
+        .await
+    }
 
-        let prev = {
-            let mut coordinators = self.inner.coordinators.write();
-            let prev = coordinators.insert(
-                sink_id,
-                (partial_graph_id, Arc::new(Mutex::new(coordinator))),
+    async fn register_sink_with<F, Fut>(
+        &self,
+        sink_id: SinkId,
+        partial_graph_id: PartialGraphId,
+        initialize: F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnOnce(SinkId, IcebergConfig, sea_orm::DatabaseConnection) -> Fut + Send,
+        Fut: Future<Output = anyhow::Result<IcebergPkIndexSinkCoordinator>> + Send,
+    {
+        let (registration, config, db) = {
+            // Deletion cannot pass the reservation. Do not reacquire the catalog read lock via
+            // CatalogController's wrapper while holding this guard.
+            let catalog = self.inner.catalog_controller.get_inner_read_guard().await;
+            let sink = catalog
+                .get_sink_by_id(sink_id)
+                .await?
+                .ok_or_else(|| anyhow!("iceberg pk-index sink {} no longer exists", sink_id))?;
+            anyhow::ensure!(
+                is_iceberg_pk_index_sink(&sink.properties),
+                "sink {} is not an iceberg pk-index sink",
+                sink_id
             );
-            // Start tracking this partial graph's committed epoch under the same write lock as the
-            // coordinator insert, so a cursor entry exists exactly while a sink is registered (and a
-            // `wait` racing an unregister can never observe a resurrected, never-advanced entry).
+            let config = build_iceberg_config(&sink)?;
+            let registration = Arc::new(IcebergPkIndexSinkRegistration {
+                ready: AtomicBool::new(false),
+                config: ArcSwap::from_pointee(config.clone()),
+            });
+            let mut coordinators = self.inner.coordinators.write();
+            Self::remove_sink(&mut coordinators, sink_id, &self.inner.committed_epochs);
+            coordinators.insert(
+                sink_id,
+                RegisteredSink {
+                    partial_graph_id,
+                    registration: registration.clone(),
+                    coordinator: None,
+                },
+            );
+            self.inner
+                .compaction_manager
+                .on_recovery_start(Some(&[sink_id]));
             self.inner.committed_epochs.ensure(partial_graph_id);
-            prev
+            (registration, config, catalog.db.clone())
         };
-        if prev.is_some() {
-            // Replacing an existing coordinator. Any in-flight commit on the old one keeps it alive via its
-            // own `Arc` until it finishes; the snapshot_id idempotency check guards against double-commit.
-            warn!(%sink_id, "iceberg pk-index sink coordinator re-registered; replacing previous instance");
+        let cleanup = scopeguard::guard(registration, |registration| {
+            let mut coordinators = self.inner.coordinators.write();
+            if coordinators
+                .get(&sink_id)
+                .is_some_and(|sink| Arc::ptr_eq(&sink.registration, &registration))
+            {
+                Self::remove_sink(&mut coordinators, sink_id, &self.inner.committed_epochs);
+            }
+        });
+        let coordinator = initialize(sink_id, config, db).await?;
+        {
+            let mut coordinators = self.inner.coordinators.write();
+            let sink = coordinators
+                .get_mut(&sink_id)
+                .filter(|sink| Arc::ptr_eq(&sink.registration, &cleanup))
+                .ok_or_else(|| {
+                    anyhow!("iceberg pk-index sink {} registration was retired", sink_id)
+                })?;
+            sink.coordinator = Some(Arc::new(Mutex::new(coordinator)));
         }
+        scopeguard::ScopeGuard::into_inner(cleanup);
         Ok(())
+    }
+
+    /// Barrier calls this only after the jobs' initial graphs and command queues are ready.
+    /// Read the settled head once, then validate and publish under the registry lock.
+    pub(crate) async fn on_jobs_ready(&self, job_ids: &HashSet<JobId>) {
+        let sinks = {
+            let coordinators = self.inner.coordinators.read();
+            coordinators
+                .iter()
+                .filter(|(sink_id, sink)| {
+                    job_ids.contains(&sink_id.as_job_id()) && !sink.registration.is_ready()
+                })
+                .filter_map(|(&sink_id, sink)| {
+                    sink.coordinator.as_ref().map(|coordinator| {
+                        (sink_id, sink.registration.clone(), coordinator.clone())
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        for (sink_id, registration, coordinator) in sinks {
+            // Do not hold the registry lock while waiting. Retain the coordinator guard through
+            // publication so commits cannot fall between observing the head and enabling updates.
+            let coordinator = coordinator.lock().await;
+            let coordinators = self.inner.coordinators.write();
+            if !coordinators
+                .get(&sink_id)
+                .is_some_and(|sink| Arc::ptr_eq(&sink.registration, &registration))
+                || registration.ready.swap(true, Ordering::AcqRel)
+            {
+                continue;
+            }
+            self.inner.compaction_manager.on_sink_ready(
+                sink_id,
+                registration,
+                coordinator.latest_observed_snapshot(),
+            );
+        }
+    }
+
+    pub(crate) fn on_sink_config_changed(&self, sink_id: SinkId, config: IcebergConfig) {
+        let mut coordinators = self.inner.coordinators.write();
+        if let Some(sink) = coordinators.get_mut(&sink_id) {
+            sink.registration.config.store(Arc::new(config));
+            if sink.registration.is_ready() {
+                self.inner
+                    .compaction_manager
+                    .on_sink_config_changed(sink_id, (*sink.registration.config()).clone());
+            }
+        }
     }
 
     /// Pre-commit one epoch, with an optional compaction overwrite folded into the same pending row.
@@ -116,7 +270,47 @@ impl IcebergPkIndexSinkManager {
     /// committed. The barrier-complete path awaits this AFTER hummock `commit_epoch`.
     pub async fn commit_epoch(&self, sink_id: SinkId) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
-        coordinator.lock().await.commit().await
+        // Keep commit completion and scheduler notifications in epoch order.
+        let mut coordinator_guard = coordinator.lock().await;
+        let result = coordinator_guard.commit().await?;
+        if let Some((observed_snapshot, has_new_data)) = result {
+            let coordinators = self.inner.coordinators.read();
+            if let Some(sink) = coordinators.get(&sink_id)
+                && sink
+                    .coordinator
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &coordinator))
+                && sink.registration.is_ready()
+            {
+                self.notify_compaction_scheduler(sink_id, Some(observed_snapshot), has_new_data);
+            }
+        }
+        drop(coordinator_guard);
+        Ok(())
+    }
+
+    fn notify_compaction_scheduler(
+        &self,
+        sink_id: SinkId,
+        observed_snapshot: Option<IcebergCommittedSnapshot>,
+        has_new_data: bool,
+    ) {
+        let Some(observed_snapshot) = observed_snapshot else {
+            return;
+        };
+        if self
+            .inner
+            .compaction_stat_tx
+            .send(IcebergSinkCompactionUpdate {
+                sink_id,
+                force_compaction: false,
+                has_new_data,
+                observed_snapshot,
+            })
+            .is_err()
+        {
+            warn!(%sink_id, "failed to notify iceberg compaction scheduler");
+        }
     }
 
     /// Advance the per-partial-graph committed epoch after a checkpoint completion.
@@ -145,30 +339,55 @@ impl IcebergPkIndexSinkManager {
         Ok(snapshot_id)
     }
 
-    /// Unregister the sink coordinators belonging to the given streaming jobs. Non-sink and unknown
-    /// job IDs are no-ops.
-    pub fn unregister_jobs(&self, job_ids: impl IntoIterator<Item = JobId>) {
+    /// Permanently retire the sinks actually removed from the catalog, including legacy sinks
+    /// which only have compaction state. Idempotent, and serialized with ready publication.
+    pub fn retire_sinks(&self, sink_ids: impl IntoIterator<Item = SinkId>) {
         let mut coordinators = self.inner.coordinators.write();
-        let mut touched_graphs = Vec::new();
-        for job_id in job_ids {
-            let sink_id = job_id.as_sink_id();
-            if let Some((partial_graph_id, _coord)) = coordinators.remove(&sink_id) {
-                touched_graphs.push(partial_graph_id);
-            }
-        }
-        // Drop a partial graph's committed-epoch cursor only once none of its sinks remain registered.
-        for partial_graph_id in touched_graphs {
-            if !coordinators.values().any(|(pg, _)| *pg == partial_graph_id) {
-                self.inner.committed_epochs.remove(partial_graph_id);
-            }
+        for sink_id in sink_ids {
+            Self::remove_sink(&mut coordinators, sink_id, &self.inner.committed_epochs);
+            self.inner
+                .compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(sink_id);
         }
     }
 
-    /// Drop every coordinator. Used at recovery time.
-    pub fn reset(&self) {
+    pub(crate) fn start_recovery(&self, job_ids: Option<&HashSet<JobId>>) {
         let mut coordinators = self.inner.coordinators.write();
-        coordinators.clear();
-        self.inner.committed_epochs.clear();
+        if let Some(job_ids) = job_ids {
+            for job_id in job_ids {
+                Self::remove_sink(
+                    &mut coordinators,
+                    job_id.as_sink_id(),
+                    &self.inner.committed_epochs,
+                );
+            }
+        } else {
+            for sink in coordinators.values() {
+                sink.registration.ready.store(false, Ordering::Release);
+            }
+            coordinators.clear();
+            self.inner.committed_epochs.clear();
+        }
+        let scope = job_ids.map(|ids| ids.iter().map(|id| id.as_sink_id()).collect::<Vec<_>>());
+        self.inner
+            .compaction_manager
+            .on_recovery_start(scope.as_deref());
+    }
+
+    fn remove_sink(
+        coordinators: &mut HashMap<SinkId, RegisteredSink>,
+        sink_id: SinkId,
+        committed_epochs: &PartialGraphCommittedEpochs,
+    ) {
+        if let Some(sink) = coordinators.remove(&sink_id) {
+            sink.registration.ready.store(false, Ordering::Release);
+            if !coordinators
+                .values()
+                .any(|other| other.partial_graph_id == sink.partial_graph_id)
+            {
+                committed_epochs.remove(sink.partial_graph_id);
+            }
+        }
     }
 
     fn coordinator(&self, sink_id: SinkId) -> anyhow::Result<CoordinatorRef> {
@@ -176,7 +395,7 @@ impl IcebergPkIndexSinkManager {
             .coordinators
             .read()
             .get(&sink_id)
-            .map(|(_pg, coord)| coord.clone())
+            .and_then(|sink| sink.coordinator.clone())
             .ok_or_else(|| {
                 anyhow!(
                     "iceberg pk-index sink coordinator for sink {} is not registered",
@@ -190,7 +409,7 @@ impl IcebergPkIndexSinkManager {
             .coordinators
             .read()
             .get(&sink_id)
-            .map(|(pg, _coord)| *pg)
+            .map(|sink| sink.partial_graph_id)
             .ok_or_else(|| {
                 anyhow!(
                     "iceberg pk-index sink coordinator for sink {} is not registered",
@@ -199,3 +418,7 @@ impl IcebergPkIndexSinkManager {
             })
     }
 }
+
+#[cfg(test)]
+#[path = "manager_test.rs"]
+mod tests;

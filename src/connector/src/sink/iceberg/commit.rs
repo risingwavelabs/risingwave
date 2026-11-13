@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::Catalog;
 use iceberg::arrow::schema_to_arrow_schema;
-use iceberg::spec::{DataFile, FormatVersion, Operation, SerializedDataFile, TableMetadata};
+use iceberg::spec::{DataFile, Operation, SerializedDataFile, TableMetadata};
 use iceberg::table::Table;
 use iceberg::transaction::{AddColumn, ApplyTransactionAction, FastAppendAction, Transaction};
 use itertools::Itertools;
@@ -253,16 +253,7 @@ pub struct IcebergSinkCommitter {
 impl IcebergSinkCommitter {
     fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
-        let metadata = self.table.metadata();
-        metadata
-            .snapshot_for_ref(&branch)
-            .map(|snapshot| IcebergCommittedSnapshot {
-                branch,
-                snapshot_id: snapshot.snapshot_id(),
-                timestamp_ms: snapshot.timestamp_ms(),
-                max_file_sequence_number: (metadata.format_version() >= FormatVersion::V2)
-                    .then_some(snapshot.sequence_number()),
-            })
+        IcebergCommittedSnapshot::from_branch_head(self.table.metadata(), &branch)
     }
 
     fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
@@ -293,6 +284,7 @@ impl IcebergSinkCommitter {
             .send(IcebergSinkCompactionUpdate {
                 sink_id: self.sink_id,
                 force_compaction,
+                has_new_data: true,
                 observed_snapshot,
             })
             .is_err()

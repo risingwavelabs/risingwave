@@ -34,12 +34,14 @@ pub use connection::{
     KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
 };
 pub use iceberg::compaction::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
+#[cfg(any(test, feature = "test"))]
+pub use iceberg::mock_catalog;
 
 mod iceberg;
 #[cfg(not(madsim))]
 mod maybe_tls_connector;
 pub mod postgres;
-
+pub mod sql_server;
 pub use iceberg::{
     IcebergCatalogKind, IcebergCatalogRuntime, IcebergCommon, IcebergTableIdentifier,
     ResolvedIcebergCatalogConfig, iceberg_java_catalog_props_from_options,
@@ -49,6 +51,5 @@ pub use postgres::{
     create_pg_client_from_properties, discover_pgvector_dimensions,
     pg_connection_config_from_properties,
 };
-
 #[cfg(test)]
 mod common_test;

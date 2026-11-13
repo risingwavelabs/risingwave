@@ -14,7 +14,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use iceberg::actions::RemoveOrphanFilesAction;
 use iceberg::spec::{FormatVersion, ManifestContentType, ManifestFile};
+use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use itertools::Itertools;
 use risingwave_connector::sink::SinkError;
@@ -27,6 +29,33 @@ use tokio::task::JoinHandle;
 use super::*;
 
 const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
+const ORPHAN_FILE_LOG_SAMPLE_SIZE: usize = 10;
+
+async fn remove_orphan_files_from_table(
+    table: Table,
+    min_age: std::time::Duration,
+) -> risingwave_connector::sink::Result<Vec<String>> {
+    // The pinned iceberg-rust action does not enforce this table-level protection.
+    // Check before discovering or deleting files, which may be shared with other tables.
+    if !table.metadata().table_properties()?.gc_enabled {
+        return Err(SinkError::Config(anyhow!(
+            "Cannot remove orphan files when gc.enabled=false: files may be shared with other tables"
+        )));
+    }
+    // The action keeps the current metadata file only when the table carries its
+    // location; without it, cleanup would delete the file the catalog points to.
+    if table.metadata_location().is_none() {
+        return Err(SinkError::Config(anyhow!(
+            "Cannot remove orphan files: current metadata location of table {} is unknown",
+            table.identifier()
+        )));
+    }
+
+    Ok(RemoveOrphanFilesAction::new(table)
+        .older_than(min_age)
+        .execute()
+        .await?)
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct ManifestRewritePlan {
@@ -161,6 +190,43 @@ impl IcebergCompactionManager {
         (join_handle, shutdown_tx)
     }
 
+    pub fn orphan_file_cleanup_loop(
+        manager: Arc<Self>,
+        interval_sec: u64,
+    ) -> (JoinHandle<()>, Sender<()>) {
+        assert!(
+            interval_sec > 0,
+            "Iceberg orphan file cleanup interval must be greater than 0"
+        );
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            tracing::info!(interval_sec, "Starting Iceberg orphan file cleanup loop");
+            let period = std::time::Duration::from_secs(interval_sec);
+            let mut interval =
+                tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(e) = manager.perform_orphan_file_cleanup().await {
+                            tracing::error!(
+                                error = ?e.as_report(),
+                                "Iceberg orphan file cleanup failed",
+                            );
+                        }
+                    },
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Iceberg orphan file cleanup loop is stopped");
+                        return;
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
+    }
+
     async fn perform_gc_operations(&self) -> MetaResult<()> {
         let (snapshot_expiration_sink_ids, manifest_rewrite_sink_ids) = {
             let guard = self.inner.read();
@@ -206,10 +272,66 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
+    async fn perform_orphan_file_cleanup(&self) -> MetaResult<()> {
+        let orphan_file_cleanup_sink_ids = {
+            let guard = self.inner.read();
+            guard
+                .orphan_file_cleanup_sink_ids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+        };
+
+        tracing::info!(
+            orphan_file_cleanup_sink_count = orphan_file_cleanup_sink_ids.len(),
+            "Starting Iceberg orphan file cleanup operations",
+        );
+
+        for sink_id in orphan_file_cleanup_sink_ids {
+            if let Err(e) = self.check_and_remove_orphan_files(sink_id).await {
+                tracing::error!(
+                    error = ?e.as_report(),
+                    %sink_id,
+                    "Failed to remove Iceberg orphan files",
+                );
+            }
+        }
+
+        tracing::info!("Iceberg orphan file cleanup operations completed");
+        Ok(())
+    }
+
+    async fn load_maintenance_config(&self, sink_id: SinkId) -> MetaResult<Option<IcebergConfig>> {
+        {
+            let guard = self.inner.read();
+            if guard.is_recovering(sink_id)
+                || guard
+                    .sink_schedules
+                    .get(&sink_id)
+                    .is_some_and(|track| !track.source_is_ready())
+            {
+                return Ok(None);
+            }
+        }
+        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        if iceberg_config.enable_pk_index
+            && !self
+                .inner
+                .read()
+                .sink_schedules
+                .get(&sink_id)
+                .is_some_and(|track| track.source_is_ready())
+        {
+            return Ok(None);
+        }
+        Ok(Some(iceberg_config))
+    }
+
     pub async fn check_and_expire_snapshots(&self, sink_id: SinkId) -> MetaResult<()> {
         let now = chrono::Utc::now().timestamp_millis();
-
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let Some(iceberg_config) = self.load_maintenance_config(sink_id).await? else {
+            return Ok(());
+        };
         if !iceberg_config.enable_snapshot_expiration {
             let mut guard = self.inner.write();
             guard.snapshot_expiration_sink_ids.remove(&sink_id);
@@ -218,6 +340,11 @@ impl IcebergCompactionManager {
 
         let active_attempt_gc_watermark_snapshot = {
             let guard = self.inner.read();
+            // The old track is discarded during recovery, but durable pending rewrites still
+            // need protection until the new coordinator has settled them.
+            if guard.is_recovering(sink_id) {
+                return Ok(());
+            }
             guard
                 .sink_schedules
                 .get(&sink_id)
@@ -326,8 +453,98 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
+    pub async fn check_and_remove_orphan_files(&self, sink_id: SinkId) -> MetaResult<()> {
+        let Some(iceberg_config) = self.load_maintenance_config(sink_id).await? else {
+            return Ok(());
+        };
+        if !iceberg_config.enable_orphan_file_cleanup {
+            self.inner
+                .write()
+                .orphan_file_cleanup_sink_ids
+                .remove(&sink_id);
+            return Ok(());
+        }
+
+        self.remove_orphan_files_with_config(sink_id, iceberg_config)
+            .await?;
+        Ok(())
+    }
+
+    /// Remove orphan files immediately, independently of the periodic cleanup switch.
+    pub async fn remove_orphan_files(&self, sink_id: SinkId) -> MetaResult<u64> {
+        let iceberg_config = self
+            .load_maintenance_config(sink_id)
+            .await?
+            .ok_or_else(|| anyhow!("iceberg sink {} is not ready for orphan cleanup", sink_id))?;
+        self.remove_orphan_files_with_config(sink_id, iceberg_config)
+            .await
+    }
+
+    async fn remove_orphan_files_with_config(
+        &self,
+        sink_id: SinkId,
+        iceberg_config: IcebergConfig,
+    ) -> MetaResult<u64> {
+        // Storage catalog relies on metadata/version-hint.text to load and
+        // commit the table, but that catalog-owned file is not tracked by
+        // Iceberg table metadata. Do not expose orphan cleanup for this catalog.
+        iceberg_config.ensure_orphan_file_cleanup_supported()?;
+
+        // Serialize scheduled and manual cleanup for the same sink. Deleting
+        // the same candidate concurrently can otherwise turn an idempotent
+        // maintenance request into a partial failure.
+        let cleanup_lock = self.orphan_file_cleanup_lock(sink_id);
+        let _cleanup_guard = cleanup_lock.lock().await;
+
+        let catalog = iceberg_config.create_catalog().await?;
+        let table_ident = iceberg_config.full_table_name()?;
+        let table = catalog
+            .load_table(&table_ident)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        let min_age_millis = iceberg_config.orphan_file_cleanup_min_age_millis();
+
+        tracing::info!(
+            iceberg_component = "orphan_file_maintenance",
+            iceberg_operation = "remove_orphan_files",
+            catalog_name = iceberg_config.catalog_name(),
+            table = %table_ident,
+            %sink_id,
+            min_age_millis,
+            "Starting Iceberg orphan file cleanup",
+        );
+
+        let orphan_files =
+            remove_orphan_files_from_table(table, std::time::Duration::from_millis(min_age_millis))
+                .await?;
+
+        let orphan_file_sample = orphan_files
+            .iter()
+            .take(ORPHAN_FILE_LOG_SAMPLE_SIZE)
+            .cloned()
+            .collect_vec();
+        let orphan_file_count = orphan_files.len() as u64;
+
+        tracing::info!(
+            iceberg_component = "orphan_file_maintenance",
+            iceberg_operation = "remove_orphan_files",
+            catalog_name = iceberg_config.catalog_name(),
+            table = %table_ident,
+            %sink_id,
+            min_age_millis,
+            orphan_file_count,
+            deleted_file_count = orphan_file_count,
+            orphan_file_sample = ?orphan_file_sample,
+            "Iceberg orphan file cleanup completed",
+        );
+
+        Ok(orphan_file_count)
+    }
+
     pub async fn check_and_rewrite_manifests(&self, sink_id: SinkId) -> MetaResult<()> {
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let Some(iceberg_config) = self.load_maintenance_config(sink_id).await? else {
+            return Ok(());
+        };
         if !iceberg_config.enable_manifest_rewrite {
             self.inner
                 .write()
@@ -630,5 +847,105 @@ mod tests {
         assert_eq!(plan.data_manifest_count, 99);
         assert_eq!(plan.selected_manifest_count, 0);
         assert_eq!(plan.estimated_output_manifest_count, 0);
+    }
+}
+
+// Iceberg's runtime and file IO need a real Tokio runtime, which madsim does not provide.
+#[cfg(all(test, not(madsim)))]
+mod orphan_file_tests {
+    use std::collections::HashMap;
+    use std::time::{Duration, SystemTime};
+
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        FormatVersion, NestedField, PrimitiveType, Schema, SortOrder, TableMetadataBuilder, Type,
+        UnboundPartitionSpec,
+    };
+    use iceberg::table::Table;
+    use iceberg::{Runtime, TableIdent};
+    use thiserror_ext::AsReport;
+
+    use super::remove_orphan_files_from_table;
+
+    async fn check_orphan_file_cleanup(
+        gc_enabled: Option<&str>,
+        with_metadata_location: bool,
+        expected_error: Option<&str>,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("file://{}", directory.path().display());
+        let properties = gc_enabled
+            .map(|value| HashMap::from([("gc.enabled".to_owned(), value.to_owned())]))
+            .unwrap_or_default();
+        let schema = Schema::builder()
+            .with_fields([
+                NestedField::required(1, "id", Type::Primitive(PrimitiveType::Long)).into(),
+            ])
+            .build()
+            .unwrap();
+        let metadata = TableMetadataBuilder::new(
+            schema,
+            UnboundPartitionSpec::default(),
+            SortOrder::unsorted_order(),
+            location.clone(),
+            FormatVersion::V2,
+            properties,
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+        let metadata_path = directory.path().join("metadata.json");
+        let old_path = directory.path().join("old.parquet");
+        let recent_path = directory.path().join("recent.parquet");
+        std::fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+        std::fs::write(&old_path, b"old orphan").unwrap();
+        std::fs::write(&recent_path, b"in-progress write").unwrap();
+        for path in [&old_path, &metadata_path] {
+            std::fs::File::open(path)
+                .unwrap()
+                .set_modified(SystemTime::now() - Duration::from_secs(8 * 24 * 3600))
+                .unwrap();
+        }
+        let mut builder = Table::builder()
+            .metadata(metadata)
+            .identifier(TableIdent::from_strs(["ns", "table"]).unwrap())
+            .file_io(FileIO::new_with_fs())
+            .runtime(Runtime::current());
+        if with_metadata_location {
+            builder = builder.metadata_location(format!("{location}/metadata.json"));
+        }
+        let table = builder.build().unwrap();
+
+        let result =
+            remove_orphan_files_from_table(table, Duration::from_secs(7 * 24 * 3600)).await;
+        match expected_error {
+            None => assert_eq!(result.unwrap(), vec![format!("{location}/old.parquet")]),
+            Some(error) => assert!(result.unwrap_err().to_report_string().contains(error)),
+        }
+        assert_eq!(old_path.exists(), expected_error.is_some());
+        assert!(recent_path.exists());
+        assert!(metadata_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_orphan_file_cleanup_respects_disabled_gc() {
+        check_orphan_file_cleanup(Some("false"), true, Some("gc.enabled")).await;
+    }
+
+    #[tokio::test]
+    async fn test_orphan_file_cleanup_rejects_invalid_gc_property() {
+        check_orphan_file_cleanup(Some("invalid"), true, Some("gc.enabled")).await;
+    }
+
+    #[tokio::test]
+    async fn test_orphan_file_cleanup_requires_metadata_location() {
+        check_orphan_file_cleanup(Some("true"), false, Some("metadata location")).await;
+    }
+
+    #[tokio::test]
+    async fn test_orphan_file_cleanup_preserves_reachable_and_recent_files() {
+        check_orphan_file_cleanup(Some("true"), true, None).await;
+        check_orphan_file_cleanup(None, true, None).await;
     }
 }

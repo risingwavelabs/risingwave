@@ -32,3 +32,127 @@
     with c as changelog from t key (missing) select * from c;
   expected_outputs:
   - binder_error
+
+- name: changelog over a singleton input
+  sql: |
+    create table t (v int);
+    create materialized view mv as select count(*) as c from t;
+    with x as changelog from mv select * from x;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+
+- id: changelog_cdc_source
+  sql: |
+    create source shared_cdc with (
+      connector = 'postgres-cdc',
+      hostname = 'localhost',
+      port = '5432',
+      username = 'postgres',
+      password = '',
+      database.name = 'db'
+    ) format plain encode json;
+    create source orders (tenant int, id int, email varchar, primary key (tenant, id))
+      with (snapshot = 'false') from shared_cdc table 'public.orders';
+  expected_outputs: []
+
+- name: upsert changelog with equal key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant, id) select * from c;
+  expected_outputs:
+  - stream_dist_plan
+
+- name: upsert changelog with subset key and pruned stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant) select email, changelog_op from c;
+  expected_outputs:
+  - stream_dist_plan
+
+- name: reject upsert changelog with non-stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (email) select * from c;
+  expected_outputs:
+  - stream_error
+
+- name: reject upsert changelog with mixed key and pruned stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant, email) select changelog_op from c;
+  expected_outputs:
+  - stream_error
+
+- name: reject upsert changelog with superset key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant, id, email) select * from c;
+  expected_outputs:
+  - stream_error
+
+- name: materialized CDC changelog permits non-stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    create materialized view orders_mv as select * from orders;
+    with c as changelog from orders_mv key (email) select * from c;
+  expected_outputs:
+  - stream_dist_plan
+
+- name: keyed changelog with a distribution subset
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (tenant)
+    select payload from c;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_stream
+  - stream_plan
+  - stream_dist_plan
+
+- name: keyed changelog with reordered equal distribution keys
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (id, TENANT)
+    select payload from c;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+
+- name: keyed changelog with a quoted distribution column
+  sql: |
+    create table t (id int primary key, "Tenant" int, payload varchar);
+    with c as changelog from t key (id, "Tenant") distributed by ("Tenant")
+    select payload from c;
+  expected_outputs:
+  - stream_plan
+
+- name: keyed changelog rejects distribution outside declared key
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (payload)
+    select * from c;
+  expected_outputs:
+  - binder_error
+
+- name: keyed changelog rejects a distribution superset
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant) distributed by (tenant, id)
+    select * from c;
+  expected_outputs:
+  - binder_error
+
+- name: keyed changelog reports all invalid distribution columns
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar, "Region" int);
+    with c as changelog from t key (tenant, id) distributed by (tenant, payload, "Region")
+    select * from c;
+  expected_outputs:
+  - binder_error

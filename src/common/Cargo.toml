@@ -96,7 +96,7 @@ serde_bytes = "0.11"
 serde_default = "0.2"
 # serde_json 1.0.147 switched from ryu to zmij
 # The former outputs `e` while the latter outputs `e+`
-serde_json = ">= 1.0.145, < 1.0.147"
+serde_json = "1.0.147"
 serde_with = "3"
 smallbitset = "0.7.1"
 smallvec = { workspace = true }
@@ -105,7 +105,7 @@ stacker = "0.1"
 static_assertions = "1"
 strum = "0.28"
 strum_macros = "0.28"
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }

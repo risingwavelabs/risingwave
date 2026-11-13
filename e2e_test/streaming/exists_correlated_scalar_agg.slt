@@ -1,0 +1,62 @@
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+create table exists_agg_sa(x int);
+
+statement ok
+create table exists_agg_sb(x int, y int);
+
+statement ok
+create materialized view exists_agg_mv as
+select * from exists_agg_sa where exists (select max(y) from exists_agg_sb where exists_agg_sb.x = exists_agg_sa.x);
+
+statement ok
+create materialized view not_exists_agg_mv as
+select * from exists_agg_sa where not exists (select max(y) from exists_agg_sb where exists_agg_sb.x = exists_agg_sa.x);
+
+statement ok
+insert into exists_agg_sa values (1), (2), (null);
+
+statement ok
+insert into exists_agg_sb values (1, 10);
+
+query I rowsort
+select * from exists_agg_mv;
+----
+1
+2
+NULL
+
+query I rowsort
+select * from not_exists_agg_mv;
+----
+
+statement ok
+insert into exists_agg_sb values (2, 20);
+
+statement ok
+delete from exists_agg_sb where x = 1;
+
+query I rowsort
+select * from exists_agg_mv;
+----
+1
+2
+NULL
+
+query I rowsort
+select * from not_exists_agg_mv;
+----
+
+statement ok
+drop materialized view exists_agg_mv;
+
+statement ok
+drop materialized view not_exists_agg_mv;
+
+statement ok
+drop table exists_agg_sa;
+
+statement ok
+drop table exists_agg_sb;

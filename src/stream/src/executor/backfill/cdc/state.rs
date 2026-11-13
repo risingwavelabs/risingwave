@@ -92,8 +92,13 @@ impl<S: StateStore> CdcBackfillState<S> {
                 };
 
                 let current_pk_pos = state[1..state_len - 3].to_vec();
+                let current_pk_pos = if current_pk_pos.iter().all(Option::is_none) {
+                    None
+                } else {
+                    Some(OwnedRow::new(current_pk_pos))
+                };
                 Ok(CdcStateRecord {
-                    current_pk_pos: Some(OwnedRow::new(current_pk_pos)),
+                    current_pk_pos,
                     is_finished,
                     last_cdc_offset: cdc_offset,
                     row_count,
@@ -111,6 +116,12 @@ impl<S: StateStore> CdcBackfillState<S> {
         row_count: u64,
         is_finished: bool,
     ) -> StreamExecutorResult<()> {
+        // An unfinished backfill without a snapshot cursor has no progress to persist.
+        // Skip it so recovery starts a fresh backfill instead of resuming from NULL PK cells.
+        if !is_finished && current_pk_pos.is_none() {
+            return Ok(());
+        }
+
         // schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(self.split_id.clone()));
@@ -136,6 +147,20 @@ impl<S: StateStore> CdcBackfillState<S> {
             }
         }
         Ok(())
+    }
+
+    /// Modify the backfill state and persist it at `new_epoch`.
+    pub async fn mutate_and_commit_state(
+        &mut self,
+        current_pk_pos: Option<OwnedRow>,
+        last_cdc_offset: Option<CdcOffset>,
+        row_count: u64,
+        is_finished: bool,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        self.mutate_state(current_pk_pos, last_cdc_offset, row_count, is_finished)
+            .await?;
+        self.commit_state(new_epoch).await
     }
 
     /// Persist the state to storage

@@ -17,6 +17,7 @@
 package com.risingwave.connector.source;
 
 import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.StatusRuntimeException;
@@ -155,6 +156,34 @@ public class SourceValidateHandler {
         }
     }
 
+    private static void validateHeartbeatTableAutoInitialize(
+            Map<String, String> props, ConnectorServiceProto.SourceType sourceType) {
+        var value = props.get(DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY);
+        if (value == null) {
+            return;
+        }
+        if (!value.equals("true") && !value.equals("false")) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'%s' must be 'true' or 'false'",
+                            DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY));
+        }
+        if (value.equals("false")) {
+            return;
+        }
+
+        switch (sourceType) {
+            case ORACLE:
+                break;
+            default:
+                throw ValidatorUtils.invalidArgument(
+                        String.format(
+                                "'%s=true' is not supported for connector '%s'",
+                                DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY,
+                                sourceType.name()));
+        }
+    }
+
     public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
@@ -168,6 +197,7 @@ public class SourceValidateHandler {
                 isBackfillTable);
 
         validateHeartbeatInterval(props);
+        validateHeartbeatTableAutoInitialize(props, request.getSourceType());
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
@@ -182,42 +212,18 @@ public class SourceValidateHandler {
                 }
                 break;
 
-            case CITUS:
-                ensureRequiredProps(props, isCdcSourceJob);
-                ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
-                ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
-                validateQueueMemoryRatio(props);
-                try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
-                    coordinatorValidator.validateDistributedTable();
-                    coordinatorValidator.validateTable();
-                }
-
-                ensurePropNotBlank(props, DbzConnectorConfig.DB_SERVERS);
-                var workerServers =
-                        StringUtils.split(props.get(DbzConnectorConfig.DB_SERVERS), ',');
-                // props extracted from grpc request, clone it to modify
-                Map<String, String> mutableProps = new HashMap<>(props);
-                for (String workerAddr : workerServers) {
-                    String[] hostPort = StringUtils.split(workerAddr, ':');
-                    if (hostPort.length != 2) {
-                        throw ValidatorUtils.invalidArgument("invalid database.servers");
-                    }
-                    // set HOST for each worker server
-                    mutableProps.put(DbzConnectorConfig.HOST, hostPort[0]);
-                    mutableProps.put(DbzConnectorConfig.PORT, hostPort[1]);
-                    try (var workerValidator = new CitusValidator(mutableProps, tableSchema)) {
-                        workerValidator.validateDbConfig();
-                        workerValidator.validateUserPrivilege();
-                    }
-                }
-
-                break;
             case MYSQL:
+            case MARIADB:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 validateQueueMemoryRatio(props);
                 try (var validator =
-                        new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
+                        new MySqlValidator(
+                                SourceTypeE.valueOf(request.getSourceType()),
+                                props,
+                                tableSchema,
+                                isCdcSourceJob,
+                                isBackfillTable)) {
                     validator.validateAll();
                 }
                 break;
@@ -251,7 +257,8 @@ public class SourceValidateHandler {
                                     DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
                 }
                 validateQueueMemoryRatio(props);
-                try (var oracleValidator = new OracleValidator(props, isCdcSourceJob)) {
+                try (var oracleValidator =
+                        new OracleValidator(props, tableSchema, isCdcSourceJob)) {
                     oracleValidator.validateAll();
                 }
                 break;

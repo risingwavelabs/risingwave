@@ -16,14 +16,8 @@
 
 package com.risingwave.connector.source.oracle;
 
-import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.connector.source.SourceTestClient;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
-import io.grpc.Grpc;
-import io.grpc.InsecureChannelCredentials;
-import io.grpc.ManagedChannel;
-import io.grpc.Server;
-import io.grpc.ServerBuilder;
 import java.sql.Connection;
 import java.time.Duration;
 import java.util.HashMap;
@@ -36,7 +30,6 @@ final class OracleTestFixture implements AutoCloseable {
     static final String CDB = "FREE";
     static final String PDB = "FREEPDB1";
     static final String SOURCE_SCHEMA = "APP";
-    static final String SOURCE_TABLE = "CUSTOMERS";
     static final String HEARTBEAT_TABLE = "RW_HEARTBEAT";
     static final String CONNECTOR_USER = "C##RW_VALIDATOR";
     static final String PASSWORD = "RwTestPass123";
@@ -47,9 +40,6 @@ final class OracleTestFixture implements AutoCloseable {
 
     private final GenericContainer<?> container;
     private final Map<String, DataSource> dataSources = new HashMap<>();
-    private Server connectorServer;
-    private ManagedChannel connectorChannel;
-    private SourceTestClient sourceTestClient;
 
     OracleTestFixture() {
         var image =
@@ -126,18 +116,6 @@ final class OracleTestFixture implements AutoCloseable {
             SourceTestClient.performQuery(pdb, "CREATE ROLE HEARTBEAT_WRITER");
             SourceTestClient.performQuery(pdb, "GRANT HEARTBEAT_WRITER TO " + CONNECTOR_USER);
         }
-        connectorServer =
-                ServerBuilder.forPort(0).addService(new ConnectorServiceImpl()).build().start();
-        connectorChannel =
-                Grpc.newChannelBuilder(
-                                "localhost:" + connectorServer.getPort(),
-                                InsecureChannelCredentials.create())
-                        .build();
-        sourceTestClient = new SourceTestClient(connectorChannel);
-    }
-
-    SourceTestClient sourceTestClient() {
-        return sourceTestClient;
     }
 
     Connection connectAsSystem(String service) {
@@ -155,10 +133,6 @@ final class OracleTestFixture implements AutoCloseable {
 
     String jdbcUrl(String service) {
         return "jdbc:oracle:thin:@//" + container.getHost() + ":" + port() + "/" + service;
-    }
-
-    Map<String, String> sourceProperties() {
-        return sourceProperties(SOURCE_TABLE);
     }
 
     Map<String, String> sourceProperties(String tableName) {
@@ -183,12 +157,6 @@ final class OracleTestFixture implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        if (connectorChannel != null) {
-            connectorChannel.shutdownNow();
-        }
-        if (connectorServer != null) {
-            connectorServer.shutdownNow();
-        }
         for (var dataSource : dataSources.values()) {
             if (dataSource instanceof AutoCloseable closeable) {
                 closeable.close();

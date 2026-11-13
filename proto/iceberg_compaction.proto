@@ -32,6 +32,12 @@ message SubscribeIcebergCompactionEventRequest {
       FAILED = 2;
       // A bounded planning attempt completed successfully and produced no plans.
       DRAINED = 3;
+      // Work exists but no complete group fits this worker's hard capacity.
+      BLOCKED_CAPACITY = 4;
+      // File statistics or planning prerequisites cannot prove a safe selection.
+      BLOCKED_STATISTICS = 5;
+      // This worker's pending queue is temporarily full, not an execution failure.
+      BUSY = 6;
     }
 
     uint64 task_id = 1;

@@ -169,7 +169,11 @@ impl HummockManager {
 
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(to_unregister).await
+        self.unregister_table_ids(to_unregister).await?;
+        self.table_change_log_progress
+            .write()
+            .retain(|progress_table_id, _| valid_ids.contains(progress_table_id));
+        Ok(())
     }
 
     /// The implementation acquires `versioning` lock.
@@ -211,6 +215,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -303,6 +308,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,

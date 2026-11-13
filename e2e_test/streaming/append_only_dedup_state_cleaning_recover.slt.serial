@@ -1,0 +1,105 @@
+# Duplicates must still be dropped after the append-only dedup state is cleaned by watermark and
+# the cache is gone, so they are checked against the cleaned state. c1 and c2 count every row their
+# dedup emits, so a key emitted twice makes them too large.
+#
+# Each insert has at most 200 rows, so that the watermark only advances between inserts.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 2;
+
+statement ok
+CREATE TABLE t (k INT, ts INT, WATERMARK FOR ts AS ts - 10) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW c1 AS SELECT count(*) AS cnt FROM (SELECT DISTINCT ON (ts, k) ts, k FROM t);
+
+statement ok
+CREATE MATERIALIZED VIEW c2 AS SELECT count(*) AS cnt FROM (SELECT DISTINCT ON (k, ts) k, ts FROM t);
+
+let c1_tname
+SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 'c1' AND name LIKE '%appendonlydedup%';
+
+let c2_tname
+SELECT name FROM rw_catalog.rw_internal_table_info WHERE job_name = 'c2' AND name LIKE '%appendonlydedup%';
+
+# ts 0..29, watermark 19.
+statement ok
+INSERT INTO t SELECT k, ts FROM generate_series(0, 9) AS k(k), generate_series(0, 19) AS ts(ts);
+
+statement ok
+INSERT INTO t SELECT k, ts FROM generate_series(0, 9) AS k(k), generate_series(10, 29) AS ts(ts);
+
+query II
+SELECT (SELECT cnt FROM c1), (SELECT cnt FROM c2);
+----
+300 300
+
+# Only keys at or above the watermark are left, including the ones on it.
+query II retry 30 backoff 1s
+SELECT count(*), min(t_ts) FROM ${c1_tname};
+----
+110 19
+
+query II retry 30 backoff 1s
+SELECT count(*), min(t_ts) FROM ${c2_tname};
+----
+110 19
+
+statement ok
+RECOVER;
+
+statement ok
+WAIT;
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Duplicates of live keys, starting exactly at the watermark.
+statement ok
+INSERT INTO t SELECT k, ts FROM generate_series(0, 9) AS k(k), generate_series(19, 29) AS ts(ts);
+
+query II
+SELECT (SELECT cnt FROM c1), (SELECT cnt FROM c2);
+----
+300 300
+
+# ts 0..39, watermark 29.
+statement ok
+INSERT INTO t SELECT k, ts FROM generate_series(0, 9) AS k(k), generate_series(20, 39) AS ts(ts);
+
+query II
+SELECT (SELECT cnt FROM c1), (SELECT cnt FROM c2);
+----
+400 400
+
+query I
+SELECT count(*) FROM (SELECT DISTINCT ts, k FROM t);
+----
+400
+
+query II retry 30 backoff 1s
+SELECT count(*), min(t_ts) FROM ${c1_tname};
+----
+110 29
+
+query II retry 30 backoff 1s
+SELECT count(*), min(t_ts) FROM ${c2_tname};
+----
+110 29
+
+statement ok
+DROP MATERIALIZED VIEW c1;
+
+statement ok
+DROP MATERIALIZED VIEW c2;
+
+statement ok
+DROP TABLE t;
+
+statement ok
+SET streaming_parallelism = default;

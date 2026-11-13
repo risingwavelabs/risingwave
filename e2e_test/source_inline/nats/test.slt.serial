@@ -50,26 +50,16 @@ create table t_nats_1 ( i int ) with (
   consumer.max_ack_pending = '100000')
 format plain encode json;
 
-statement ok
-select * from t_nats;
-
-sleep 3s
-
-statement ok
-flush;
-
 # at least once
 query T retry 3 backoff 5s
 select count(*) >= 100 from t_nats;
 ----
 t
 
-
 query T retry 3 backoff 5s
 select count(*) >= 100 from t_nats_1;
 ----
 t
-
 
 system ok retry 3 backoff 5s
 python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 4
@@ -82,11 +72,6 @@ alter table t_nats set PARALLELISM to 6;
 
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
-
-sleep 4s
-
-statement ok
-flush;
 
 query T retry 3 backoff 5s
 select count(*) >= 200 from t_nats;
@@ -104,11 +89,6 @@ alter table t_nats set PARALLELISM to 2;
 
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
-
-sleep 4s
-
-statement ok
-flush;
 
 query T retry 3 backoff 5s
 select count(*) >= 300 from t_nats;
@@ -151,21 +131,13 @@ with (
   consumer.max_ack_pending = '100000')
 format plain encode json;
 
-statement ok
-select * from t_nats;
-
-sleep 3s
-
-statement ok
-flush;
-
-query I rowsort
+query T rowsort retry 3 backoff 5s
 select distinct "_rw_nats_subject" from t_nats;
 ----
 testsubject1
 testsubject2
 
-query T
+query T retry 3 backoff 5s
 select count(distinct "_rw_nats_offset") >= 200 from t_nats;
 ----
 t
@@ -201,14 +173,6 @@ with (
   stream='teststreamheader',
   consumer.max_ack_pending = '100000')
 format plain encode json;
-
-statement ok
-select * from t_nats;
-
-sleep 3s
-
-statement ok
-flush;
 
 query T rowsort retry 3 backoff 5s
 select distinct foo_str from t_nats;

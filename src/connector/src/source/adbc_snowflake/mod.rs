@@ -25,9 +25,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::array::arrow::{
-    Arrow58FromArrow, arrow_array_58 as arrow, arrow_schema_58 as arrow_schema,
-};
+use risingwave_common::array::arrow::{arrow_array_58 as arrow, from_arrow58_record_batch};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -41,27 +39,6 @@ use crate::source::{
 pub const ADBC_SNOWFLAKE_CONNECTOR: &str = "adbc_snowflake";
 
 mod schema;
-
-#[derive(Default)]
-pub struct AdbcSnowflakeArrowConvert;
-
-impl Arrow58FromArrow for AdbcSnowflakeArrowConvert {}
-
-impl AdbcSnowflakeArrowConvert {
-    pub fn chunk_from_record_batch(
-        &self,
-        batch: &arrow::RecordBatch,
-    ) -> Result<risingwave_common::array::DataChunk, risingwave_common::array::ArrayError> {
-        Arrow58FromArrow::from_record_batch(self, batch)
-    }
-
-    pub fn type_from_field(
-        &self,
-        field: &arrow_schema::Field,
-    ) -> Result<risingwave_common::types::DataType, risingwave_common::array::ArrayError> {
-        Arrow58FromArrow::from_field(self, field)
-    }
-}
 
 /// Properties for ADBC Snowflake source connector.
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
@@ -440,14 +417,12 @@ impl AdbcSnowflakeSplitReader {
         // Execute the query and get a record batch reader
         let reader = statement.execute().context("Failed to execute query")?;
 
-        let converter = AdbcSnowflakeArrowConvert;
-
         // Iterate over the record batches and convert them to StreamChunks
         for batch_result in reader {
             let batch = batch_result.context("Failed to read record batch")?;
 
-            // Convert Arrow RecordBatch to RisingWave DataChunk using the converter
-            let data_chunk = converter.chunk_from_record_batch(&batch)?;
+            // Convert Arrow RecordBatch to RisingWave DataChunk
+            let data_chunk = from_arrow58_record_batch(&batch)?;
 
             // Convert DataChunk to StreamChunk (all inserts)
             let stream_chunk = StreamChunk::from_parts(

@@ -25,11 +25,11 @@ use futures::future::{BoxFuture, join, join_all};
 use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
-    PbRefreshFinishedActor,
+    PbLocalSstableInfo, PbTableChangeLogProgress,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -73,8 +73,10 @@ use crate::executor::Barrier;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::barrier_worker::managed_state::{
-    ManagedBarrierStateDebugInfo, ManagedBarrierStateEvent, PartialGraphState, PartialGraphStatus,
+    EpochBarrierEvent, ManagedBarrierStateDebugInfo, ManagedBarrierStateEvent, PartialGraphState,
+    PartialGraphStatus,
 };
+use crate::task::progress::TableChangeLogProgress;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -85,26 +87,83 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 pub struct BarrierCompleteResult {
     /// The result returned from `sync` of `StateStore`.
     pub sync_result: Option<SyncResult>,
+    pub(crate) event: EpochBarrierEvent,
+}
 
-    /// The updated creation progress of materialized view after this barrier.
-    pub create_mview_progress: Vec<PbCreateMviewProgress>,
+type TableChangeLogSubscriberKey = (FragmentId, TableId, TableId);
 
-    /// The source IDs that have finished listing data for refreshable batch sources.
-    pub list_finished_source_ids: Vec<PbListFinishedSource>,
+struct LocalTableChangeLogProgress {
+    vnode_bitmap: Bitmap,
+    min_truncate_epoch: u64,
+}
 
-    /// The source IDs that have finished loading data for refreshable batch sources.
-    pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
+fn aggregate_table_change_log_progress(
+    reports: Vec<TableChangeLogProgress>,
+) -> Vec<PbTableChangeLogProgress> {
+    let mut aggregated = HashMap::<TableChangeLogSubscriberKey, LocalTableChangeLogProgress>::new();
+    let mut invalid = HashSet::new();
 
-    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+    for report in reports {
+        let key = (
+            report.fragment_id,
+            report.upstream_table_id,
+            report.progress_table_id,
+        );
+        if !report.vnode_bitmap.any() {
+            warn!(
+                actor_id = %report.actor_id,
+                fragment_id = %report.fragment_id,
+                upstream_table_id = %report.upstream_table_id,
+                progress_table_id = %report.progress_table_id,
+                "ignore empty table change log progress vnode bitmap"
+            );
+            invalid.insert(key);
+            continue;
+        }
 
-    /// CDC sources that have updated their offset at least once.
-    pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+        match aggregated.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(LocalTableChangeLogProgress {
+                    vnode_bitmap: (*report.vnode_bitmap).clone(),
+                    min_truncate_epoch: report.truncate_epoch,
+                });
+            }
+            Entry::Occupied(mut entry) => {
+                let progress = entry.get_mut();
+                if progress.vnode_bitmap.len() != report.vnode_bitmap.len()
+                    || (&progress.vnode_bitmap & &*report.vnode_bitmap).any()
+                {
+                    warn!(
+                        actor_id = %report.actor_id,
+                        fragment_id = %report.fragment_id,
+                        upstream_table_id = %report.upstream_table_id,
+                        progress_table_id = %report.progress_table_id,
+                        "ignore inconsistent table change log progress vnode ownership"
+                    );
+                    invalid.insert(key);
+                    continue;
+                }
+                progress.vnode_bitmap |= &*report.vnode_bitmap;
+                progress.min_truncate_epoch =
+                    progress.min_truncate_epoch.min(report.truncate_epoch);
+            }
+        }
+    }
 
-    /// Iceberg pk-index sink metadata reports collected during this barrier.
-    pub iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
-
-    /// The materialize actors that have finished their part of a table refresh.
-    pub refresh_finished_actors: Vec<PbRefreshFinishedActor>,
+    aggregated
+        .into_iter()
+        .filter_map(
+            |(key @ (fragment_id, upstream_table_id, progress_table_id), progress)| {
+                (!invalid.contains(&key)).then(|| PbTableChangeLogProgress {
+                    fragment_id,
+                    upstream_table_id,
+                    progress_table_id,
+                    min_truncate_epoch: progress.min_truncate_epoch,
+                    vnode_bitmap: Some(progress.vnode_bitmap.to_protobuf()),
+                })
+            },
+        )
+        .collect()
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -412,7 +471,7 @@ impl LocalBarrierWorker {
                 (partial_graph_id, barrier, result) = Self::next_completed_epoch(&mut self.await_epoch_completed_futures) => {
                     match result {
                         Ok(result) => {
-                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
+                            self.on_epoch_completed(partial_graph_id, result);
                         }
                         Err(err) => {
                             // TODO: may only report as partial graph failure instead of reset the stream
@@ -628,32 +687,21 @@ mod await_epoch_completed_future {
     use futures::FutureExt;
     use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-        PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
-        PbRefreshFinishedActor,
-    };
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
+    use crate::task::barrier_worker::managed_state::EpochBarrierEvent;
     use crate::task::{BarrierCompleteResult, await_tree_key};
 
     pub(super) type AwaitEpochCompletedFuture =
         impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
-    #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
-        create_mview_progress: Vec<PbCreateMviewProgress>,
-        list_finished_source_ids: Vec<PbListFinishedSource>,
-        load_finished_source_ids: Vec<PbLoadFinishedSource>,
-        cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
-        cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
-        iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
-        refresh_finished_actors: Vec<PbRefreshFinishedActor>,
+        event: EpochBarrierEvent,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -667,16 +715,7 @@ mod await_epoch_completed_future {
         .map(move |result| {
             (
                 barrier,
-                result.map(|sync_result| BarrierCompleteResult {
-                    sync_result,
-                    create_mview_progress,
-                    list_finished_source_ids,
-                    load_finished_source_ids,
-                    cdc_table_backfill_progress,
-                    cdc_source_offset_updated,
-                    iceberg_pk_index_sink_metadata,
-                    refresh_finished_actors,
-                }),
+                result.map(|sync_result| BarrierCompleteResult { sync_result, event }),
             )
         });
         if let Some(reg) = barrier_await_tree_reg {
@@ -693,7 +732,6 @@ mod await_epoch_completed_future {
 }
 
 use await_epoch_completed_future::*;
-use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
@@ -746,13 +784,7 @@ impl LocalBarrierWorker {
             let BarrierToComplete {
                 barrier,
                 table_ids,
-                create_mview_progress,
-                list_finished_source_ids,
-                load_finished_source_ids,
-                cdc_table_backfill_progress,
-                cdc_source_offset_updated,
-                iceberg_pk_index_sink_metadata,
-                refresh_finished_actors,
+                event,
             } = graph_state.pop_barrier_to_complete(prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
@@ -782,13 +814,7 @@ impl LocalBarrierWorker {
                         complete_barrier_future,
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
-                        create_mview_progress,
-                        list_finished_source_ids,
-                        load_finished_source_ids,
-                        cdc_table_backfill_progress,
-                        cdc_source_offset_updated,
-                        iceberg_pk_index_sink_metadata,
-                        refresh_finished_actors,
+                        event,
                     )
                 });
         }
@@ -797,19 +823,30 @@ impl LocalBarrierWorker {
     fn on_epoch_completed(
         &mut self,
         partial_graph_id: PartialGraphId,
-        epoch: u64,
         result: BarrierCompleteResult,
     ) {
-        let BarrierCompleteResult {
+        let BarrierCompleteResult { sync_result, event } = result;
+        let EpochBarrierEvent {
+            epoch: event_epoch,
             create_mview_progress,
-            sync_result,
+            table_change_log_progress,
             list_finished_source_ids,
             load_finished_source_ids,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
             refresh_finished_actors,
-        } = result;
+        } = event;
+        let create_mview_progress = create_mview_progress
+            .into_iter()
+            .map(|(actor, (fragment_id, state))| state.to_pb(fragment_id, actor))
+            .collect();
+        let table_change_log_progress =
+            aggregate_table_change_log_progress(table_change_log_progress);
+        let cdc_table_backfill_progress = cdc_table_backfill_progress
+            .into_iter()
+            .map(|(actor, state)| state.to_pb(actor, event_epoch.curr))
+            .collect();
 
         let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
             .map(|sync_result| {
@@ -828,9 +865,10 @@ impl LocalBarrierWorker {
                     BarrierCompleteResponse {
                         request_id: "todo".to_owned(),
                         partial_graph_id,
-                        epoch,
+                        epoch: event_epoch.prev,
                         status: None,
                         create_mview_progress,
+                        table_change_log_progress,
                         synced_sstables: synced_sstables
                             .into_iter()
                             .map(

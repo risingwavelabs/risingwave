@@ -1,0 +1,34 @@
+name: Debezium Submodule Check
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [ main ]
+  merge_group:
+    types: [ checks_requested ]
+
+jobs:
+  check:
+    name: Debezium submodule is merged in the fork
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that the submodule commit is on the fork branch
+        run: |
+          set -euo pipefail
+
+          url="$(git config -f .gitmodules submodule.java/debezium.url)"
+          branch="$(git config -f .gitmodules submodule.java/debezium.branch)"
+          commit="$(git ls-tree HEAD java/debezium | awk '{print $3}')"
+
+          git init -q fork
+          git -C fork fetch -q --filter=tree:0 "${url}" "refs/heads/${branch}"
+
+          if git -C fork merge-base --is-ancestor "${commit}" FETCH_HEAD 2>/dev/null; then
+            echo "java/debezium points at ${commit}, which is on the ${branch} branch of ${url}"
+          else
+            echo "::error::java/debezium points at ${commit}, which is not on the ${branch} branch of ${url}. Merge the Debezium fork PR first, then point the submodule at its merge commit."
+            exit 1
+          fi

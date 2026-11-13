@@ -18,10 +18,12 @@ mod fs_fetch;
 
 use std::collections::BTreeMap;
 
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 pub use trad_source::create_source_desc_builder;
 
 use super::*;
@@ -38,4 +40,32 @@ fn is_full_reload_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
         .as_ref()
         .map(|refresh_mode| matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_))))
         .unwrap_or(false)
+}
+
+/// Whether the List and Fetch executors of an Iceberg source run in streaming update mode.
+/// Both read the same plaintext option, so they cannot disagree on the mode.
+fn iceberg_update_mode(
+    with_properties: &BTreeMap<String, String>,
+    refresh_mode: &Option<SourceRefreshMode>,
+    rate_limit: Option<u32>,
+    row_id_index: Option<u32>,
+    stream_kind: StreamKind,
+) -> StreamResult<bool> {
+    if !with_properties.is_iceberg_update_source() {
+        return Ok(false);
+    }
+    // Retract is also the protobuf default for legacy plans, so it does not imply opt-in.
+    if is_full_reload_refresh(refresh_mode) || stream_kind != StreamKind::Retract {
+        return Err(anyhow::anyhow!(
+            "Iceberg streaming_updates requires a retracting, non-refresh graph"
+        )
+        .into());
+    }
+    if rate_limit.is_some() || row_id_index.is_some() {
+        return Err(anyhow::anyhow!(
+            "Iceberg streaming_updates cannot use generated row IDs or rate limiting"
+        )
+        .into());
+    }
+    Ok(true)
 }

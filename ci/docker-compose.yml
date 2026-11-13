@@ -37,6 +37,27 @@ services:
       timeout: 5s
       retries: 5
 
+  mariadb:
+    image: mariadb:11.4
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --log-bin=mariadb-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --server-id=4101
+      - --binlog-legacy-event-pos=ON
+    ports:
+      - 3306
+    environment:
+      - MARIADB_ROOT_PASSWORD=123456
+      - MARIADB_DATABASE=risedev
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   moto:
     image: motoserver/moto:5.0.3
     ports:
@@ -235,8 +256,12 @@ services:
   source-cdc-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
+      oracle:
+        condition: service_started
       mysql:
         condition: service_started
+      mariadb:
+        condition: service_healthy
       sqlserver-server:
         condition: service_started
       db:
@@ -574,7 +599,7 @@ services:
       - 9201:9200
 
   clickhouse-server:
-    image: clickhouse/clickhouse-server:25.5
+    image: clickhouse/clickhouse-server:26.9
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -614,6 +639,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  oracle:
+    image: container-registry.oracle.com/database/free:23.9.0.0
+    ports:
+      - "1521"
+    environment:
+      ORACLE_PWD: "OracleTest123"
+      ENABLE_ARCHIVELOG: "true"
+    shm_size: 1g
 
   sqlserver-server:
     image: mcr.microsoft.com/mssql/server:2022-latest

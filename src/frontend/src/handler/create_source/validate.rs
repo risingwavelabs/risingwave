@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
 
 use super::*;
@@ -80,24 +81,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 BATCH_POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
                 ),
-                MYSQL_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
-                POSTGRES_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
-                ORACLE_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
-                MONGODB_CDC_CONNECTOR => hashmap!(
-                    Format::DebeziumMongo => vec![Encode::Json],
-                ),
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Bytes],
                 ),
@@ -113,51 +96,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ADBC_SNOWFLAKE_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
                 ),
-                SQL_SERVER_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
         ))
     });
-
-fn validate_license(connector: &str) -> Result<()> {
-    if connector == SQL_SERVER_CDC_CONNECTOR {
-        Feature::SqlServerCdcSource.check_available()?;
-    }
-    Ok(())
-}
-
-fn validate_decimal_handling_mode(props: &BTreeMap<String, String>) -> Result<()> {
-    if let Some(mode) = props.get("debezium.decimal.handling.mode")
-        && mode != "string"
-    {
-        return Err(RwError::from(ProtocolError(format!(
-            "'debezium.decimal.handling.mode' must be 'string', got: '{mode}'"
-        ))));
-    }
-    Ok(())
-}
-
-/// Requires an explicitly supplied heartbeat interval to be a positive signed 32-bit integer.
-/// Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`.
-/// Validates user-supplied options, not the final Debezium configuration. On CREATE, an omitted
-/// interval uses the connector default; on ALTER, omission leaves the existing interval unchanged.
-/// Unrelated connector heartbeat mechanisms are not checked here.
-pub fn validate_heartbeat_interval(props: &BTreeMap<String, String>) -> Result<()> {
-    let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
-        return Ok(());
-    };
-
-    // Match Java's ASCII integer syntax and Debezium's signed 32-bit range.
-    if !value.parse::<i32>().is_ok_and(|interval| interval > 0) {
-        return Err(ErrorCode::InvalidParameterValue(format!(
-            "'debezium.heartbeat.interval.ms' must be a positive integer, got: '{value}'"
-        ))
-        .into());
-    }
-    Ok(())
-}
 
 /// Returns whether the Pulsar schema is used. The Pulsar schema options themselves are validated by
 /// `PulsarSchemaConfig::from_options` when building the parser config. Only the connector and
@@ -167,18 +107,16 @@ fn validate_pulsar_schema_options(
     connector: &str,
 ) -> Result<bool> {
     let options = WithOptions::try_from(format_encode.row_options())?;
-    if !options.contains_key(PULSAR_SCHEMA_URL_KEY)
-        && !options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
-    {
+    if !uses_pulsar_schema(&options, options.secret_ref()) {
         return Ok(false);
     }
 
     if connector != PULSAR_CONNECTOR
         || format_encode.format != Format::Plain
-        || format_encode.row_encode != Encode::Avro
+        || !matches!(format_encode.row_encode, Encode::Avro | Encode::Json)
     {
         return Err(RwError::from(ProtocolError(format!(
-            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO"
+            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO or JSON"
         ))));
     }
 
@@ -192,6 +130,24 @@ pub fn validate_compatibility(
     let mut connector = props
         .get_connector()
         .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_owned())))?;
+    let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
+
+    let protocol_error = |e: ConnectorError| RwError::from(ProtocolError(e.to_report_string()));
+    dispatch_cdc_source_type!(
+        props.cdc_source_type(),
+        T,
+        {
+            T::check_license()?;
+            T::check_format_encode(
+                format_to_prost(&format_encode.format),
+                row_encode_to_prost(&format_encode.row_encode),
+            )
+            .map_err(protocol_error)?;
+            T::check_and_fill_create_with_options(props).map_err(protocol_error)?;
+            return Ok(());
+        },
+        {}
+    );
 
     if connector == OPENDAL_S3_CONNECTOR {
         // reject s3_v2 creation
@@ -217,14 +173,6 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
-
-    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
-    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
-    // override must retain the common `string` default from `debezium.properties`.
-    validate_decimal_handling_mode(props)?;
-
-    validate_license(&connector)?;
-    let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
     if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
@@ -257,91 +205,7 @@ pub fn validate_compatibility(
             connector, format_encode.format, format_encode.row_encode
         ))));
     }
-
-    if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
-        match props.get("slot.name") {
-            None => {
-                // Build a random slot name with UUID
-                // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-                let uuid = uuid::Uuid::new_v4();
-                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid.simple()));
-            }
-            Some(slot_name) => {
-                // please refer to
-                // - https://github.com/debezium/debezium/blob/97956ce25b7612e3413d363658661896b7d2e0a2/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java#L1179
-                // - https://doxygen.postgresql.org/slot_8c.html#afac399f07320b9adfd2c599cf822aaa3
-                if !slot_name
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                    || slot_name.len() > 63
-                {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "Invalid replication slot name: {:?}. Valid replication slot name must contain only digits, lowercase characters and underscores with length <= 63",
-                        slot_name
-                    ))));
-                }
-            }
-        }
-
-        if !props.contains_key("schema.name") {
-            // Default schema name is "public"
-            props.insert("schema.name".into(), "public".into());
-        }
-        if !props.contains_key("publication.name") {
-            // Build a random publication name with UUID to avoid conflicts between sources
-            // e.g. "rw_publication_f9a3567e6dd54bf5900444c8b1c03815"
-            let uuid = uuid::Uuid::new_v4();
-            props.insert(
-                "publication.name".into(),
-                format!("rw_publication_{}", uuid.simple()),
-            );
-        }
-        if !props.contains_key("publication.create.enable") {
-            // Default auto create publication if doesn't exist
-            props.insert("publication.create.enable".into(), "true".into());
-        }
-    }
-
-    if connector == SQL_SERVER_CDC_CONNECTOR && !props.contains_key("schema.name") {
-        // Default schema name is "dbo"
-        props.insert("schema.name".into(), "dbo".into());
-    }
-
-    // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
-    if (connector == MYSQL_CDC_CONNECTOR
-        || connector == POSTGRES_CDC_CONNECTOR
-        || connector == CITUS_CDC_CONNECTOR
-        || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR
-        || connector == ORACLE_CDC_CONNECTOR)
-        && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
-        && timeout_value.parse::<u32>().is_err()
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
-            config_value: timeout_value.to_owned(),
-        }
-        .into());
-    }
-
-    // Validate debezium.max.queue.size for all CDC connectors
-    if (connector == MYSQL_CDC_CONNECTOR
-        || connector == POSTGRES_CDC_CONNECTOR
-        || connector == CITUS_CDC_CONNECTOR
-        || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR
-        || connector == ORACLE_CDC_CONNECTOR)
-        && let Some(queue_size_value) = props.get("debezium.max.queue.size")
-        && queue_size_value.parse::<u32>().is_err()
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.max.queue.size".to_owned(),
-            config_value: queue_size_value.to_owned(),
-        }
-        .into());
-    }
-
-    validate_heartbeat_interval(props)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -376,16 +240,18 @@ mod tests {
     }
 
     #[test]
-    fn pulsar_schema_accepts_minimal_plain_avro_options() {
-        let format_encode = format_encode(
-            Format::Plain,
-            Encode::Avro,
-            &[
-                (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
-                (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
-            ],
-        );
-        validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+    fn pulsar_schema_accepts_minimal_plain_avro_and_json_options() {
+        for encode in [Encode::Avro, Encode::Json] {
+            let format_encode = format_encode(
+                Format::Plain,
+                encode,
+                &[
+                    (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
+                    (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
+                ],
+            );
+            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+        }
     }
 
     #[test]
@@ -393,8 +259,9 @@ mod tests {
         for (connector, format, encode) in [
             (KAFKA_CONNECTOR, Format::Plain, Encode::Avro),
             (PULSAR_CONNECTOR, Format::Upsert, Encode::Avro),
+            (KAFKA_CONNECTOR, Format::Plain, Encode::Json),
+            (PULSAR_CONNECTOR, Format::Upsert, Encode::Json),
             (PULSAR_CONNECTOR, Format::Plain, Encode::Protobuf),
-            (PULSAR_CONNECTOR, Format::Plain, Encode::Json),
         ] {
             let format_encode = format_encode(
                 format,
@@ -404,7 +271,7 @@ mod tests {
             let error =
                 validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
             assert!(error.to_string().contains(
-                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO or JSON"
             ));
         }
     }

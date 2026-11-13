@@ -94,7 +94,9 @@ use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
-use crate::rpc::metrics::{GLOBAL_META_METRICS, start_info_monitor, start_worker_info_monitor};
+use crate::rpc::metrics::{
+    GLOBAL_META_METRICS, init_meta_metrics, start_info_monitor, start_worker_info_monitor,
+};
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
@@ -192,6 +194,8 @@ pub async fn rpc_serve_with_store(
     session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
+    init_meta_metrics(server_config.metrics_level);
+
     // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
@@ -458,7 +462,7 @@ pub async fn start_service_as_election_leader(
         env.meta_store_ref().conn.clone(),
         hummock_manager.clone(),
         metadata_manager.clone(),
-        iceberg_compaction_stat_tx,
+        iceberg_compaction_stat_tx.clone(),
         env.await_tree_reg().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
@@ -474,10 +478,6 @@ pub async fn start_service_as_election_leader(
         env.session_params_manager_impl_ref(),
     ));
 
-    let iceberg_pk_index_sink_manager =
-        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
-    tracing::info!("IcebergPkIndexSinkManager started");
-
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
@@ -486,7 +486,15 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
+        barrier_scheduler.clone(),
     );
+
+    let iceberg_pk_index_sink_manager = IcebergPkIndexSinkManager::new(
+        metadata_manager.catalog_controller.clone(),
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_tx,
+    );
+    tracing::info!("IcebergPkIndexSinkManager started");
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
         iceberg_compaction_mgr.clone(),
@@ -497,6 +505,16 @@ pub async fn start_service_as_election_leader(
         iceberg_compaction_mgr.clone(),
         env.opts.iceberg_gc_interval_sec,
     ));
+    sub_tasks.push(IcebergCompactionManager::orphan_file_cleanup_loop(
+        iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_orphan_file_cleanup_interval_sec,
+    ));
+
+    if env.opts.iceberg_compaction_schedule_on_startup {
+        sub_tasks.push(IcebergCompactionManager::schedule_on_startup_task(
+            iceberg_compaction_mgr.clone(),
+        ));
+    }
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -514,6 +532,7 @@ pub async fn start_service_as_election_leader(
     .await?;
     sub_tasks.push((refresh_handle, refresh_shutdown));
 
+    let (initial_workers_tx, initial_workers_rx) = tokio::sync::oneshot::channel();
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
@@ -523,9 +542,9 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         iceberg_pk_index_sink_manager.clone(),
-        iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
         refresh_manager.clone(),
+        initial_workers_tx,
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
@@ -546,7 +565,8 @@ pub async fn start_service_as_election_leader(
             hummock_manager.clone(),
             source_manager.clone(),
             refresh_manager.clone(),
-            iceberg_compaction_mgr.clone(),
+            sink_manager.clone(),
+            iceberg_pk_index_sink_manager.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
@@ -634,7 +654,7 @@ pub async fn start_service_as_election_leader(
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
+        opts.sql_option_redaction.clone(),
         env.system_params_manager_impl_ref(),
     ));
 
@@ -745,7 +765,7 @@ pub async fn start_service_as_election_leader(
         ));
 
         if !env.opts.disable_automatic_parallelism_control {
-            sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
+            sub_tasks.push(stream_manager.start_auto_parallelism_monitor(initial_workers_rx));
         }
     }
 
@@ -810,14 +830,24 @@ pub async fn start_service_as_election_leader(
         .add_service(
             HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
         )
-        .add_service(NotificationServiceServer::new(notification_srv))
+        // Compress notifications with zstd for clients that accept it (older clients still
+        // get uncompressed responses). The initial `MetaSnapshot` carries the full hummock
+        // version; uncompressed messages larger than `i32::MAX` bytes are silently reset by
+        // hyper/h2, so compression keeps large snapshots deliverable.
+        .add_service(
+            NotificationServiceServer::new(notification_srv)
+                .send_compressed(tonic::codec::CompressionEncoding::Zstd),
+        )
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
-        .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(
+            BackupServiceServer::new(backup_srv)
+                .send_compressed(tonic::codec::CompressionEncoding::Zstd),
+        )
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))

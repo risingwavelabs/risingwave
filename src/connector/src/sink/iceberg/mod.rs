@@ -23,6 +23,7 @@ mod engine_options;
 mod metadata;
 #[cfg(any(test, madsim))]
 pub mod mock_v3_catalog_registry;
+mod pk_index_file;
 mod position_delete;
 mod prometheus;
 mod writer;
@@ -38,6 +39,7 @@ pub use create_table::*;
 pub use engine_options::*;
 use iceberg::table::Table;
 pub use metadata::*;
+pub use pk_index_file::*;
 pub use position_delete::*;
 use risingwave_common::bail;
 use risingwave_common::license::Feature;
@@ -152,6 +154,10 @@ impl IcebergSink {
         create_and_validate_table_impl(&self.config, &self.param).await
     }
 
+    async fn create_and_load_table(&self) -> Result<Table> {
+        create_and_load_table_impl(&self.config, &self.param).await
+    }
+
     /// Returns `true` if this call created the table, `false` if it already existed.
     pub async fn create_table_if_not_exists(&self) -> Result<bool> {
         create_table_if_not_exists_impl(&self.config, &self.param).await
@@ -225,6 +231,12 @@ impl Sink for IcebergSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        if self.config.enable_pk_index {
+            Feature::IcebergSinkWithPkIndex
+                .check_available()
+                .map_err(|e| anyhow!(e))?;
+        }
+
         let catalog_kind = self.config.catalog_kind()?;
         if matches!(catalog_kind, IcebergCatalogKind::Snowflake) {
             bail!("Snowflake catalog only supports iceberg sources");
@@ -279,6 +291,25 @@ impl Sink for IcebergSink {
         config: &BTreeMap<String, String>,
         alter_props: &BTreeMap<String, String>,
     ) -> Result<()> {
+        let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
+        if iceberg_config.enable_pk_index {
+            // PK-index executors do not rebuild their writers on ConnectorPropsChange.
+            // Maintenance options and commit intervals are consumed by Meta, but accepting
+            // writer options here would leave the writer and persisted configuration out of sync.
+            // The ordinary sink's backlog and delete-file-count knobs also have no consumer
+            // in the PK-index path, which selects by delete ratio.
+            for key in [
+                COMPACTION_MAX_SNAPSHOTS_NUM,
+                COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
+                COMPACTION_WRITE_PARQUET_COMPRESSION,
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+            ] {
+                if alter_props.contains_key(key) {
+                    bail!("altering `{key}` is not supported for Iceberg sinks with PK index");
+                }
+            }
+        }
         let compaction_type_changed = alter_props.contains_key(COMPACTION_TYPE);
         let compaction_options_changed = compaction_type_changed
             || alter_props.contains_key(COMPACTION_SMALL_FILES_THRESHOLD_MB)
@@ -288,7 +319,6 @@ impl Sink for IcebergSink {
             .is_some_and(|value| value.eq_ignore_ascii_case("true"));
 
         if compaction_options_changed || enabling_compaction {
-            let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
             let validate_explicit_type = compaction_type_changed
                 || (enabling_compaction
                     && iceberg_config.write_mode == IcebergWriteMode::MergeOnRead);
@@ -406,7 +436,11 @@ impl Sink for IcebergSink {
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<SinkCommitCoordinator> {
         let catalog = self.config.create_catalog().await?;
-        let table = self.create_and_validate_table().await?;
+        // Do not require the current Iceberg schema to match `self.param` here. During recovery,
+        // `self.param` may already include a sink schema change that is still pending in the meta
+        // store. The coordinator commits that change before it starts writer handles, and writers
+        // validate the table schema against their own params in `begin_epoch`.
+        let table = self.create_and_load_table().await?;
         let coordinator = IcebergSinkCommitter {
             catalog,
             table,

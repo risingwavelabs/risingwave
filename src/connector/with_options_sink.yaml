@@ -369,6 +369,59 @@ ElasticSearchConfig:
     field_type: String
     required: false
     default: '"upsert" . to_owned ()'
+FirestoreConfig:
+  fields:
+  - name: firestore.project_id
+    field_type: String
+    comments: Google Cloud project ID
+    required: true
+  - name: firestore.collection
+    field_type: String
+    comments: Collection path. A parent document segment may reference a column, e.g. `users/{user_id}/orders`.
+    required: true
+  - name: firestore.database_id
+    field_type: String
+    comments: 'Optional: Firestore database ID (for multi-database projects)'
+    required: false
+  - name: firestore.credentials
+    field_type: String
+    comments: |-
+      A JSON string containing the service account credentials for authorization
+      see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
+    required: false
+  - name: firestore.document_id_column
+    field_type: String
+    comments: |-
+      Column whose value is used as the Firestore document ID. Values must be unique and valid
+      Firestore document IDs. Duplicate values in the same resolved collection intentionally
+      map multiple rows to the same Firestore document.
+    required: false
+  - name: firestore.skip_invalid_rows
+    field_type: bool
+    comments: |-
+      Skip invalid rows and document-level `INVALID_ARGUMENT/OUT_OF_RANGE` rejections (default: false).
+      Skipped mutations are not delivered; authentication and transient failures still fail the chunk.
+    required: false
+    default: Default::default
+  - name: firestore.decimal_mode
+    field_type: FirestoreDecimalMode
+    comments: |-
+      DECIMAL encoding: `decimal128` (default, Enterprise only) or `double` (may lose precision).
+      Database metadata is checked for Decimal128; unavailable metadata never selects double.
+    required: false
+    default: Default::default
+  - name: firestore.max_batch_size
+    field_type: usize
+    comments: 'Maximum batch size for batch writes (default: 500)'
+    required: false
+    default: '500'
+  - name: firestore.max_future_send_nums
+    field_type: usize
+    comments: |-
+      Maximum concurrent batch write requests within one chunk (default: 256).
+      Chunks are written sequentially to preserve per-document mutation order.
+    required: false
+    default: '256'
 FsConfig:
   fields:
   - name: fs.path
@@ -644,8 +697,11 @@ IcebergConfig:
     comments: |-
       Security type for REST catalog authentication.
       Supported values: `none`, `oauth2`, `google`.
-      When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
-      for authentication using Google Application Default Credentials (ADC).
+      When set to `google`, native REST catalogs authenticate using
+      `gcs.credential` or Google Application Default Credentials (ADC).
+      JNI REST catalogs use Java's `GoogleAuthManager` with ADC;
+      `gcs.credential` only configures Rust `FileIO` storage credentials.
+      Vended credentials use the native Rust REST catalog.
     required: false
   - name: gcp.auth.scopes
     field_type: String
@@ -664,8 +720,8 @@ IcebergConfig:
       - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
       - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
       - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
-      Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
-      `org.apache.iceberg.gcp.gcs.GCSFileIO`.
+      Applies only to JNI catalogs. Native REST catalogs route storage by URI
+      and support GCS vended credentials without a Java `FileIO` class.
     required: false
   - name: database.name
     field_type: String
@@ -804,6 +860,24 @@ IcebergConfig:
     default: Default::default
     allow_alter_on_fly: true
     iceberg_engine: true
+  - name: enable_orphan_file_cleanup
+    field_type: bool
+    comments: |-
+      Whether to periodically remove files that are unreachable from Iceberg metadata.
+      Cleanup runs on the global Iceberg orphan-file cleanup interval.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: orphan_file_cleanup_min_age_millis
+    field_type: u64
+    comments: |-
+      Minimum file age in milliseconds before an unreachable file may be removed.
+      Defaults to 7 days and must be at least 24 hours.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-
@@ -822,6 +896,13 @@ IcebergConfig:
     iceberg_engine: true
   - name: compaction.delete_files_count_threshold
     field_type: usize
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: compaction.delete_ratio_percent
+    field_type: u32
+    comments: Minimum percentage of deleted physical rows for PK-index compaction.
     required: false
     default: Default::default
     allow_alter_on_fly: true
@@ -884,6 +965,22 @@ IcebergConfig:
     required: false
     default: Default::default
     iceberg_engine: true
+  - name: legacy_pk_index_file_path
+    field_type: bool
+    comments: |-
+      Whether the PK index of a pk-index sink stores full data file paths. Default is true.
+      When false, the sink writes every data file as `{data_location}/{uuid}.parquet` and the
+      PK index only stores the 16-byte uuid, from which the path is rebuilt. New pk-index sinks
+      are created with false; sinks created before this option existed keep the legacy layout.
+      It must not change after the sink is created.
+
+      While it is false, the table's data location must never change: neither the
+      `write.data.path` or `write.folder-storage.path` table property nor the table location.
+      RisingWave never changes them, but it cannot stop other engines from doing so. After such
+      a change, uuids already in the PK index rebuild paths that do not exist, and the position
+      deletes written for those rows silently have no effect.
+    required: false
+    default: 'true'
 KafkaConfig:
   fields:
   - name: topic
@@ -975,11 +1072,6 @@ KafkaConfig:
   - name: properties.sasl.kerberos.principal
     field_type: String
     comments: Client's Kerberos principal name under SASL/GSSAPI.
-    required: false
-    allow_alter_on_fly: true
-  - name: properties.sasl.kerberos.kinit.cmd
-    field_type: String
-    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
     required: false
     allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin
@@ -1401,14 +1493,43 @@ MqttConfig:
   - name: clean_start
     field_type: bool
     comments: |-
-      `clean_start = true` removes all the state from queues & instructs the broker
-      to clean all the client state when client disconnects.
+      Whether to start a new session when connecting (MQTT v5 Clean Start). Defaults to `false`.
 
-      When set `false`, broker will hold the client state and performs pending
-      operations on the client when reconnection with same `client_id`
-      happens. Local queue state is also held to retransmit packets after reconnection.
+      `clean_start = true` makes the broker discard any existing session for the client id when
+      connecting. `clean_start = false` resumes the session the broker still holds for the same
+      client id, if any, including its subscriptions and any messages queued for it.
+
+      This flag only applies when connecting. How long the broker keeps a session after a
+      disconnect is controlled by `session_expiry_interval`. If that is not set, the session ends
+      when the connection closes, so `clean_start = false` alone does not resume anything after a
+      reconnect. Conversely, `clean_start = true` with `session_expiry_interval = 60` still keeps
+      the new session for 60 seconds after a disconnect.
     required: false
     default: Default::default
+  - name: keep_alive_secs
+    field_type: u16
+    comments: |-
+      The keep alive interval in seconds. The client sends a ping to the broker if no other
+      packet is exchanged within this interval, and the broker may close the connection after
+      1.5 times this interval without receiving any packet from the client. Must be between 5
+      and 65535. Defaults to 10.
+
+      Consider a larger value if the source can be backpressured for a long time, since no
+      ping is sent while the source is not consuming messages.
+    required: false
+    default: Default::default
+  - name: session_expiry_interval
+    field_type: u32
+    comments: |-
+      The session expiry interval in seconds sent to the broker on connect (MQTT v5).
+      If not set, the broker treats it as 0 and discards the session as soon as the connection
+      is closed.
+
+      Set it together with `clean_start = false` to let the broker keep the session, including
+      subscriptions and queued messages, across reconnects with the same client id. Note that
+      the client id contains the actor id, so a session is not resumed after the job is
+      rescheduled.
+    required: false
   - name: inflight_messages
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100
@@ -2062,6 +2183,39 @@ StarrocksConfig:
     comments: |-
       The maximum size in bytes for each `StarRocks` stream load request payload.
       Defaults to unlimited.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.max_transaction_size_bytes
+    field_type: u64
+    comments: |-
+      The maximum cumulative serialized payload bytes per writer/transaction.
+      Defaults to unlimited. Before the next row would exceed this limit, commit
+      the current transaction, even before `commit_checkpoint_interval` elapses.
+      A single oversized row is rejected. Early commits can increase data versions;
+      recovery can replay committed data under the sink's at-least-once contract.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.ignore_json_size
+    field_type: bool
+    comments: |-
+      Skip the `StarRocks` JSON size check. Defaults to false. This may increase
+      backend memory usage and does not disable `starrocks.max_batch_size_bytes`.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: starrocks.load_mem_limit
+    field_type: u64
+    comments: |-
+      The `StarRocks` load job memory limit in bytes. When omitted, use the server default.
+      This is not a limit on all HTTP receive buffers or total backend memory usage.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.transaction_timeout_seconds
+    field_type: u32
+    comments: |-
+      The server-side transaction timeout in seconds, from begin to prepared.
+      A positive 32-bit signed integer, subject to the server's configured timeout range.
+      When omitted, use the server default. Independent of the client HTTP timeout.
     required: false
     allow_alter_on_fly: true
   - name: r#type

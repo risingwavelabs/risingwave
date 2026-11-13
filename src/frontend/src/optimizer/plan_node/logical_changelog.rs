@@ -16,6 +16,7 @@ use itertools::Itertools;
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
+use super::stream::StreamPlanNodeMetadata;
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
@@ -36,17 +37,28 @@ pub struct LogicalChangeLog {
 }
 
 impl LogicalChangeLog {
-    pub fn create(input: PlanRef, key_indices: Option<Vec<usize>>) -> PlanRef {
-        Self::new(input, key_indices, true, true).into()
+    pub fn create(
+        input: PlanRef,
+        key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
+    ) -> PlanRef {
+        Self::new(input, key_indices, distribution_key_indices, true, true).into()
     }
 
     pub fn new(
         input: PlanRef,
         key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
         need_op: bool,
         need_changelog_row_id: bool,
     ) -> Self {
-        let core = generic::ChangeLog::new(input, key_indices, need_op, need_changelog_row_id);
+        let core = generic::ChangeLog::new(
+            input,
+            key_indices,
+            distribution_key_indices,
+            need_op,
+            need_changelog_row_id,
+        );
         Self::with_core(core)
     }
 
@@ -77,7 +89,18 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
             .key_indices
             .as_ref()
             .map(|key| input_col_change.map_all(key));
-        let changelog = Self::new(input, key_indices, self.core.need_op, true);
+        let distribution_key_indices = self
+            .core
+            .distribution_key_indices
+            .as_ref()
+            .map(|key| input_col_change.map_all(key));
+        let changelog = Self::new(
+            input,
+            key_indices,
+            distribution_key_indices,
+            self.core.need_op,
+            true,
+        );
 
         let out_col_change = if self.core.need_op {
             let (mut output_vec, len) = input_col_change.into_parts();
@@ -162,6 +185,15 @@ impl ColPrunable for LogicalChangeLog {
             }
         }
 
+        // Distribution columns must survive pruning even when the query does not select them.
+        if let Some(key) = &self.core.distribution_key_indices {
+            for &index in key {
+                if !input_required_cols.contains(&index) {
+                    input_required_cols.push(index);
+                }
+            }
+        }
+
         let new_input = self.input().prune_col(&input_required_cols, ctx);
         let input_mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
@@ -173,9 +205,21 @@ impl ColPrunable for LogicalChangeLog {
             .as_ref()
             .map(|key| input_mapping.map_all(key));
 
+        let distribution_key_indices = self
+            .core
+            .distribution_key_indices
+            .as_ref()
+            .map(|key| input_mapping.map_all(key));
+
         // updated plan with new inputs
-        let changelog: PlanRef =
-            Self::new(new_input, key_indices, need_op, need_changelog_row_id).into();
+        let changelog: PlanRef = Self::new(
+            new_input,
+            key_indices,
+            distribution_key_indices,
+            need_op,
+            need_changelog_row_id,
+        )
+        .into();
 
         // output now contains business keys as well, we need to hide it if not requested by the parent
         let (mut output_mapping, new_output_len) = input_mapping.into_parts();
@@ -214,7 +258,24 @@ impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let input = self.input().to_stream(ctx)?;
 
-        let input = if let Some(key) = &self.core.key_indices {
+        if let Some(key) = &self.core.key_indices {
+            // Upsert deletes only guarantee stream-key columns. Validate before shuffling:
+            // otherwise a tombstone can be routed differently from its preceding insert.
+            if input.stream_kind().is_upsert()
+                && !key.iter().all(|i| input.expect_stream_key().contains(i))
+            {
+                return Err(BindError(
+                    "When producing a changelog from an upsert stream, KEY must be the same as \
+                     or a subset of the stream key. Materialize the input first to use other key columns."
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
+
+        let input = if let Some(key) = &self.core.distribution_key_indices {
+            RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
+        } else if let Some(key) = &self.core.key_indices {
             RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
         } else if matches!(input.distribution(), Distribution::SomeShard) {
             RequiredDist::hash_shard(input.expect_stream_key())
@@ -223,14 +284,18 @@ impl ToStream for LogicalChangeLog {
             input
         };
 
-        let dist = input.distribution();
-        let distribution_keys = match dist {
+        let row_id_index = self.schema().fields().len() - 1;
+        // The changelog row id encodes the vnode of the input row, so the output of a
+        // hash-distributed input is hash-distributed by the row id. A singleton input stays
+        // in its singleton fragment.
+        let (distribution_keys, dist) = match input.distribution() {
             Distribution::HashShard(distribution_keys)
-            | Distribution::UpstreamHashShard(distribution_keys, _) => distribution_keys.clone(),
-            Distribution::Single => {
-                vec![]
-            }
-            _ => {
+            | Distribution::UpstreamHashShard(distribution_keys, _) => (
+                distribution_keys.clone(),
+                Distribution::HashShard(vec![row_id_index]),
+            ),
+            Distribution::Single => (vec![], Distribution::Single),
+            dist => {
                 return Err(BindError(format!(
                     "ChangeLog requires input to be hash distributed, single, but got {:?}",
                     dist
@@ -239,10 +304,9 @@ impl ToStream for LogicalChangeLog {
             }
         };
         let core = self.core.clone_with_input(input);
-        let row_id_index = self.schema().fields().len() - 1;
         let plan = StreamChangeLog::new_with_dist(
             core,
-            Distribution::HashShard(vec![row_id_index]),
+            dist,
             distribution_keys.into_iter().map(|k| k as u32).collect(),
         )
         .into();
@@ -298,7 +362,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let changelog = LogicalChangeLog::create(scan.clone().into(), None);
+        let changelog = LogicalChangeLog::create(scan.clone().into(), None, None);
         let stream = changelog
             .to_stream(&mut ToStreamContext::new_with_backfill_type(
                 false,
@@ -311,7 +375,7 @@ mod tests {
         assert_eq!(input.distribution(), &Distribution::HashShard(vec![0]));
 
         // The primary key is retained internally even when it is not selected from the changelog.
-        let changelog = LogicalChangeLog::create(scan.into(), None);
+        let changelog = LogicalChangeLog::create(scan.into(), None, None);
         let pruned = changelog.prune_col(
             &[1, 2, 3],
             &mut ColumnPruningContext::new(changelog.clone()),

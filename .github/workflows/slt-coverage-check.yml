@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "e2e_test/**/*.slt"
+      - "e2e_test/**/*.slt.serial"
       - "e2e_test/**/*.slt.part"
       - "ci/scripts/**/*.sh"
       - "e2e_test/check_slt_coverage.py"

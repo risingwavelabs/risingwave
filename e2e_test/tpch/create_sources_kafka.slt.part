@@ -1,7 +1,7 @@
 control substitution on
 
 statement ok
-CREATE SOURCE supplier (
+CREATE SOURCE supplier_raw (
         s_suppkey  INTEGER,
         s_name VARCHAR,
         s_address VARCHAR,
@@ -15,7 +15,7 @@ CREATE SOURCE supplier (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE part (
+CREATE SOURCE part_raw (
         p_partkey INTEGER,
         p_name VARCHAR,
         p_mfgr VARCHAR,
@@ -31,7 +31,7 @@ CREATE SOURCE part (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE partsupp (
+CREATE SOURCE partsupp_raw (
         ps_partkey INTEGER,
         ps_suppkey INTEGER,
         ps_availqty INTEGER,
@@ -43,7 +43,7 @@ CREATE SOURCE partsupp (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE customer (
+CREATE SOURCE customer_raw (
         c_custkey INTEGER,
         c_name VARCHAR,
         c_address VARCHAR,
@@ -58,7 +58,7 @@ CREATE SOURCE customer (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE orders (
+CREATE SOURCE orders_raw (
         o_orderkey BIGINT,
         o_custkey INTEGER,
         o_orderstatus VARCHAR,
@@ -74,7 +74,7 @@ CREATE SOURCE orders (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE lineitem (
+CREATE SOURCE lineitem_raw (
         l_orderkey BIGINT,
         l_partkey INTEGER,
         l_suppkey INTEGER,
@@ -97,7 +97,7 @@ CREATE SOURCE lineitem (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE nation (
+CREATE SOURCE nation_raw (
         n_nationkey INTEGER,
         n_name VARCHAR,
         n_regionkey INTEGER,
@@ -108,7 +108,7 @@ CREATE SOURCE nation (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-CREATE SOURCE region (
+CREATE SOURCE region_raw (
         r_regionkey INTEGER,
         r_name VARCHAR,
         r_comment VARCHAR
@@ -116,3 +116,28 @@ CREATE SOURCE region (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'tpch-region'
 ) FORMAT PLAIN ENCODE JSON;
+
+# Kafka sinks provide at-least-once delivery, so snapshot rows may be replayed.
+statement ok
+CREATE VIEW supplier AS SELECT DISTINCT * FROM supplier_raw;
+
+statement ok
+CREATE VIEW part AS SELECT DISTINCT * FROM part_raw;
+
+statement ok
+CREATE VIEW partsupp AS SELECT DISTINCT * FROM partsupp_raw;
+
+statement ok
+CREATE VIEW customer AS SELECT DISTINCT * FROM customer_raw;
+
+statement ok
+CREATE VIEW orders AS SELECT DISTINCT * FROM orders_raw;
+
+statement ok
+CREATE VIEW lineitem AS SELECT DISTINCT * FROM lineitem_raw;
+
+statement ok
+CREATE VIEW nation AS SELECT DISTINCT * FROM nation_raw;
+
+statement ok
+CREATE VIEW region AS SELECT DISTINCT * FROM region_raw;

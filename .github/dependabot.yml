@@ -20,7 +20,9 @@ updates:
     # It will always need human intervention, and we'd better be the last one to update arrow.
     - dependency-name: "arrow*"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]
-    - dependency-name: "parquet"
+    # `parquet*` also covers parquet-variant, parquet-variant-compute and parquet-variant-json,
+    # which are released together with arrow and must stay on the same version as parquet.
+    - dependency-name: "parquet*"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]
     # bump sqllogictest manually together with sqllogictest-bin in CI docker image
     - dependency-name: "sqllogictest"
