@@ -34,6 +34,8 @@ export CLICKHOUSE_NATIVE_PORT="9000"
 export CLICKHOUSE_USER="default"
 export CLICKHOUSE_PASSWORD="default"
 export CLICKHOUSE_DATABASE="default"
+export CLICKHOUSE_SHARD_HOST="clickhouse-shard"
+export CLICKHOUSE_SHARD_NATIVE_PORT="9000"
 export RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON="connector='clickhouse',clickhouse.url='http://clickhouse-server:8123',clickhouse.user='default',clickhouse.password='default',clickhouse.database='default'"
 export PATH="${PWD}/e2e_test/commands:${PWD}:${PATH}"
 
