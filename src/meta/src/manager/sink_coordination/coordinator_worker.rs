@@ -88,7 +88,8 @@ pub(super) enum CoordinatorStopRequest {
     /// Commit every pending epoch of the sink, which must not exceed `target_epoch`, then stop.
     ///
     /// Used for the old sink of `REPLACE SINK` after the cutover barrier has been committed to
-    /// Hummock.
+    /// Hummock. If `reply` is dropped before the drain finishes, the worker abandons the drain and
+    /// stops.
     DrainAndStop {
         target_epoch: u64,
         reply: oneshot::Sender<anyhow::Result<()>>,
@@ -633,15 +634,29 @@ impl CoordinatorWorker {
             }
             CoordinatorStopRequest::DrainAndStop {
                 target_epoch,
-                reply,
+                mut reply,
             } => {
-                let result = worker
-                    .drain_and_stop(&db, &mut coordinator, target_epoch)
-                    .await;
+                // The caller gives up after a timeout, which fails the replacement and triggers
+                // recovery, and recovery waits for this worker to exit. Abandon the drain once the
+                // caller is gone, so that a hanging external commit cannot block recovery. Like
+                // `Stop`, this may cancel an in-flight commit, and the epochs left pending are
+                // committed in recovery.
+                let sink_id = worker.handle_manager.param.sink_id;
+                let result = select! {
+                    result = worker.drain_and_stop(&db, &mut coordinator, target_epoch) => result,
+                    _ = reply.closed() => {
+                        warn!(
+                            %sink_id,
+                            target_epoch,
+                            "drain request was abandoned by the caller, stop the coordinator"
+                        );
+                        return;
+                    }
+                };
                 if let Err(e) = &result {
                     error!(
                         error = %e.as_report(),
-                        sink_id = %worker.handle_manager.param.sink_id,
+                        %sink_id,
                         target_epoch,
                         "failed to drain sink commits before stopping the coordinator"
                     );

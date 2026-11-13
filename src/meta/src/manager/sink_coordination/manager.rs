@@ -2987,6 +2987,154 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_abandoned_drain_does_not_block_recovery() {
+        /// A two-phase coordinator whose external commit never finishes.
+        struct HangingCommitCoordinator;
+
+        #[async_trait]
+        impl TwoPhaseCommitCoordinator for HangingCommitCoordinator {
+            async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+                Ok(())
+            }
+
+            async fn pre_commit(
+                &mut self,
+                epoch: u64,
+                _metadata: Vec<SinkMetadata>,
+                _schema_change: Option<PbSinkSchemaChange>,
+            ) -> risingwave_connector::sink::Result<Option<Vec<u8>>> {
+                Ok(Some(epoch.to_le_bytes().to_vec()))
+            }
+
+            async fn commit_data(
+                &mut self,
+                _epoch: u64,
+                _commit_metadata: Vec<u8>,
+            ) -> risingwave_connector::sink::Result<()> {
+                std::future::pending().await
+            }
+
+            async fn commit_schema_change(
+                &mut self,
+                _epoch: u64,
+                _schema_change: PbSinkSchemaChange,
+            ) -> risingwave_connector::sink::Result<()> {
+                unreachable!()
+            }
+
+            async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {}
+        }
+
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+        let epoch = 233;
+
+        // Hummock never reports `epoch` as committed, so it stays pending until the drain.
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    *captured_sender.lock().await = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let db = db.clone();
+                move |param, new_writer_rx, stop_rx| {
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param,
+                                new_writer_rx,
+                                stop_rx,
+                                SinkCommitCoordinator::TwoPhase(Box::new(HangingCommitCoordinator)),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let mut client = CoordinatorStreamHandle::new_with_init_stream(
+            param.to_proto(),
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            },
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(client.align_initial_epoch(1).await.unwrap(), 1);
+        client
+            .commit(
+                epoch,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: vec![],
+                    })),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        client.stop().await.unwrap();
+
+        // The caller gives up on the hanging drain, as the barrier side does after its timeout.
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            manager.drain_and_stop_coordinator(param.sink_id, epoch),
+        )
+        .await
+        .expect_err("drain should hang on the external commit");
+
+        // Recovery waits for the coordinator worker to exit, which must not wait for the hanging
+        // commit once the drain is abandoned.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            manager.start_recovery(RecoveryStart::Global),
+        )
+        .await
+        .expect("recovery should not wait for the abandoned drain")
+        .unwrap();
+
+        // The epoch stays pending and is committed in recovery.
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch as i64);
+        assert_eq!(rows[0].2, "PENDING");
+    }
+
+    #[tokio::test]
     async fn test_aborted() {
         let db = prepare_db_backend().await;
 
