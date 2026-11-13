@@ -92,6 +92,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        options.footer_size_limit = task.sst_footer_size_limit();
         let estimated_output_key_count =
             estimate_output_key_count_for_task(&task, options.capacity);
         options.estimated_output_key_count = Some(estimated_output_key_count);

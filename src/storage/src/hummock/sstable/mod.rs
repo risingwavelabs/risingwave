@@ -514,21 +514,31 @@ impl SstableMeta {
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
+        Self::encoded_size_from_parts(
+            self.block_metas.iter().map(BlockMeta::encoded_size).sum(),
+            self.bloom_filter.len(),
+            self.smallest_key.len(),
+            self.largest_key.len(),
+        )
+    }
+
+    fn encoded_size_from_parts(
+        block_meta_size: usize,
+        filter_size: usize,
+        smallest_key_size: usize,
+        largest_key_size: usize,
+    ) -> usize {
         4 // block meta count
-            + self
-            .block_metas
-            .iter()
-            .map(|block_meta| block_meta.encoded_size())
-            .sum::<usize>()
+            + block_meta_size
             + 4 // monotonic tombstone events len
             + 4 // SST filter len
-            + self.bloom_filter.len()
+            + filter_size
             + 4 // estimated size
             + 4 // key count
             + 4 // key len
-            + self.smallest_key.len()
+            + smallest_key_size
             + 4 // key len
-            + self.largest_key.len()
+            + largest_key_size
             + 8 // footer
             + 8 // checksum
             + 4 // version
