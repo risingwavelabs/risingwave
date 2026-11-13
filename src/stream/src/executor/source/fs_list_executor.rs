@@ -29,19 +29,22 @@ use super::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
-/// Recover both stream construction and page errors without blocking the barrier stream.
-#[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-async fn retry_list_stream<F, S>(mut build_stream: F)
+/// Retry errors emitted by the listing stream without blocking barriers.
+/// Stream construction errors propagate, including the initial build before the first barrier.
+fn retry_list_stream<F, S>(
+    mut build_stream: F,
+) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>>>
 where
     F: FnMut() -> StreamExecutorResult<S>,
     S: Stream<Item = StreamExecutorResult<StreamChunk>>,
 {
-    let new_backoff = || exponential_backoff(Duration::from_secs(1), 2, Duration::from_secs(10));
-    let mut backoff = new_backoff();
-    loop {
-        let mut has_progress = false;
-        let error = match build_stream() {
-            Ok(stream) => {
+    let mut stream = build_stream()?;
+    Ok(async_stream::try_stream! {
+        let new_backoff = || exponential_backoff(Duration::from_secs(1), 2, Duration::from_secs(10));
+        let mut backoff = new_backoff();
+        loop {
+            let mut has_progress = false;
+            let error = {
                 pin_mut!(stream);
                 loop {
                     match stream.next().await {
@@ -50,20 +53,20 @@ where
                             yield chunk;
                         }
                         Some(Err(error)) => break error,
-                        None => return Ok(()),
+                        None => return,
                     }
                 }
+            };
+            if has_progress {
+                backoff = new_backoff();
             }
-            Err(error) => error,
-        };
-        if has_progress {
-            backoff = new_backoff();
+            let delay = backoff.next().unwrap();
+            tracing::warn!(error = %error.as_report(), ?delay, "file listing failed, retrying");
+            // Sleep in the data stream so barriers and pause/resume remain responsive.
+            tokio::time::sleep(delay).await;
+            stream = build_stream()?;
         }
-        let delay = backoff.next().unwrap();
-        tracing::warn!(error = %error.as_report(), ?delay, "file listing failed, retrying");
-        // Sleep in the data stream so barriers and pause/resume remain responsive.
-        tokio::time::sleep(delay).await;
-    }
+    })
 }
 
 pub struct FsListExecutor<S: StateStore> {
@@ -163,7 +166,7 @@ impl<S: StateStore> FsListExecutor<S> {
             .map_err(StreamExecutorError::connector_error)?;
 
         let chunked_paginate_stream =
-            retry_list_stream(move || Self::build_chunked_paginate_stream(&source_desc));
+            retry_list_stream(move || Self::build_chunked_paginate_stream(&source_desc))?;
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
@@ -234,7 +237,8 @@ mod tests {
         StreamExecutorError::connector_error(anyhow!("permanent listing error"))
     }
 
-    async fn check_retry_backoff(fail_on_build: bool) {
+    #[tokio::test(start_paused = true)]
+    async fn test_listing_errors_back_off() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let available = Arc::new(AtomicBool::new(false));
         let data_stream = retry_list_stream({
@@ -246,13 +250,13 @@ mod tests {
                     Ok(stream::once(async { Ok(StreamChunk::default()) })
                         .chain(stream::pending())
                         .boxed())
-                } else if fail_on_build {
-                    Err(list_error())
                 } else {
+                    // An asynchronous listing-creation error is emitted by the stream.
                     Ok(stream::once(async { Err(list_error()) }).boxed())
                 }
             }
-        });
+        })
+        .unwrap();
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
         let mut reader = StreamReaderWithPause::<true, _>::new(
             barrier_to_message_stream(barrier_rx).boxed(),
@@ -301,14 +305,43 @@ mod tests {
         assert_eq!(attempts.load(Ordering::SeqCst), 8);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn test_listing_creation_errors_back_off() {
-        check_retry_backoff(true).await;
+    #[test]
+    fn test_initial_stream_construction_error_propagates() {
+        let result = retry_list_stream(|| {
+            Err::<stream::Empty<StreamExecutorResult<StreamChunk>>, _>(list_error())
+        });
+        assert!(result.is_err());
     }
 
     #[tokio::test(start_paused = true)]
-    async fn test_listing_page_errors_back_off() {
-        check_retry_backoff(false).await;
+    async fn test_stream_reconstruction_error_propagates() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let stream = retry_list_stream({
+            let attempts = attempts.clone();
+            move || {
+                if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(stream::once(async { Err(list_error()) }))
+                } else {
+                    Err(StreamExecutorError::connector_error(anyhow!(
+                        "construction failed"
+                    )))
+                }
+            }
+        })
+        .unwrap();
+        pin_mut!(stream);
+
+        assert!(stream.next().now_or_never().is_none());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let error = stream.next().now_or_never().unwrap().unwrap().unwrap_err();
+        assert!(
+            error
+                .as_report()
+                .to_string()
+                .contains("construction failed")
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_matches!(stream.next().now_or_never(), Some(None));
     }
 
     #[tokio::test(start_paused = true)]
@@ -324,7 +357,8 @@ mod tests {
                     vec![Ok(StreamChunk::default()), Err(list_error())]
                 }))
             }
-        });
+        })
+        .unwrap();
         pin_mut!(stream);
 
         assert!(stream.next().now_or_never().is_none());
