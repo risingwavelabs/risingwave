@@ -24,7 +24,9 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactionConfig, TableOption, TableSchema};
 
-use crate::hummock::compaction::CompactionTask as PickedCompactionTask;
+use crate::hummock::compaction::{
+    CompactionTask as PickedCompactionTask, parse_compression_algorithm,
+};
 
 pub(super) struct CompactTaskBuildContext {
     pub(super) task_id: HummockCompactionTaskId,
@@ -53,11 +55,15 @@ pub(super) fn build_base_compact_task(
     let compact_table_id_set: HashSet<_> = compact_table_ids.iter().copied().collect();
     let mut table_options = context.table_options;
     retain_table_options(&mut table_options, &compact_table_id_set);
-    let compression_algorithm = match picked_task.compression_algorithm.as_str() {
-        "Lz4" => 1,
-        "Zstd" => 2,
-        _ => 0,
-    };
+    let compression_algorithm = parse_compression_algorithm(&picked_task.compression_algorithm)
+        .map(|(_, algorithm)| algorithm)
+        .unwrap_or_else(|err| {
+            tracing::warn!(
+                compaction_group_id = %context.compaction_group_id,
+                "{err}, compact task output will not be compressed"
+            );
+            0
+        });
     let compaction_config = context.compaction_config.as_ref();
 
     (
