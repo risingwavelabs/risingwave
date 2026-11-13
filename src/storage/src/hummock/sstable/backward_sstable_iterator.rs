@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use foyer::Hint;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
@@ -44,6 +45,7 @@ pub struct BackwardSstableIterator {
 
     // used for checking if the block is valid, filter out the block that is not in the table-id range
     read_block_meta_range: (usize, usize),
+    key_range: KeyRange,
 }
 
 impl BackwardSstableIterator {
@@ -133,7 +135,12 @@ impl BackwardSstableIterator {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             read_block_meta_range: (start_idx, end_idx),
+            key_range: sstable_info_ref.key_range.clone(),
         }
+    }
+
+    fn block_iter_is_valid(&self) -> bool {
+        self.block_iter.as_ref().is_some_and(|iter| iter.is_valid())
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
@@ -194,17 +201,28 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
+        self.block_iter_is_valid() && super::full_key_in_range(&self.key_range, self.key())
     }
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.read_block_meta_range.1 as isize, None)
-            .await
+        if self.key_range.right.is_empty() {
+            self.seek_idx(self.read_block_meta_range.1 as isize, None)
+                .await
+        } else {
+            let right = self.key_range.right.clone();
+            self.seek(FullKey::decode(&right)).await
+        }
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        let right = self.key_range.right.clone();
+        let key = if !right.is_empty() && FullKey::decode(&right).lt(&key) {
+            FullKey::decode(&right)
+        } else {
+            key
+        };
         let block_idx = self
             .sst
             .meta
@@ -220,9 +238,17 @@ impl HummockIterator for BackwardSstableIterator {
         let block_idx = block_idx as isize;
 
         self.seek_idx(block_idx, Some(key)).await?;
-        if !self.is_valid() {
+        if !self.block_iter_is_valid() {
             // Seek to prev block
             self.seek_idx(block_idx - 1, None).await?;
+        }
+
+        if self.block_iter_is_valid()
+            && !right.is_empty()
+            && self.key_range.right_exclusive
+            && self.key() == FullKey::decode(&right)
+        {
+            self.next().await?;
         }
 
         Ok(())

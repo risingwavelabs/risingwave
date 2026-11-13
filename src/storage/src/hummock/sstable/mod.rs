@@ -43,6 +43,7 @@ use tracing::warn;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, UserKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 
 mod filter;
@@ -63,6 +64,17 @@ use crate::store::ReadOptions;
 const MAGIC: u32 = 0x5785ab73;
 const OLD_VERSION: u32 = 1;
 const VERSION: u32 = 2;
+
+fn full_key_in_range(key_range: &KeyRange, key: FullKey<&[u8]>) -> bool {
+    let after_left = key_range.left.is_empty() || FullKey::decode(&key_range.left).le(&key);
+    let before_right = key_range.right.is_empty()
+        || if key_range.right_exclusive {
+            key.lt(&FullKey::decode(&key_range.right))
+        } else {
+            key.le(&FullKey::decode(&key_range.right))
+        };
+    after_left && before_right
+}
 
 /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
 /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
