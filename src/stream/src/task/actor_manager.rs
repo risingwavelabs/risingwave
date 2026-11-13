@@ -396,11 +396,14 @@ impl StreamActorManager {
             config: actor_context.config.clone(),
         };
 
+        // The executor builder is a large future. Box it before wrapping it in
+        // task-local scopes to avoid growing their stack frames for every executor.
+        let build = create_executor(executor_params, node, store).boxed();
         risingwave_expr::scalar::ai_decide::with_config_async(
             actor_context.config.ai_decide.clone(),
             risingwave_expr::scalar::ai_extract::with_config_async(
                 actor_context.config.ai_extract.clone(),
-                create_executor(executor_params, node, store),
+                build,
             ),
         )
         .await

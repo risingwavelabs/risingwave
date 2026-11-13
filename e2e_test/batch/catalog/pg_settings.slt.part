@@ -25,6 +25,12 @@ user ai_decide_max_retry_after_ms
 user ai_decide_max_retry_delay_ms
 user ai_decide_request_timeout_ms
 user ai_decide_retry_delay_ms
+user ai_extract_max_concurrency
+user ai_extract_max_response_bytes
+user ai_extract_max_retry_after_ms
+user ai_extract_max_retry_delay_ms
+user ai_extract_request_timeout_ms
+user ai_extract_retry_delay_ms
 user application_name
 user auto_locality_backfill_min_size
 user backfill_rate_limit

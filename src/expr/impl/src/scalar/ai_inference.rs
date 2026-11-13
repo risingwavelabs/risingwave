@@ -34,6 +34,7 @@ use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::scalar::ai_extract::ExtractionSchema;
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
+use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 
 /// One state is one request. An array in `state` is context, not an HTTP batch.
@@ -482,7 +483,7 @@ impl AiInference {
                         LazyLock::new(LogSuppressor::default);
                     if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         // Only sanitized errors: never log credentials, URL or payloads.
-                        tracing::error!(error = %error, ?delay, suppressed_count, function = self.name(), "AI request failed, retrying");
+                        tracing::error!(error = %error.as_report(), ?delay, suppressed_count, function = self.name(), "AI request failed, retrying");
                     }
                 }
             }
