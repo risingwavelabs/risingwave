@@ -318,10 +318,24 @@ impl Expr for FunctionCall {
             .map(|input| input.try_to_expr_proto())
             .try_collect()?;
 
+        let (function_type, rex_node) = if self.func_type() == ExprType::AiDecide {
+            (
+                Type::Unspecified,
+                RexNode::AiDecide(AiDecideNode {
+                    children,
+                    config: Some((&risingwave_expr::scalar::ai_decide::config()).into()),
+                }),
+            )
+        } else {
+            (
+                self.func_type(),
+                RexNode::FuncCall(FunctionCall { children }),
+            )
+        };
         Ok(ExprNode {
-            function_type: self.func_type().into(),
+            function_type: function_type.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+            rex_node: Some(rex_node),
         })
     }
 }

@@ -145,6 +145,19 @@ where
                 _ => FuncCallBuilder::build_boxed(prost, build_child),
             },
 
+            RexNode::AiDecide(node) => {
+                use crate::scalar::ai_decide;
+
+                let ret_type = DataType::from(prost.get_return_type()?);
+                // Build children before entering this node's scope, so sibling and nested
+                // calls retain their own settings. Streaming overrides all node snapshots.
+                let children = node.children.iter().map(build_child).try_collect()?;
+                let config = ai_decide::config_override()
+                    .or_else(|| node.config.map(Into::into))
+                    .unwrap_or_default();
+                ai_decide::with_config(config, || build_func(E::AiDecide, ret_type, children))
+            }
+
             RexNode::Now(_) => unreachable!("now should not be built at backend"),
 
             RexNode::SecretRef(sr) => {

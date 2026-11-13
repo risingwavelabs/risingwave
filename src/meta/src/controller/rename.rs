@@ -502,6 +502,10 @@ impl IndexItemRewriter {
             RexNode::Constant(_) => {}
             RexNode::Udf(udf) => self.rewrite_udf(udf),
             RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
+            RexNode::AiDecide(node) => node
+                .children
+                .iter_mut()
+                .for_each(|expr| self.rewrite_expr(expr)),
             RexNode::Now(_) | RexNode::SecretRef(_) => {}
         }
     }

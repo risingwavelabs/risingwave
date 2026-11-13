@@ -239,9 +239,11 @@ pub fn build_graph_with_strategy(
         )
     };
 
-    let config_override = ctx
-        .session_ctx()
-        .config()
+    let mut job_config = ctx.session_ctx().config().clone();
+    for (key, value) in &ctx.overwrite_options().ai_decide {
+        job_config.set(key, value.clone(), &mut ())?;
+    }
+    let config_override = job_config
         .to_initial_streaming_config_override()
         .context("invalid initial streaming config override")?;
     let fragments = state
