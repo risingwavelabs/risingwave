@@ -193,6 +193,9 @@ impl ObserverState for FrontendObserverNode {
             catalog_guard.create_secret(secret)
         }
         catalog_guard.set_object_dependencies(object_dependencies);
+        if let Some(version) = &version {
+            catalog_guard.set_version(version.catalog_version);
+        }
         for user in users {
             user_guard.create_user(user)
         }
@@ -428,6 +431,7 @@ impl FrontendObserverNode {
             self.version
         );
         self.version = resp.version;
+        catalog_guard.set_version(resp.version);
         self.catalog_updated_tx.send(resp.version).unwrap();
     }
 

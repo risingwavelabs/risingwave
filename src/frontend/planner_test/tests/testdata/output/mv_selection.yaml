@@ -359,3 +359,559 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: mv_cte2, columns: [mv_cte2.a, mv_cte2.s], distribution: UpstreamHashShard(mv_cte2.a) }
+- id: create_t_u
+  sql: |
+    create table t (a int, b int, c int, d varchar);
+    create table u (k int primary key, v int);
+- id: filter_same
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b, d from t where a > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b, mv_filter.d], distribution: SomeShard }
+- id: filter_extra_predicate
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b from t where a > 0 and b = 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv_filter.b = 10:Int32) }
+      └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b], distribution: SomeShard }
+- id: filter_narrower_range
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b, d from t where a > 10 and a <= 20;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv_filter.a > 10:Int32) AND (mv_filter.a <= 20:Int32) }
+      └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b, mv_filter.d], distribution: SomeShard }
+- id: filter_column_subset
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select b from t where a > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_filter, columns: [mv_filter.b], distribution: SomeShard }
+- id: filter_in_list_and_or
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0 and a <> 5;
+    set enable_mv_selection = true;
+    select a, d from t where (a in (1, 2, 3) or a between 10 and 20) and a <> 5;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (((mv_filter.a = 1:Int32) OR (mv_filter.a = 2:Int32)) OR ((mv_filter.a = 3:Int32) OR ((mv_filter.a >= 10:Int32) AND (mv_filter.a <= 20:Int32)))) }
+      └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.d], distribution: SomeShard }
+- id: filter_wider_range_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b, d from t where a >= 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (t.a >= 0:Int32) }
+      └─BatchScan { table: t, columns: [t.a, t.b, t.d], distribution: SomeShard }
+- id: filter_missing_column_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a from t where a > 0 and c = 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a] }
+      └─BatchFilter { predicate: (t.a > 0:Int32) AND (t.c = 1:Int32) }
+        └─BatchScan { table: t, columns: [t.a, t.c], distribution: SomeShard }
+- id: agg_filter_on_group_key
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, c, sum(b) from t where a = 1 group by a, c;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_agg, columns: [mv_agg.a, mv_agg.c, mv_agg.s], scan_ranges: [mv_agg.a = Int32(1)], distribution: UpstreamHashShard(mv_agg.a, mv_agg.c) }
+- id: agg_filter_on_group_key_rollup
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b), count(*) from t where c > 100 group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchSortAgg { group_key: [mv_agg.a], aggs: [sum(mv_agg.s), sum0(mv_agg.n)] }
+      └─BatchExchange { order: [mv_agg.a ASC], dist: HashShard(mv_agg.a) }
+        └─BatchProject { exprs: [mv_agg.a, mv_agg.s, mv_agg.n] }
+          └─BatchFilter { predicate: (mv_agg.c > 100:Int32) }
+            └─BatchScan { table: mv_agg, columns: [mv_agg.a, mv_agg.s, mv_agg.n, mv_agg.c], distribution: UpstreamHashShard(mv_agg.a, mv_agg.c) }
+- id: agg_filter_on_other_column_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) from t where b > 0 group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t.a], aggs: [sum(t.b)] }
+      └─BatchExchange { order: [], dist: HashShard(t.a) }
+        └─BatchFilter { predicate: (t.b > 0:Int32) }
+          └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- id: agg_without_group_by_over_grouped_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select sum(b), count(*) from t where a = 1;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum(sum(mv_agg.s)), sum0(sum0(mv_agg.n))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [sum(mv_agg.s), sum0(mv_agg.n)] }
+        └─BatchScan { table: mv_agg, columns: [mv_agg.s, mv_agg.n], scan_ranges: [mv_agg.a = Int32(1)], distribution: SomeShard }
+- id: agg_distinct_and_min_on_group_key
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, count(distinct c), max(c) from t group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchSortAgg { group_key: [mv_agg.a], aggs: [count(mv_agg.c), max(max(mv_agg.c))] }
+      └─BatchExchange { order: [mv_agg.a ASC], dist: HashShard(mv_agg.a) }
+        └─BatchSortAgg { group_key: [mv_agg.a, mv_agg.c], aggs: [max(mv_agg.c)] }
+          └─BatchScan { table: mv_agg, columns: [mv_agg.a, mv_agg.c], distribution: UpstreamHashShard(mv_agg.a, mv_agg.c) }
+- id: agg_having_and_expression
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, c, sum(b) + 1 from t group by a, c having count(*) > 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_agg.a, mv_agg.c, (mv_agg.s + 1:Int32) as $expr1] }
+      └─BatchFilter { predicate: (mv_agg.n > 10:Int32) }
+        └─BatchScan { table: mv_agg, columns: [mv_agg.a, mv_agg.c, mv_agg.s, mv_agg.n], distribution: UpstreamHashShard(mv_agg.a, mv_agg.c) }
+- id: agg_avg_from_sum_and_count
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(b) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, avg(b) from t group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_agg.a, Case((sum0(mv_agg.n) = 0:Int32), null:Decimal, (sum(mv_agg.s)::Decimal / sum0(mv_agg.n)::Decimal)) as $expr1] }
+      └─BatchSortAgg { group_key: [mv_agg.a], aggs: [sum(mv_agg.s), sum0(mv_agg.n)] }
+        └─BatchExchange { order: [mv_agg.a ASC], dist: HashShard(mv_agg.a) }
+          └─BatchScan { table: mv_agg, columns: [mv_agg.a, mv_agg.s, mv_agg.n], distribution: SomeShard }
+- id: agg_on_view_without_agg
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select d, sum(b), count(distinct a) from t where a > 0 group by d;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [mv_filter.d], aggs: [sum(sum(mv_filter.b)), count(mv_filter.a)] }
+      └─BatchExchange { order: [], dist: HashShard(mv_filter.d) }
+        └─BatchHashAgg { group_key: [mv_filter.a, mv_filter.d], aggs: [sum(mv_filter.b)] }
+          └─BatchExchange { order: [], dist: HashShard(mv_filter.a, mv_filter.d) }
+            └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b, mv_filter.d], distribution: SomeShard }
+- id: agg_view_for_query_without_agg_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_distinct as select distinct a, c from t;
+    set enable_mv_selection = true;
+    select a, c from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.c], distribution: SomeShard }
+- id: select_distinct
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_distinct as select distinct a, c from t;
+    set enable_mv_selection = true;
+    select distinct a from t where c = 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_distinct.a] }
+      └─BatchFilter { predicate: (mv_distinct.c = 1:Int32) }
+        └─BatchScan { table: mv_distinct, columns: [mv_distinct.a, mv_distinct.c], distribution: UpstreamHashShard(mv_distinct.a, mv_distinct.c) }
+- id: join_same
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.a, t.b, u.v from u join t on u.k = t.a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_join, columns: [mv_join.a, mv_join.b, mv_join.v], distribution: SomeShard }
+- id: join_filter_on_equivalent_column
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.b, u.v from t join u on t.a = u.k where u.k = 2;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_join.b, mv_join.v] }
+      └─BatchFilter { predicate: (mv_join.a = 2:Int32) }
+        └─BatchScan { table: mv_join, columns: [mv_join.b, mv_join.v, mv_join.a], distribution: SomeShard }
+- id: join_extra_equality
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.a from t join u on t.a = u.k and t.b = u.v;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_join.a] }
+      └─BatchFilter { predicate: (mv_join.b = mv_join.v) }
+        └─BatchScan { table: mv_join, columns: [mv_join.a, mv_join.b, mv_join.v], distribution: SomeShard }
+- id: join_extra_table
+  before:
+  - create_t_u
+  sql: |
+    create table w (x int, y int);
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.a, u.v, w.y from t join u on t.a = u.k join w on w.x = t.b where w.y > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: mv_join.b = w.x, output: [mv_join.a, mv_join.v, w.y] }
+      ├─BatchExchange { order: [], dist: HashShard(mv_join.b) }
+      │ └─BatchScan { table: mv_join, columns: [mv_join.a, mv_join.b, mv_join.v], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(w.x) }
+        └─BatchFilter { predicate: (w.y > 0:Int32) }
+          └─BatchScan { table: w, columns: [w.x, w.y], distribution: SomeShard }
+- id: join_then_agg
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select u.v, sum(t.b) from t join u on t.a = u.k group by u.v;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [mv_join.v], aggs: [sum(mv_join.b)] }
+      └─BatchExchange { order: [], dist: HashShard(mv_join.v) }
+        └─BatchScan { table: mv_join, columns: [mv_join.b, mv_join.v], distribution: SomeShard }
+- id: join_view_with_more_tables_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select a, b from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- id: join_agg_view_with_range_on_equivalent_key
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv as
+      select t.a, u.v, sum(t.b) as s, count(*) as n
+      from t join u on t.a = u.k where t.c > 0 group by t.a, u.v;
+    set enable_mv_selection = true;
+    select u.v, sum(t.b) from u join t on u.k = t.a
+    where t.c > 0 and u.k between 1 and 5 group by u.v;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [mv.v], aggs: [sum(mv.s)] }
+      └─BatchExchange { order: [], dist: HashShard(mv.v) }
+        └─BatchScan { table: mv, columns: [mv.v, mv.s], scan_ranges: [mv.a = Int32(1), mv.a = Int32(2), mv.a = Int32(3), mv.a = Int32(4), mv.a = Int32(5)], distribution: SomeShard }
+- id: self_join_uses_view_for_one_side
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select x.b, y.d from t x join t y on x.a = y.a where x.a > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: mv_filter.a = t.a, output: [mv_filter.b, t.d] }
+      ├─BatchExchange { order: [], dist: HashShard(mv_filter.a) }
+      │ └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t.a) }
+        └─BatchScan { table: t, columns: [t.a, t.d], distribution: SomeShard }
+- id: expr_same
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_expr as select a, b + c as bc from t;
+    set enable_mv_selection = true;
+    select a, c + b from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_expr, columns: [mv_expr.a, mv_expr.bc], distribution: SomeShard }
+- id: expr_predicate_on_computed_column
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_expr as select a, b + c as bc from t;
+    set enable_mv_selection = true;
+    select a from t where b + c > 100;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_expr.a] }
+      └─BatchFilter { predicate: (mv_expr.bc > 100:Int32) }
+        └─BatchScan { table: mv_expr, columns: [mv_expr.a, mv_expr.bc], distribution: SomeShard }
+- id: two_views_in_one_block
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_t as select a, b from t where a > 0;
+    create materialized view mv_u as select k, v from u where v > 0;
+    set enable_mv_selection = true;
+    select t.b, u.v from t join u on t.a = u.k where t.a > 0 and u.v > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: mv_u.k = mv_t.a, output: [mv_t.b, mv_u.v] }
+      ├─BatchExchange { order: [], dist: HashShard(mv_u.k) }
+      │ └─BatchScan { table: mv_u, columns: [mv_u.k, mv_u.v], distribution: UpstreamHashShard(mv_u.k) }
+      └─BatchExchange { order: [], dist: HashShard(mv_t.a) }
+        └─BatchScan { table: mv_t, columns: [mv_t.a, mv_t.b], distribution: SomeShard }
+- id: view_on_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv1 as select a, b, c from t where a > 0;
+    create materialized view mv2 as select a, sum(b) as s from mv1 group by a;
+    set enable_mv_selection = true;
+    select a, sum(b) from t where a > 0 group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv2, columns: [mv2.a, mv2.s], distribution: UpstreamHashShard(mv2.a) }
+- id: block_below_top_n_and_union
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b from t where a > 0 union all (select a, b from t where a > 1 order by b limit 3);
+  batch_plan: |-
+    BatchUnion { all: true }
+    ├─BatchExchange { order: [], dist: Single }
+    │ └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b], distribution: SomeShard }
+    └─BatchTopN { order: [mv_filter.b ASC], limit: 3, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [mv_filter.b ASC], limit: 3, offset: 0 }
+          └─BatchFilter { predicate: (mv_filter.a > 1:Int32) }
+            └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b], distribution: SomeShard }
+- id: block_in_subquery
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select k, v from u where k in (select a from t where a > 0 and b = 1);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftSemi, predicate: u.k = mv_filter.a, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(u.k) }
+      │ └─BatchScan { table: u, columns: [u.k, u.v], distribution: UpstreamHashShard(u.k) }
+      └─BatchExchange { order: [], dist: HashShard(mv_filter.a) }
+        └─BatchProject { exprs: [mv_filter.a] }
+          └─BatchFilter { predicate: (mv_filter.b = 1:Int32) }
+            └─BatchScan { table: mv_filter, columns: [mv_filter.a, mv_filter.b], distribution: SomeShard }
+- id: left_join_view
+  sql: |
+    create table orders (id int primary key, cid int, amount int);
+    create table customers (id int primary key, region varchar);
+    create materialized view mv_lj as
+      select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+    set enable_mv_selection = true;
+    select c.region, count(*), sum(o.amount) from orders o left join customers c on o.cid = c.id
+    where c.region is null or c.region <> 'x' group by c.region;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [mv_lj.region], aggs: [count, sum(mv_lj.amount)] }
+      └─BatchExchange { order: [], dist: HashShard(mv_lj.region) }
+        └─BatchFilter { predicate: (IsNull(mv_lj.region) OR (mv_lj.region <> 'x':Varchar)) }
+          └─BatchScan { table: mv_lj, columns: [mv_lj.amount, mv_lj.region], distribution: SomeShard }
+- id: left_join_view_with_filter_below_join_not_selected
+  sql: |
+    create table orders (id int primary key, cid int, amount int);
+    create table customers (id int primary key, region varchar);
+    create materialized view mv_lj as
+      select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+    set enable_mv_selection = true;
+    select o.id, c.region from orders o left join customers c on o.cid = c.id where o.amount > 100;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: LeftOuter, predicate: orders.cid = customers.id, output: [orders.id, customers.region], lookup table: customers }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(orders.cid) }
+        └─BatchProject { exprs: [orders.id, orders.cid] }
+          └─BatchFilter { predicate: (orders.amount > 100:Int32) }
+            └─BatchScan { table: orders, columns: [orders.id, orders.cid, orders.amount], distribution: UpstreamHashShard(orders.id) }
+- id: left_join_view_for_other_join_type_not_selected
+  sql: |
+    create table orders (id int primary key, cid int, amount int);
+    create table customers (id int primary key, region varchar);
+    create materialized view mv_lj as
+      select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+    set enable_mv_selection = true;
+    select o.id, c.region from orders o full join customers c on o.cid = c.id;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: FullOuter, predicate: orders.cid = customers.id, output: [orders.id, customers.region] }
+      ├─BatchExchange { order: [], dist: HashShard(orders.cid) }
+      │ └─BatchScan { table: orders, columns: [orders.id, orders.cid], distribution: UpstreamHashShard(orders.id) }
+      └─BatchExchange { order: [], dist: HashShard(customers.id) }
+        └─BatchScan { table: customers, columns: [customers.id, customers.region], distribution: UpstreamHashShard(customers.id) }
+- id: semi_join_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_semi as select a, b from t where exists (select 1 from u where u.k = t.a);
+    set enable_mv_selection = true;
+    select b from t where a in (select k from u);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_semi, columns: [mv_semi.b], distribution: SomeShard }
+- id: anti_join_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_anti as select a, b from t where not exists (select 1 from u where u.k = t.a);
+    set enable_mv_selection = true;
+    select sum(b) from t where not exists (select 1 from u where u.k = t.a);
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum(sum(mv_anti.b))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [sum(mv_anti.b)] }
+        └─BatchScan { table: mv_anti, columns: [mv_anti.b], distribution: SomeShard }
+- id: view_emit_on_window_close_not_selected
+  sql: |
+    create table tw (ts timestamp, v int, watermark for ts as ts - interval '1' minute) append only;
+    create materialized view mv_eowc as
+      select window_start, count(*) as n from tumble(tw, ts, interval '1' minute)
+      group by window_start emit on window close;
+    set enable_mv_selection = true;
+    select window_start, count(*) as n from tumble(tw, ts, interval '1' minute) group by window_start;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [$expr1], aggs: [count] }
+      └─BatchExchange { order: [], dist: HashShard($expr1) }
+        └─BatchProject { exprs: [TumbleStart(tw.ts, '00:01:00':Interval) as $expr1] }
+          └─BatchScan { table: tw, columns: [tw.ts], distribution: SomeShard }
+- id: view_reading_session_timezone_not_selected
+  sql: |
+    create table tz (ts timestamptz, v int);
+    create materialized view mv_tz as select ts, v from tz where ts >= '2026-01-01 08:00:00';
+    set enable_mv_selection = true;
+    select ts, v from tz where ts >= '2026-01-01 08:00:00';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (tz.ts >= '2026-01-01 08:00:00+00:00':Timestamptz) }
+      └─BatchScan { table: tz, columns: [tz.ts, tz.v], distribution: SomeShard }
+- id: view_with_timestamptz_constant
+  sql: |
+    create table tz (ts timestamptz, v int);
+    create materialized view mv_tz as select ts, v from tz where ts >= '2026-01-01 08:00:00+00:00'::timestamptz;
+    set enable_mv_selection = true;
+    set timezone = 'Asia/Singapore';
+    select v from tz where ts >= '2026-01-01 16:00:00';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv_tz, columns: [mv_tz.v], distribution: SomeShard }
+- id: view_reading_session_user_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_user as select a, current_user as who from t;
+    set enable_mv_selection = true;
+    select a, current_user as who from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, 'root':Varchar] }
+      └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- id: view_with_now_not_selected
+  sql: |
+    create table tn (ts timestamptz, v int);
+    create materialized view mv_now as select ts, v from tn where ts > now() - interval '1 hour';
+    set enable_mv_selection = true;
+    select ts, v from tn where ts > now() - interval '1 hour';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (tn.ts > '2021-03-31 23:00:00+00:00':Timestamptz) }
+      └─BatchScan { table: tn, columns: [tn.ts, tn.v], distribution: SomeShard }
+- id: view_with_top_n_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_top as select a, b from t order by a limit 10;
+    set enable_mv_selection = true;
+    select a, b from t order by a limit 10;
+  batch_plan: |-
+    BatchTopN { order: [t.a ASC], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchTopN { order: [t.a ASC], limit: 10, offset: 0 }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- id: view_with_unsupported_aggregate_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_string_agg as select a, string_agg(d, ',' order by d) as ds from t group by a;
+    set enable_mv_selection = true;
+    select a, string_agg(d, ',' order by d) as ds from t group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t.a], aggs: [string_agg(t.d, ',':Varchar order_by(t.d ASC))] }
+      └─BatchExchange { order: [], dist: HashShard(t.a) }
+        └─BatchProject { exprs: [t.a, t.d, ',':Varchar] }
+          └─BatchScan { table: t, columns: [t.a, t.d], distribution: SomeShard }
+- id: query_at_fixed_epoch_not_rewritten
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    set query_epoch = 1;
+    select a, b, d from t where a > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (t.a > 0:Int32) }
+      └─BatchScan { table: t, columns: [t.a, t.b, t.d], distribution: SomeShard }
+- id: dml_not_rewritten
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    delete from t where a > 0;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchDelete { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchFilter { predicate: (t.a > 0:Int32) }
+          └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d, t._row_id], distribution: UpstreamHashShard(t._row_id) }

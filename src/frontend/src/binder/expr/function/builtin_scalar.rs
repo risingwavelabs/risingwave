@@ -108,6 +108,7 @@ impl Binder {
         // `SESSION_USER` is the user name of the user that is connected to the database.
         fn session_user() -> Handle {
             guard_by_len(|binder, []| {
+                binder.session_dependent = true;
                 Ok(ExprImpl::literal_varchar(
                     binder.auth_context.user_name.clone(),
                 ))
@@ -119,6 +120,7 @@ impl Binder {
         // `SET ROLE xxx` for now, they will all returns session user name.
         fn current_user() -> Handle {
             guard_by_len(|binder, []| {
+                binder.session_dependent = true;
                 Ok(ExprImpl::literal_varchar(
                     binder.auth_context.user_name.clone(),
                 ))
@@ -128,7 +130,10 @@ impl Binder {
         // `CURRENT_DATABASE` is the name of the database you are currently connected to.
         // `CURRENT_CATALOG` is a synonym for `CURRENT_DATABASE`.
         fn current_database() -> Handle {
-            guard_by_len(|binder, []| Ok(ExprImpl::literal_varchar(binder.db_name.clone())))
+            guard_by_len(|binder, []| {
+                binder.session_dependent = true;
+                Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
+            })
         }
 
         // XXX: can we unify this with FUNC_SIG_MAP?
@@ -506,12 +511,14 @@ impl Binder {
                 ("current_catalog", current_database()),
                 ("current_database", current_database()),
                 ("current_schema", guard_by_len(|binder, []| {
+                    binder.session_dependent = true;
                     Ok(binder
                         .first_valid_schema()
                         .map(|schema| ExprImpl::literal_varchar(schema.name()))
                         .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)))
                 })),
                 ("current_schemas", raw(|binder, mut inputs| {
+                    binder.session_dependent = true;
                     let no_match_err = ErrorCode::ExprError(
                         "No function matches the given name and argument types. You might need to add explicit type casts.".into()
                     );
@@ -605,6 +612,7 @@ impl Binder {
                     ))
                 })),
                 ("current_setting", guard_by_len(|binder, [input]| {
+                    binder.session_dependent = true;
                     let input = if let ExprImpl::Literal(literal) = &input &&
                         let Some(ScalarImpl::Utf8(input)) = literal.get_data()
                     {
@@ -619,6 +627,7 @@ impl Binder {
                     Ok(ExprImpl::literal_varchar(session_config.get(input.as_ref())?))
                 })),
                 ("set_config", guard_by_len(|binder, [arg0, arg1, arg2]| {
+                    binder.session_dependent = true;
                     let setting_name = if let ExprImpl::Literal(literal) = &arg0 && let Some(ScalarImpl::Utf8(input)) = literal.get_data() {
                         input
                     } else {
@@ -667,6 +676,7 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw(|binder, mut inputs| {
+                    binder.session_dependent = true;
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -680,6 +690,7 @@ impl Binder {
                     }
                 })),
                 ("has_table_privilege", raw(|binder, mut inputs| {
+                    binder.session_dependent = true;
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -696,6 +707,7 @@ impl Binder {
                     }
                 })),
                 ("has_any_column_privilege", raw(|binder, mut inputs| {
+                    binder.session_dependent = true;
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -712,6 +724,7 @@ impl Binder {
                     }
                 })),
                 ("has_schema_privilege", raw(|binder, mut inputs| {
+                    binder.session_dependent = true;
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -725,6 +738,7 @@ impl Binder {
                     }
                 })),
                 ("has_function_privilege", raw(|binder, mut inputs| {
+                    binder.session_dependent = true;
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
                     }
@@ -739,6 +753,7 @@ impl Binder {
                 })),
                 ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
+                    binder.session_dependent = true;
                     // FIXME: the session id is not global unique in multi-frontend env.
                     Ok(ExprImpl::literal_int(binder.session_id.0))
                 })),

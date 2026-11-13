@@ -116,8 +116,6 @@ pub(super) type BoxedRule<C> = Box<dyn FallibleRule<C>>;
 mod correlated_expr_rewriter;
 mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
-mod mv_selection_rule;
-pub use mv_selection_rule::*;
 mod over_window_merge_rule;
 pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
@@ -388,7 +386,6 @@ macro_rules! for_all_rules {
             , { EmptyAggRemoveRule }
             , { TopNToVectorSearchRule }
             , { CorrelatedTopNToVectorSearchRule }
-            , { MvSelectionRule }
         }
     };
 }

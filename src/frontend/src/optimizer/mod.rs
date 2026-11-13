@@ -40,6 +40,7 @@ use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 
 pub mod backfill_order_strategy;
 mod logical_optimization;
+pub mod mv_selection;
 mod optimizer_context;
 pub mod plan_expr_rewriter;
 mod plan_expr_visitor;

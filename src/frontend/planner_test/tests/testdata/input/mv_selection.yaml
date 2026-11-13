@@ -323,3 +323,423 @@
     with cte as (select a, b from t_cte2 where c > 0) select c1.a, sum(c2.b) as s from cte c1 join cte c2 on c1.a = c2.a group by c1.a;
   expected_outputs:
   - batch_plan
+- id: create_t_u
+  sql: |
+    create table t (a int, b int, c int, d varchar);
+    create table u (k int primary key, v int);
+  expected_outputs: []
+- id: filter_same
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b, d from t where a > 0;
+  expected_outputs:
+  - batch_plan
+- id: filter_extra_predicate
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b from t where a > 0 and b = 10;
+  expected_outputs:
+  - batch_plan
+- id: filter_narrower_range
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b, d from t where a > 10 and a <= 20;
+  expected_outputs:
+  - batch_plan
+- id: filter_column_subset
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select b from t where a > 0;
+  expected_outputs:
+  - batch_plan
+- id: filter_in_list_and_or
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0 and a <> 5;
+    set enable_mv_selection = true;
+    select a, d from t where (a in (1, 2, 3) or a between 10 and 20) and a <> 5;
+  expected_outputs:
+  - batch_plan
+- id: filter_wider_range_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b, d from t where a >= 0;
+  expected_outputs:
+  - batch_plan
+- id: filter_missing_column_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a from t where a > 0 and c = 1;
+  expected_outputs:
+  - batch_plan
+- id: agg_filter_on_group_key
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, c, sum(b) from t where a = 1 group by a, c;
+  expected_outputs:
+  - batch_plan
+- id: agg_filter_on_group_key_rollup
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b), count(*) from t where c > 100 group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_filter_on_other_column_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) from t where b > 0 group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_without_group_by_over_grouped_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select sum(b), count(*) from t where a = 1;
+  expected_outputs:
+  - batch_plan
+- id: agg_distinct_and_min_on_group_key
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, count(distinct c), max(c) from t group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_having_and_expression
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(*) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, c, sum(b) + 1 from t group by a, c having count(*) > 10;
+  expected_outputs:
+  - batch_plan
+- id: agg_avg_from_sum_and_count
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_agg as select a, c, sum(b) as s, count(b) as n from t group by a, c;
+    set enable_mv_selection = true;
+    select a, avg(b) from t group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_on_view_without_agg
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select d, sum(b), count(distinct a) from t where a > 0 group by d;
+  expected_outputs:
+  - batch_plan
+- id: agg_view_for_query_without_agg_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_distinct as select distinct a, c from t;
+    set enable_mv_selection = true;
+    select a, c from t;
+  expected_outputs:
+  - batch_plan
+- id: select_distinct
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_distinct as select distinct a, c from t;
+    set enable_mv_selection = true;
+    select distinct a from t where c = 1;
+  expected_outputs:
+  - batch_plan
+- id: join_same
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.a, t.b, u.v from u join t on u.k = t.a;
+  expected_outputs:
+  - batch_plan
+- id: join_filter_on_equivalent_column
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.b, u.v from t join u on t.a = u.k where u.k = 2;
+  expected_outputs:
+  - batch_plan
+- id: join_extra_equality
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.a from t join u on t.a = u.k and t.b = u.v;
+  expected_outputs:
+  - batch_plan
+- id: join_extra_table
+  before:
+  - create_t_u
+  sql: |
+    create table w (x int, y int);
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select t.a, u.v, w.y from t join u on t.a = u.k join w on w.x = t.b where w.y > 0;
+  expected_outputs:
+  - batch_plan
+- id: join_then_agg
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select u.v, sum(t.b) from t join u on t.a = u.k group by u.v;
+  expected_outputs:
+  - batch_plan
+- id: join_view_with_more_tables_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_join as select t.a, t.b, u.v from t join u on t.a = u.k;
+    set enable_mv_selection = true;
+    select a, b from t;
+  expected_outputs:
+  - batch_plan
+- id: join_agg_view_with_range_on_equivalent_key
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv as
+      select t.a, u.v, sum(t.b) as s, count(*) as n
+      from t join u on t.a = u.k where t.c > 0 group by t.a, u.v;
+    set enable_mv_selection = true;
+    select u.v, sum(t.b) from u join t on u.k = t.a
+    where t.c > 0 and u.k between 1 and 5 group by u.v;
+  expected_outputs:
+  - batch_plan
+- id: self_join_uses_view_for_one_side
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select x.b, y.d from t x join t y on x.a = y.a where x.a > 0;
+  expected_outputs:
+  - batch_plan
+- id: expr_same
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_expr as select a, b + c as bc from t;
+    set enable_mv_selection = true;
+    select a, c + b from t;
+  expected_outputs:
+  - batch_plan
+- id: expr_predicate_on_computed_column
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_expr as select a, b + c as bc from t;
+    set enable_mv_selection = true;
+    select a from t where b + c > 100;
+  expected_outputs:
+  - batch_plan
+- id: two_views_in_one_block
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_t as select a, b from t where a > 0;
+    create materialized view mv_u as select k, v from u where v > 0;
+    set enable_mv_selection = true;
+    select t.b, u.v from t join u on t.a = u.k where t.a > 0 and u.v > 0;
+  expected_outputs:
+  - batch_plan
+- id: view_on_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv1 as select a, b, c from t where a > 0;
+    create materialized view mv2 as select a, sum(b) as s from mv1 group by a;
+    set enable_mv_selection = true;
+    select a, sum(b) from t where a > 0 group by a;
+  expected_outputs:
+  - batch_plan
+- id: block_below_top_n_and_union
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select a, b from t where a > 0 union all (select a, b from t where a > 1 order by b limit 3);
+  expected_outputs:
+  - batch_plan
+- id: block_in_subquery
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    select k, v from u where k in (select a from t where a > 0 and b = 1);
+  expected_outputs:
+  - batch_plan
+- id: left_join_view
+  sql: |
+    create table orders (id int primary key, cid int, amount int);
+    create table customers (id int primary key, region varchar);
+    create materialized view mv_lj as
+      select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+    set enable_mv_selection = true;
+    select c.region, count(*), sum(o.amount) from orders o left join customers c on o.cid = c.id
+    where c.region is null or c.region <> 'x' group by c.region;
+  expected_outputs:
+  - batch_plan
+- id: left_join_view_with_filter_below_join_not_selected
+  sql: |
+    create table orders (id int primary key, cid int, amount int);
+    create table customers (id int primary key, region varchar);
+    create materialized view mv_lj as
+      select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+    set enable_mv_selection = true;
+    select o.id, c.region from orders o left join customers c on o.cid = c.id where o.amount > 100;
+  expected_outputs:
+  - batch_plan
+- id: left_join_view_for_other_join_type_not_selected
+  sql: |
+    create table orders (id int primary key, cid int, amount int);
+    create table customers (id int primary key, region varchar);
+    create materialized view mv_lj as
+      select o.id, o.amount, c.region from orders o left join customers c on o.cid = c.id;
+    set enable_mv_selection = true;
+    select o.id, c.region from orders o full join customers c on o.cid = c.id;
+  expected_outputs:
+  - batch_plan
+- id: semi_join_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_semi as select a, b from t where exists (select 1 from u where u.k = t.a);
+    set enable_mv_selection = true;
+    select b from t where a in (select k from u);
+  expected_outputs:
+  - batch_plan
+- id: anti_join_view
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_anti as select a, b from t where not exists (select 1 from u where u.k = t.a);
+    set enable_mv_selection = true;
+    select sum(b) from t where not exists (select 1 from u where u.k = t.a);
+  expected_outputs:
+  - batch_plan
+- id: view_emit_on_window_close_not_selected
+  sql: |
+    create table tw (ts timestamp, v int, watermark for ts as ts - interval '1' minute) append only;
+    create materialized view mv_eowc as
+      select window_start, count(*) as n from tumble(tw, ts, interval '1' minute)
+      group by window_start emit on window close;
+    set enable_mv_selection = true;
+    select window_start, count(*) as n from tumble(tw, ts, interval '1' minute) group by window_start;
+  expected_outputs:
+  - batch_plan
+- id: view_reading_session_timezone_not_selected
+  sql: |
+    create table tz (ts timestamptz, v int);
+    create materialized view mv_tz as select ts, v from tz where ts >= '2026-01-01 08:00:00';
+    set enable_mv_selection = true;
+    select ts, v from tz where ts >= '2026-01-01 08:00:00';
+  expected_outputs:
+  - batch_plan
+- id: view_with_timestamptz_constant
+  sql: |
+    create table tz (ts timestamptz, v int);
+    create materialized view mv_tz as select ts, v from tz where ts >= '2026-01-01 08:00:00+00:00'::timestamptz;
+    set enable_mv_selection = true;
+    set timezone = 'Asia/Singapore';
+    select v from tz where ts >= '2026-01-01 16:00:00';
+  expected_outputs:
+  - batch_plan
+- id: view_reading_session_user_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_user as select a, current_user as who from t;
+    set enable_mv_selection = true;
+    select a, current_user as who from t;
+  expected_outputs:
+  - batch_plan
+- id: view_with_now_not_selected
+  sql: |
+    create table tn (ts timestamptz, v int);
+    create materialized view mv_now as select ts, v from tn where ts > now() - interval '1 hour';
+    set enable_mv_selection = true;
+    select ts, v from tn where ts > now() - interval '1 hour';
+  expected_outputs:
+  - batch_plan
+- id: view_with_top_n_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_top as select a, b from t order by a limit 10;
+    set enable_mv_selection = true;
+    select a, b from t order by a limit 10;
+  expected_outputs:
+  - batch_plan
+- id: view_with_unsupported_aggregate_not_selected
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_string_agg as select a, string_agg(d, ',' order by d) as ds from t group by a;
+    set enable_mv_selection = true;
+    select a, string_agg(d, ',' order by d) as ds from t group by a;
+  expected_outputs:
+  - batch_plan
+- id: query_at_fixed_epoch_not_rewritten
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    set query_epoch = 1;
+    select a, b, d from t where a > 0;
+  expected_outputs:
+  - batch_plan
+- id: dml_not_rewritten
+  before:
+  - create_t_u
+  sql: |
+    create materialized view mv_filter as select a, b, d from t where a > 0;
+    set enable_mv_selection = true;
+    delete from t where a > 0;
+  expected_outputs:
+  - batch_plan

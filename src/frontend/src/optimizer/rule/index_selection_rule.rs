@@ -1001,6 +1001,30 @@ impl ExprVisitor for TableScanIoEstimator<'_> {
     }
 }
 
+/// Estimates the fraction of a table that the scan has to read, from how its predicate matches
+/// the key prefix of the table or of an index that has the columns the predicate reads. It is
+/// `1.0` for a full table scan.
+pub(crate) fn estimate_scan_selectivity(scan: &LogicalScan) -> f64 {
+    fn fraction(scan: &LogicalScan) -> f64 {
+        // With a row size of 1, the cost is the product taken from `INDEX_COST_MATRIX`.
+        let cost = TableScanIoEstimator::new(scan, 1)
+            .estimate(scan.predicate())
+            .cost;
+        let full = TableScanIoEstimator::new(scan, 1)
+            .estimate(&Condition::true_cond())
+            .cost;
+        cost.min(full) as f64 / full.max(1) as f64
+    }
+
+    // Only the columns of the predicate matter for how much of an index is read.
+    let predicate_only = scan.clone_with_output_indices(vec![]);
+    scan.table_indexes()
+        .iter()
+        .filter_map(|index| predicate_only.to_index_scan_if_index_covered(index))
+        .map(|index_scan| fraction(&index_scan))
+        .fold(fraction(scan), f64::min)
+}
+
 struct ShiftInputRefRewriter {
     offset: usize,
 }
