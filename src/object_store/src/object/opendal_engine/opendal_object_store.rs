@@ -132,6 +132,7 @@ impl ObjectStore for OpendalObjectStore {
                     self.config.clone(),
                     self.metrics.clone(),
                     self.store_media_type(),
+                    false,
                 )
                 .await?,
             )))
@@ -144,6 +145,46 @@ impl ObjectStore for OpendalObjectStore {
                 ),
             ))
         }
+    }
+
+    async fn streaming_upload_owned(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        if matches!(self.media_type, MediaType::Fs) {
+            Ok(OpendalStreamingUploader::Native(Box::new(
+                OpendalNativeStreamingUploader::new(
+                    self.op.clone(),
+                    path.to_owned(),
+                    self.config.clone(),
+                    self.metrics.clone(),
+                    self.store_media_type(),
+                    true,
+                )
+                .await?,
+            )))
+        } else {
+            self.streaming_upload(path).await
+        }
+    }
+
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        if !matches!(self.media_type, MediaType::Fs) {
+            return Ok(None);
+        }
+        let root = self.op.info().root();
+        tokio::task::spawn_blocking(move || fs4::available_space(root))
+            .await
+            .map_err(|error| {
+                ObjectError::internal(format!(
+                    "filesystem space query failed: {}",
+                    error.as_report()
+                ))
+            })?
+            .map(Some)
+            .map_err(|error| {
+                ObjectError::internal(format!(
+                    "filesystem space query failed: {}",
+                    error.as_report()
+                ))
+            })
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -368,12 +409,13 @@ pub struct OpendalNativeStreamingUploader {
 }
 
 impl OpendalNativeStreamingUploader {
-    pub async fn new(
+    async fn new(
         op: Operator,
         path: String,
         config: Arc<ObjectStoreConfig>,
         metrics: Arc<ObjectStoreMetrics>,
         media_type: &'static str,
+        owned_fs: bool,
     ) -> ObjectResult<Self> {
         let monitored_execute = OpendalStreamingUploaderExecute::new(metrics, media_type);
         let executor = Executor::with(monitored_execute);
@@ -383,28 +425,35 @@ impl OpendalNativeStreamingUploader {
         let ctx = op.base_context().with_executor(executor);
         let op = op.with_context(ctx);
 
-        let writer = op
-            .clone()
-            .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
-                config.retry.streaming_upload_attempt_timeout_ms,
-            )))
-            .layer(
-                RetryLayer::new()
-                    .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
-                    .with_max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
-                    .with_max_times(config.retry.streaming_upload_retry_attempts)
-                    .with_factor(config.retry.req_backoff_factor as f32)
-                    .with_jitter(),
-            )
-            .writer_with(&path)
-            .concurrent(config.opendal_upload_concurrency)
-            .await?;
+        let writer = if owned_fs {
+            // The caller owns a task that is not dropped on waiter cancellation. No
+            // timeout may abandon a blocking FS operation before known cleanup is queued.
+            op.writer_with(&path).concurrent(1).await?
+        } else {
+            op.clone()
+                .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
+                    config.retry.streaming_upload_attempt_timeout_ms,
+                )))
+                .layer(
+                    RetryLayer::new()
+                        .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
+                        .with_max_delay(Duration::from_millis(
+                            config.retry.req_backoff_max_delay_ms,
+                        ))
+                        .with_max_times(config.retry.streaming_upload_retry_attempts)
+                        .with_factor(config.retry.req_backoff_factor as f32)
+                        .with_jitter(),
+                )
+                .writer_with(&path)
+                .concurrent(config.opendal_upload_concurrency)
+                .await?
+        };
         Ok(Self {
             writer,
             buf: vec![],
             not_uploaded_len: 0,
             is_valid: true,
-            abort_on_err: config.opendal_writer_abort_on_err,
+            abort_on_err: owned_fs || config.opendal_writer_abort_on_err,
             upload_part_size: config.upload_part_size,
         })
     }
@@ -417,8 +466,10 @@ impl OpendalNativeStreamingUploader {
         );
         if let Err(err) = self.writer.write(data).await {
             self.is_valid = false;
-            if self.abort_on_err {
-                self.writer.abort().await?;
+            if self.abort_on_err
+                && let Err(cleanup_error) = self.writer.abort().await
+            {
+                tracing::warn!(error = %cleanup_error.as_report(), "failed to abort errored upload; retaining original upload error");
             }
             return Err(err.into());
         }
@@ -451,8 +502,10 @@ impl StreamingUploader for OpendalNativeStreamingUploader {
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
-                if self.abort_on_err {
-                    self.writer.abort().await?;
+                if self.abort_on_err
+                    && let Err(cleanup_error) = self.writer.abort().await
+                {
+                    tracing::warn!(error = %cleanup_error.as_report(), "failed to abort errored upload; retaining original upload error");
                 }
                 return Err(err.into());
             }

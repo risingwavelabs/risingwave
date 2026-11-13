@@ -24,25 +24,32 @@
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
-//! Capacity accounting and physical reclamation are added before production activation.
+//! GC reclaims withdrawn files after their last reader releases them.
+//! `storage` owns file and active-upload registration; `gc` selects and deletes files using that state.
+//! They share one storage lock, separate from the shard locks used by the read index.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use bytes::Bytes;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
+mod gc;
 mod membership;
 mod recovery;
 mod refill;
+mod storage;
 #[cfg(test)]
 pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use self::refill::PinCacheDownloadError;
+use self::storage::PinCacheStorageState;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 fn metric_bytes(bytes: u64) -> i64 {
@@ -64,9 +71,9 @@ struct PinCacheObject {
 }
 
 impl PinCacheObject {
-    /// Withdraws the read route and returns the detached file.
+    /// Withdraws the read route and returns the exact file to enqueue for deletion.
     /// Membership and refill admission remain valid.
-    /// The caller must release the returned reference outside the shard lock.
+    /// The caller must hand the returned reference to GC outside the shard lock.
     fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
         let file = self.published.take()?;
         GLOBAL_PIN_CACHE_METRICS.published_objects.dec();
@@ -127,10 +134,17 @@ impl PinCacheShard {
 /// may run concurrently; batch membership updates are not atomic across objects.
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
-    // Hold only one shard lock at a time. Never perform I/O or call back into the controller
-    // or refill executor while locked. Construction finishes before this cache is shared.
+    // Hold only one shard lock at a time. Release it before I/O or taking the storage lock.
+    // Construction finishes before this cache is shared.
     shards: Box<[RwLock<PinCacheShard>]>,
-    next_path_id: AtomicU64,
+    // Leaf lock: never acquire a shard lock or perform I/O while holding it.
+    // Upload protection and physical file ownership share this lock.
+    storage: Mutex<PinCacheStorageState>,
+    // Serializes capacity probes/admission with GC path claims and deletion acknowledgment.
+    capacity_gate: tokio::sync::Mutex<()>,
+    gc_pressure_bytes: AtomicU64,
+    #[cfg(test)]
+    test_hooks: test_utils::PinCacheTestHooks,
 }
 
 /// Admission captured before queuing a refill. Its identity is private to the issuing cache.
@@ -150,7 +164,7 @@ impl PinCacheRefillToken {
 }
 
 /// A reference to one published file, retained even after its object leaves the index.
-/// Reads never look up the object a second time.
+/// The file stays on disk until the last handle releases it. Reads never look up the object again.
 /// Callers must support fallback if the selected local file becomes unavailable.
 #[derive(Clone)]
 pub(crate) struct PinCacheReadHandle {
@@ -175,7 +189,7 @@ impl PinCacheReadHandle {
         {
             let file = object.unpublish().unwrap();
             drop(state);
-            drop(file);
+            self.pin_cache.enqueue_delete(file);
         }
     }
 
@@ -196,7 +210,7 @@ impl PinCache {
     pub(crate) async fn new(
         store: ObjectStoreRef,
         shard_num: usize,
-        objects: impl IntoIterator<Item = HummockSstableObjectId>,
+        objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) -> ObjectResult<Arc<Self>> {
         assert!(
             shard_num > 0,
@@ -204,19 +218,24 @@ impl PinCache {
         );
         let mut pin_cache = Self {
             store,
+            storage: Mutex::default(),
             shards: (0..shard_num)
                 .map(|_| RwLock::new(PinCacheShard::default()))
                 .collect(),
-            next_path_id: AtomicU64::new(rand::random()),
+            capacity_gate: tokio::sync::Mutex::new(()),
+            gc_pressure_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            test_hooks: test_utils::PinCacheTestHooks::default(),
         };
-        for id in objects {
+        let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
+        for &id in expected_sizes.keys() {
             let state = pin_cache.shards[Self::shard_index(id, shard_num)].get_mut();
             state.register_object(id);
         }
         let metrics = &*GLOBAL_PIN_CACHE_METRICS;
         let objects = pin_cache.store.list("", None, None).await;
         let recovered = pin_cache
-            .recover_local_files(objects)
+            .recover_local_files(objects, &expected_sizes)
             .await
             .inspect_err(|_| {
                 metrics.recovery_failures.inc();
@@ -227,6 +246,25 @@ impl PinCache {
         metrics.published_bytes.set(metric_bytes(recovered.bytes));
         metrics.recovery_ready.set(1);
         Ok(Arc::new(pin_cache))
+    }
+
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        #[cfg(test)]
+        {
+            let probe = self.test_hooks.space_probe.lock().clone();
+            if let Some(probe) = probe {
+                let result = probe();
+                let observer = self.test_hooks.space_pause.lock().clone();
+                if let Some(observer) = observer {
+                    let (resume, paused) = tokio::sync::oneshot::channel();
+                    if observer.send(resume).is_ok() {
+                        let _ = paused.await;
+                    }
+                }
+                return result;
+            }
+        }
+        self.store.available_space().await
     }
 
     pub(crate) fn get(

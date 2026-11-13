@@ -15385,6 +15385,7 @@ dependencies = [
  "bytes",
  "crc32fast",
  "fail",
+ "fs4",
  "futures",
  "futures-async-stream",
  "hdrhistogram",
