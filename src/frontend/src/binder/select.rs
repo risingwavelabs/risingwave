@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::ops::Range;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
@@ -29,7 +30,7 @@ use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, InputRef, ScopeId};
 use crate::optimizer::plan_node::generic::CHANGELOG_OP;
 use crate::utils::group_by::GroupBy;
 
@@ -361,10 +362,11 @@ impl Binder {
                 SelectItem::QualifiedWildcard(obj_name, except) => {
                     let (schema_name, table_name) =
                         Binder::resolve_schema_qualified_name(&self.db_name, obj_name)?;
-                    let except_indices = self.generate_except_indices(except.as_deref())?;
                     let (begin, end) = self
                         .context
                         .resolve_relation_range(&table_name, &schema_name)?;
+                    let except_indices =
+                        self.generate_relation_except_indices(except.as_deref(), begin..end)?;
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[begin..end]
                             .iter()
@@ -386,14 +388,18 @@ impl Binder {
                         .into());
                     }
 
+                    // `EXCEPT` of the name of columns merged by `NATURAL` or `USING` joins
+                    // excludes the merged column.
+                    let (except_groups, except) =
+                        self.partition_except_column_groups(except.as_deref())?;
+                    let except_indices = self.generate_except_indices(Some(&except))?;
+
                     // Bind the column groups
                     // In psql, the USING and NATURAL columns come before the rest of the
                     // columns in a SELECT * statement
-                    let (exprs, names) = self.iter_column_groups();
+                    let (exprs, names) = self.iter_column_groups(&except_groups);
                     select_list.extend(exprs);
                     aliases.extend(names);
-
-                    let except_indices = self.generate_except_indices(except.as_deref())?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -575,38 +581,18 @@ impl Binder {
             .unzip()
     }
 
-    pub fn iter_column_groups(&self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+    /// The merged columns of `NATURAL` and `USING` joins, except those of `except_groups`.
+    pub fn iter_column_groups(
+        &self,
+        except_groups: &HashSet<u32>,
+    ) -> (Vec<ExprImpl>, Vec<Option<String>>) {
         self.context
             .column_group_context
             .groups
-            .values()
+            .iter()
             .rev() // ensure that the outermost col group gets put first in the list
-            .map(|g| {
-                if let Some(col) = &g.non_nullable_column {
-                    let c = &self.context.columns[*col];
-                    (
-                        InputRef::new(c.index, c.field.data_type.clone()).into(),
-                        Some(c.field.name.clone()),
-                    )
-                } else {
-                    let mut input_idxes = g.indices.iter().collect::<Vec<_>>();
-                    input_idxes.sort();
-                    let inputs = input_idxes
-                        .into_iter()
-                        .map(|index| {
-                            let column = &self.context.columns[*index];
-                            InputRef::new(column.index, column.field.data_type.clone()).into()
-                        })
-                        .collect::<Vec<_>>();
-                    let c = &self.context.columns[*g.indices.iter().next().unwrap()];
-                    (
-                        FunctionCall::new(ExprType::Coalesce, inputs)
-                            .expect("Failure binding COALESCE function call")
-                            .into(),
-                        Some(c.field.name.clone()),
-                    )
-                }
-            })
+            .filter(|(group_id, _)| !except_groups.contains(group_id))
+            .map(|(_, group)| (group.merged.clone(), Some(group.column_name.clone())))
             .unzip()
     }
 
@@ -700,6 +686,61 @@ impl Binder {
             }
         }
         Ok(except_indices)
+    }
+
+    /// The indices of the columns that an `EXCEPT` list excludes from the wildcard of a relation,
+    /// whose columns are `relation` in the context. The name of columns merged by `NATURAL` or
+    /// `USING` joins excludes the column of the relation among them, as the merged column may be a
+    /// column of another relation, or no column at all.
+    pub(super) fn generate_relation_except_indices(
+        &mut self,
+        except: Option<&[Expr]>,
+        relation: Range<usize>,
+    ) -> Result<HashSet<usize>> {
+        let (except_groups, except) = self.partition_except_column_groups(except)?;
+        let mut except_indices = self.generate_except_indices(Some(&except))?;
+        for group_id in except_groups {
+            let group = &self.context.column_group_context.groups[&group_id];
+            for index in group
+                .indices
+                .iter()
+                .filter(|index| relation.contains(index))
+            {
+                if !except_indices.insert(*index) {
+                    return Err(
+                        ErrorCode::BindError("Duplicate entry in except list".into()).into(),
+                    );
+                }
+            }
+        }
+        Ok(except_indices)
+    }
+
+    /// Splits the unqualified names of columns merged by `NATURAL` or `USING` joins out of an
+    /// `EXCEPT` list, returning their column group ids and the rest of the list.
+    fn partition_except_column_groups(
+        &self,
+        except: Option<&[Expr]>,
+    ) -> Result<(HashSet<u32>, Vec<Expr>)> {
+        let mut groups = HashSet::new();
+        let mut rest = vec![];
+        for expr in except.into_iter().flatten() {
+            let group_id = match expr {
+                Expr::Identifier(ident) => self.context.get_column_group_id(&ident.real_value()),
+                _ => None,
+            };
+            match group_id {
+                Some(group_id) => {
+                    if !groups.insert(group_id) {
+                        return Err(
+                            ErrorCode::BindError("Duplicate entry in except list".into()).into(),
+                        );
+                    }
+                }
+                None => rest.push(expr.clone()),
+            }
+        }
+        Ok((groups, rest))
     }
 }
 

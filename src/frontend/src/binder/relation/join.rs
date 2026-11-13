@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use risingwave_pb::plan_common::JoinType;
-use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
-};
+use risingwave_sqlparser::ast::{Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins};
 
-use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Binder, COLUMN_GROUP_PREFIX, Clause, Relation};
+use crate::binder::{Binder, Clause, Relation};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ScopeId};
+use crate::expr::{
+    Expr as _, ExprImpl, ExprRewriter, ExprType, FunctionCall, ScopeId, align_types,
+};
+use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -156,6 +156,15 @@ impl Binder {
         Ok(match constraint {
             JoinConstraint::None => (ExprImpl::literal_bool(true), None),
             c @ JoinConstraint::Natural | c @ JoinConstraint::Using(_) => {
+                if matches!(join_type, JoinType::AsofInner | JoinType::AsofLeftOuter) {
+                    // An ASOF join needs an inequality condition, which only `ON` can express.
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ASOF JOIN requires an inequality condition in ON, \
+                         and does not support NATURAL or USING"
+                            .to_owned(),
+                    )
+                    .into());
+                }
                 // First, we identify columns with the same name.
                 let old_context = self.context.clone();
                 let l_len = old_context.columns.len();
@@ -186,15 +195,14 @@ impl Binder {
                     .indices_of
                     .iter()
                     .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
-                    .map(|(s, idxes)| (Ident::from_real_value(s), idxes))
+                    .map(|(s, _)| Ident::from_real_value(s))
                     .collect::<Vec<_>>();
-                columns.sort_by_key(|a| a.0.real_value());
+                columns.sort_by_key(|column| column.real_value());
 
-                let mut col_indices = Vec::new();
-                let mut binary_expr = Expr::Value(Value::Boolean(true));
+                let mut join_columns = Vec::new();
 
                 // Walk the RHS cols, checking to see if any share a name with any LHS cols
-                for (column, indices_r) in columns {
+                for column in columns {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
                     // constraint.
@@ -203,52 +211,37 @@ impl Binder {
                     {
                         continue;
                     }
-                    let indices_l = match old_context.get_unqualified_indices(&column.real_value())
-                    {
-                        Err(e) => {
-                            if let ErrorCode::ItemNotFound(_) = e {
-                                continue;
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
-                        Ok(idxs) => idxs,
+                    let column_name = column.real_value();
+                    let merged_l = match old_context.bind_unqualified_column(&column_name) {
+                        Err(ErrorCode::ItemNotFound(_)) => continue,
+                        Err(e) => return Err(e.into()),
+                        Ok(expr) => expr,
                     };
-                    // Select at most one column from each natural column group from left and right
-                    col_indices.push((indices_l[0], indices_r[0] + l_len));
-                    let left_expr = Self::get_identifier_from_indices(
-                        &old_context,
-                        &indices_l,
-                        column.clone(),
-                    )?;
-                    let right_expr = Self::get_identifier_from_indices(
-                        &self.context,
-                        indices_r,
-                        column.clone(),
-                    )?;
-                    binary_expr = Expr::BinaryOp {
-                        left: Box::new(binary_expr),
-                        op: BinaryOperator::And,
-                        right: Box::new(Expr::BinaryOp {
-                            left: Box::new(left_expr),
-                            op: BinaryOperator::Eq,
-                            right: Box::new(right_expr),
-                        }),
-                    }
+                    let merged_r = self.context.bind_unqualified_column(&column_name)?;
+                    // Any column of each side identifies its column group.
+                    let l = old_context.indices_of[&column_name][0];
+                    let r = self.context.indices_of[&column_name][0];
+                    join_columns.push((l, r, merged_l, merged_r));
                 }
+                let r_len = self.context.columns.len();
                 self.pop_and_merge_lateral_context()?;
-                // Bind the expression first, before allowing disambiguation of the columns involved
-                // in the join
-                let expr = self.bind_expr(&binary_expr)?;
-                for (l, r) in col_indices {
-                    let non_nullable = match join_type {
-                        JoinType::LeftOuter | JoinType::Inner => Some(l),
-                        JoinType::RightOuter => Some(r),
-                        JoinType::FullOuter => None,
-                        _ => unreachable!(),
-                    };
-                    self.context.add_natural_columns(l, r, non_nullable);
+
+                // Merging the contexts offsets the right columns by the left ones.
+                let mut shift = ColIndexMapping::with_shift_offset(r_len, l_len as isize);
+                let mut conds = Vec::with_capacity(join_columns.len());
+                for (l, r, merged_l, merged_r) in join_columns {
+                    let merged_r = shift.rewrite_expr(merged_r);
+                    conds.push(
+                        FunctionCall::new(
+                            ExprType::Equal,
+                            vec![merged_l.clone(), merged_r.clone()],
+                        )?
+                        .into(),
+                    );
+                    let merged = Self::merge_using_columns(join_type, merged_l, merged_r)?;
+                    self.context.add_natural_columns(l, r + l_len, merged);
                 }
+                let expr = ExprImpl::and(conds);
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
@@ -263,27 +256,39 @@ impl Binder {
         })
     }
 
-    fn get_identifier_from_indices(
-        context: &BindContext,
-        indices: &[usize],
-        column: Ident,
-    ) -> Result<Expr> {
-        if indices.len() == 1 {
-            let right_table = context.columns[indices[0]].table_name.as_ref();
-            Ok(Expr::CompoundIdentifier(vec![
-                Ident::from_real_value(right_table),
-                column,
-            ]))
-        } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
-            Ok(Expr::CompoundIdentifier(vec![
-                Ident::from_real_value(&format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
-                column,
-            ]))
-        } else {
-            Err(
-                ErrorCode::InternalError(format!("Ambiguous column name: {}", column.real_value()))
-                    .into(),
-            )
-        }
+    /// Merges the merged columns of the inputs of a `USING` join, as PostgreSQL does: the merged
+    /// column has the common type of both sides, and the join type picks the side that supplies
+    /// its value. That is either side for INNER joins, preferring one that needs no cast, the left
+    /// side for LEFT joins, the right side for RIGHT joins, and `COALESCE(left, right)` for FULL
+    /// joins.
+    fn merge_using_columns(
+        join_type: JoinType,
+        left: ExprImpl,
+        right: ExprImpl,
+    ) -> Result<ExprImpl> {
+        let mut aligned_left = left.clone();
+        let mut aligned_right = right.clone();
+        let common = align_types([&mut aligned_left, &mut aligned_right].into_iter())?;
+        Ok(match join_type {
+            JoinType::Inner if left.return_type() == common => left,
+            JoinType::Inner if right.return_type() == common => right,
+            JoinType::Inner | JoinType::LeftOuter => aligned_left,
+            JoinType::RightOuter => aligned_right,
+            JoinType::FullOuter => {
+                // Flatten the `COALESCE` of a nested FULL join, so that the plans of nested FULL
+                // joins over columns of the same type stay `COALESCE` over all the columns.
+                let inputs = [aligned_left, aligned_right]
+                    .into_iter()
+                    .flat_map(|input| match input {
+                        ExprImpl::FunctionCall(func) if func.func_type() == ExprType::Coalesce => {
+                            func.decompose().1
+                        }
+                        input => vec![input],
+                    })
+                    .collect();
+                FunctionCall::new(ExprType::Coalesce, inputs)?.into()
+            }
+            _ => unreachable!(),
+        })
     }
 }

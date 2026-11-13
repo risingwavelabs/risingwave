@@ -1,0 +1,366 @@
+# Nested USING / NATURAL joins. Expected results match PostgreSQL.
+#
+# A join whose left and right sides both contain a column group (from an earlier
+# USING / NATURAL join) must compare the right side's group, not the left one.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table ung_t1 (x int, y int);
+
+statement ok
+create table ung_t2 (x int, y int);
+
+statement ok
+create table ung_t3 (x int);
+
+statement ok
+create table ung_t4 (x int);
+
+statement ok
+create table ung_t5 (y int);
+
+statement ok
+insert into ung_t1 values (1, 10), (2, 20);
+
+statement ok
+insert into ung_t2 values (2, 20), (3, 30);
+
+statement ok
+insert into ung_t3 values (3), (4);
+
+statement ok
+insert into ung_t4 values (4), (5);
+
+statement ok
+insert into ung_t5 values (10), (20);
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) full join (ung_t3 full join ung_t4 using (x)) using (x) order by x;
+----
+1
+2
+3
+4
+5
+
+query I
+select x from (ung_t1 join ung_t2 using (x)) join (ung_t3 full join ung_t4 using (x)) using (x);
+----
+
+# The left column group is on another column.
+query II
+select x, y from (ung_t1 join ung_t5 using (y)) join (ung_t3 full join ung_t4 using (x)) using (x);
+----
+
+query I
+select x from (ung_t3 natural full join ung_t4) natural full join (ung_t3 as g3 natural full join ung_t4 as g4) order by x;
+----
+3
+4
+5
+
+# The merged column of an outer join must not keep a column that is only
+# non-null on one side of an inner join below it.
+query I
+select x from (ung_t1 join ung_t2 using (x)) full join (ung_t3 full join ung_t4 using (x)) using (x) order by x;
+----
+2
+3
+4
+5
+
+query I
+select x from ung_t1 join ung_t2 using (x) full join ung_t3 using (x) order by x;
+----
+2
+3
+4
+
+query I
+select x from ung_t3 full join (ung_t1 left join ung_t2 using (x)) using (x) order by x;
+----
+1
+2
+3
+4
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) left join ung_t3 using (x) order by x;
+----
+1
+2
+3
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) join ung_t3 using (x);
+----
+3
+
+query I
+select x from ung_t2 right join (ung_t3 right join ung_t4 using (x)) using (x) order by x;
+----
+4
+5
+
+# The merged column takes the value and type of the side its join type picks,
+# which may differ from the other columns of the group in scale or type.
+statement ok
+create table ung_n1 (x numeric);
+
+statement ok
+create table ung_n2 (x numeric);
+
+statement ok
+create table ung_n3 (x numeric);
+
+statement ok
+insert into ung_n1 values (1.0);
+
+statement ok
+insert into ung_n2 values (1.00);
+
+statement ok
+insert into ung_n3 values (1.000);
+
+query T
+select x::varchar from ung_n1 right join (ung_n2 full join ung_n3 using (x)) using (x);
+----
+1.00
+
+query T
+select x::varchar from ung_n1 join (ung_n2 join ung_n3 using (x)) using (x);
+----
+1.0
+
+statement ok
+create table ung_m1 (x bigint);
+
+statement ok
+create table ung_m2 (x int);
+
+statement ok
+create table ung_m3 (x int);
+
+statement ok
+insert into ung_m1 values (2147483647);
+
+statement ok
+insert into ung_m2 values (2147483647);
+
+statement ok
+insert into ung_m3 values (2147483647);
+
+query I
+select x + 1 from (ung_m1 full join ung_m2 using (x)) join ung_m3 using (x);
+----
+2147483648
+
+query I
+select x + 1 from ung_m1 join (ung_m2 join ung_m3 using (x)) using (x);
+----
+2147483648
+
+# The merged column has the common type of both sides, and the join type picks
+# the side that supplies its value: either side for INNER joins, preferring one
+# that needs no cast, the left side for LEFT joins, the right side for RIGHT
+# joins, and COALESCE over both for FULL joins.
+statement ok
+create table ung_i (x int, i int);
+
+statement ok
+create table ung_b (x bigint, b int);
+
+statement ok
+insert into ung_i values (1, 10), (2147483647, 20);
+
+statement ok
+insert into ung_b values (2, 30), (2147483647, 40);
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i join ung_b using (x);
+----
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b join ung_i using (x);
+----
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i left join ung_b using (x);
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b left join ung_i using (x);
+----
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i right join ung_b using (x);
+----
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b right join ung_i using (x);
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_i full join ung_b using (x);
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+query ITII rowsort
+select x + 1, pg_typeof(x), i, b from ung_b natural full join ung_i;
+----
+2 bigint 10 NULL
+2147483648 bigint 20 40
+3 bigint NULL 30
+
+# The narrower side of a nested join is cast to the common type too.
+query IT
+select x + 1, pg_typeof(x) from ung_m2 join (ung_m1 join ung_m1 as m using (x)) using (x);
+----
+2147483648 bigint
+
+query IT
+select x + 1, pg_typeof(x) from ung_m2 left join (ung_m3 full join ung_m1 using (x)) using (x);
+----
+2147483648 bigint
+
+# The merged column of an INNER join takes the value of the side of the common
+# type, which differs from the other side here.
+statement ok
+create table ung_d (x double precision);
+
+statement ok
+create table ung_l (x bigint);
+
+statement ok
+insert into ung_d values (9007199254740992);
+
+statement ok
+insert into ung_l values (9007199254740993);
+
+query IT
+select x::bigint, pg_typeof(x) from ung_l join (ung_d join ung_d as d using (x)) using (x);
+----
+9007199254740992 double precision
+
+# `SELECT *` lists the merged columns first.
+query IIIT rowsort
+select *, pg_typeof(x) from ung_i left join (ung_b full join ung_m1 using (x)) using (x);
+----
+1 10 NULL bigint
+2147483647 20 40 bigint
+
+query III rowsort
+select * from ung_i natural join (ung_b natural full join ung_m1);
+----
+2147483647 20 40
+
+# `EXCEPT` of a merged column excludes it from `SELECT *`.
+query II rowsort
+select * except (x) from ung_i full join ung_b using (x);
+----
+10 NULL
+20 40
+NULL 30
+
+query II rowsort
+select * except (x) from (ung_i full join ung_b using (x)) join ung_m1 using (x);
+----
+20 40
+
+# `EXCEPT` of a merged column excludes the column of the table from its
+# `table.*`, whichever side the merged column takes its value from.
+query I rowsort
+select ung_i.* except (x) from ung_i left join ung_b using (x);
+----
+10
+20
+
+query I rowsort
+select ung_i.* except (x) from ung_i join ung_b using (x);
+----
+20
+
+query I rowsort
+select ung_i.* except (x) from ung_i right join ung_b using (x);
+----
+20
+NULL
+
+query I rowsort
+select ung_b.* except (x) from ung_i full join ung_b using (x);
+----
+30
+40
+NULL
+
+query II rowsort
+select ung_i.* except (x), ung_b.* except (x) from ung_i join ung_b using (x);
+----
+20 40
+
+query T
+select jsonb_agg(ung_i.* except (x)) from ung_i join ung_b using (x);
+----
+[{"i": 20}]
+
+statement error Duplicate entry in except list
+select ung_i.* except (x, ung_i.x) from ung_i join ung_b using (x);
+
+statement ok
+drop table ung_i;
+
+statement ok
+drop table ung_b;
+
+statement ok
+drop table ung_d;
+
+statement ok
+drop table ung_l;
+
+statement ok
+drop table ung_t1;
+
+statement ok
+drop table ung_t2;
+
+statement ok
+drop table ung_t3;
+
+statement ok
+drop table ung_t4;
+
+statement ok
+drop table ung_t5;
+
+statement ok
+drop table ung_n1;
+
+statement ok
+drop table ung_n2;
+
+statement ok
+drop table ung_n3;
+
+statement ok
+drop table ung_m1;
+
+statement ok
+drop table ung_m2;
+
+statement ok
+drop table ung_m3;
