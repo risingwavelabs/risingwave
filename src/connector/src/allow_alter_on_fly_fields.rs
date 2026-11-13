@@ -178,6 +178,13 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
 pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use sink_properties::*;
     let mut map = HashMap::new();
+    // BigQueryConfig
+    map.try_insert(
+        std::any::type_name::<BigQueryConfig>().to_owned(),
+        [
+            "bigquery.change_sequence_number".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // ClickHouseConfig
     map.try_insert(
         std::any::type_name::<ClickHouseConfig>().to_owned(),
