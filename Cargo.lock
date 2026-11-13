@@ -16375,6 +16375,7 @@ version = "0.0.0"
 dependencies = [
  "fs-err",
  "hostname",
+ "rustix 1.1.4",
  "sysinfo",
  "tempfile",
  "thiserror-ext",
