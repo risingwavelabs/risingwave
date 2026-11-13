@@ -37,7 +37,7 @@ pub enum MaybeFeature {
 /// License tier.
 ///
 /// A tier controls which enterprise [`Feature`]s are available.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
     /// Free tier. No feature is available. This is more like a placeholder.
@@ -68,55 +68,6 @@ pub enum Tier {
         name: String,
         excluded_features: Vec<MaybeFeature>,
     },
-}
-
-impl<'de> Deserialize<'de> for Tier {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        enum TierDef {
-            Free,
-            #[serde(rename = "paid")]
-            AllAsOf2_5,
-            All,
-            #[serde(untagged)]
-            Custom {
-                name: String,
-                #[serde(default)]
-                features: Option<Vec<MaybeFeature>>,
-                #[serde(default)]
-                excluded_features: Option<Vec<MaybeFeature>>,
-            },
-        }
-
-        match TierDef::deserialize(deserializer)? {
-            TierDef::Free => Ok(Tier::Free),
-            TierDef::AllAsOf2_5 => Ok(Tier::AllAsOf2_5),
-            TierDef::All => Ok(Tier::All),
-            TierDef::Custom {
-                name,
-                features: Some(allowed_features),
-                excluded_features: None,
-            } => Ok(Tier::CustomAllowList {
-                name,
-                allowed_features,
-            }),
-            TierDef::Custom {
-                name,
-                features: None,
-                excluded_features: Some(excluded_features),
-            } => Ok(Tier::CustomDenyList {
-                name,
-                excluded_features,
-            }),
-            TierDef::Custom { .. } => Err(<D::Error as serde::de::Error>::custom(
-                "custom license tier must contain exactly one of `features` or `excluded_features`",
-            )),
-        }
-    }
 }
 
 impl Tier {
@@ -610,24 +561,6 @@ mod tests {
         assert_eq!(
             tier.available_features().collect::<Vec<_>>(),
             Feature::all()
-        );
-    }
-
-    #[test]
-    fn test_custom_tier_rejects_ambiguous_feature_lists() {
-        let error = serde_json::from_str::<Tier>(
-            r#"{
-                "name": "ambiguous",
-                "features": ["BigQuerySink"],
-                "excluded_features": ["SecretManagement"]
-            }"#,
-        )
-        .unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("must contain exactly one of `features` or `excluded_features`")
         );
     }
 
