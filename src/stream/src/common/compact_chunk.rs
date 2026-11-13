@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::stream_record::Record;
@@ -109,6 +111,9 @@ impl StreamChunkCompactor {
 
     /// Remove unnecessary changes in the given chunks, by filtering them out and constructing new
     /// chunks, with the given chunk size.
+    ///
+    /// As in [`Self::into_compacted_chunks_inline`], each operation is applied on its own, so an
+    /// update may change the key.
     pub fn into_compacted_chunks_reconstructed<const KIND: OutputKind>(
         self,
         chunk_size: usize,
@@ -124,15 +129,12 @@ impl StreamChunkCompactor {
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
         let mut cb = ChangeBuffer::with_capacity(estimate_size).with_inconsistency_behavior(ib);
 
-        for chunk in &chunks {
+        for (op, row) in chunks.iter().flat_map(|c| c.rows()) {
+            let key = row.project(&key_indices);
             if input_kind == StreamKind::Upsert {
-                for (op, row) in chunk.rows() {
-                    cb.apply_upsert_op_row(op, row.project(&key_indices), row);
-                }
+                cb.apply_upsert_op_row(op, key, row);
             } else {
-                for record in chunk.records() {
-                    cb.apply_record(record, |&row| row.project(&key_indices));
-                }
+                cb.apply_op_row(op, key, row);
             }
         }
 
@@ -157,11 +159,126 @@ pub fn compact_chunk_inline<const KIND: OutputKind>(
     .unwrap_or_else(|_| unreachable!("should have exactly one chunk in the output"))
 }
 
+/// Keeps the last change of each key in the given chunk, by modifying the visibility and ops in
+/// place.
+///
+/// Unlike [`compact_chunk_inline`], this does not assume that the chunk starts from what its
+/// consumer holds: an insert and a later delete of a key do not cancel, and an update back to the
+/// old row is kept. For retract output, the delete that a key starts with gives the old row.
+pub fn keep_last_change_inline(
+    stream_chunk: StreamChunk,
+    key_indices: &[usize],
+    output_kind: OutputKind,
+) -> StreamChunk {
+    let mut chunk = StreamChunkMut::from(stream_chunk);
+    let is_delete = |op| matches!(op, Op::Delete | Op::UpdateDelete);
+
+    // For each key, the delete that it starts with, if any, and its last change.
+    let changes = {
+        let mut changes: HashMap<_, (Option<usize>, usize)> = HashMap::new();
+        for i in (0..chunk.capacity()).filter(|i| chunk.vis(*i)) {
+            let first_delete = is_delete(chunk.op(i)).then_some(i);
+            changes
+                .entry(chunk.row_ref(i).project(key_indices))
+                .and_modify(|(_, last)| *last = i)
+                .or_insert((first_delete, i));
+        }
+        changes.into_values().collect_vec()
+    };
+
+    for i in 0..chunk.capacity() {
+        chunk.set_vis(i, false);
+    }
+    for (first_delete, last) in changes {
+        if is_delete(chunk.op(last)) {
+            let old = match output_kind {
+                RETRACT => first_delete.unwrap_or(last),
+                UPSERT => last,
+            };
+            chunk.set_vis(old, true);
+            chunk.set_op(old, Op::Delete);
+        } else if output_kind == RETRACT
+            && let Some(old) = first_delete
+        {
+            let adjacent = old + 1 == last;
+            chunk.set_vis(old, true);
+            chunk.set_op(
+                old,
+                if adjacent {
+                    Op::UpdateDelete
+                } else {
+                    Op::Delete
+                },
+            );
+            chunk.set_vis(last, true);
+            chunk.set_op(
+                last,
+                if adjacent {
+                    Op::UpdateInsert
+                } else {
+                    Op::Insert
+                },
+            );
+        } else {
+            chunk.set_vis(last, true);
+            chunk.set_op(last, Op::Insert);
+        }
+    }
+    chunk.into()
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;
+
+    #[test]
+    fn test_keep_last_change_inline() {
+        let input = StreamChunk::from_pretty(
+            "  I I
+             + 1 10
+             - 1 10
+             - 2 20
+             + 2 21
+             - 3 30
+             + 3 31
+             - 3 31
+             + 4 40
+             + 4 41
+             - 5 50
+             + 6 60
+             + 5 50",
+        );
+        // Key `1` keeps its delete though it follows the insert, key `3` deletes the row it started
+        // with, and key `5` keeps the update back to its old row.
+        assert_eq!(
+            keep_last_change_inline(input.clone(), &[0], RETRACT).compact_vis(),
+            StreamChunk::from_pretty(
+                "  I I
+                 - 1 10
+                U- 2 20
+                U+ 2 21
+                 - 3 30
+                 + 4 41
+                 - 5 50
+                 + 6 60
+                 + 5 50",
+            )
+        );
+        assert_eq!(
+            keep_last_change_inline(input, &[0], UPSERT).compact_vis(),
+            StreamChunk::from_pretty(
+                " I I
+                - 1 10
+                + 2 21
+                - 3 31
+                + 4 41
+                + 6 60
+                + 5 50",
+            )
+        );
+    }
 
     #[test]
     fn test_upsert_input_retains_final_operation() {
@@ -332,6 +449,38 @@ mod tests {
         );
 
         assert_eq!(iter.next(), None);
+    }
+
+    /// The two rows of an update are compacted apart, as they may have different keys.
+    #[test]
+    fn test_compact_update_changing_key() {
+        let input = StreamChunk::from_pretty(
+            "  I I
+            U- 1 1
+            U+ 1 2",
+        );
+        for reconstructed in [false, true] {
+            let compactor =
+                StreamChunkCompactor::new(vec![0, 1], vec![input.clone()], StreamKind::Retract);
+            let chunks = if reconstructed {
+                compactor.into_compacted_chunks_reconstructed::<RETRACT>(
+                    2,
+                    vec![DataType::Int64; 2],
+                    InconsistencyBehavior::Panic,
+                )
+            } else {
+                compactor.into_compacted_chunks_inline::<RETRACT>(InconsistencyBehavior::Panic)
+            };
+            assert_eq!(
+                StreamChunk::concat(chunks).compact_vis(),
+                StreamChunk::from_pretty(
+                    " I I
+                    - 1 1
+                    + 1 2",
+                ),
+                "reconstructed: {reconstructed}"
+            );
+        }
     }
 
     #[test]
