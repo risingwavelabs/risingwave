@@ -87,7 +87,7 @@ futures-async-stream = { workspace = true }
 gcloud-sdk = { version = "0.28", features = ["google-firestore-admin-v1"] }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "=1.7.0", features = [
     "auth",
 ], optional = true }
 google-cloud-gax = { package = "gcloud-gax", version = "1" }
