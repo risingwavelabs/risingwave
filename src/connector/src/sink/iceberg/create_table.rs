@@ -63,6 +63,28 @@ pub async fn create_and_validate_table_impl(
     config: &IcebergConfig,
     param: &SinkParam,
 ) -> Result<Table> {
+    let table = create_and_load_table_impl(config, param).await?;
+
+    let sink_schema = param.schema();
+    let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    try_matches_arrow_schema(&sink_schema, &iceberg_arrow_schema)
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    Ok(table)
+}
+
+/// Creates the table if configured, loads it, and checks table properties that do not depend on
+/// its current schema.
+///
+/// Unlike [`create_and_validate_table_impl`], this does not require the current Iceberg schema to
+/// match `param`. During recovery, a durably recorded sink schema change may still need to be
+/// committed before the two schemas match again.
+pub async fn create_and_load_table_impl(
+    config: &IcebergConfig,
+    param: &SinkParam,
+) -> Result<Table> {
     if config.create_table_if_not_exists {
         create_table_if_not_exists_impl(config, param).await?;
     }
@@ -82,13 +104,6 @@ pub async fn create_and_validate_table_impl(
             )));
         }
     }
-
-    let sink_schema = param.schema();
-    let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())
-        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-
-    try_matches_arrow_schema(&sink_schema, &iceberg_arrow_schema)
-        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
     Ok(table)
 }

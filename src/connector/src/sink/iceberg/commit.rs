@@ -19,7 +19,10 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::Catalog;
 use iceberg::arrow::schema_to_arrow_schema;
-use iceberg::spec::{DataFile, Operation, SerializedDataFile, TableMetadata};
+use iceberg::spec::{
+    DataFile, ListType, MapType, NestedField, NestedFieldRef, Operation, SerializedDataFile,
+    StructType, TableMetadata, Type,
+};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use itertools::Itertools;
@@ -912,52 +915,16 @@ impl IcebergSinkCommitter {
     /// This function uses Transaction API to atomically update the table schema
     /// with optimistic locking to prevent concurrent conflicts.
     async fn commit_schema_change_impl(&mut self, schema_change: PbSinkSchemaChange) -> Result<()> {
-        use iceberg::spec::NestedField;
-
-        // Step 1: Get current table metadata
-        let metadata = self.table.metadata();
-        let mut next_field_id = metadata.last_column_id() + 1;
-        tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
-
-        // Step 2: Build new fields to add
-        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+        // Step 1: Build new fields to add, with fresh field IDs after the table's last column ID.
         let mut new_fields = Vec::new();
-
         let mut drop_column_names = Vec::new();
         match schema_change.op.as_ref() {
             Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(
                 add_columns_op,
             )) => {
                 let add_columns = add_columns_op.fields.iter().map(Field::from).collect_vec();
-                for field in &add_columns {
-                    // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
-                    let arrow_field = iceberg_create_table_arrow_convert
-                        .to_arrow_field(&field.name, &field.data_type)
-                        .with_context(|| {
-                            format!("Failed to convert field '{}' to arrow", field.name)
-                        })
-                        .map_err(SinkError::Iceberg)?;
-
-                    // Convert Arrow DataType to Iceberg Type
-                    let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
-                        .map_err(|err| {
-                            SinkError::Iceberg(
-                                anyhow!(err)
-                                    .context("Failed to convert Arrow type to Iceberg type"),
-                            )
-                        })?;
-
-                    // Create NestedField with the next available field ID
-                    let nested_field = Arc::new(NestedField::optional(
-                        next_field_id,
-                        &field.name,
-                        iceberg_type,
-                    ));
-
-                    new_fields.push(nested_field);
-                    tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
-                    next_field_id += 1;
-                }
+                new_fields =
+                    build_add_column_fields(&add_columns, self.table.metadata().last_column_id())?;
             }
             Some(risingwave_pb::stream_plan::sink_schema_change::Op::DropColumns(
                 drop_columns_op,
@@ -972,7 +939,7 @@ impl IcebergSinkCommitter {
             }
         }
 
-        // Step 3: Create Transaction with UpdateSchemaAction
+        // Step 2: Create Transaction with UpdateSchemaAction
         tracing::info!(
             "Committing schema change to catalog for table {}",
             self.table.identifier()
@@ -1083,6 +1050,87 @@ fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
 
 fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
+}
+
+/// Builds the Iceberg fields for an add-columns sink schema change.
+///
+/// `IcebergCreateTableArrowConvert` numbers field IDs from 1, as it does for `CREATE TABLE`. That
+/// is fine for top-level columns, which are renumbered here, but nested fields (list elements, map
+/// keys and values, struct members) would keep those IDs and collide with existing columns, and the
+/// commit fails with `Found duplicate 'field.id'`. Assign every new field a fresh ID after
+/// `last_column_id`: each column first, then its nested fields depth-first, as `AddColumn` in newer
+/// iceberg-rust does.
+fn build_add_column_fields(
+    add_columns: &[Field],
+    last_column_id: i32,
+) -> Result<Vec<NestedFieldRef>> {
+    let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+    let mut next_field_id = last_column_id;
+    add_columns
+        .iter()
+        .map(|field| {
+            // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
+            let arrow_field = iceberg_create_table_arrow_convert
+                .to_arrow_field(&field.name, &field.data_type)
+                .with_context(|| format!("Failed to convert field '{}' to arrow", field.name))
+                .map_err(SinkError::Iceberg)?;
+
+            // Convert Arrow DataType to Iceberg Type
+            let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
+                .map_err(|err| {
+                    SinkError::Iceberg(
+                        anyhow!(err).context("Failed to convert Arrow type to Iceberg type"),
+                    )
+                })?;
+
+            let nested_field = assign_fresh_field_ids(
+                &NestedField::optional(0, &field.name, iceberg_type),
+                &mut next_field_id,
+            );
+            tracing::info!(
+                "Prepared field '{}' with ID {}",
+                field.name,
+                nested_field.id
+            );
+            Ok(nested_field)
+        })
+        .collect()
+}
+
+/// Assigns `field` and all of its nested fields fresh IDs taken from `next_field_id`.
+fn assign_fresh_field_ids(field: &NestedField, next_field_id: &mut i32) -> NestedFieldRef {
+    *next_field_id += 1;
+    let id = *next_field_id;
+    let field_type = assign_fresh_field_ids_to_type(&field.field_type, next_field_id);
+    Arc::new(NestedField {
+        id,
+        field_type: Box::new(field_type),
+        ..field.clone()
+    })
+}
+
+fn assign_fresh_field_ids_to_type(field_type: &Type, next_field_id: &mut i32) -> Type {
+    match field_type {
+        Type::Primitive(_) | Type::Variant(_) => field_type.clone(),
+        Type::Struct(struct_type) => Type::Struct(StructType::new(
+            struct_type
+                .fields()
+                .iter()
+                .map(|field| assign_fresh_field_ids(field, next_field_id))
+                .collect(),
+        )),
+        Type::List(list_type) => Type::List(ListType {
+            element_field: assign_fresh_field_ids(&list_type.element_field, next_field_id),
+        }),
+        Type::Map(map_type) => {
+            let key_field = assign_fresh_field_ids(&map_type.key_field, next_field_id);
+            let value_field = assign_fresh_field_ids(&map_type.value_field, next_field_id);
+            Type::Map(MapType {
+                key_field,
+                value_field,
+            })
+        }
+    }
 }
 
 #[cfg(test)]

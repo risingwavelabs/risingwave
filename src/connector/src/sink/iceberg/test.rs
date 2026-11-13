@@ -1101,3 +1101,285 @@ fn test_iceberg_sink_upper_case_primary_key() {
         Some(vec!["Key".to_owned()])
     );
 }
+
+// Iceberg tables require a native Tokio runtime, which madsim does not provide.
+#[cfg(not(madsim))]
+mod coordinator_recovery {
+    use std::collections::HashMap;
+
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        FormatVersion, NestedField, PrimitiveType, Schema as IcebergSchema, SortOrder,
+        TableMetadataBuilder, Type, UnboundPartitionSpec,
+    };
+    use iceberg::table::Table;
+    use iceberg::{NamespaceIdent, TableIdent};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+    use risingwave_common::id::SinkId;
+    use risingwave_common::types::{DataType, ListType, MapType, StructType};
+    use risingwave_pb::plan_common::PbField;
+    use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
+    use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
+    use thiserror_ext::AsReport;
+
+    use crate::connector_common::mock_catalog::{MockCatalog, MockTableGuard};
+    use crate::sink::boxed::BoxTwoPhaseCoordinator;
+    use crate::sink::catalog::SinkType;
+    use crate::sink::iceberg::{IcebergConfig, IcebergSink, create_and_validate_table_impl};
+    use crate::sink::{Sink, SinkCommitCoordinator, SinkParam};
+
+    const NAMESPACE: &str = "mock_namespace";
+
+    fn register_table(fields: &[(i32, &str, PrimitiveType)]) -> (String, MockTableGuard) {
+        let name = format!("coordinator_recovery_{}", uuid::Uuid::new_v4().simple());
+        let schema = IcebergSchema::builder()
+            .with_fields(fields.iter().map(|(id, field_name, ty)| {
+                NestedField::optional(*id, *field_name, Type::Primitive(ty.clone())).into()
+            }))
+            .build()
+            .unwrap();
+        let metadata = TableMetadataBuilder::new(
+            schema,
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            format!("memory://{name}"),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+        let table = Table::builder()
+            .identifier(TableIdent::new(
+                NamespaceIdent::new(NAMESPACE.to_owned()),
+                name.clone(),
+            ))
+            .file_io(FileIO::from_path("memory://").unwrap().build().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap();
+        let guard = MockCatalog::register(table);
+        (name, guard)
+    }
+
+    fn sink_param(table_name: &str, columns: &[(&str, DataType)]) -> SinkParam {
+        SinkParam {
+            sink_id: SinkId::from(1u32),
+            sink_name: "test_sink".to_owned(),
+            properties: [
+                ("connector", "iceberg"),
+                ("type", "append-only"),
+                ("catalog.type", "mock"),
+                ("database.name", NAMESPACE),
+                ("table.name", table_name),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect(),
+            columns: columns
+                .iter()
+                .enumerate()
+                .map(|(i, (name, ty))| {
+                    ColumnDesc::named(*name, ColumnId::new(i as i32 + 1), ty.clone())
+                })
+                .collect(),
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test_db".to_owned(),
+            sink_from_name: "test_table".to_owned(),
+        }
+    }
+
+    fn pb_fields(columns: &[(&str, DataType)]) -> Vec<PbField> {
+        columns
+            .iter()
+            .map(|(name, ty)| Field::with_name(ty.clone(), *name).to_prost())
+            .collect()
+    }
+
+    fn add_columns_change(
+        original: &[(&str, DataType)],
+        added: &[(&str, DataType)],
+    ) -> PbSinkSchemaChange {
+        PbSinkSchemaChange {
+            original_schema: pb_fields(original),
+            op: Some(PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                fields: pb_fields(added),
+            })),
+        }
+    }
+
+    async fn new_two_phase_coordinator(param: &SinkParam) -> BoxTwoPhaseCoordinator {
+        let sink = IcebergSink::try_from(param.clone()).unwrap();
+        match sink.new_coordinator(None).await.unwrap() {
+            SinkCommitCoordinator::TwoPhase(coordinator) => coordinator,
+            SinkCommitCoordinator::SinglePhase(_) => {
+                panic!("an exactly-once iceberg sink should use a two-phase coordinator")
+            }
+        }
+    }
+
+    /// After a sink schema change is persisted and the replace job is finished, recovery builds the
+    /// coordinator from writers that already have the new schema, while the Iceberg table may still
+    /// have the original schema. The coordinator must start so that it can commit the pending
+    /// change; writers keep rejecting the table until then.
+    #[tokio::test]
+    async fn test_coordinator_starts_before_pending_add_columns_is_committed() {
+        let original = [("id", DataType::Int32), ("v1", DataType::Int64)];
+        let added = [("v2", DataType::Varchar)];
+        let changed = [original.as_slice(), added.as_slice()].concat();
+        let (table_name, _table) = register_table(&[
+            (1, "id", PrimitiveType::Int),
+            (2, "v1", PrimitiveType::Long),
+        ]);
+        let param = sink_param(&table_name, &changed);
+        let config = IcebergConfig::from_btreemap(param.properties.clone()).unwrap();
+
+        let err = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("Schema length mismatch, risingwave is 3, and iceberg is 2"),
+            "unexpected error: {}",
+            err.as_report()
+        );
+
+        let schema_change = add_columns_change(&original, &added);
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        coordinator
+            .commit_schema_change(1, schema_change.clone())
+            .await
+            .unwrap();
+
+        let table = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap();
+        let schema_id = table.metadata().current_schema_id();
+        assert_eq!(
+            table.metadata().current_schema().as_struct().fields().len(),
+            3
+        );
+
+        // Recovery can replay the same pending change after it has reached Iceberg.
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        coordinator
+            .commit_schema_change(1, schema_change)
+            .await
+            .unwrap();
+        let table = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap();
+        assert_eq!(table.metadata().current_schema_id(), schema_id);
+    }
+
+    /// Starting the coordinator without validating the schema must not hide a table that was
+    /// changed outside RisingWave.
+    #[tokio::test]
+    async fn test_coordinator_start_keeps_external_schema_drift_visible() {
+        let columns = [("id", DataType::Int32), ("v1", DataType::Int64)];
+        let (table_name, _table) = register_table(&[(1, "id", PrimitiveType::Int)]);
+        let param = sink_param(&table_name, &columns);
+        let config = IcebergConfig::from_btreemap(param.properties.clone()).unwrap();
+
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        let err = coordinator
+            .commit_schema_change(
+                1,
+                add_columns_change(&columns, &[("v2", DataType::Varchar)]),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("cannot determine whether schema change is applied"),
+            "unexpected error: {}",
+            err.as_report()
+        );
+
+        let err = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("Schema length mismatch, risingwave is 2, and iceberg is 1"),
+            "unexpected error: {}",
+            err.as_report()
+        );
+    }
+
+    fn collect_field_ids(field: &NestedField, ids: &mut Vec<i32>) {
+        ids.push(field.id);
+        match field.field_type.as_ref() {
+            Type::Struct(struct_type) => struct_type
+                .fields()
+                .iter()
+                .for_each(|field| collect_field_ids(field, ids)),
+            Type::List(list_type) => collect_field_ids(&list_type.element_field, ids),
+            Type::Map(map_type) => {
+                collect_field_ids(&map_type.key_field, ids);
+                collect_field_ids(&map_type.value_field, ids);
+            }
+            _ => {}
+        }
+    }
+
+    /// Nested fields of added columns must get fresh IDs. The arrow conversion numbers fields from
+    /// 1, so without renumbering, the element of `tags` reuses an existing column's ID and the
+    /// commit fails with `Found duplicate 'field.id'`.
+    #[tokio::test]
+    async fn test_add_nested_columns_assigns_fresh_field_ids() {
+        let original = [
+            ("id", DataType::Int32),
+            ("v1", DataType::Int64),
+            ("v2", DataType::Varchar),
+        ];
+        let added = [
+            ("tags", DataType::List(ListType::new(DataType::Varchar))),
+            (
+                "attrs",
+                DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+            ),
+            (
+                "info",
+                DataType::Struct(StructType::new([
+                    ("a", DataType::Int32),
+                    ("b", DataType::List(ListType::new(DataType::Int64))),
+                ])),
+            ),
+        ];
+        let changed = [original.as_slice(), added.as_slice()].concat();
+        let (table_name, _table) = register_table(&[
+            (1, "id", PrimitiveType::Int),
+            (2, "v1", PrimitiveType::Long),
+            (3, "v2", PrimitiveType::String),
+        ]);
+        let param = sink_param(&table_name, &changed);
+        let config = IcebergConfig::from_btreemap(param.properties.clone()).unwrap();
+
+        let mut coordinator = new_two_phase_coordinator(&param).await;
+        coordinator.init().await.unwrap();
+        coordinator
+            .commit_schema_change(1, add_columns_change(&original, &added))
+            .await
+            .unwrap();
+
+        let table = create_and_validate_table_impl(&config, &param)
+            .await
+            .unwrap();
+        let schema = table.metadata().current_schema();
+        let mut ids = vec![];
+        for field in schema.as_struct().fields() {
+            collect_field_ids(field, &mut ids);
+        }
+        // tags, tags.element, attrs, attrs.key, attrs.value, info, info.a, info.b, info.b.element
+        assert_eq!(ids, (1..=12).collect::<Vec<_>>());
+        assert_eq!(table.metadata().last_column_id(), 12);
+    }
+}
