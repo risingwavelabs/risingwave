@@ -22,8 +22,7 @@ pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
             .round_left_ties_away(digits.unsigned_abs())
             .ok_or(ExprError::NumericOverflow)
     } else {
-        // rust_decimal can only handle up to 28 digits of scale
-        Ok(input.round_dp_ties_away((digits as u32).min(Decimal::MAX_PRECISION.into())))
+        Ok(input.round_dp_ties_away(digits as u32))
     }
 }
 
@@ -91,8 +90,17 @@ mod tests {
         do_test("84818.15", 1, Some("84818.2"));
         do_test("21.372736", -1, Some("20"));
         do_test("-79228162514264337593543950335", -30, Some("0"));
-        do_test("-79228162514264337593543950335", -29, None);
-        do_test("-79228162514264337593543950335", -28, None);
+        // Results beyond the former 28-digit range continue with up to 38 digits.
+        do_test(
+            "-79228162514264337593543950335",
+            -29,
+            Some("-100000000000000000000000000000"),
+        );
+        do_test(
+            "-79228162514264337593543950335",
+            -28,
+            Some("-80000000000000000000000000000"),
+        );
         do_test(
             "-79228162514264337593543950335",
             -27,
@@ -102,7 +110,17 @@ mod tests {
         do_test("-792.28162514264337593543950335", -3, Some("-1000"));
         do_test("-792.28162514264337593543950335", -2, Some("-800"));
         do_test("-792.28162514264337593543950335", -1, Some("-790"));
-        do_test("-50000000000000000000000000000", -29, None);
+        do_test(
+            "-50000000000000000000000000000",
+            -29,
+            Some("-100000000000000000000000000000"),
+        );
+        do_test("99999999999999999999999999999999999999", -37, None);
+        do_test(
+            "-1.23456789012345678901234567890123456789",
+            36,
+            Some("-1.234567890123456789012345678901234568"),
+        );
         do_test("-49999999999999999999999999999", -29, Some("0"));
         do_test("-500.00000000000000000000000000", -3, Some("-1000"));
         do_test("-499.99999999999999999999999999", -3, Some("0"));

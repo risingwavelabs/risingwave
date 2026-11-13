@@ -43,11 +43,10 @@ impl FromArrow for DefaultIcebergFromArrow {}
 // Arrow Decimal128 supports up to 38 decimal digits. We use precision=38, scale=10:
 // - Integer range: up to 10^28 - 1 (28 digits)
 // - Fractional precision: 10 digits
-// - Covers all RisingWave decimal values (MAX_PRECISION=28)
 //
-// Note: When reading Arrow decimals that exceed RisingWave's 96-bit / 28-digit
-// storage limit, the conversion code in arrow_impl.rs will reduce scale and
-// truncate the mantissa (via truncated_i128_and_scale) to make them fit.
+// RisingWave decimals have up to 38 significant digits, so values with more than 28 integer digits
+// do not fit this type. When reading Arrow decimals beyond 38 digits, the conversion code in
+// arrow_impl.rs reduces the scale and truncates the mantissa (via truncated_i128_and_scale).
 pub const ICEBERG_DECIMAL_PRECISION: u8 = 38;
 pub const ICEBERG_DECIMAL_SCALE: i8 = 10;
 
