@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use futures::FutureExt;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
@@ -316,6 +317,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             )?
         };
 
+        if connector.eq_ignore_ascii_case(ICEBERG_SINK) {
+            // Derive this from the plan, never from user-supplied connector options.
+            properties_with_secret.insert(
+                SCHEMA_VERSION_PROPERTY.to_owned(),
+                node.log_store_schema_version.to_string(),
+            );
+        }
         let (sink_param, columns) =
             build_sink_param(sink_desc, properties_with_secret.clone(), connector)?;
 
@@ -416,11 +424,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     .iter()
                     .map(|entry| {
                         let sink_desc = sink_desc_of_columns(sink_desc, &entry.sink_columns)?;
-                        let (sink_param, columns) = build_sink_param(
-                            &sink_desc,
-                            properties_with_secret.clone(),
-                            connector,
-                        )?;
+                        let mut properties = properties_with_secret.clone();
+                        if connector.eq_ignore_ascii_case(ICEBERG_SINK) {
+                            properties.insert(
+                                SCHEMA_VERSION_PROPERTY.to_owned(),
+                                entry.version.to_string(),
+                            );
+                        }
+                        let (sink_param, columns) =
+                            build_sink_param(&sink_desc, properties, connector)?;
                         Ok::<_, StreamExecutorError>(SinkSchemaVersionParam {
                             version: entry.version,
                             sink_param,

@@ -86,6 +86,14 @@ garbage collection. Log rows carry an explicit `u32` schema-version header,
 independent of the row operation. Legacy rows without the header are version 0.
 While an Iceberg managed table's downstream schema is catching up, reads use
 committed Iceberg data only and temporarily omit pending log rows.
+Pending-log reads resume only after a data snapshot records the current sink ID
+and log-store schema version. Equal column names are not proof of schema progress.
+Snapshots without this progress marker, including legacy snapshots, use committed
+Iceberg data only until a versioned data commit is available. Before the first
+snapshot, pending reads remain available if the catalog proves the sink is at v0
+and therefore has no historical schemas. Legacy sink catalogs
+without a known schema version also conservatively omit pending rows until their
+next schema refresh.
 
 ### Multi-batch compaction rounds
 

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use iceberg::arrow::{
@@ -53,6 +53,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -302,6 +303,7 @@ pub struct IcebergSinkWriterInner {
     // For chunk with extra partition column, we should remove this column before write.
     // This project index vec is used to avoid create project idx each time.
     project_idx_vec: ProjectIdxVec,
+    log_store_schema_version: Option<u32>,
 }
 
 enum IcebergWriterDispatch {
@@ -477,6 +479,7 @@ impl IcebergSinkWriterInner {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
         Ok(Self {
+            log_store_schema_version: None,
             arrow_schema: Arc::new(
                 schema_to_arrow_schema(table.metadata().current_schema())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -690,6 +693,7 @@ impl IcebergSinkWriterInner {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
         Ok(Self {
+            log_store_schema_version: None,
             arrow_schema: original_arrow_schema,
             metrics: IcebergWriterMetrics {
                 _write_qps: write_qps,
@@ -960,6 +964,7 @@ impl IcebergSinkWriterInner {
             data_files: serialized_data_files,
             schema_id: self.table.metadata().current_schema_id(),
             partition_spec_id: self.table.metadata().default_partition_spec_id(),
+            log_store_schema_version: self.log_store_schema_version,
         })
     }
 
@@ -979,7 +984,7 @@ impl SinkWriter for IcebergSinkWriter {
         };
 
         let table = create_and_validate_table_impl(&args.config, &args.sink_param).await?;
-        let inner = match &args.upsert_primary_key_column_names {
+        let mut inner = match &args.upsert_primary_key_column_names {
             Some(primary_key_column_names) => IcebergSinkWriterInner::build_upsert(
                 &args.config,
                 table,
@@ -991,6 +996,13 @@ impl SinkWriter for IcebergSinkWriter {
             }
         };
 
+        inner.log_store_schema_version = args
+            .sink_param
+            .properties
+            .get(SCHEMA_VERSION_PROPERTY)
+            .map(|version| version.parse())
+            .transpose()
+            .context("Invalid log store schema version")?;
         *self = IcebergSinkWriter::Initialized(inner);
         Ok(())
     }

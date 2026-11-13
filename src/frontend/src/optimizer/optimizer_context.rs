@@ -136,6 +136,8 @@ pub struct MaterializedViewCandidate {
 pub(crate) struct IcebergSnapshotInfo {
     pub(crate) snapshot_id: i64,
     pub(crate) commit_epoch: Option<u64>,
+    /// The sink ID and log-store schema version of the committed data.
+    pub(crate) schema_version: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

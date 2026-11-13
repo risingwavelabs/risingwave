@@ -1267,19 +1267,27 @@ mod coordinator_recovery {
     };
     use iceberg::table::Table;
     use iceberg::{NamespaceIdent, Runtime, TableIdent};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+    use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::{
+        ColumnDesc, ColumnId, Field, RISINGWAVE_ICEBERG_SCHEMA_VERSION,
+    };
+    use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
     use risingwave_common::id::SinkId;
     use risingwave_common::types::DataType;
     use risingwave_pb::plan_common::PbField;
     use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
-    use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
+    use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkDropColumnsOp, PbSinkSchemaChange};
     use thiserror_ext::AsReport;
 
     use crate::connector_common::mock_catalog::{MockCatalog, MockTableGuard};
     use crate::sink::boxed::BoxTwoPhaseCoordinator;
     use crate::sink::catalog::SinkType;
-    use crate::sink::iceberg::{IcebergConfig, IcebergSink, create_and_validate_table_impl};
-    use crate::sink::{Sink, SinkCommitCoordinator, SinkParam};
+    use crate::sink::iceberg::{
+        IcebergConfig, IcebergSink, IcebergSinkWriter, create_and_validate_table_impl,
+    };
+    use crate::sink::writer::SinkWriter;
+    use crate::sink::{Sink, SinkCommitCoordinator, SinkParam, SinkWriterParam};
 
     const NAMESPACE: &str = "mock_namespace";
 
@@ -1374,6 +1382,129 @@ mod coordinator_recovery {
                 panic!("an exactly-once iceberg sink should use a two-phase coordinator")
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_schema_progress_survives_recovery_and_same_name_changes() {
+        let original = [
+            ("id", DataType::Int32),
+            ("a", DataType::Int64),
+            ("b", DataType::Int64),
+        ];
+        let dropped = [("id", DataType::Int32), ("b", DataType::Int64)];
+        let added = [("a", DataType::Int64)];
+        let changed = [dropped.as_slice(), added.as_slice()].concat();
+        let (table_name, _table) = register_table(&[
+            (1, "id", PrimitiveType::Int),
+            (2, "a", PrimitiveType::Long),
+            (3, "b", PrimitiveType::Long),
+        ]);
+        let param = |columns: &[(&str, DataType)], version: u32| {
+            let mut param = sink_param(&table_name, columns);
+            param
+                .properties
+                .insert(SCHEMA_VERSION_PROPERTY.to_owned(), version.to_string());
+            param
+        };
+        let v0 = param(&original, 0);
+        let v1 = param(&dropped, 1);
+        let v2 = param(&changed, 2);
+        let write = async |param: &SinkParam, epoch, chunk| {
+            let sink = IcebergSink::try_from(param.clone()).unwrap();
+            let mut writer = IcebergSinkWriter::new(
+                sink.config,
+                param.clone(),
+                SinkWriterParam {
+                    executor_id: 1.into(),
+                    vnode_bitmap: Bitmap::ones(1),
+                    meta_client: None,
+                    extra_partition_col_idx: None,
+                    actor_id: 1.into(),
+                    sink_id: param.sink_id,
+                    sink_name: param.sink_name.clone(),
+                    connector: "iceberg".to_owned(),
+                    streaming_config: Default::default(),
+                    time_zone: "UTC".parse().unwrap(),
+                },
+                None,
+            );
+            writer.begin_epoch(epoch).await.unwrap();
+            writer
+                .write_batch(StreamChunk::from_pretty(chunk))
+                .await
+                .unwrap();
+            writer.barrier(true).await.unwrap().unwrap()
+        };
+        let load = async |param: &SinkParam| {
+            let sink = IcebergSink::try_from(param.clone()).unwrap();
+            create_and_validate_table_impl(&sink.config, param)
+                .await
+                .unwrap()
+        };
+        let progress = |table: &Table| {
+            table
+                .metadata()
+                .current_snapshot()
+                .unwrap()
+                .summary()
+                .additional_properties[RISINGWAVE_ICEBERG_SCHEMA_VERSION]
+                .clone()
+        };
+
+        let metadata = write(&v0, 10, "i I I\n+ 1 10 100").await;
+        let mut coordinator = new_two_phase_coordinator(&v0).await;
+        coordinator.init().await.unwrap();
+        let prepared = coordinator
+            .pre_commit(10, vec![metadata], None)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(coordinator);
+
+        // A replacement coordinator must not label an old prepared commit with its new version.
+        let mut coordinator = new_two_phase_coordinator(&v2).await;
+        coordinator.init().await.unwrap();
+        coordinator.commit_data(10, prepared.clone()).await.unwrap();
+        assert_eq!(progress(&load(&v0).await), "1:0");
+        coordinator.commit_data(10, prepared).await.unwrap();
+        assert_eq!(load(&v0).await.metadata().snapshots().count(), 1);
+
+        coordinator
+            .commit_schema_change(
+                10,
+                PbSinkSchemaChange {
+                    original_schema: pb_fields(&original),
+                    op: Some(PbSinkSchemaChangeOp::DropColumns(PbSinkDropColumnsOp {
+                        column_names: vec!["a".to_owned()],
+                    })),
+                },
+            )
+            .await
+            .unwrap();
+        // Schema-only commits do not establish a new pending-log read boundary.
+        assert_eq!(progress(&load(&v1).await), "1:0");
+        let metadata = write(&v1, 20, "i I\n+ 2 200").await;
+        let prepared = coordinator
+            .pre_commit(20, vec![metadata], None)
+            .await
+            .unwrap()
+            .unwrap();
+        coordinator.commit_data(20, prepared).await.unwrap();
+        assert_eq!(progress(&load(&v1).await), "1:1");
+
+        coordinator
+            .commit_schema_change(20, add_columns_change(&dropped, &added))
+            .await
+            .unwrap();
+        assert_eq!(progress(&load(&v2).await), "1:1");
+        let metadata = write(&v2, 30, "i I I\n+ 3 300 30").await;
+        let prepared = coordinator
+            .pre_commit(30, vec![metadata], None)
+            .await
+            .unwrap()
+            .unwrap();
+        coordinator.commit_data(30, prepared).await.unwrap();
+        assert_eq!(progress(&load(&v2).await), "1:2");
     }
 
     /// After a sink schema change is persisted and the replace job is finished, recovery builds the

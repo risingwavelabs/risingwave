@@ -273,6 +273,7 @@ fn populate_pk_index_report_fields(
     // Reporting Success without it would make meta silently treat the rewrite as done while
     // dropping the output files entirely. Fail the report instead so meta retries the task.
     let output_files = match SinkMetadata::try_from(&IcebergCommitResult {
+        log_store_schema_version: None,
         schema_id,
         partition_spec_id,
         data_files: output_files,

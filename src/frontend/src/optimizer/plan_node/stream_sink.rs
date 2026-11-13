@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID,
     ROW_ID_COLUMN_NAME,
 };
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
@@ -560,6 +561,9 @@ impl StreamSink {
         } else {
             CreateType::Foreground
         };
+        if properties.is_iceberg_connector() {
+            properties.insert(SCHEMA_VERSION_PROPERTY.to_owned(), "0".to_owned());
+        }
         let (mut properties, secret_refs) = properties.into_parts();
         if let Some(target_table) = &target_table
             && target_table_requires_row_level_conflict_handling(target_table)

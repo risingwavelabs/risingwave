@@ -23,6 +23,7 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, max_column_id,
 };
 use risingwave_common::config::DefaultParallelism;
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
@@ -2467,9 +2468,15 @@ impl CatalogController {
                         .one(txn)
                         .await?;
                 let columns = ColumnCatalogArray::from(finish_sink_context.columns);
+                if let Some(version) = finish_sink_context.log_store_schema_version {
+                    sink.properties
+                        .0
+                        .insert(SCHEMA_VERSION_PROPERTY.to_owned(), version.to_string());
+                }
                 Sink::update(sink::ActiveModel {
                     sink_id: Set(finish_sink_context.original_sink_id),
                     columns: Set(columns.clone()),
+                    properties: Set(sink.properties.clone()),
                     ..Default::default()
                 })
                 .exec(txn)
@@ -4187,6 +4194,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
+    pub log_store_schema_version: Option<u32>,
     pub new_log_store_table: Option<Box<PbTable>>,
 }
 

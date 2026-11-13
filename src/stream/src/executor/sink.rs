@@ -1487,7 +1487,7 @@ mod test {
             }
             let version = (position / 2) as u32;
             self.read_version.set(version);
-            let item = if position % 2 == 0 {
+            let item = if position.is_multiple_of(2) {
                 // Each version has one more visible column and a hidden column. The sink must be
                 // rebuilt with matching columns, and the projection must use that version's layout.
                 let chunk = StreamChunk::from_pretty(match version {

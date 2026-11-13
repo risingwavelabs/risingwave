@@ -29,7 +29,9 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH};
+use risingwave_common::catalog::{
+    Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH, RISINGWAVE_ICEBERG_SCHEMA_VERSION,
+};
 use risingwave_common::error::IcebergError;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -50,12 +52,15 @@ use crate::sink::{Result, SinglePhaseCommitCoordinator, SinkParam, TwoPhaseCommi
 const SCHEMA_ID: &str = "schema_id";
 const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
+const LOG_STORE_SCHEMA_VERSION: &str = "log_store_schema_version";
 
 #[derive(Default, Clone)]
 pub struct IcebergCommitResult {
     pub schema_id: i32,
     pub partition_spec_id: i32,
     pub data_files: Vec<SerializedDataFile>,
+    /// The writer's version, retained in two-phase pre-commit state for recovery.
+    pub log_store_schema_version: Option<u32>,
 }
 
 impl IcebergCommitResult {
@@ -109,10 +114,16 @@ impl IcebergCommitResult {
             bail!("iceberg sink metadata should have data_files object");
         }
 
+        let log_store_schema_version = values
+            .remove(LOG_STORE_SCHEMA_VERSION)
+            .map(serde_json::from_value)
+            .transpose()
+            .context("Invalid log store schema version")?;
         Ok(Self {
             schema_id: schema_id as i32,
             partition_spec_id: partition_spec_id as i32,
             data_files,
+            log_store_schema_version,
         })
     }
 }
@@ -140,7 +151,7 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for Vec<u8> {
                 .collect::<std::result::Result<Vec<serde_json::Value>, _>>()
                 .context("Can't serialize data files to json")?,
         );
-        let json_value = serde_json::Value::Object(
+        let mut json_value = serde_json::Value::Object(
             vec![
                 (
                     SCHEMA_ID.to_owned(),
@@ -155,8 +166,43 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for Vec<u8> {
             .into_iter()
             .collect(),
         );
+        if let Some(version) = value.log_store_schema_version {
+            json_value[LOG_STORE_SCHEMA_VERSION] = version.into();
+        }
         Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
     }
+}
+
+fn log_store_schema_version(write_results: &[IcebergCommitResult]) -> Result<Option<u32>> {
+    let version = write_results
+        .first()
+        .and_then(|r| r.log_store_schema_version);
+    if write_results
+        .iter()
+        .any(|r| r.log_store_schema_version != version)
+    {
+        bail!("log store schema version should be the same in all write results");
+    }
+    Ok(version)
+}
+
+fn snapshot_properties(
+    epoch: u64,
+    sink_id: SinkId,
+    write_results: &[IcebergCommitResult],
+) -> Result<HashMap<String, String>> {
+    let version = log_store_schema_version(write_results)?;
+    let mut properties = HashMap::from([(
+        RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(),
+        epoch.to_string(),
+    )]);
+    if let Some(version) = version {
+        properties.insert(
+            RISINGWAVE_ICEBERG_SCHEMA_VERSION.to_owned(),
+            format!("{sink_id}:{version}"),
+        );
+    }
+    Ok(properties)
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -605,6 +651,7 @@ impl IcebergSinkCommitter {
 
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
+        log_store_schema_version(&write_results)?;
 
         // guarantee that all write results has same schema_id and partition_spec_id
         if write_results
@@ -654,6 +701,8 @@ impl IcebergSinkCommitter {
         let expect_partition_spec_id = write_results[0].partition_spec_id;
         let data_file_count: usize = write_results.iter().map(|r| r.data_files.len()).sum();
         let target_branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        // Use persisted writer metadata, not the coordinator's potentially newer parameters.
+        let snapshot_properties = snapshot_properties(epoch, self.sink_id, &write_results)?;
         tracing::info!(
             iceberg_component = "sink_committer",
             iceberg_operation = "commit",
@@ -729,6 +778,7 @@ impl IcebergSinkCommitter {
                 let table_name = table_name.clone();
                 let target_branch = target_branch.clone();
                 let data_files = data_files.clone();
+                let snapshot_properties = snapshot_properties.clone();
                 let catalog = catalog.clone();
                 async move {
                     let txn = Transaction::new(&table);
@@ -736,10 +786,7 @@ impl IcebergSinkCommitter {
                         .fast_append()
                         .set_snapshot_id(snapshot_id)
                         .set_target_branch(target_branch.clone())
-                        .set_snapshot_properties(HashMap::from([(
-                            RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(),
-                            epoch.to_string(),
-                        )]))
+                        .set_snapshot_properties(snapshot_properties)
                         .add_data_files(data_files);
 
                     let tx = append_action.apply(txn).map_err(|err| {
@@ -1096,6 +1143,65 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn test_log_store_schema_version_survives_pre_commit_recovery() {
+        for version in [None, Some(0), Some(2), Some(u32::MAX)] {
+            let result = IcebergCommitResult {
+                log_store_schema_version: version,
+                ..Default::default()
+            };
+            let metadata = SinkMetadata::try_from(&result).unwrap();
+            assert_eq!(
+                IcebergCommitResult::try_from(&metadata)
+                    .unwrap()
+                    .log_store_schema_version,
+                version,
+            );
+            let bytes = Vec::<u8>::try_from(&result).unwrap();
+            let persisted = serialize_metadata(vec![bytes, 123_i64.to_le_bytes().to_vec()]);
+            let mut recovered = deserialize_metadata(persisted);
+            assert_eq!(recovered.pop().unwrap(), 123_i64.to_le_bytes());
+            let result = IcebergCommitResult::try_from_serialized_bytes(&recovered[0]).unwrap();
+            let properties = snapshot_properties(42, SinkId::new(7), &[result]).unwrap();
+            assert_eq!(properties[RISINGWAVE_ICEBERG_COMMIT_EPOCH], "42");
+            assert_eq!(
+                properties.get(RISINGWAVE_ICEBERG_SCHEMA_VERSION),
+                version.map(|version| format!("7:{version}")).as_ref(),
+            );
+        }
+        for invalid in [
+            serde_json::json!(-1),
+            serde_json::json!(4294967296u64),
+            serde_json::json!("2"),
+        ] {
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schema_id": 0,
+                "partition_spec_id": 0,
+                "data_files": [],
+                "log_store_schema_version": invalid,
+            }))
+            .unwrap();
+            assert!(IcebergCommitResult::try_from_serialized_bytes(&bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn test_snapshot_progress_rejects_mixed_writer_versions() {
+        for other in [None, Some(1), Some(3)] {
+            let results = [
+                IcebergCommitResult {
+                    log_store_schema_version: Some(2),
+                    ..Default::default()
+                },
+                IcebergCommitResult {
+                    log_store_schema_version: other,
+                    ..Default::default()
+                },
+            ];
+            assert!(snapshot_properties(42, SinkId::new(7), &results).is_err());
+        }
+    }
 
     #[test]
     fn test_schema_contains_same_fields_allows_binary_large_binary() {
