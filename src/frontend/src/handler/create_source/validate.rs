@@ -175,9 +175,10 @@ pub fn validate_compatibility(
         })?;
     if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
-            (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
+            (Format::Plain | Format::Upsert, Encode::Protobuf | Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+                let (_, use_schema_registry) =
+                    get_schema_location(options.inner_mut()).unwrap_or_default();
                 use_schema_registry
             }
             (Format::Debezium, Encode::Avro) => true,
@@ -284,5 +285,15 @@ mod tests {
             &[("schema.registry", "http://localhost:8081")],
         );
         validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
+    }
+
+    #[test]
+    fn glue_schema_registry_non_kafka() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[(AWS_GLUE_SCHEMA_ARN_KEY, "placeholder")],
+        );
+        validate_compatibility(&format_encode, &mut source_options(KINESIS_CONNECTOR)).unwrap();
     }
 }
