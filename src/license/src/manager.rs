@@ -36,8 +36,8 @@ pub enum MaybeFeature {
 
 /// License tier.
 ///
-/// Each enterprise [`Feature`] is available for a specific tier and above.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A tier controls which enterprise [`Feature`]s are available.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
     /// Free tier. No feature is available. This is more like a placeholder.
@@ -50,12 +50,73 @@ pub enum Tier {
     /// All features available currently and in the future.
     All,
 
-    /// Custom tier, with a list of available features.
+    /// Custom tier, with an allowlist of available features.
     #[serde(untagged)]
-    Custom {
+    CustomAllowList {
         name: String,
-        features: Vec<MaybeFeature>,
+        /// Keep serializing this field as `features` for compatibility with existing licenses.
+        #[serde(rename = "features")]
+        allowed_features: Vec<MaybeFeature>,
     },
+
+    /// Custom tier, with a denylist of unavailable features.
+    ///
+    /// Features added in future versions are available by default unless they are explicitly
+    /// included in `excluded_features`.
+    #[serde(untagged)]
+    CustomDenyList {
+        name: String,
+        excluded_features: Vec<MaybeFeature>,
+    },
+}
+
+impl<'de> Deserialize<'de> for Tier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum TierDef {
+            Free,
+            #[serde(rename = "paid")]
+            AllAsOf2_5,
+            All,
+            #[serde(untagged)]
+            Custom {
+                name: String,
+                #[serde(default)]
+                features: Option<Vec<MaybeFeature>>,
+                #[serde(default)]
+                excluded_features: Option<Vec<MaybeFeature>>,
+            },
+        }
+
+        match TierDef::deserialize(deserializer)? {
+            TierDef::Free => Ok(Tier::Free),
+            TierDef::AllAsOf2_5 => Ok(Tier::AllAsOf2_5),
+            TierDef::All => Ok(Tier::All),
+            TierDef::Custom {
+                name,
+                features: Some(allowed_features),
+                excluded_features: None,
+            } => Ok(Tier::CustomAllowList {
+                name,
+                allowed_features,
+            }),
+            TierDef::Custom {
+                name,
+                features: None,
+                excluded_features: Some(excluded_features),
+            } => Ok(Tier::CustomDenyList {
+                name,
+                excluded_features,
+            }),
+            TierDef::Custom { .. } => Err(<D::Error as serde::de::Error>::custom(
+                "custom license tier must contain exactly one of `features` or `excluded_features`",
+            )),
+        }
+    }
 }
 
 impl Tier {
@@ -66,10 +127,18 @@ impl Tier {
             Tier::Free => std::iter::empty(),
             Tier::AllAsOf2_5 => Feature::all_as_of_2_5().iter().copied(),
             Tier::All => Feature::all().iter().copied(),
-            Tier::Custom { features, .. } => features.iter().filter_map(|feature| match feature {
+            Tier::CustomAllowList {
+                allowed_features, ..
+            } => allowed_features.iter().filter_map(|feature| match feature {
                 MaybeFeature::Feature(feature) => Some(*feature),
                 MaybeFeature::Unknown(_) => None,
             }),
+            Tier::CustomDenyList {
+                excluded_features, ..
+            } => Feature::all()
+                .iter()
+                .copied()
+                .filter(|feature| !excluded_features.contains(&MaybeFeature::Feature(*feature))),
         }
     }
 
@@ -78,7 +147,7 @@ impl Tier {
             Tier::Free => "free",
             Tier::AllAsOf2_5 => "paid",
             Tier::All => "all",
-            Tier::Custom { name, .. } => name,
+            Tier::CustomAllowList { name, .. } | Tier::CustomDenyList { name, .. } => name,
         }
     }
 }
@@ -337,6 +406,18 @@ mod tests {
         manager
     }
 
+    fn manager_with_tier(tier: Tier) -> LicenseManager {
+        let manager = LicenseManager::new();
+        manager.inner.write().unwrap().license = Ok(License {
+            sub: "rw-unit-test".to_owned(),
+            iss: Issuer::Test,
+            tier,
+            rwu_limit: None,
+            exp: 10000627200,
+        });
+        manager
+    }
+
     #[test]
     fn test_all_license_key() {
         do_test(
@@ -420,9 +501,9 @@ mod tests {
                 License {
                     sub: "rw-unit-test",
                     iss: Test,
-                    tier: Custom {
+                    tier: CustomAllowList {
                         name: "secret-only",
-                        features: [
+                        allowed_features: [
                             Feature(
                                 SecretManagement,
                             ),
@@ -448,6 +529,125 @@ mod tests {
             Feature::BigQuerySink
                 .check_available_with(&manager)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn test_custom_allow_list_json_compatibility() {
+        let tier: Tier = serde_json::from_str(
+            r#"{
+                "name": "secret-only",
+                "features": ["SecretManagement", "FutureFeature"]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            tier,
+            Tier::CustomAllowList {
+                name: "secret-only".to_owned(),
+                allowed_features: vec![
+                    MaybeFeature::Feature(Feature::SecretManagement),
+                    MaybeFeature::Unknown("FutureFeature".to_owned()),
+                ],
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(tier).unwrap(),
+            serde_json::json!({
+                "name": "secret-only",
+                "features": ["SecretManagement", "FutureFeature"],
+            })
+        );
+    }
+
+    #[test]
+    fn test_custom_deny_list() {
+        let tier: Tier = serde_json::from_str(
+            r#"{
+                "name": "all-except-secret",
+                "excluded_features": ["SecretManagement", "FutureFeature"]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&tier).unwrap(),
+            serde_json::json!({
+                "name": "all-except-secret",
+                "excluded_features": ["SecretManagement", "FutureFeature"],
+            })
+        );
+        assert_eq!(tier.name(), "all-except-secret");
+        assert_eq!(
+            tier.available_features().collect::<Vec<_>>(),
+            Feature::all()
+                .iter()
+                .copied()
+                .filter(|feature| *feature != Feature::SecretManagement)
+                .collect::<Vec<_>>()
+        );
+
+        let manager = manager_with_tier(tier);
+        assert!(
+            Feature::SecretManagement
+                .check_available_with(&manager)
+                .is_err()
+        );
+        assert!(Feature::BigQuerySink.check_available_with(&manager).is_ok());
+    }
+
+    #[test]
+    fn test_empty_custom_deny_list_allows_all_features() {
+        let tier: Tier = serde_json::from_str(
+            r#"{
+                "name": "all-features",
+                "excluded_features": []
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            tier.available_features().collect::<Vec<_>>(),
+            Feature::all()
+        );
+    }
+
+    #[test]
+    fn test_custom_tier_rejects_ambiguous_feature_lists() {
+        let error = serde_json::from_str::<Tier>(
+            r#"{
+                "name": "ambiguous",
+                "features": ["BigQuerySink"],
+                "excluded_features": ["SecretManagement"]
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("must contain exactly one of `features` or `excluded_features`")
+        );
+    }
+
+    #[test]
+    fn test_legacy_custom_tier_rejects_deny_list() {
+        #[allow(dead_code)]
+        #[derive(Deserialize)]
+        struct LegacyCustomTier {
+            name: String,
+            features: Vec<MaybeFeature>,
+        }
+
+        assert!(
+            serde_json::from_str::<LegacyCustomTier>(
+                r#"{
+                    "name": "all-except-secret",
+                    "excluded_features": ["SecretManagement"]
+                }"#,
+            )
+            .is_err()
         );
     }
 
