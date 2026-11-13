@@ -269,13 +269,19 @@ pub struct BigQueryConfig {
     /// Write `_CHANGE_SEQUENCE_NUMBER` on upsert rows, so that `BigQuery` applies the changes of
     /// each key in the order they are sent. Once a table has rows written with it, turning it off
     /// makes `BigQuery` ignore later changes to those rows.
-    #[serde(rename = "bigquery.change_sequence_number", default)]
+    #[serde(rename = "bigquery.change_sequence_number", default = "default_change_sequence_number")]
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub change_sequence_number: bool,
 
     #[serde(flatten)]
     pub unknown_fields: std::collections::HashMap<String, String>,
+}
+
+/// Sinks on this build wrote `_CHANGE_SEQUENCE_NUMBER` before the option existed, so it stays on
+/// unless a sink turns it off.
+fn default_change_sequence_number() -> bool {
+    true
 }
 
 crate::impl_sink_unknown_fields!(BigQueryConfig);
@@ -1300,7 +1306,7 @@ mod test {
 
     #[test]
     fn test_change_sequence_number_option() {
-        assert!(!sink_config("upsert", &[]).change_sequence_number);
+        assert!(sink_config("upsert", &[]).change_sequence_number);
         for (value, expected) in [("true", true), ("false", false)] {
             let config = sink_config("upsert", &[("bigquery.change_sequence_number", value)]);
             assert_eq!(config.change_sequence_number, expected);
@@ -1442,10 +1448,8 @@ mod test {
                 .to_owned()
         };
 
-        let rows = write_and_decode(
-            sink_config("upsert", &[("bigquery.change_sequence_number", "true")]),
-            chunks(),
-        );
+        // On by default.
+        let rows = write_and_decode(sink_config("upsert", &[]), chunks());
         let change_types: Vec<_> = rows.iter().map(|row| field(row, CHANGE_TYPE)).collect();
         assert_eq!(change_types, ["UPSERT", "UPSERT", "DELETE"]);
         let sequence_numbers: Vec<_> = rows
@@ -1464,8 +1468,11 @@ mod test {
             "{sequence_numbers:?}"
         );
 
-        // Off by default: upsert rows carry only the change type.
-        let rows = write_and_decode(sink_config("upsert", &[]), chunks());
+        // Off: upsert rows carry only the change type.
+        let rows = write_and_decode(
+            sink_config("upsert", &[("bigquery.change_sequence_number", "false")]),
+            chunks(),
+        );
         let change_types: Vec<_> = rows.iter().map(|row| field(row, CHANGE_TYPE)).collect();
         assert_eq!(change_types, ["UPSERT", "UPSERT", "DELETE"]);
         assert!(

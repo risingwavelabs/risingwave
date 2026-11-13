@@ -122,7 +122,7 @@ BigQueryConfig:
       each key in the order they are sent. Once a table has rows written with it, turning it off
       makes `BigQuery` ignore later changes to those rows.
     required: false
-    default: Default::default
+    default: 'true'
     allow_alter_on_fly: true
 ClickHouseConfig:
   fields:
