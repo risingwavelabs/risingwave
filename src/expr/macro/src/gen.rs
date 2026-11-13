@@ -152,11 +152,26 @@ impl FunctionAttr {
         .collect_vec();
         let ret = sig_data_type(&self.ret);
 
+        let is_async = self.async_ || user_fn.async_;
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
-            quote! { #name }
+            if self.async_ {
+                quote! {
+                    |return_type, children| {
+                        let expr = #name(return_type, children)?;
+                        risingwave_expr::ensure!(
+                            matches!(&expr, risingwave_expr::expr::BoxedExpression::Async(_)),
+                            "async expression builder `{}` returned a synchronous expression",
+                            stringify!(#name)
+                        );
+                        Ok(expr)
+                    }
+                }
+            } else {
+                quote! { #name }
+            }
         } else if self.rewritten {
             quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
@@ -186,6 +201,7 @@ impl FunctionAttr {
                     build: FuncBuilder::Scalar(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    is_async: #is_async,
                 }
             }
         })
@@ -850,6 +866,7 @@ impl FunctionAttr {
                     },
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    is_async: false,
                 }
             }
         })
@@ -1183,6 +1200,7 @@ impl FunctionAttr {
                     build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    is_async: false,
                 }
             }
         })

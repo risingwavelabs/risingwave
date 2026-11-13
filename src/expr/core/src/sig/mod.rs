@@ -209,6 +209,9 @@ pub struct FuncSign {
     /// The return type.
     pub ret_type: SigDataType,
 
+    /// Whether this scalar function is asynchronous even when all its inputs are synchronous.
+    pub is_async: bool,
+
     /// A function to build the expression.
     pub build: FuncBuilder,
 

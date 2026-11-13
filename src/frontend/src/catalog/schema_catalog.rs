@@ -462,6 +462,7 @@ impl SchemaCatalog {
             // dummy type infer, will not use this result
             type_infer: |_| Ok(DataType::Boolean),
             deprecated: false,
+            is_async: true,
         }
     }
 

@@ -1438,6 +1438,7 @@ mod tests {
                     build: FuncBuilder::Scalar(|_, _| unreachable!()),
                     type_infer: |_| unreachable!(),
                     deprecated: false,
+                    is_async: false,
                 });
             }
             let result = infer_type_name(&sig_map, ExprType::Add.into(), inputs);

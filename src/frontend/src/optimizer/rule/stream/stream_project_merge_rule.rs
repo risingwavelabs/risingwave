@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use super::prelude::*;
+use super::stream_project_split_rule::{has_mixed_computations, is_trivial_expr};
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject};
 use crate::optimizer::rule::ProjectMergeRule;
 
@@ -24,12 +26,26 @@ impl Rule<Stream> for StreamProjectMergeRule {
         let input = outer_project.input();
         let inner_project = input.as_stream_project()?;
 
+        // Keep evaluated async results as column references. Inlining them into a conditional
+        // or lambda can change which rows evaluate the call, even without duplicating its tree.
+        if inner_project.exprs().iter().any(ExprImpl::is_async)
+            && outer_project
+                .exprs()
+                .iter()
+                .any(|expr| !is_trivial_expr(expr))
+        {
+            return None;
+        }
+
         let mut core = outer_project.core().clone();
         core.exprs = ProjectMergeRule::merge_project_exprs(
             outer_project.exprs(),
             inner_project.exprs(),
             true,
         )?;
+        if has_mixed_computations(&core.exprs) {
+            return None;
+        }
         core.input = inner_project.input();
 
         // If either of the projects has the hint, we should keep it.
