@@ -30,9 +30,9 @@ use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, co
 use rw_futures_util::pending_on_none;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot::{Receiver, Sender, channel};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
@@ -41,7 +41,9 @@ use tracing::{error, info, warn};
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::sink_coordination::SinkWriterRequestStream;
-use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
+use crate::manager::sink_coordination::coordinator_worker::{
+    CoordinatorStopRequest, CoordinatorWorker,
+};
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 use crate::notification::{
     CollectionNotifier, Notifier, NotifierStarter, StartReceiver, wait_collection,
@@ -59,6 +61,11 @@ const BOUNDED_CHANNEL_SIZE: usize = 16;
 
 enum ManagerRequest {
     NewSinkWriter(SinkWriterCoordinationHandle),
+    DrainAndStopCoordinator {
+        sink_id: SinkId,
+        target_epoch: u64,
+        reply: Sender<anyhow::Result<()>>,
+    },
     StopCoordinator {
         notifier: Notifier,
         /// Streaming jobs whose sink coordinators should be stopped.
@@ -151,11 +158,12 @@ impl SinkCoordinatorManager {
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
         Self::start_worker_with_spawn_worker({
-            move |param, manager_request_stream| {
+            move |param, manager_request_stream, stop_rx| {
                 let sink_id = param.sink_id;
                 let fut = CoordinatorWorker::run(
                     param,
                     manager_request_stream,
+                    stop_rx,
                     db.clone(),
                     subscriber.clone(),
                     iceberg_compact_stat_sender.clone(),
@@ -216,6 +224,36 @@ impl SinkCoordinatorManager {
         Ok(UnboundedReceiverStream::new(response_rx))
     }
 
+    /// Commit the pending epochs of a sink up to `target_epoch` and stop its coordinator.
+    ///
+    /// Used for the old sink of `REPLACE SINK` after the cutover barrier has been committed to
+    /// Hummock and all its writers have stopped.
+    pub async fn drain_and_stop_coordinator(
+        &self,
+        sink_id: SinkId,
+        target_epoch: u64,
+    ) -> anyhow::Result<()> {
+        let (tx, rx) = channel();
+        self.request_tx
+            .send(ManagerRequest::DrainAndStopCoordinator {
+                sink_id,
+                target_epoch,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "unable to send drain request to sink manager worker. The worker may have stopped"
+                )
+            })?;
+        rx.await.map_err(|_| {
+            anyhow!(
+                "sink coordinator stopped before finishing the drain: sink_id={}",
+                sink_id
+            )
+        })?
+    }
+
     pub async fn stop_sink_coordinators_for_jobs(&self, job_ids: Vec<JobId>) {
         let (notifier, started_rx) = Notifier::new();
         if self
@@ -260,8 +298,11 @@ impl SinkCoordinatorManager {
 }
 
 struct CoordinatorWorkerHandle {
-    /// Sender to coordinator worker. Drop the sender as a stop signal
-    request_sender: Option<UnboundedSender<SinkWriterCoordinationHandle>>,
+    /// Sender of new sink writers to the coordinator worker.
+    request_sender: UnboundedSender<SinkWriterCoordinationHandle>,
+    /// Sender of the terminal stop request. Taken once the worker is asked to stop, after which
+    /// new sink writers are rejected.
+    stop_sender: Option<oneshot::Sender<CoordinatorStopRequest>>,
     /// Notify when the coordinator worker stops
     finish_notifiers: Vec<CollectionNotifier>,
 }
@@ -285,7 +326,11 @@ enum ManagerEvent {
     },
 }
 
-trait SpawnCoordinatorFn = FnMut(SinkParam, UnboundedReceiver<SinkWriterCoordinationHandle>) -> JoinHandle<()>
+trait SpawnCoordinatorFn = FnMut(
+        SinkParam,
+        UnboundedReceiver<SinkWriterCoordinationHandle>,
+        oneshot::Receiver<CoordinatorStopRequest>,
+    ) -> JoinHandle<()>
     + Send
     + 'static;
 
@@ -307,6 +352,11 @@ impl ManagerWorker {
                     ManagerRequest::NewSinkWriter(request) => {
                         self.handle_new_sink_writer(request, &mut spawn_coordinator_worker)
                     }
+                    ManagerRequest::DrainAndStopCoordinator {
+                        sink_id,
+                        target_epoch,
+                        reply,
+                    } => self.handle_drain_and_stop_coordinator(sink_id, target_epoch, reply),
                     ManagerRequest::StopCoordinator { notifier, job_ids } => {
                         let mut notifier = notifier.start();
                         for job_id in job_ids {
@@ -388,9 +438,9 @@ impl ManagerWorker {
         notifier: &mut NotifierStarter,
     ) {
         worker_handle.finish_notifiers.push(notifier.add_notify());
-        if let Some(sender) = worker_handle.request_sender.take() {
-            // Drop the sender as a signal to notify the coordinator worker to stop.
-            drop(sender);
+        if let Some(stop_sender) = worker_handle.stop_sender.take() {
+            // A worker that has already exited is reported by its join handle.
+            let _ = stop_sender.send(CoordinatorStopRequest::Stop);
         }
     }
 
@@ -454,9 +504,8 @@ impl ManagerWorker {
     async fn clean_up(&mut self) {
         info!("sink manager worker start cleaning up");
         for worker_handle in self.running_coordinator_worker.values_mut() {
-            if let Some(sender) = worker_handle.request_sender.take() {
-                // drop the sender to notify the coordinator worker to stop
-                drop(sender);
+            if let Some(stop_sender) = worker_handle.stop_sender.take() {
+                let _ = stop_sender.send(CoordinatorStopRequest::Stop);
             }
         }
         while let Some((sink_id, join_result)) =
@@ -492,6 +541,49 @@ impl ManagerWorker {
         }
     }
 
+    fn handle_drain_and_stop_coordinator(
+        &mut self,
+        sink_id: SinkId,
+        target_epoch: u64,
+        reply: Sender<anyhow::Result<()>>,
+    ) {
+        // For a sink that commits through a coordinator, the worker is expected to exist here. The
+        // cutover epoch has just completed, so the old writers have initialized the coordinator and
+        // committed through it. Stopping all writers does not end the worker: it keeps running
+        // until meta stops it. A sink without a coordinator has no worker and nothing to drain. If
+        // the worker has exited on an error, the caller's final check of `pending_sink_state`
+        // catches any epoch left uncommitted.
+        let Some(worker_handle) = self.running_coordinator_worker.get_mut(&sink_id) else {
+            send_with_err_check!(reply, Ok(()));
+            return;
+        };
+        let Some(stop_sender) = worker_handle.stop_sender.take() else {
+            send_with_err_check!(
+                reply,
+                Err(anyhow!(
+                    "sink coordinator is already being stopped: sink_id={}",
+                    sink_id
+                ))
+            );
+            return;
+        };
+        if let Err(request) = stop_sender.send(CoordinatorStopRequest::DrainAndStop {
+            target_epoch,
+            reply,
+        }) {
+            let CoordinatorStopRequest::DrainAndStop { reply, .. } = request else {
+                unreachable!("returned the request that was sent");
+            };
+            send_with_err_check!(
+                reply,
+                Err(anyhow!(
+                    "sink coordinator exited before accepting the drain request: sink_id={}",
+                    sink_id
+                ))
+            );
+        }
+    }
+
     fn handle_new_sink_writer(
         &mut self,
         new_writer: SinkWriterCoordinationHandle,
@@ -514,20 +606,22 @@ impl ManagerWorker {
             .or_insert_with(|| {
                 // Launch the coordinator worker task if it is the first
                 let (request_tx, request_rx) = unbounded_channel();
-                let join_handle = spawn_coordinator_worker(param.clone(), request_rx);
+                let (stop_tx, stop_rx) = oneshot::channel();
+                let join_handle = spawn_coordinator_worker(param.clone(), request_rx, stop_rx);
                 self.running_coordinator_worker_join_handles.push(
                     join_handle
                         .map(move |join_result| (sink_id, join_result))
                         .boxed(),
                 );
                 CoordinatorWorkerHandle {
-                    request_sender: Some(request_tx),
+                    request_sender: request_tx,
+                    stop_sender: Some(stop_tx),
                     finish_notifiers: Vec::new(),
                 }
             });
 
-        if let Some(sender) = handle.request_sender.as_mut() {
-            send_with_err_check!(sender, new_writer);
+        if handle.stop_sender.is_some() {
+            send_with_err_check!(handle.request_sender, new_writer);
         } else {
             warn!(
                 "handle a new request while the sink coordinator is being stopped: {:?}",
@@ -546,6 +640,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
     use std::task::Poll;
+    use std::time::Duration;
 
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -581,7 +676,9 @@ mod tests {
         SinkWriterCoordinationHandle,
     };
     use crate::manager::sink_coordination::SinkCoordinatorManager;
-    use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
+    use crate::manager::sink_coordination::coordinator_worker::{
+        CoordinatorStopRequest, CoordinatorWorker,
+    };
     use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
 
     fn test_writer_handle(
@@ -721,13 +818,14 @@ mod tests {
                 let spawned = spawned.clone();
                 let stopping = stopping.clone();
                 let allow_exit = allow_exit.clone();
-                move |_param, mut request_rx| {
+                move |_param, request_rx, stop_rx| {
                     spawn_count.fetch_add(1, Ordering::SeqCst);
                     spawned.notify_one();
                     let stopping = stopping.clone();
                     let allow_exit = allow_exit.clone();
                     tokio::spawn(async move {
-                        while request_rx.recv().await.is_some() {}
+                        let _request_rx = request_rx;
+                        assert!(matches!(stop_rx.await, Ok(CoordinatorStopRequest::Stop)));
                         stopping.notify_one();
                         allow_exit.notified().await;
                     })
@@ -917,7 +1015,7 @@ mod tests {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
@@ -930,6 +1028,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
                                     0,
                                     move |epoch, metadata_list, count: &mut usize| {
@@ -1123,7 +1222,7 @@ mod tests {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
@@ -1136,6 +1235,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
                                     0,
                                     move |epoch, metadata_list, count: &mut usize| {
@@ -1274,7 +1374,7 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -1286,6 +1386,7 @@ mod tests {
                                 db,
                                 param,
                                 new_writer_rx,
+                                stop_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
                                     (),
                                     |_, _, _| unreachable!(),
@@ -1382,7 +1483,7 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -1395,6 +1496,7 @@ mod tests {
                                     db,
                                     param,
                                     new_writer_rx,
+                                    stop_rx,
                                     MockSinglePhaseCoordinator::new_coordinator((), |_, _, _| {
                                         Err(SinkError::Coordinator(anyhow!("failed to commit")))
                                     }),
@@ -1518,7 +1620,7 @@ mod tests {
                 let metadata_scale_out = metadata_scale_out.clone();
                 let metadata_scale_in = metadata_scale_in.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let metadata = metadata.clone();
                     let metadata_scale_out = metadata_scale_out.clone();
                     let metadata_scale_in = metadata_scale_in.clone();
@@ -1533,6 +1635,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
                                     0,
                                     move |epoch, metadata_list, count: &mut usize| {
@@ -2030,7 +2133,7 @@ mod tests {
                 let db = db.clone();
                 let pre_commit_attempt = pre_commit_attempt.clone();
                 let commit_attempt = commit_attempt.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     let pre_commit_attempt = pre_commit_attempt.clone();
@@ -2043,6 +2146,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, _metadata_list, _schema_change| {
                                         pre_commit_attempt.fetch_add(
@@ -2177,7 +2281,7 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let db = db.clone();
                 let commits = commits.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let db = db.clone();
                     let metadata = metadata.clone();
                     let schema_change = schema_change.clone();
@@ -2190,6 +2294,7 @@ mod tests {
                                 db,
                                 param,
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, _metadata_list, _schema_change| {
                                         Err(SinkError::Coordinator(anyhow!(
@@ -2299,7 +2404,7 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -2311,6 +2416,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, _metadata_list, _schema_change| {
                                         Err(SinkError::Coordinator(anyhow!("failed to pre commit")))
@@ -2414,7 +2520,7 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -2426,6 +2532,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
                                         assert_eq!(metadata_list.len(), 1);
@@ -2558,7 +2665,7 @@ mod tests {
                 let metadata = metadata.clone();
                 let db = db.clone();
                 let commit_attempt = commit_attempt.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
@@ -2572,6 +2679,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
@@ -2658,6 +2766,375 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_drain_and_stop_commits_pending_epochs() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+        let epoch2 = 234;
+
+        let vnode = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let committed_epochs = Arc::new(std::sync::Mutex::new(vec![]));
+        // Hummock never reports `epoch1` or `epoch2` as committed to the coordinator, so both stay
+        // pending until the drain.
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    *captured_sender.lock().await = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let db = db.clone();
+                let committed_epochs = committed_epochs.clone();
+                move |param, new_writer_rx, stop_rx| {
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    let committed_epochs = committed_epochs.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                new_writer_rx,
+                                stop_rx,
+                                MockTwoPhaseCoordinator::new_coordinator(
+                                    move |epoch, _metadata_list, _schema_change| {
+                                        Ok(Some(epoch.to_le_bytes().to_vec()))
+                                    },
+                                    move |epoch, commit_metadata| {
+                                        assert_eq!(commit_metadata, epoch.to_le_bytes().to_vec());
+                                        committed_epochs.lock().unwrap().push(epoch);
+                                        Ok(())
+                                    },
+                                    move |_epoch, _schema_change| unreachable!(),
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let mut client =
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(client.align_initial_epoch(1).await.unwrap(), 1);
+        for epoch in [epoch1, epoch2] {
+            client
+                .commit(
+                    epoch,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: vec![],
+                        })),
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+        client.stop().await.unwrap();
+        assert!(committed_epochs.lock().unwrap().is_empty());
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            manager.drain_and_stop_coordinator(param.sink_id, epoch2),
+        )
+        .await
+        .expect("drain should not wait for new writers")
+        .unwrap();
+
+        assert_eq!(*committed_epochs.lock().unwrap(), vec![epoch1, epoch2]);
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch2 as i64);
+        assert_eq!(rows[0].2, "COMMITTED");
+    }
+
+    #[tokio::test]
+    async fn test_drain_and_stop_interrupts_waiting_for_writers() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        // Only half of the vnodes register, so the coordinator keeps waiting for the other half.
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        for i in 0..VirtualNode::COUNT_FOR_TEST / 2 {
+            builder.set(i, true);
+        }
+        let vnode = builder.finish();
+
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    *captured_sender.lock().await = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let db = db.clone();
+                move |param, new_writer_rx, stop_rx| {
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param,
+                                new_writer_rx,
+                                stop_rx,
+                                MockSinglePhaseCoordinator::new_coordinator(
+                                    (),
+                                    |_, _, _| unreachable!(),
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let client = tokio::spawn({
+            let manager = manager.clone();
+            let param = param.clone();
+            async move {
+                CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                })
+                .await
+                .map(|_| ())
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!client.is_finished());
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            manager.drain_and_stop_coordinator(param.sink_id, 233),
+        )
+        .await
+        .expect("drain should interrupt the wait for writers")
+        .unwrap();
+
+        // The stopped coordinator drops the writer that never started.
+        let result = tokio::time::timeout(Duration::from_secs(5), client)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_abandoned_drain_does_not_block_recovery() {
+        /// A two-phase coordinator whose external commit never finishes.
+        struct HangingCommitCoordinator;
+
+        #[async_trait]
+        impl TwoPhaseCommitCoordinator for HangingCommitCoordinator {
+            async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+                Ok(())
+            }
+
+            async fn pre_commit(
+                &mut self,
+                epoch: u64,
+                _metadata: Vec<SinkMetadata>,
+                _schema_change: Option<PbSinkSchemaChange>,
+            ) -> risingwave_connector::sink::Result<Option<Vec<u8>>> {
+                Ok(Some(epoch.to_le_bytes().to_vec()))
+            }
+
+            async fn commit_data(
+                &mut self,
+                _epoch: u64,
+                _commit_metadata: Vec<u8>,
+            ) -> risingwave_connector::sink::Result<()> {
+                std::future::pending().await
+            }
+
+            async fn commit_schema_change(
+                &mut self,
+                _epoch: u64,
+                _schema_change: PbSinkSchemaChange,
+            ) -> risingwave_connector::sink::Result<()> {
+                unreachable!()
+            }
+
+            async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {}
+        }
+
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+        let epoch = 233;
+
+        // Hummock never reports `epoch` as committed, so it stays pending until the drain.
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    *captured_sender.lock().await = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let db = db.clone();
+                move |param, new_writer_rx, stop_rx| {
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param,
+                                new_writer_rx,
+                                stop_rx,
+                                SinkCommitCoordinator::TwoPhase(Box::new(HangingCommitCoordinator)),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let mut client = CoordinatorStreamHandle::new_with_init_stream(
+            param.to_proto(),
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            },
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(client.align_initial_epoch(1).await.unwrap(), 1);
+        client
+            .commit(
+                epoch,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: vec![],
+                    })),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        client.stop().await.unwrap();
+
+        // The caller gives up on the hanging drain, as the barrier side does after its timeout.
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            manager.drain_and_stop_coordinator(param.sink_id, epoch),
+        )
+        .await
+        .expect_err("drain should hang on the external commit");
+
+        // Recovery waits for the coordinator worker to exit, which must not wait for the hanging
+        // commit once the drain is abandoned.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            manager.start_recovery(RecoveryStart::Global),
+        )
+        .await
+        .expect("recovery should not wait for the abandoned drain")
+        .unwrap();
+
+        // The epoch stays pending and is committed in recovery.
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch as i64);
+        assert_eq!(rows[0].2, "PENDING");
+    }
+
+    #[tokio::test]
     async fn test_aborted() {
         let db = prepare_db_backend().await;
 
@@ -2709,7 +3186,7 @@ mod tests {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
@@ -2722,6 +3199,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
@@ -2880,7 +3358,7 @@ mod tests {
                 let metadata = metadata.clone();
                 let schema_change = schema_change.clone();
                 let db = db.clone();
-                move |param, new_writer_rx| {
+                move |param, new_writer_rx, stop_rx| {
                     let metadata = metadata.clone();
                     let schema_change_for_pre_commit = schema_change.clone();
                     let schema_change_for_commit = schema_change.clone();
@@ -2894,6 +3372,7 @@ mod tests {
                                 db,
                                 param.clone(),
                                 new_writer_rx,
+                                stop_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, schema_change| {
                                         assert_eq!(

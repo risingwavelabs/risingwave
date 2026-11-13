@@ -144,7 +144,7 @@ impl CompleteBarrierTask {
                 let elapsed_secs = info.elapsed_secs();
                 notifiers.extend(info.notifier);
                 context
-                    .post_collect_command(info.post_collect_command)
+                    .post_collect_command(info.post_collect_command, info.barrier_info.epoch())
                     .await?;
                 if job_id.is_none() {
                     Self::report_complete_event(

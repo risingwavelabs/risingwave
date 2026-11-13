@@ -40,8 +40,8 @@ use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
-use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
 use tokio_retry::strategy::jitter;
 use tonic::Status;
@@ -76,6 +76,25 @@ async fn run_future_with_periodic_fn<F: Future>(
 }
 
 type HandleId = usize;
+
+/// Terminal request that stops a coordinator worker.
+///
+/// It is sent on its own oneshot channel and selected against the whole coordination future, so it
+/// also interrupts nested waits, such as waiting for writers to align during initialization or
+/// rescaling. The writer-registration channel and its event handling are not involved.
+pub(super) enum CoordinatorStopRequest {
+    /// Stop the worker. Uncommitted epochs stay in `pending_sink_state` for recovery.
+    Stop,
+    /// Commit every pending epoch of the sink, which must not exceed `target_epoch`, then stop.
+    ///
+    /// Used for the old sink of `REPLACE SINK` after the cutover barrier has been committed to
+    /// Hummock. If `reply` is dropped before the drain finishes, the worker abandons the drain and
+    /// stops.
+    DrainAndStop {
+        target_epoch: u64,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+}
 
 #[derive(Default)]
 struct AligningRequests<R> {
@@ -519,6 +538,9 @@ pub struct CoordinatorWorker {
     /// committed epoch persisted in `pending_sink_state`.
     last_writer_acked_epoch: Option<u64>,
     curr_state: CoordinatorWorkerState,
+    /// Whether the commit coordinator has been initialized, so that a drain after the
+    /// coordination future is dropped knows whether to initialize it first.
+    coordinator_initialized: bool,
 }
 
 enum CoordinatorWorkerEvent {
@@ -530,6 +552,7 @@ impl CoordinatorWorker {
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        stop_rx: oneshot::Receiver<CoordinatorStopRequest>,
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
@@ -559,7 +582,7 @@ impl CoordinatorWorker {
                         return;
                     }
                 };
-            Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
+            Self::execute_coordinator(db, param, request_rx, stop_rx, coordinator, subscriber).await
         });
     }
 
@@ -567,7 +590,8 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
-        coordinator: SinkCommitCoordinator,
+        stop_rx: oneshot::Receiver<CoordinatorStopRequest>,
+        mut coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) {
         let mut worker = CoordinatorWorker {
@@ -579,16 +603,173 @@ impl CoordinatorWorker {
             },
             last_writer_acked_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
+            coordinator_initialized: false,
         };
 
-        if let Err(e) = worker.run_coordination(db, coordinator, subscriber).await {
-            for handle in worker.handle_manager.writer_handles.into_values() {
-                handle.abort(Status::internal(format!(
-                    "failed to run coordination: {:?}",
-                    e.as_report()
-                )))
+        // The commit coordinator is kept outside the coordination future. When a stop request
+        // arrives, the future is dropped first, so the final drain below never runs concurrently
+        // with the normal commit path.
+        let stop_request = select! {
+            biased;
+            // The manager dropping the sender without a request also means stop.
+            stop_request = stop_rx => stop_request.unwrap_or(CoordinatorStopRequest::Stop),
+            result = worker.run_coordination(&db, &mut coordinator, subscriber) => {
+                if let Err(e) = result {
+                    for handle in worker.handle_manager.writer_handles.into_values() {
+                        handle.abort(Status::internal(format!(
+                            "failed to run coordination: {:?}",
+                            e.as_report()
+                        )))
+                    }
+                }
+                return;
+            }
+        };
+
+        match stop_request {
+            CoordinatorStopRequest::Stop => {
+                for handle in worker.handle_manager.writer_handles.into_values() {
+                    handle.abort(Status::internal("sink coordinator is stopped"));
+                }
+            }
+            CoordinatorStopRequest::DrainAndStop {
+                target_epoch,
+                mut reply,
+            } => {
+                // The caller gives up after a timeout, which fails the replacement and triggers
+                // recovery, and recovery waits for this worker to exit. Abandon the drain once the
+                // caller is gone, so that a hanging external commit cannot block recovery. Like
+                // `Stop`, this may cancel an in-flight commit, and the epochs left pending are
+                // committed in recovery.
+                let sink_id = worker.handle_manager.param.sink_id;
+                let result = select! {
+                    result = worker.drain_and_stop(&db, &mut coordinator, target_epoch) => result,
+                    _ = reply.closed() => {
+                        warn!(
+                            %sink_id,
+                            target_epoch,
+                            "drain request was abandoned by the caller, stop the coordinator"
+                        );
+                        return;
+                    }
+                };
+                if let Err(e) = &result {
+                    error!(
+                        error = %e.as_report(),
+                        %sink_id,
+                        target_epoch,
+                        "failed to drain sink commits before stopping the coordinator"
+                    );
+                }
+                let _ = reply.send(result);
             }
         }
+    }
+
+    /// Commit the pending epochs of a sink whose writers have all stopped, then stop.
+    ///
+    /// This runs for the old sink of `REPLACE SINK` in post-collect, after the cutover barrier has
+    /// been collected and committed to Hummock. The old writers have already persisted their final
+    /// pre-commit metadata, received their stop acknowledgements and flushed their log stores, so
+    /// their handles are dropped without further checks, and every pending epoch is ready to
+    /// commit. A failure fails the replacement and triggers recovery.
+    async fn drain_and_stop(
+        &mut self,
+        db: &DatabaseConnection,
+        coordinator: &mut SinkCommitCoordinator,
+        target_epoch: u64,
+    ) -> anyhow::Result<()> {
+        self.handle_manager.writer_handles.clear();
+        let sink_id = self.handle_manager.param.sink_id;
+
+        if !self.coordinator_initialized {
+            match &mut *coordinator {
+                SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
+                SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
+            }
+            self.coordinator_initialized = true;
+        }
+
+        let mut last_committed_epoch = None;
+        for (epoch, state, metadata, schema_change) in
+            list_sink_states_ordered_by_epoch(db, sink_id).await?
+        {
+            match state {
+                SinkState::Committed => last_committed_epoch = Some(epoch),
+                SinkState::Pending => {
+                    if epoch > target_epoch {
+                        bail!(
+                            "pending epoch {} of sink {} is after the drain target epoch {}",
+                            epoch,
+                            sink_id,
+                            target_epoch
+                        );
+                    }
+                    Self::commit_prepared_epoch(
+                        coordinator,
+                        sink_id,
+                        epoch,
+                        metadata,
+                        schema_change,
+                    )
+                    .await?;
+                    commit_and_prune_epoch(db, sink_id, epoch, last_committed_epoch).await?;
+                    last_committed_epoch = Some(epoch);
+                }
+                // Aborted epochs were cleaned up when the coordinator was initialized, and are
+                // not committed.
+                SinkState::Aborted => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Commit an epoch whose pre-commit metadata has been persisted to the external sink.
+    async fn commit_prepared_epoch(
+        coordinator: &mut SinkCommitCoordinator,
+        sink_id: SinkId,
+        epoch: u64,
+        metadata: Option<Vec<u8>>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<(), SinkError> {
+        match coordinator {
+            SinkCommitCoordinator::SinglePhase(coordinator) => {
+                assert!(metadata.is_none());
+                if let Some(schema_change) = schema_change {
+                    coordinator
+                        .commit_schema_change(epoch, schema_change)
+                        .instrument_await(Self::commit_span(
+                            "single_phase_schema_change",
+                            sink_id,
+                            epoch,
+                        ))
+                        .await?;
+                }
+            }
+            SinkCommitCoordinator::TwoPhase(coordinator) => {
+                if let Some(metadata) = metadata {
+                    coordinator
+                        .commit_data(epoch, metadata)
+                        .instrument_await(Self::commit_span(
+                            "two_phase_commit_data",
+                            sink_id,
+                            epoch,
+                        ))
+                        .await?;
+                }
+                if let Some(schema_change) = schema_change {
+                    coordinator
+                        .commit_schema_change(epoch, schema_change)
+                        .instrument_await(Self::commit_span(
+                            "two_phase_commit_schema_change",
+                            sink_id,
+                            epoch,
+                        ))
+                        .await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn try_handle_init_requests(
@@ -669,8 +850,8 @@ impl CoordinatorWorker {
 
     async fn run_coordination(
         &mut self,
-        db: DatabaseConnection,
-        mut coordinator: SinkCommitCoordinator,
+        db: &DatabaseConnection,
+        coordinator: &mut SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
@@ -680,12 +861,13 @@ impl CoordinatorWorker {
             .instrument_await("acquire_sink_coordinator_init_permit")
             .await?;
         let mut two_phase_handler = self
-            .init_state_from_store(&db, sink_id, subscriber, &mut coordinator)
+            .init_state_from_store(db, sink_id, subscriber, coordinator)
             .await?;
-        match &mut coordinator {
+        match &mut *coordinator {
             SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
             SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
         }
+        self.coordinator_initialized = true;
         drop(coordinator_init_permit);
 
         let mut running_handles = self.handle_manager.wait_init_handles().await?;
@@ -733,46 +915,13 @@ impl CoordinatorWorker {
                 },
                 CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
                     let start_time = Instant::now();
-                    let commit_fut = async {
-                        match &mut coordinator {
-                            SinkCommitCoordinator::SinglePhase(coordinator) => {
-                                assert!(metadata.is_none());
-                                if let Some(schema_change) = schema_change {
-                                    coordinator
-                                        .commit_schema_change(epoch, schema_change)
-                                        .instrument_await(Self::commit_span(
-                                            "single_phase_schema_change",
-                                            sink_id,
-                                            epoch,
-                                        ))
-                                        .await?;
-                                }
-                            }
-                            SinkCommitCoordinator::TwoPhase(coordinator) => {
-                                if let Some(metadata) = metadata {
-                                    coordinator
-                                        .commit_data(epoch, metadata)
-                                        .instrument_await(Self::commit_span(
-                                            "two_phase_commit_data",
-                                            sink_id,
-                                            epoch,
-                                        ))
-                                        .await?;
-                                }
-                                if let Some(schema_change) = schema_change {
-                                    coordinator
-                                        .commit_schema_change(epoch, schema_change)
-                                        .instrument_await(Self::commit_span(
-                                            "two_phase_commit_schema_change",
-                                            sink_id,
-                                            epoch,
-                                        ))
-                                        .await?;
-                                }
-                            }
-                        }
-                        Ok(())
-                    };
+                    let commit_fut = Self::commit_prepared_epoch(
+                        coordinator,
+                        sink_id,
+                        epoch,
+                        metadata,
+                        schema_change,
+                    );
                     let commit_res =
                         run_future_with_periodic_fn(commit_fut, Duration::from_secs(5), || {
                             warn!(
@@ -829,7 +978,7 @@ impl CoordinatorWorker {
                     metadatas.push(metadata);
                 }
 
-                match &mut coordinator {
+                match &mut *coordinator {
                     SinkCommitCoordinator::SinglePhase(coordinator) => {
                         if !metadatas.is_empty() {
                             let start_time = Instant::now();
@@ -851,7 +1000,7 @@ impl CoordinatorWorker {
                         }
                         if first_schema_change.is_some() {
                             persist_pre_commit_metadata(
-                                &db,
+                                db,
                                 sink_id as _,
                                 epoch,
                                 None,
@@ -876,7 +1025,7 @@ impl CoordinatorWorker {
                         // commit handler treats a `None`/`None` item as an external no-op before
                         // marking it committed, and recovery re-enqueues it through the same path.
                         persist_pre_commit_metadata(
-                            &db,
+                            db,
                             sink_id as _,
                             epoch,
                             commit_metadata.clone(),

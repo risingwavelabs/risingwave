@@ -21,7 +21,7 @@ use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::{JobId, PartialGraphId, SinkId};
-use risingwave_common::util::epoch::test_epoch;
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
     CreateType, I32Array, JobStatus, StreamNode, StreamingParallelism, TableIdArray, database,
@@ -114,7 +114,11 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         Ok(Default::default())
     }
 
-    async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
+    async fn post_collect_command(
+        &self,
+        _command: PostCollectCommand,
+        _epoch: EpochPair,
+    ) -> MetaResult<()> {
         unreachable!()
     }
 
