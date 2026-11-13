@@ -4,18 +4,24 @@ set -euo pipefail
 
 REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
 
-uri=()
-if [[ $# -gt 0 && "$1" == mongodb://* ]]; then
-  uri=("$1")
-  shift
-elif [[ -n "${MONGODB_URL:-}" ]]; then
-  uri=("${MONGODB_URL}")
+uri="${MONGODB_URL:-}"
+# Explicit connection arguments take precedence over RiseDev's default URI.
+for arg in "$@"; do
+  case "$arg" in
+    mongodb://* | mongodb+srv://* | --host | --host=* | --port | --port=*)
+      uri=""
+      break
+      ;;
+  esac
+done
+if [[ -n "$uri" ]]; then
+  set -- "$uri" "$@"
 fi
 
 if PATH="${REAL_PATH}" command -v mongosh >/dev/null 2>&1; then
-  PATH="${REAL_PATH}" mongosh --quiet "${uri[@]}" "$@"
+  PATH="${REAL_PATH}" mongosh --quiet "$@"
 elif PATH="${REAL_PATH}" command -v mongo >/dev/null 2>&1; then
-  PATH="${REAL_PATH}" mongo --quiet "${uri[@]}" "$@"
+  PATH="${REAL_PATH}" mongo --quiet "$@"
 else
-  docker exec -i "${MONGODB_CONTAINER}" mongosh --quiet "${uri[@]}" "$@"
+  docker exec -i "${MONGODB_CONTAINER}" mongosh --quiet "$@"
 fi
