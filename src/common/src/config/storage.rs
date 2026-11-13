@@ -655,6 +655,9 @@ pub struct ReadBatchConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadSchedulerConfig {
+    /// Run scheduled object reads on a small runtime shared by all schedulers in the process.
+    #[serde(default)]
+    pub use_dedicated_io_runtime: bool,
     /// Maximum intentional wait for compatible reads in a prefetch batch, in microseconds.
     /// Zero disables waiting after cache registration. Timer wakeups have runtime granularity.
     #[serde(default)]

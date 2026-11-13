@@ -37,6 +37,17 @@ type PhysicalPermit = OwnedSemaphorePermit;
 
 pub(super) type ReadResult = ObjectResult<Bytes>;
 
+/// Process-owned runtime, initialized only by the first scheduler that opts in.
+#[cfg(not(madsim))]
+static IO_RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("rw-read-io")
+        .enable_all()
+        .build()
+        .expect("failed to build the object read scheduler runtime")
+});
+
 pub(super) struct ReadScheduler {
     _shutdown: oneshot::Sender<()>,
     groups: Arc<GroupQueue>,
@@ -735,6 +746,15 @@ impl ReadScheduler {
         );
         #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
         let worker = replay::dispatcher(worker);
+        // The dispatcher spawns physical reads on its current runtime.
+        // Range fallback stays inside the same read task.
+        #[cfg(not(madsim))]
+        if config.use_dedicated_io_runtime {
+            IO_RUNTIME.spawn(worker);
+        } else {
+            tokio::spawn(worker);
+        }
+        #[cfg(madsim)]
         tokio::spawn(worker);
         Self {
             _shutdown: shutdown,
@@ -1418,6 +1438,220 @@ mod tests {
 
     use super::super::{InMemObjectStore, ObjectStore, ObjectStoreConfig};
     use super::*;
+
+    #[cfg(not(madsim))]
+    #[test]
+    fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
+        struct SignalOnDrop(Option<oneshot::Sender<()>>);
+
+        impl Drop for SignalOnDrop {
+            fn drop(&mut self) {
+                if let Some(signal) = self.0.take() {
+                    let _ = signal.send(());
+                }
+            }
+        }
+
+        struct ReportWorkerExit(Option<oneshot::Sender<tokio::runtime::Id>>);
+
+        impl Drop for ReportWorkerExit {
+            fn drop(&mut self) {
+                let _ = self
+                    .0
+                    .take()
+                    .unwrap()
+                    .send(tokio::runtime::Handle::current().id());
+            }
+        }
+
+        let scan = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        scan.block_on(async {
+            let scan_id = tokio::runtime::Handle::current().id();
+            let (release_worker, blocked) = std::sync::mpsc::channel::<()>();
+            let (entered, worker_entered) = oneshot::channel();
+            let scan_worker = tokio::spawn(async move {
+                entered.send(()).unwrap();
+                // Simulate a scan occupying every worker on the caller runtime.
+                let _ = blocked.recv();
+            });
+            // The timeout must still fire if the only scan worker stays blocked.
+            let test = async {
+                worker_entered.await.unwrap();
+
+                let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+                let config = ReadSchedulerConfig {
+                    use_dedicated_io_runtime: true,
+                    max_admitted_groups: 1.try_into().unwrap(),
+                    max_inflight_reads: 1.try_into().unwrap(),
+                    ..Default::default()
+                };
+                let (started, mut reads) = mpsc::unbounded_channel();
+                let (cancelled, cancellation) = oneshot::channel();
+                let cancelled = Arc::new(Mutex::new(Some(cancelled)));
+                let (closed, worker_closed) = oneshot::channel();
+                let backend_owner = ReportWorkerExit(Some(closed));
+                let scheduler = Arc::new(ReadScheduler::new(&metrics, "test", config, {
+                    move |path, range: Range<usize>| {
+                        let _ = &backend_owner;
+                        let started = started.clone();
+                        let cancelled = cancelled.clone();
+                        async move {
+                            let _cancelled = SignalOnDrop(if path == "cancel" {
+                                cancelled.lock().unwrap().take()
+                            } else {
+                                None
+                            });
+                            let (reply, reply_open) = oneshot::channel();
+                            // Emitted from the backend future's first poll, not from admission or dequeue.
+                            started
+                                .send((tokio::runtime::Handle::current().id(), path, range, reply))
+                                .unwrap();
+                            reply_open.await.unwrap()
+                        }
+                    }
+                }));
+                let io_id = IO_RUNTIME.handle().id();
+                assert_ne!(io_id, scan_id);
+                let check = |call: (
+                    tokio::runtime::Id,
+                    String,
+                    Range<usize>,
+                    oneshot::Sender<ReadResult>,
+                ),
+                             path: &str,
+                             range: Range<usize>| {
+                    assert_eq!(call.0, io_id);
+                    assert_eq!(call.1, path);
+                    assert_eq!(call.2, range);
+                    call.3
+                };
+
+                // Sealing publishes both reads atomically while P is free.
+                let batch = ReadBatch::new(scheduler.clone(), 2);
+                let member = batch.member();
+                let a = member.stage(&scheduler, "scan", 0..2, None).unwrap();
+                let b = member.stage(&scheduler, "scan", 2..4, None).unwrap();
+                drop(batch);
+                drop(member);
+                check(reads.recv().await.unwrap(), "scan", 0..4)
+                    .send(Ok(Bytes::from_static(b"abcd")))
+                    .unwrap();
+                assert_eq!(a.await.unwrap().unwrap(), "ab");
+                assert_eq!(b.await.unwrap().unwrap(), "cd");
+
+                // Exercise the real range-error fallback on the same runtime.
+                let batch = ReadBatch::new(scheduler.clone(), 2);
+                let member = batch.member();
+                let valid = member.stage(&scheduler, "fallback", 0..2, None).unwrap();
+                let invalid = member.stage(&scheduler, "fallback", 2..4, None).unwrap();
+                drop(batch);
+                drop(member);
+                check(reads.recv().await.unwrap(), "fallback", 0..4)
+                    .send(Err(ObjectError::read_length_mismatch(
+                        "past EOF".to_owned(),
+                    )))
+                    .unwrap();
+                check(reads.recv().await.unwrap(), "fallback", 0..2)
+                    .send(Ok(Bytes::from_static(b"ab")))
+                    .unwrap();
+                check(reads.recv().await.unwrap(), "fallback", 2..4)
+                    .send(Err(ObjectError::read_length_mismatch(
+                        "past EOF".to_owned(),
+                    )))
+                    .unwrap();
+                assert_eq!(valid.await.unwrap().unwrap(), "ab");
+                assert!(invalid.await.unwrap().unwrap_err().is_read_range_error());
+
+                let read = scheduler.submit("cancel", 0..1, None).await.unwrap();
+                let cancelled_gate = check(reads.recv().await.unwrap(), "cancel", 0..1);
+                let next_read = {
+                    let next = scheduler.submit("next", 4..6, None);
+                    tokio::pin!(next);
+                    assert!(
+                        futures::poll!(&mut next).is_pending(),
+                        "G must be held until cancellation"
+                    );
+                    drop(read);
+                    cancellation.await.unwrap();
+                    assert!(cancelled_gate.is_closed());
+                    next.await.unwrap()
+                };
+                check(reads.recv().await.unwrap(), "next", 4..6)
+                    .send(Ok(Bytes::from_static(b"ef")))
+                    .unwrap();
+                assert_eq!(next_read.await.unwrap().unwrap(), "ef");
+
+                let groups = scheduler.groups.clone();
+                drop(groups.slots.clone().acquire_owned().await.unwrap());
+                assert_eq!(groups.admitted.get(), 0);
+                assert_eq!(groups.queued.get(), 0);
+                assert_eq!(scheduler.pending.get(), 0);
+                assert_eq!(scheduler.waiting.get(), 0);
+                assert_eq!(
+                    metrics
+                        .read_scheduler_in_flight
+                        .with_label_values(&["test"])
+                        .get(),
+                    0
+                );
+                let state = groups.pending.lock().unwrap();
+                assert!(state.groups.is_empty() && state.waiting.is_empty());
+                assert_eq!(state.starting, 0);
+                drop(state);
+                assert!(matches!(
+                    reads.try_recv(),
+                    Err(mpsc::error::TryRecvError::Empty)
+                ));
+
+                // A second scheduler uses the same runtime even after the first closes.
+                drop(scheduler);
+                assert_eq!(worker_closed.await.unwrap(), io_id);
+                assert!(reads.recv().await.is_none());
+                while !groups.slots.is_closed() {
+                    tokio::task::yield_now().await;
+                }
+                assert_eq!(groups.slots.available_permits(), 1);
+
+                let (starts, second_start) = oneshot::channel();
+                let starts = Mutex::new(Some(starts));
+                let second = ReadScheduler::new(&metrics, "test", config, move |path, range| {
+                    let starts = starts.lock().unwrap().take().unwrap();
+                    async move {
+                        starts
+                            .send((tokio::runtime::Handle::current().id(), path, range))
+                            .unwrap();
+                        Ok(Bytes::from_static(b"a"))
+                    }
+                });
+                assert_eq!(
+                    second
+                        .submit("other", 0..1, None)
+                        .await
+                        .unwrap()
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    "a"
+                );
+                assert_eq!(
+                    second_start.await.unwrap(),
+                    (io_id, "other".to_owned(), 0..1)
+                );
+            };
+            let timeout = {
+                let _enter = IO_RUNTIME.enter();
+                tokio::time::timeout(Duration::from_secs(10), test)
+            };
+            timeout.await.unwrap();
+
+            drop(release_worker);
+            scan_worker.await.unwrap();
+        });
+    }
 
     #[tokio::test]
     async fn read_coalesces_adjacent_ranges_on_the_same_object() {

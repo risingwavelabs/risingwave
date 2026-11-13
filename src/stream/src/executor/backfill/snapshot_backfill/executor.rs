@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::ScanRange;
 use risingwave_pb::common::PbThrottleType;
 use risingwave_storage::StateStore;
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::store::{PrefetchMode, PrefetchOptions};
 use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::table::batch_table::{BatchTable, PkScanRange};
 use tokio::select;
@@ -539,6 +539,10 @@ async fn make_snapshot_stream(
     snapshot_rebuild_interval: Duration,
     pk_scan_range: &PkScanRange,
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
+    let mut prefetch = PrefetchOptions::prefetch_for_large_range_scan();
+    if std::env::var_os("RW_Q18_SOURCE_BLOCKWISE").is_some() {
+        prefetch.mode = PrefetchMode::Blockwise;
+    }
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
         move |(vnode, progress)| {
@@ -562,7 +566,7 @@ async fn make_snapshot_stream(
                         &pk_scan_range.pk_prefix,
                         &pk_scan_range.range_bounds,
                         vnode,
-                        PrefetchOptions::prefetch_for_large_range_scan(),
+                        prefetch,
                         snapshot_rebuild_interval,
                     )
                     .map_ok(move |stream| {

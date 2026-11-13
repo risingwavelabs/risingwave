@@ -284,7 +284,7 @@ fn resolve_locality_backfill(
     }
 }
 
-const UNLICENSED_LOCALITY_PROVIDER_LIMIT: usize = 5;
+const UNLICENSED_LOCALITY_PROVIDER_LIMIT: usize = 6;
 
 fn locality_backfill_requires_license(
     mode: LocalityBackfillMode,

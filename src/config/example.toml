@@ -503,6 +503,7 @@ retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 use_opendal = true
 
 [storage.object_store.read_scheduler]
+use_dedicated_io_runtime = false
 prefetch_batch_wait_us = 0
 max_batch_requests = 16
 max_admitted_groups = 64
