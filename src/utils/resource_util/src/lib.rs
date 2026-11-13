@@ -151,18 +151,21 @@ pub mod memory {
     const V2_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory.max";
     const V2_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory.current";
 
+    fn system_with_memory() -> System {
+        // A zero total would invalidate memory sizing, so fail if sysinfo cannot initialize.
+        let mut sys = System::new().expect("failed to initialize system memory information");
+        sys.refresh_memory();
+        sys
+    }
+
     /// Returns the system memory.
     pub fn get_system_memory() -> usize {
-        let mut sys = System::new();
-        sys.refresh_memory();
-        sys.total_memory() as usize
+        system_with_memory().total_memory() as usize
     }
 
     /// Returns the used memory of the system.
     pub fn get_system_memory_used() -> usize {
-        let mut sys = System::new();
-        sys.refresh_memory();
-        sys.used_memory() as usize
+        system_with_memory().used_memory() as usize
     }
 
     /// Returns the total memory used by the system in bytes.
