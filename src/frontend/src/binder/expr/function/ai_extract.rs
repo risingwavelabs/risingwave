@@ -56,7 +56,8 @@ pub(super) fn bind(mut inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
             .cast_implicit_mut(&MapType::from_kv(DataType::Varchar, DataType::Varchar).into())?;
     }
     let specification = json_constant(&inputs[3], "ai_extract specification")?;
-    let schema = ExtractionSchema::parse(&specification).map_err(|e| invalid(e.to_report_string()))?;
+    let schema =
+        ExtractionSchema::parse(&specification).map_err(|e| invalid(e.to_report_string()))?;
     // Ship the validated constant to the executor, not an unevaluated expression.
     inputs[3] = Literal::new(Some(specification.into()), DataType::Jsonb).into();
     Ok(FunctionCall::new_unchecked(ExprType::AiExtract, inputs, schema.return_type()).into())

@@ -149,7 +149,8 @@ pub(super) fn question(kind: &str, inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
         }
     }
     let result = json!({id: definition});
-    QuestionSchema::parse(&JsonbVal::from(result.clone())).map_err(|e| invalid(e.to_report_string()))?;
+    QuestionSchema::parse(&JsonbVal::from(result.clone()))
+        .map_err(|e| invalid(e.to_report_string()))?;
     Ok(literal(result))
 }
 
@@ -169,6 +170,7 @@ pub(super) fn questions(inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
         }
     }
     let result = Value::Object(questions);
-    QuestionSchema::parse(&JsonbVal::from(result.clone())).map_err(|e| invalid(e.to_report_string()))?;
+    QuestionSchema::parse(&JsonbVal::from(result.clone()))
+        .map_err(|e| invalid(e.to_report_string()))?;
     Ok(literal(result))
 }
