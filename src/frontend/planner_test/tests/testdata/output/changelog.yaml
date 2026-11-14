@@ -19,7 +19,7 @@
                 └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -27,7 +27,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ changelog_row_id, v1, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ changelog_row_id, v1, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 3 ]
@@ -41,7 +41,7 @@
     LogicalProject { exprs: [t.name, changelog_op] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { key: [t.id] }
-        └─LogicalScan { table: t, columns: [t.id, t.name, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.name, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.name, changelog_op] }
     └─LogicalChangeLog { key: [t.id] }
@@ -66,7 +66,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -74,7 +74,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ name, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ name, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 2 ]
@@ -88,7 +88,7 @@
     LogicalProject { exprs: [t.name] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { key: [t.tenant, t.id] }
-        └─LogicalScan { table: t, columns: [t.id, t.age, t.tenant, t.name, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.age, t.tenant, t.name, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.name] }
     └─LogicalChangeLog { key: [t.tenant, t.id] }
@@ -113,14 +113,14 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ name, _changelog_row_id, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ name, _changelog_row_id, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - name: changelog missing key column
   sql: |
@@ -145,7 +145,7 @@
             └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -153,7 +153,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ c, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ c, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
@@ -191,14 +191,14 @@
     └── Upstream
 
     Table 0
-    ├── columns: [ split_id, tenant, id, backfill_finished, row_count, cdc_offset, _rw_timestamp ]
+    ├── columns: [ split_id, tenant, id, backfill_finished, row_count, cdc_offset, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: []
     └── read pk prefix len hint: 1
 
     Table 4294967294
-    ├── columns: [ tenant, id, email, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ tenant, id, email, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
@@ -227,14 +227,14 @@
     └── Upstream
 
     Table 0
-    ├── columns: [ split_id, tenant, id, backfill_finished, row_count, cdc_offset, _rw_timestamp ]
+    ├── columns: [ split_id, tenant, id, backfill_finished, row_count, cdc_offset, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: []
     └── read pk prefix len hint: 1
 
     Table 4294967294
-    ├── columns: [ email, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ email, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 2 ]
@@ -276,9 +276,9 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, tenant, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, tenant, id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ tenant, id, email, changelog_op, _changelog_row_id, _rw_timestamp ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ tenant, id, email, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
 - name: keyed changelog with a distribution subset
   sql: |
@@ -289,7 +289,7 @@
     LogicalProject { exprs: [t.payload] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
-        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.payload] }
     └─LogicalChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
@@ -314,7 +314,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -322,7 +322,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ payload, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ payload, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
@@ -353,7 +353,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -361,7 +361,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ payload, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ payload, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]

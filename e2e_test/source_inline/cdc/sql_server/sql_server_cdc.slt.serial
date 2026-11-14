@@ -229,6 +229,7 @@ related_id integer false NULL
 client_id integer false NULL
 payload character varying false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key related_id, type_id, client_id NULL NULL
 distribution key related_id, type_id, client_id NULL NULL
 table description shared_composite_pk_order NULL NULL

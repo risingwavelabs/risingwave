@@ -509,6 +509,7 @@ mod tests {
             "primary key".into() => "v3".into(),
             "distribution key".into() => "v3".into(),
             "_rw_timestamp".into() => "timestamp with time zone".into(),
+            "_rw_vnode".into() => "smallint".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
             "table description".into() => "t".into(),
         };

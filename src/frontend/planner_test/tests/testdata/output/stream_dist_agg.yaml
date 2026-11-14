@@ -31,23 +31,23 @@
                 └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_v, s_t__row_id, s_o, _rw_timestamp ]
+    ├── columns: [ s_v, s_t__row_id, s_o, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 DESC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
-    Table 1 { columns: [ max(s_v), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ max(s_v), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: sum_on_single
   before:
@@ -73,17 +73,17 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ sum(s_v), count(s_v), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(s_v), count(s_v), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: cnt_on_single
   before:
@@ -109,17 +109,17 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ count(s_v), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ count(s_v), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: string_agg_on_single
   before:
@@ -149,23 +149,28 @@
                     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_v, s_t__row_id, s_o, s_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ s_v, s_t__row_id, s_o, s_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
-    Table 1 { columns: [ string_agg(s_s, ',':Varchar order_by(s_v ASC)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1
+    ├── columns: [ string_agg(s_s, ',':Varchar order_by(s_v ASC)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_on_T
   before:
@@ -201,12 +206,17 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ max(t_v), _vnode, _rw_timestamp ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0
+    ├── columns: [ max(t_v), _vnode, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 DESC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
-    Table 1 { columns: [ max(max(t_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ max(max(t_v)), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ _vnode, t_v, t__row_id, _rw_timestamp ]
+    ├── columns: [ _vnode, t_v, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
@@ -214,7 +224,7 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ _vnode, max(t_v), count, _rw_timestamp ]
+    ├── columns: [ _vnode, max(t_v), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: []
@@ -222,14 +232,14 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_on_AO
   before:
@@ -258,17 +268,17 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ max(max(ao_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ max(max(ao_v)), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: sum_on_T
   before:
@@ -303,21 +313,21 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ sum(sum(t_v)), sum0(count(t_v)), count, _rw_timestamp ]
+    ├── columns: [ sum(sum(t_v)), sum0(count(t_v)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: sum_on_AO
   before:
@@ -346,17 +356,17 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ sum(sum(ao_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(sum(ao_v)), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: cnt_on_T
   before:
@@ -390,17 +400,17 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ sum0(count(t_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum0(count(t_v)), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: cnt_on_AO
   before:
@@ -429,17 +439,17 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ sum0(count(ao_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum0(count(ao_v)), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: string_agg_on_T
   before:
@@ -474,28 +484,28 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ string_agg(t_s, ',':Varchar order_by(t_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ string_agg(t_s, ',':Varchar order_by(t_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: string_agg_on_AO
   before:
@@ -525,28 +535,28 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_count_on_T
   before:
@@ -582,12 +592,22 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ max(t_v), _vnode, _rw_timestamp ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0
+    ├── columns: [ max(t_v), _vnode, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 DESC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
-    Table 1 { columns: [ max(max(t_v)), sum0(count(t_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1
+    ├── columns: [ max(max(t_v)), sum0(count(t_v)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ _vnode, t_v, t__row_id, _rw_timestamp ]
+    ├── columns: [ _vnode, t_v, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
@@ -595,7 +615,7 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ _vnode, max(t_v), count(t_v), count, _rw_timestamp ]
+    ├── columns: [ _vnode, max(t_v), count(t_v), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
@@ -603,14 +623,14 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, a2, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, a2, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_count_on_AO
   before:
@@ -639,17 +659,22 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ max(max(ao_v)), sum0(count(ao_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0
+    ├── columns: [ max(max(ao_v)), sum0(count(ao_v)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, a2, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, a2, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: count_string_agg_on_T
   before:
@@ -684,28 +709,28 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ count(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ count(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, a2, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, a2, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: count_string_agg_on_AO
   before:
@@ -735,28 +760,28 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ count(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ count(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, a2, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, a2, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_string_agg_on_T
   before:
@@ -790,31 +815,31 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ t_v, t__row_id, _rw_timestamp ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_v, t__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ max(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ max(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 3
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, a2, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, a2, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_string_agg_on_AO
   before:
@@ -844,28 +869,28 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ max(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ max(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, a2, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ a1, a2, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: extreme_on_T_by_k
   before:
@@ -893,19 +918,19 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, tk_v, tk_t__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, tk_v, tk_t__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ tk_k, max(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ tk_k, max(tk_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: extreme_on_Tk_by_k
   before:
@@ -932,19 +957,19 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, tk_v, tk_t__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, tk_v, tk_t__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ tk_k, max(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ tk_k, max(tk_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: extreme_on_S_by_k
   before:
@@ -978,23 +1003,33 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_k, s_v, s_t__row_id, s_o, _rw_timestamp ]
+    ├── columns: [ s_k, s_v, s_t__row_id, s_o, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 DESC, $2 ASC, $3 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ s_k, max(s_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1
+    ├── columns: [ s_k, max(s_v), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, s.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ a1, s.k, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
 - id: extreme_on_AO_by_k
   before:
@@ -1021,17 +1056,17 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ ao_k, max(ao_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ ao_k, max(ao_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: sum_on_T_by_k
   before:
@@ -1059,17 +1094,17 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, sum(tk_v), count(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, sum(tk_v), count(tk_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: sum_on_Tk_by_k
   before:
@@ -1096,17 +1131,17 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, sum(tk_v), count(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, sum(tk_v), count(tk_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: sum_on_S_by_k
   before:
@@ -1140,21 +1175,26 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_k, sum(s_v), count(s_v), count, _rw_timestamp ]
+    ├── columns: [ s_k, sum(s_v), count(s_v), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, s.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ a1, s.k, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
 - id: sum_on_AO_by_k
   before:
@@ -1181,17 +1221,17 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ ao_k, sum(ao_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ ao_k, sum(ao_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: cnt_on_T_by_k
   before:
@@ -1219,17 +1259,17 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, count(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, count(tk_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: cnt_on_Tk_by_k
   before:
@@ -1256,17 +1296,17 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, count(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, count(tk_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: cnt_on_S_by_k
   before:
@@ -1298,17 +1338,27 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ s_k, count(s_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0
+    ├── columns: [ s_k, count(s_v), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, s.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ a1, s.k, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
 - id: cnt_on_AO_by_k
   before:
@@ -1335,17 +1385,17 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ ao_k, count(ao_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ ao_k, count(ao_v), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: string_agg_on_T_by_k
   before:
@@ -1377,23 +1427,28 @@
                     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ tk_k, tk_o, tk_t__row_id, tk_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ tk_k, tk_o, tk_t__row_id, tk_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ tk_k, string_agg(tk_s, ',':Varchar order_by(tk_o ASC)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1
+    ├── columns: [ tk_k, string_agg(tk_s, ',':Varchar order_by(tk_o ASC)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: string_agg_on_Tk_by_k
   before:
@@ -1424,23 +1479,28 @@
                     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ tk_k, tk_o, tk_t__row_id, tk_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ tk_k, tk_o, tk_t__row_id, tk_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ tk_k, string_agg(tk_s, ',':Varchar order_by(tk_o ASC)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1
+    ├── columns: [ tk_k, string_agg(tk_s, ',':Varchar order_by(tk_o ASC)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, tk.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: string_agg_on_S_by_k
   before:
@@ -1477,28 +1537,28 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ s_k, s_o, s_t__row_id, s_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ s_k, s_o, s_t__row_id, s_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ s_k, string_agg(s_s, ',':Varchar order_by(s_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ s_k, string_agg(s_s, ',':Varchar order_by(s_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, s.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, s.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
 - id: string_agg_on_AO_by_k
   before:
@@ -1528,26 +1588,26 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ ao_k, ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp ]
+    ├── columns: [ ao_k, ao_o, ao__row_id, ao_s, ',':Varchar, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ ao_k, string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp ]
+    ├── columns: [ ao_k, string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ a1, ao.k, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 

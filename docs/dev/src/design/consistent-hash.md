@@ -68,6 +68,32 @@ In vnode mapping introduced above, one parallel unit will correspond to several 
 
 This is better than range partition in that this approach of partition is more stable when the primary key of a materialized view distributes non-randomly, for example, monotonically increasing.
 
+### Inspecting row distribution in SQL
+
+Hummock tables, materialized views, and indexes expose a virtual hidden column
+`_rw_vnode` in batch queries. It reads the vnode from the stored row key and
+returns a `smallint`:
+
+```sql
+SELECT _rw_vnode, COUNT(*)
+FROM orders
+GROUP BY _rw_vnode
+ORDER BY _rw_vnode;
+```
+
+`SELECT *` and `table.*` omit this column. Qualify it with a table name or alias
+when joining relations. An outer join returns NULL for an absent row's vnode.
+The value belongs to the named relation: directly querying an index reports the
+index's vnode. Singleton relations return zero. Changing actor parallelism does
+not change the row's vnode.
+
+This column does not change stored rows or the persisted catalog and cannot be
+written by DML. Like `_rw_timestamp`, it can be read in UPDATE/DELETE predicates,
+but cannot be used in a DML `RETURNING` list or selected as input to a streaming
+job. It can be queried from an existing materialized view. External sources and
+Iceberg engine tables do not expose it. The `_rw_` prefix is reserved for system
+column names.
+
 ### Storage
 
 If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). Namely, read data with the same vnodes as it previously writes.

@@ -196,7 +196,7 @@
       └─LogicalProject { exprs: [] }
         └─LogicalDedup { dedup_cols: [t.a] }
           └─LogicalProject { exprs: [t.a, t.b, t.c] }
-            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum0(count)] }
     └─BatchExchange { order: [], dist: Single }
@@ -213,7 +213,7 @@
       └─LogicalProject { exprs: [] }
         └─LogicalDedup { dedup_cols: [t.b] }
           └─LogicalProject { exprs: [t.a, t.b, t.c] }
-            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum0(count)] }
     └─BatchExchange { order: [], dist: Single }
@@ -230,7 +230,7 @@
       └─LogicalProject { exprs: [] }
         └─LogicalDedup { dedup_cols: [t.a, t.b] }
           └─LogicalProject { exprs: [t.a, t.b, t.c] }
-            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum0(count)] }
     └─BatchExchange { order: [], dist: Single }

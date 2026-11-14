@@ -97,6 +97,7 @@ prices character varying[] false NULL
 note character varying false NULL
 extra integer false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description corner_enum_arr NULL NULL
@@ -129,6 +130,7 @@ extra integer false NULL
 moods character varying[] false NULL
 discounts character varying[] false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description corner_enum_arr NULL NULL

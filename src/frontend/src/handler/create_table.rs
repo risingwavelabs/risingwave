@@ -2185,7 +2185,7 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME, RW_VNODE_COLUMN_NAME,
     };
     use risingwave_common::types::StructType;
 
@@ -2438,6 +2438,7 @@ mod tests {
             .with_ids([3, 4, 5].map(ColumnId::new))
             .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
+            RW_VNODE_COLUMN_NAME => DataType::Int16,
         };
 
         assert_eq!(columns, expected_columns, "{columns:#?}");

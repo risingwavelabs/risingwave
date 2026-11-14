@@ -121,6 +121,7 @@ query TT
 select rw_catalog.rw_columns.name, is_nullable from rw_catalog.rw_columns JOIN rw_catalog.rw_tables ON rw_catalog.rw_columns.relation_id = rw_catalog.rw_tables.id WHERE rw_catalog.rw_tables.name = 'test_person' order by rw_catalog.rw_columns.name;
 ----
 _rw_timestamp t
+_rw_vnode t
 age           f
 height        f
 id            f

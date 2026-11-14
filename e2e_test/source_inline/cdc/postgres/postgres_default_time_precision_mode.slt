@@ -59,6 +59,7 @@ c_time time without time zone false NULL
 c_timestamp timestamp without time zone false NULL
 c_timestamptz timestamp with time zone false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description postgres_time_precision_default_rw NULL NULL

@@ -111,6 +111,7 @@ impl std::fmt::Display for ColumnId {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SystemColumn {
     RwTimestamp,
+    RwVnode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -122,8 +123,7 @@ pub struct ColumnDesc {
     pub description: Option<String>,
     pub additional_column: AdditionalColumn,
     pub version: ColumnDescVersion,
-    /// Currently the system column is used for `_rw_timestamp` only and is generated at runtime,
-    /// so this field is not persisted.
+    /// System columns are generated at runtime, so this field is not persisted.
     pub system_column: Option<SystemColumn>,
     /// Whether the column is nullable.
     /// If a column is not nullable, BatchInsert/BatchUpdate operations will throw an error when NULL is inserted/updated into.
@@ -334,7 +334,7 @@ impl ColumnCatalog {
     }
 
     pub fn can_dml(&self) -> bool {
-        !self.is_generated() && !self.is_rw_timestamp_column()
+        !self.is_generated() && !self.is_rw_sys_column()
     }
 
     /// Returns whether the column is defined by user within the column definition clause
@@ -415,6 +415,15 @@ impl ColumnCatalog {
             self.column_desc.system_column,
             Some(SystemColumn::RwTimestamp)
         )
+    }
+
+    pub fn rw_vnode_column() -> Self {
+        Self::hidden(ColumnDesc::named_with_system_column(
+            super::RW_VNODE_COLUMN_NAME,
+            super::RW_VNODE_COLUMN_ID,
+            DataType::Int16,
+            SystemColumn::RwVnode,
+        ))
     }
 
     // XXX: should we use INCLUDE columns or SYSTEM columns instead of normal hidden columns?

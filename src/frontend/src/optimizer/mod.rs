@@ -94,7 +94,7 @@ use crate::optimizer::plan_node::{
     StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
-    LocalityBackfillScanEstimator, LocalityProviderCounter, RwTimestampValidator,
+    LocalityBackfillScanEstimator, LocalityProviderCounter, SystemColumnValidator,
     TemporalJoinValidator,
 };
 use crate::optimizer::property::Distribution;
@@ -718,10 +718,12 @@ impl LogicalPlanRoot {
             ).into());
         }
 
-        if RwTimestampValidator::select_rw_timestamp_in_stream_query(plan.clone()) {
+        if let Some(column) =
+            SystemColumnValidator::unsupported_column_in_stream_query(plan.clone())
+        {
             return Err(ErrorCode::NotSupported(
-                "selecting `_rw_timestamp` in a streaming query is not allowed".to_owned(),
-                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_owned(),
+                format!("selecting `{column}` in a streaming query is not allowed"),
+                format!("please run the sql in batch mode or remove the column `{column}` from the streaming query"),
             ).into());
         }
 
@@ -1337,7 +1339,7 @@ impl LogicalPlanRoot {
         }
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, backfill_type)?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
-            let columns = t.columns_without_rw_timestamp();
+            let columns = t.columns_without_system_columns();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)
         });
 

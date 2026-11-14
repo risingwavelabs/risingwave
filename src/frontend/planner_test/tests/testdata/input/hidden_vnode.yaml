@@ -1,0 +1,21 @@
+- id: composite_distribution
+  sql: |
+    CREATE TABLE t (tenant INT, id INT, PRIMARY KEY (tenant, id));
+    SELECT t.*, t._rw_vnode FROM t;
+  expected_outputs:
+  - batch_plan
+  - stream_error
+- id: implicit_row_id
+  sql: |
+    CREATE TABLE t (value INT);
+    SELECT value, _rw_vnode FROM t;
+  expected_outputs:
+  - batch_plan
+  - stream_error
+- id: index_lookup_preserves_source_vnode
+  sql: |
+    CREATE TABLE t (id INT PRIMARY KEY, value INT);
+    CREATE INDEX idx ON t(value) INCLUDE (id);
+    SELECT id, _rw_vnode FROM t WHERE value = 1;
+  expected_outputs:
+  - batch_plan
