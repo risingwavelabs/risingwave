@@ -29,7 +29,7 @@ impl GroupingSetsToExpandRule {
         Box::new(Self {})
     }
 
-    fn empty_grouping_sets(&self, agg: &LogicalAgg) -> Option<PlanRef> {
+    fn rewrite_with_empty_sets(agg: &LogicalAgg) -> Option<PlanRef> {
         let empty_count = agg
             .grouping_sets()
             .iter()
@@ -51,6 +51,7 @@ impl GroupingSetsToExpandRule {
             LogicalShare::create(input)
         };
 
+        // Empty grouping sets need a global aggregation to produce a row even on empty input.
         let mut global_agg_calls = vec![];
         let mut project_exprs = group_keys
             .indices()
@@ -58,6 +59,7 @@ impl GroupingSetsToExpandRule {
             .collect_vec();
         for agg_call in &agg_calls {
             if matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Grouping)) {
+                // Every argument is absent from the empty grouping set.
                 let value = agg_call.inputs.iter().fold(0, |value, _| (value << 1) | 1);
                 project_exprs.push(ExprImpl::literal_int(value));
             } else {
@@ -71,9 +73,11 @@ impl GroupingSetsToExpandRule {
             .with_enable_two_phase(enable_two_phase);
         let mut empty_plan = LogicalProject::create(global_agg.into(), project_exprs);
 
+        // Duplicate the aggregate result so repeated empty sets survive empty input.
         if empty_count > 1 {
             let output_len = empty_plan.schema().len();
             let expand = LogicalExpand::create(empty_plan, vec![vec![]; empty_count]);
+            // Keep the original aggregate results from Expand's second column block.
             empty_plan =
                 LogicalProject::with_out_col_idx(expand, output_len..output_len * 2).into();
         }
@@ -84,23 +88,14 @@ impl GroupingSetsToExpandRule {
             let nonempty_agg = Agg::new(agg_calls, group_keys, input)
                 .with_grouping_sets(nonempty_sets)
                 .with_enable_two_phase(enable_two_phase);
-            let nonempty_plan = self.apply(nonempty_agg.into()).unwrap();
+            let nonempty_plan = Self::rewrite_without_empty_sets(nonempty_agg);
             Some(LogicalUnion::create(true, vec![nonempty_plan, empty_plan]))
         }
     }
-}
 
-impl Rule<Logical> for GroupingSetsToExpandRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let agg: &LogicalAgg = plan.as_logical_agg()?;
-        if agg.grouping_sets().is_empty() {
-            return None;
-        }
-        if let Some(plan) = self.empty_grouping_sets(agg) {
-            return Some(plan);
-        }
+    fn rewrite_without_empty_sets(agg: Agg<PlanRef>) -> PlanRef {
         let (old_agg_calls, old_group_keys, grouping_sets, input, enable_two_phase) =
-            agg.clone().decompose();
+            agg.decompose();
 
         let old_input_schema_len = input.schema().len();
         let flag_col_idx = old_group_keys.len();
@@ -204,6 +199,19 @@ impl Rule<Logical> for GroupingSetsToExpandRule {
 
         let project = LogicalProject::new(new_agg.into(), project_exprs);
 
-        Some(project.into())
+        project.into()
+    }
+}
+
+impl Rule<Logical> for GroupingSetsToExpandRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        let agg: &LogicalAgg = plan.as_logical_agg()?;
+        if agg.grouping_sets().is_empty() {
+            return None;
+        }
+        if let Some(plan) = Self::rewrite_with_empty_sets(agg) {
+            return Some(plan);
+        }
+        Some(Self::rewrite_without_empty_sets(agg.core().clone()))
     }
 }
