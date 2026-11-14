@@ -91,6 +91,16 @@
     sql parser error: syntax error at or near WHERE at line 1, column 11
     LINE 1: SELECT 1, WHERE true
                             ^
+- input: |-
+    WITH arr AS (SELECT 1),
+      WITH unnested AS (SELECT 2)
+    SELECT * FROM unnested
+  error_msg: |-
+    sql parser error: syntax error at or near WITH at line 2, column 3
+    LINE 2:   WITH unnested AS (SELECT 2)
+              ^
+- input: SELECT (WITH a AS (SELECT 1) SELECT 1)
+  formatted_sql: SELECT (WITH a AS (SELECT 1) SELECT 1)
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: Value(SingleQuotedString("US/Pacific")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
