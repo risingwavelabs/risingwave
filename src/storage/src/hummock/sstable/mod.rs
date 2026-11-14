@@ -124,10 +124,16 @@ struct SerdeSstable {
 }
 
 impl From<SerdeSstable> for Sstable {
-    fn from(SerdeSstable { id, meta }: SerdeSstable) -> Self {
-        // Set skip_bloom_filter_in_serde to false because the behavior
-        // is determined by the serializer
-        Sstable::new(id, meta, false)
+    fn from(SerdeSstable { id, mut meta }: SerdeSstable) -> Self {
+        let bytes = std::mem::take(&mut meta.bloom_filter);
+        let filter_reader = XorFilterReader::from_owned(bytes, &meta.block_metas);
+        Self {
+            id,
+            meta,
+            filter_reader,
+            // The serializer decides whether the filter is included.
+            skip_bloom_filter_in_serde: false,
+        }
     }
 }
 
