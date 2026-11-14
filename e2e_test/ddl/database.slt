@@ -145,7 +145,14 @@ statement ok
 drop database db_barrier_custom;
 
 statement ok
-alter system set license_key to '';
+ALTER SYSTEM SET license_key TO '';
+
+# The frontend refreshes its license asynchronously after ALTER SYSTEM returns.
+# Wait for the same local license manager used by CREATE DATABASE to observe it.
+query T retry 10 backoff 1s
+select available from rw_features where name = 'ResourceGroup';
+----
+f
 
 statement error
 create database test with resource_group = 'test';
@@ -159,4 +166,10 @@ Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '..
 
 
 statement ok
-alter system set license_key to default;
+ALTER SYSTEM SET license_key TO DEFAULT;
+
+# Do not leave a pending license refresh for the next DDL test.
+query T retry 10 backoff 1s
+select available from rw_features where name = 'ResourceGroup';
+----
+t

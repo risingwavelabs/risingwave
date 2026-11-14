@@ -13,4 +13,5 @@
 // limitations under the License.
 
 pub mod ai_decide;
+pub mod ai_extract;
 pub mod like;

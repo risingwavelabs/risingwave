@@ -1,0 +1,44 @@
+- name: typed extraction with dynamic content
+  sql: CREATE TABLE docs (id INT, body VARCHAR); SELECT id, ai_extract(body, 'http://127.0.0.1:1/extract', 'model', '{"task":"entities","labels":["person","company"],"word_splitter":"char"}'::jsonb,
+    'planner-only-key') FROM docs;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- name: constant calls remain volatile and secrets are redacted
+  sql: 'SELECT ai_extract(''text'', ''http://127.0.0.1:1/extract'', ''model'', ''{"task":"entities","labels":["person","company"],"word_splitter":"char"}''::jsonb,
+    ''planner-only-key'', MAP {''X-Secret'': ''private-header''});'
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- name: record str and list fields infer distinct types
+  sql: SELECT ai_extract('text', 'http://127.0.0.1:1/extract', 'model', '{"task":"records","record_name":"sale","anchor":"product","fields":[{"name":"product"},{"name":"prices","dtype":"list"}],"word_splitter":"char"}'::jsonb,
+    'planner-only-key');
+  expected_outputs:
+  - logical_plan
+- name: shared nested expression has one async result
+  sql: CREATE TABLE docs (id INT, body VARCHAR, enabled BOOLEAN) APPEND ONLY; SELECT id, (result).person, (result).company FROM (SELECT id, CASE
+    WHEN enabled THEN ai_extract(body, 'http://127.0.0.1:1/extract', 'model', '{"task":"entities","labels":["person","company"],"word_splitter":"char"}'::jsonb,
+    'planner-only-key') END AS result FROM docs) d;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+- name: dynamic specification is rejected
+  sql: CREATE TABLE docs(body VARCHAR,spec JSONB); SELECT ai_extract(body, 'http://127.0.0.1:1/extract', 'model', spec, 'planner-only-key') FROM
+    docs;
+  expected_outputs:
+  - binder_error
+- name: missing splitter rejected
+  sql: SELECT ai_extract('text', 'http://127.0.0.1:1/extract', 'model', '{"task":"entities","labels":["person"]}'::jsonb, 'planner-only-key');
+  expected_outputs:
+  - binder_error
+- name: wrong arity rejected
+  sql: SELECT ai_extract('text');
+  expected_outputs:
+  - binder_error
+- name: wrong content type rejected
+  sql: SELECT ai_extract(42, 'http://127.0.0.1:1/extract', 'model', '{"task":"entities","labels":["person","company"],"word_splitter":"char"}'::jsonb,
+    'planner-only-key');
+  expected_outputs:
+  - binder_error

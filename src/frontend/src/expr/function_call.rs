@@ -49,8 +49,13 @@ fn debug_binary_op(
 
 impl std::fmt::Debug for FunctionCall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.func_type == ExprType::AiDecide {
-            let mut builder = f.debug_tuple("AiDecide");
+        if matches!(self.func_type, ExprType::AiDecide | ExprType::AiExtract) {
+            let name = if self.func_type == ExprType::AiDecide {
+                "AiDecide"
+            } else {
+                "AiExtract"
+            };
+            let mut builder = f.debug_tuple(name);
             for (index, child) in self.inputs.iter().enumerate() {
                 if index >= 4 {
                     builder.field(&"<redacted>");
@@ -326,6 +331,14 @@ impl Expr for FunctionCall {
                     config: Some((&risingwave_expr::scalar::ai_decide::config()).into()),
                 }),
             )
+        } else if self.func_type() == ExprType::AiExtract {
+            (
+                Type::Unspecified,
+                RexNode::AiExtract(AiExtractNode {
+                    children,
+                    config: Some((&risingwave_expr::scalar::ai_extract::config()).into()),
+                }),
+            )
         } else {
             (
                 self.func_type(),
@@ -348,8 +361,13 @@ pub struct FunctionCallDisplay<'a> {
 impl std::fmt::Debug for FunctionCallDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.function_call;
-        if that.func_type == ExprType::AiDecide {
-            let mut builder = f.debug_tuple("AiDecide");
+        if matches!(that.func_type, ExprType::AiDecide | ExprType::AiExtract) {
+            let name = if that.func_type == ExprType::AiDecide {
+                "AiDecide"
+            } else {
+                "AiExtract"
+            };
+            let mut builder = f.debug_tuple(name);
             for (index, child) in that.inputs.iter().enumerate() {
                 if index >= 4 {
                     builder.field(&"<redacted>");

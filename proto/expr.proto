@@ -392,6 +392,7 @@ message ExprNode {
     // AI model functions
     OPENAI_EMBEDDING = 2501;
     AI_DECIDE = 2502;
+    AI_EXTRACT = 2503;
   }
   // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;
@@ -404,6 +405,7 @@ message ExprNode {
     NowRexNode now = 8;
     SecretRefNode secret_ref = 9;
     AiDecideNode ai_decide = 10;
+    AiExtractNode ai_extract = 11;
   }
 }
 
@@ -502,6 +504,12 @@ message FunctionCall {
 message AiDecideNode {
   repeated ExprNode children = 1;
   // Streaming resolves current job/global settings at construction and recovery.
+  AiDecideConfig config = 2;
+}
+
+// AI_EXTRACT shares the HTTP execution configuration and retry semantics.
+message AiExtractNode {
+  repeated ExprNode children = 1;
   AiDecideConfig config = 2;
 }
 

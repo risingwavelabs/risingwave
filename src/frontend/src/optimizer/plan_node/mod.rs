@@ -937,13 +937,18 @@ impl dyn StreamPlanNode {
 }
 
 impl dyn BatchPlanNode {
-    /// Capture session settings on `AI_DECIDE` nodes at plan serialization time.
+    /// Capture session settings on AI expression nodes at plan serialization time.
     pub fn to_batch_prost_body_with_config(
         &self,
     ) -> SchedulerResult<risingwave_pb::batch_plan::plan_node::NodeBody> {
         risingwave_expr::scalar::ai_decide::with_config(
             self.ctx().session_ctx().config().ai_decide_config(),
-            || self.try_to_batch_prost_body(),
+            || {
+                risingwave_expr::scalar::ai_extract::with_config(
+                    self.ctx().session_ctx().config().ai_extract_config(),
+                    || self.try_to_batch_prost_body(),
+                )
+            },
         )
     }
 

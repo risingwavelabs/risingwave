@@ -164,6 +164,9 @@ impl OptimizerContext {
         for key in overwrite_options.ai_decide.keys() {
             handler_args.with_options.remove(key);
         }
+        for key in overwrite_options.ai_extract.keys() {
+            handler_args.with_options.remove(key);
+        }
         Self {
             session_ctx: handler_args.session,
             sql: handler_args.sql,

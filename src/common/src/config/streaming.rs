@@ -65,6 +65,11 @@ pub struct StreamingConfig {
     #[config_doc(nested)]
     pub ai_decide: AiDecideConfig,
 
+    /// HTTP execution settings for `AI_EXTRACT`; independent of `AI_DECIDE`.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub ai_extract: AiDecideConfig,
+
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,

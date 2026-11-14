@@ -506,6 +506,10 @@ impl IndexItemRewriter {
                 .children
                 .iter_mut()
                 .for_each(|expr| self.rewrite_expr(expr)),
+            RexNode::AiExtract(node) => node
+                .children
+                .iter_mut()
+                .for_each(|expr| self.rewrite_expr(expr)),
             RexNode::Now(_) | RexNode::SecretRef(_) => {}
         }
     }

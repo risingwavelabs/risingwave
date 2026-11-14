@@ -1,0 +1,7 @@
+# Changes job configuration and runs RECOVER; selected only by the isolated recovery lane.
+# The local HTTP fixture and psql subprocesses cannot run under madsim.
+skipif madsim
+system ok
+python3 e2e_test/streaming/ai_extract_config.py
+----
+ai_extract configuration and recovery passed

@@ -292,6 +292,14 @@ max_retry_after_ms = 5000
 max_response_bytes = 16777216
 max_concurrency = 0
 
+[streaming.ai_extract]
+request_timeout_ms = 30000
+max_retry_delay_ms = 10000
+retry_delay_ms = 100
+max_retry_after_ms = 5000
+max_response_bytes = 16777216
+max_concurrency = 0
+
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4

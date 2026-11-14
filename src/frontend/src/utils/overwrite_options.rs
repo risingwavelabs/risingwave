@@ -23,6 +23,7 @@ use crate::handler::HandlerArgs;
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
     pub ai_decide: BTreeMap<String, String>,
+    pub ai_extract: BTreeMap<String, String>,
     pub source_rate_limit: Option<u32>,
     pub backfill_rate_limit: Option<u32>,
     pub dml_rate_limit: Option<u32>,
@@ -96,8 +97,17 @@ impl OverwriteOptions {
                     .map(|value| (key.to_owned(), value.clone()))
             })
             .collect();
+        let ai_extract = AiDecideConfig::EXTRACT_SESSION_OPTIONS
+            .into_iter()
+            .filter_map(|key| {
+                args.with_options
+                    .get(key)
+                    .map(|value| (key.to_owned(), value.clone()))
+            })
+            .collect();
         Self {
             ai_decide,
+            ai_extract,
             source_rate_limit,
             backfill_rate_limit,
             dml_rate_limit,

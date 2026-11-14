@@ -158,6 +158,19 @@ where
                 ai_decide::with_config(config, || build_func(E::AiDecide, ret_type, children))
             }
 
+            RexNode::AiExtract(node) => {
+                use crate::scalar::ai_extract;
+
+                let ret_type = DataType::from(prost.get_return_type()?);
+                // Build children before entering this node's scope, so sibling and nested
+                // calls retain their own settings. Streaming overrides all node snapshots.
+                let children = node.children.iter().map(build_child).try_collect()?;
+                let config = ai_extract::config_override()
+                    .or_else(|| node.config.map(Into::into))
+                    .unwrap_or_default();
+                ai_extract::with_config(config, || build_func(E::AiExtract, ret_type, children))
+            }
+
             RexNode::Now(_) => unreachable!("now should not be built at backend"),
 
             RexNode::SecretRef(sr) => {

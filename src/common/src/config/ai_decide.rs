@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::DefaultFromSerde;
 
-/// HTTP execution settings carried by `AI_DECIDE` expression nodes.
+/// Shared HTTP settings for `AI_DECIDE` and `AI_EXTRACT`; each has its own config namespace.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct AiDecideConfig {
@@ -76,6 +76,14 @@ fn positive_u32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Er
 }
 
 impl AiDecideConfig {
+    pub const EXTRACT_SESSION_OPTIONS: [&'static str; 6] = [
+        "ai_extract_request_timeout_ms",
+        "ai_extract_max_retry_delay_ms",
+        "ai_extract_retry_delay_ms",
+        "ai_extract_max_retry_after_ms",
+        "ai_extract_max_response_bytes",
+        "ai_extract_max_concurrency",
+    ];
     pub const SESSION_OPTIONS: [&'static str; 6] = [
         "ai_decide_request_timeout_ms",
         "ai_decide_max_retry_delay_ms",
