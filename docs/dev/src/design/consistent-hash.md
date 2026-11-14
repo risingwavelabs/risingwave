@@ -71,14 +71,14 @@ This is better than range partition in that this approach of partition is more s
 ### Inspecting row distribution in SQL
 
 Hummock tables, materialized views, and indexes expose a virtual hidden column
-`__rw_vnode` in batch queries. It reads the vnode from the stored row key and
+`_rw_vnode` in batch queries. It reads the vnode from the stored row key and
 returns a `smallint`:
 
 ```sql
-SELECT __rw_vnode, COUNT(*)
+SELECT _rw_vnode, COUNT(*)
 FROM orders
-GROUP BY __rw_vnode
-ORDER BY __rw_vnode;
+GROUP BY _rw_vnode
+ORDER BY _rw_vnode;
 ```
 
 `SELECT *` and `table.*` omit this column. Qualify it with a table name or alias
@@ -88,10 +88,11 @@ index's vnode. Singleton relations return zero. Changing actor parallelism does
 not change the row's vnode.
 
 This column does not change stored rows or the persisted catalog and cannot be
-written by DML. Like `_rw_timestamp`, it cannot be selected as input to a streaming
+written by DML. Like `_rw_timestamp`, it can be read in UPDATE/DELETE predicates,
+but cannot be used in a DML `RETURNING` list or selected as input to a streaming
 job. It can be queried from an existing materialized view. External sources and
-Iceberg engine tables do not expose it. An existing user column with the same
-name retains its original meaning.
+Iceberg engine tables do not expose it. The `_rw_` prefix is reserved for system
+column names.
 
 ### Storage
 

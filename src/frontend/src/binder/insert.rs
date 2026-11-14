@@ -197,7 +197,7 @@ impl Binder {
             )));
         }
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items, table_catalog)?;
         let is_returning = !returning_list.is_empty();
 
         let (mut col_indices_to_insert, default_column_indices) = get_col_indices_to_insert(

@@ -142,11 +142,11 @@ fn check_replace_safe(old: &TableCatalog, new: &TableCatalog) -> Result<()> {
         ));
     }
     // `original_catalog` is loaded via `TableCatalog::from_prost`, which appends the
-    // `_rw_timestamp` system column to `columns`. The freshly-built `new` table from
-    // `get_replace_table_plan` doesn't go through `from_prost` and therefore lacks it.
-    // Compare only user-visible columns to avoid a spurious mismatch.
-    let old_cols = old.columns_without_rw_timestamp();
-    let new_cols = new.columns_without_rw_timestamp();
+    // runtime-generated system columns to `columns`. The freshly-built `new` table
+    // from `get_replace_table_plan` doesn't go through `from_prost` and lacks them.
+    // Compare only persisted columns to avoid a spurious mismatch.
+    let old_cols = old.columns_without_system_columns();
+    let new_cols = new.columns_without_system_columns();
     if old_cols.len() != new_cols.len() {
         return Err(diff("columns.len()", &old_cols.len(), &new_cols.len()));
     }

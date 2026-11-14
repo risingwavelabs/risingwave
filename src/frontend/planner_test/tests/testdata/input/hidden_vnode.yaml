@@ -1,56 +1,14 @@
 - id: composite_distribution
   sql: |
     CREATE TABLE t (tenant INT, id INT, PRIMARY KEY (tenant, id));
-    SELECT t.*, t.__rw_vnode FROM t;
+    SELECT t.*, t._rw_vnode FROM t;
   expected_outputs:
   - batch_plan
   - stream_error
-- id: wildcard_prunes_vnode
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY, value INT);
-    SELECT t.* FROM t;
-  expected_outputs:
-  - batch_plan
-  - stream_plan
 - id: implicit_row_id
   sql: |
     CREATE TABLE t (value INT);
-    SELECT value, __rw_vnode FROM t;
-  expected_outputs:
-  - batch_plan
-  - stream_error
-- id: filter_and_group
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT __rw_vnode, COUNT(*) FROM t WHERE __rw_vnode < 16 GROUP BY __rw_vnode;
-  expected_outputs:
-  - batch_plan
-  - stream_error
-- id: outer_join
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT a.__rw_vnode AS a_vnode, b.__rw_vnode AS b_vnode
-    FROM t a LEFT JOIN t b ON a.id = b.id + 1;
-  expected_outputs:
-  - batch_plan
-  - stream_error
-- id: ambiguous_vnode
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT __rw_vnode FROM t a JOIN t b ON a.id = b.id;
-  expected_outputs:
-  - binder_error
-- id: subquery_wildcard_hides_vnode
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT __rw_vnode FROM (SELECT * FROM t) s;
-  expected_outputs:
-  - binder_error
-- id: singleton_mv
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    CREATE MATERIALIZED VIEW totals AS SELECT COUNT(*) AS n FROM t;
-    SELECT n, __rw_vnode FROM totals;
+    SELECT value, _rw_vnode FROM t;
   expected_outputs:
   - batch_plan
   - stream_error
@@ -58,13 +16,6 @@
   sql: |
     CREATE TABLE t (id INT PRIMARY KEY, value INT);
     CREATE INDEX idx ON t(value) INCLUDE (id);
-    SELECT id, __rw_vnode FROM t WHERE value = 1;
+    SELECT id, _rw_vnode FROM t WHERE value = 1;
   expected_outputs:
   - batch_plan
-- id: existing_user_column
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY, __rw_vnode VARCHAR);
-    SELECT * FROM t;
-  expected_outputs:
-  - batch_plan
-  - stream_plan

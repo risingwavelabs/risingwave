@@ -22,16 +22,26 @@
                 └── StreamSource { source: t, columns: [v1, _row_id] } { tables: [ Source: 1 ] }
 
     Table 0
-    ├── columns: [ vnode, offset, _rw_timestamp ]
+    ├── columns: [ vnode, offset, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 1 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1
+    ├── columns: [ partition_id, offset_info, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 1
 
-    Table 4294967294 { columns: [ v1, _row_id, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ v1, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
 - name: watermark on append only table with source
   sql: |
@@ -103,8 +113,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2] }
     └─LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1) AND (t1.ts >= (t2.ts + '00:00:01':Interval)) AND (t2.ts >= (t1.ts + '00:00:01':Interval)), output: all }
-      ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
-      └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+      ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
+      └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck, watermark_columns: [t1_ts, t2_ts] }
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
@@ -123,8 +133,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v1) AND (t1.ts >= (t2.ts + '00:00:01':Interval)) AND (t2.ts >= (t1.ts + '00:00:01':Interval)), output: all }
-      ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
-      └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+      ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
+      └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_v1], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: NoCheck, watermark_columns: [t1_ts, t2_ts] }
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id, t2._row_id) }
@@ -158,19 +168,19 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ t1_ts, t1_v1, t1_v2, $expr1, t1__row_id, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+    Table 0 { columns: [ t1_ts, t1_v1, t1_v2, $expr1, t1__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 1 { columns: [ t1_v1, t1__row_id, _degree, t1_ts, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
+    Table 1 { columns: [ t1_v1, t1__row_id, _degree, t1_ts, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
-    Table 2 { columns: [ t2_ts, t2_v1, t2_v2, $expr2, t2__row_id, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+    Table 2 { columns: [ t2_ts, t2_v1, t2_v2, $expr2, t2__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 3 { columns: [ t2_v1, t2__row_id, _degree, t2_ts, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
+    Table 3 { columns: [ t2_v1, t2__row_id, _degree, t2_ts, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
-    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id, t2._row_id, _rw_timestamp ], primary key: [ $6 ASC, $7 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 6, 7 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id, t2._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $6 ASC, $7 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 6, 7 ], read pk prefix len hint: 3 }
 
 - name: union all
   sql: |
@@ -317,19 +327,19 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+    Table 0 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
 
-    Table 1 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+    Table 1 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
 
-    Table 2 { columns: [ mv2_ts1, mv2_ts2, mv2_t2__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+    Table 2 { columns: [ mv2_ts1, mv2_ts2, mv2_t2__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
 
-    Table 3 { columns: [ mv2_ts1, mv2_ts2, mv2_t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+    Table 3 { columns: [ mv2_ts1, mv2_ts2, mv2_t2__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [0] }
 
-    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, t1__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, t2__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, t2__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1, 4, 5 ], read pk prefix len hint: 4 }
+    Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $4 ASC, $5 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1, 4, 5 ], read pk prefix len hint: 4 }
 
 - name: window join with watermark in join key and inequality
   sql: |
@@ -360,19 +370,19 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+    Table 0 { columns: [ mv1_ts1, mv1_ts2, mv1_t1__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 1 { columns: [ mv1_ts1, mv1_t1__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+    Table 1 { columns: [ mv1_ts1, mv1_t1__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 2 { columns: [ mv2_ts1, mv2_ts2, $expr1, mv2_t2__row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+    Table 2 { columns: [ mv2_ts1, mv2_ts2, $expr1, mv2_t2__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 3 { columns: [ mv2_ts1, mv2_t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
+    Table 3 { columns: [ mv2_ts1, mv2_t2__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, t1__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, t2__row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, t2__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 4, 5 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $4 ASC, $5 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 4, 5 ], read pk prefix len hint: 3 }
 
 - name: two-phase top n ordered by watermark column
   sql: |
@@ -461,7 +471,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp ]
+    ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1 ]
@@ -469,7 +479,7 @@
     └── clean watermark indices: [0]
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -477,7 +487,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ ts, v1, v2, t._row_id, _rw_timestamp ]
+    ├── columns: [ ts, v1, v2, t._row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1 ]
@@ -500,7 +510,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp ]
+    ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1, 0 ]
@@ -508,7 +518,7 @@
     └── clean watermark indices: [0]
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -516,7 +526,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ ts, v1, v2, t._row_id, _rw_timestamp ]
+    ├── columns: [ ts, v1, v2, t._row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1, 0 ]

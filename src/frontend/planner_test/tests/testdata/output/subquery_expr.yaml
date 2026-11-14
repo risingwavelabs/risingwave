@@ -14,9 +14,9 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalProject { exprs: [t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
@@ -38,10 +38,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalLimit { limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t.x] }
-          └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+          └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
@@ -54,10 +54,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t.x] }
-          └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+          └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
@@ -70,10 +70,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
         └─LogicalProject { exprs: [t.x] }
-          └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+          └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
@@ -98,9 +98,9 @@
   logical_plan: |-
     LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalProject { exprs: [t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(t.x + 1:Int32) as $expr1] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
@@ -125,7 +125,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalJoin { type: FullOuter, on: true, output: all }
         ├─LogicalProject { exprs: [t.x] }
-        │ └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+        │ └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
         └─LogicalProject { exprs: [1:Int32] }
           └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |-
@@ -150,12 +150,12 @@
   logical_plan: |-
     LogicalProject { exprs: [(t.x + $expr1) as $expr2] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalProject { exprs: [(t.x + t.x) as $expr1] }
         └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-          ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+          ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
           └─LogicalProject { exprs: [t.x] }
-            └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+            └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(t.x + $expr1) as $expr2] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
@@ -205,7 +205,7 @@
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
@@ -219,7 +219,7 @@
     └─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftAnti, on: true, output: all }
@@ -232,18 +232,18 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
       └─LogicalProject { exprs: [t2.x] }
-        └─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+        └─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
 - sql: |
     create table t(x int);
     select x from t where exists (select * from t);
   logical_plan: |-
     LogicalProject { exprs: [t.x] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
       └─LogicalProject { exprs: [t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
@@ -252,9 +252,9 @@
     LogicalProject { exprs: [t1.x] }
     └─LogicalFilter { predicate: (t1.x > t2.x) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
         └─LogicalProject { exprs: [t2.x] }
-          └─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
 - sql: |
     select 1 where 1>0 and exists (values (1))
   logical_plan: |-
@@ -302,9 +302,9 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
       └─LogicalProject { exprs: [t2.y] }
-        └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+        └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -312,9 +312,9 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.x] }
     └─LogicalApply { type: LeftAnti, on: (t1.y = t2.y), correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
+      ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
       └─LogicalProject { exprs: [t2.y] }
-        └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+        └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
 - sql: |
     create table t1 (a int);
     create table t2 (b int);
@@ -328,13 +328,13 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.a] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.a, t1._row_id, t1._rw_timestamp, t1.__rw_vnode] }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1._row_id, t1._rw_timestamp, t1._rw_vnode] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalTopN { order: [$expr2 DESC], limit: 90, offset: 0 }
           └─LogicalProject { exprs: [1:Int32, CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
             └─LogicalAgg { group_key: [$expr1], aggs: [] }
               └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
-                └─LogicalScan { table: t2, columns: [t2.b, t2._row_id, t2._rw_timestamp, t2.__rw_vnode] }
+                └─LogicalScan { table: t2, columns: [t2.b, t2._row_id, t2._rw_timestamp, t2._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t1.a, output: all }
@@ -359,7 +359,7 @@
   logical_plan: |-
     LogicalProject { exprs: [b.b1, ] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: b, columns: [b.b1, b._row_id, b._rw_timestamp, b.__rw_vnode] }
+      ├─LogicalScan { table: b, columns: [b.b1, b._row_id, b._rw_timestamp, b._rw_vnode] }
       └─LogicalProject { exprs: [] }
         └─LogicalValues { rows: [[Repeat(CorrelatedInputRef { index: 0, correlated_id: 1 }, 2:Int32)]], schema: Schema { fields: [:Varchar] } }
   batch_plan: |-
@@ -383,17 +383,17 @@
   logical_plan: |-
     LogicalProject { exprs: [1:Int32, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: dl, columns: [dl.c1, dl.c2, dl._row_id, dl._rw_timestamp, dl.__rw_vnode] }
+      ├─LogicalScan { table: dl, columns: [dl.c1, dl.c2, dl._row_id, dl._rw_timestamp, dl._rw_vnode] }
       └─LogicalJoin { type: FullOuter, on: true, output: all }
         ├─LogicalLimit { limit: 1, offset: 0 }
         │ └─LogicalProject { exprs: [1:Int32] }
         │   └─LogicalFilter { predicate: (t.a = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
         │     └─LogicalJoin { type: Inner, on: true, output: all }
-        │       ├─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        │       └─LogicalScan { table: di, columns: [di.d1, di.d2, di._row_id, di._rw_timestamp, di.__rw_vnode] }
+        │       ├─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        │       └─LogicalScan { table: di, columns: [di.d1, di.d2, di._row_id, di._rw_timestamp, di._rw_vnode] }
         └─LogicalLimit { limit: 1, offset: 0 }
           └─LogicalProject { exprs: [1:Int32] }
             └─LogicalFilter { predicate: (t.a = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
               └─LogicalJoin { type: Inner, on: true, output: all }
-                ├─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-                └─LogicalScan { table: di, columns: [di.d1, di.d2, di._row_id, di._rw_timestamp, di.__rw_vnode] }
+                ├─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp, t._rw_vnode] }
+                └─LogicalScan { table: di, columns: [di.d1, di.d2, di._row_id, di._rw_timestamp, di._rw_vnode] }

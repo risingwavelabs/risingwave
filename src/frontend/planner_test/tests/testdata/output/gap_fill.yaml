@@ -6,7 +6,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }] }
-      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [id, ts, val], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }] }
@@ -22,7 +22,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.ts, t.val] }
     └─LogicalGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $1 }] }
-      └─LogicalScan { table: t, columns: [t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.ts, t.val, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [ts, val], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $1 }] }
@@ -38,7 +38,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.ts, t.name] }
     └─LogicalGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Null, target_col: $1 }] }
-      └─LogicalScan { table: t, columns: [t.ts, t.name, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.ts, t.name, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [ts, name], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $0, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Null, target_col: $1 }] }
@@ -119,21 +119,21 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -141,7 +141,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ id, ts, val, _rw_timestamp ]
+    ├── columns: [ id, ts, val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
@@ -177,21 +177,21 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -199,7 +199,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ ts, val, _rw_timestamp ]
+    ├── columns: [ ts, val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
@@ -235,21 +235,21 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_ts, t_name, _rw_timestamp ]
+    ├── columns: [ t_ts, t_name, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ t_ts, t_name, _rw_timestamp ]
+    ├── columns: [ t_ts, t_name, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -257,7 +257,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ ts, name, _rw_timestamp ]
+    ├── columns: [ ts, name, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
@@ -291,19 +291,19 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_ts, t_temp, t_status, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_ts, t_temp, t_status, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ t_ts, t_temp, t_status, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ t_ts, t_temp, t_status, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ ts, temp, status, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ ts, temp, status, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
 - name: eowc with timestamptz
   sql: |
@@ -335,21 +335,21 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -357,7 +357,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ ts, val, _rw_timestamp ]
+    ├── columns: [ ts, val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
@@ -399,28 +399,33 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp ]
+    ├── columns: [ t_id, t_ts, t_val, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ id, ts, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ id, ts, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 1
 
 - name: too few arguments
   sql: |
@@ -499,7 +504,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }] }
-      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.val, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [val, t.ts(hidden)], stream_key: [t.ts], pk_columns: [t.ts], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.val, t.ts] }
@@ -516,7 +521,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
-      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
@@ -535,17 +540,17 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ device_id, ts, val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ device_id, ts, val, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - name: partition by duplicate columns
   sql: |
@@ -554,7 +559,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
-      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
@@ -567,7 +572,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.region, t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $2, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $3 }], partition_by: [$0, $1] }
-      └─LogicalScan { table: t, columns: [t.region, t.device_id, t.ts, t.val, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.region, t.device_id, t.ts, t.val, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [region, device_id, ts, val], stream_key: [region, device_id, ts], pk_columns: [region, device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $2, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $3 }], partition_by: [$0, $1] }
@@ -586,17 +591,17 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_region, t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 0 { columns: [ t_region, t_device_id, t_ts, t_val, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 1
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, region, device_id, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, region, device_id, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ region, device_id, ts, val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ region, device_id, ts, val, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 3 }
 
 - name: partition by with mixed strategies
   sql: |
@@ -641,19 +646,19 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+    Table 1 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ device_id, ts, val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ device_id, ts, val, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - name: partition by without input pk
   sql: |
@@ -684,7 +689,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.device_id, t.ts, t.val] }
     └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
-      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t.extra, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t.extra, t._rw_timestamp, t._rw_vnode] }
   stream_plan: |-
     StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }

@@ -1339,7 +1339,7 @@ impl LogicalPlanRoot {
         }
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, backfill_type)?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
-            let columns = t.columns_without_rw_timestamp();
+            let columns = t.columns_without_system_columns();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)
         });
 

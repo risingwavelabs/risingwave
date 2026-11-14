@@ -27,7 +27,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
 use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
-use crate::catalog::check_column_name_not_reserved;
+use crate::catalog::{TableCatalog, check_column_name_not_reserved};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
 use crate::optimizer::plan_node::generic::CHANGELOG_OP;
@@ -540,6 +540,7 @@ impl Binder {
     pub fn bind_returning_list(
         &mut self,
         returning_items: Vec<SelectItem>,
+        table: &TableCatalog,
     ) -> Result<(Vec<ExprImpl>, Vec<Field>)> {
         let (returning_list, aliases) = self.bind_select_list(&returning_items)?;
         if returning_list
@@ -548,6 +549,18 @@ impl Binder {
         {
             return Err(RwError::from(ErrorCode::BindError(
                 "should not have agg/window in the `RETURNING` list".to_owned(),
+            )));
+        }
+
+        // DML returns the persisted row, without runtime-generated system columns.
+        // Reject references before they become out-of-range input refs in the plan.
+        let input_refs = crate::expr::collect_input_refs(table.columns().len(), &returning_list);
+        if input_refs
+            .ones()
+            .any(|index| table.columns()[index].is_rw_sys_column())
+        {
+            return Err(RwError::from(ErrorCode::BindError(
+                "system columns are not supported in the `RETURNING` list".to_owned(),
             )));
         }
 

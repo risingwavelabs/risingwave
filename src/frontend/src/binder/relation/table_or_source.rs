@@ -19,8 +19,7 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, RW_VNODE_COLUMN_NAME, debug_assert_column_ids_distinct,
-    is_system_schema,
+    Engine, Field, debug_assert_column_ids_distinct, is_system_schema,
 };
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
@@ -561,19 +560,6 @@ impl Binder {
         as_of: Option<&AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
-        // Add the query-only system column to this binding, without changing the
-        // catalog or DML schema. Preserve an existing user column with this name.
-        let mut table_catalog = table_catalog;
-        if table_catalog.engine == Engine::Hummock
-            && !table_catalog
-                .columns
-                .iter()
-                .any(|c| c.name() == RW_VNODE_COLUMN_NAME)
-        {
-            Arc::make_mut(&mut table_catalog)
-                .columns
-                .push(ColumnCatalog::rw_vnode_column());
-        }
         let columns = table_catalog
             .columns
             .iter()

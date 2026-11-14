@@ -6,8 +6,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, sum] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x)] }
@@ -35,8 +35,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, row_number] }
     └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -55,8 +55,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, sum] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
@@ -78,8 +78,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1] }
@@ -108,8 +108,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, sum, count] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -130,8 +130,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, max] }
     └─LogicalOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
@@ -152,8 +152,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, first_value, last_value] }
     └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
@@ -179,8 +179,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, min, max, count] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), min(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), max(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, min, max, count] }
@@ -206,8 +206,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, row_number, rank, dense_rank] }
     └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -232,8 +232,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, first_value, first_value, first_value, last_value] }
     └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -271,8 +271,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, count] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, count] }
@@ -298,8 +298,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, first_value] }
     └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
-      └─LogicalProject { exprs: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
+        └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
     └─BatchExchange { order: [], dist: Single }
@@ -316,8 +316,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, t.z, sum] }
     └─LogicalOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY $expr2 ORDER BY $expr3 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode, (t.x * 2:Int32) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.z) as $expr3] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+      └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode, (t.x * 2:Int32) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.z) as $expr3] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum] }
@@ -346,8 +346,8 @@
     └─LogicalFilter { predicate: (row_number <= 3:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-            └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+          └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+            └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y] }
@@ -374,8 +374,8 @@
     └─LogicalFilter { predicate: (sum > 10:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, sum] }
         └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-            └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+          └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
+            └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y] }
@@ -413,8 +413,8 @@
       └─LogicalShare { id: 4 }
         └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
           └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
-              └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t.__rw_vnode] }
+            └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
+              └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp, t._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.z] }

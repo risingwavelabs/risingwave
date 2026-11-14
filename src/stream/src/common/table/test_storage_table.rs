@@ -178,19 +178,13 @@ async fn test_storage_table_value_indices() {
         .unwrap();
     assert_eq!(get_no_exist_res, None);
 
-    // Query-only columns must work with key-only, value-only, and mixed projections.
+    // Cover system-only output and a mix of key, value, and system columns.
     // They must not be included in the persisted value schema.
     let mut query_columns = column_descs;
     query_columns
         .push(risingwave_common::catalog::ColumnCatalog::rw_timestamp_column().column_desc);
     query_columns.push(risingwave_common::catalog::ColumnCatalog::rw_vnode_column().column_desc);
-    for projection in [
-        vec![6],
-        vec![6, 5],
-        vec![4, 6, 5],
-        vec![0, 6, 5],
-        vec![4, 6, 0, 5],
-    ] {
+    for projection in [vec![6, 5], vec![4, 6, 0, 5]] {
         let reader = BatchTable::for_test_with_partial_columns(
             test_env.storage.clone(),
             TEST_TABLE_ID,

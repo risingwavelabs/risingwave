@@ -47,6 +47,7 @@ v2                integer  false  NULL
 v3                integer  false  NULL
 _row_id           serial    true  NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key       _row_id   NULL  NULL
 distribution key  _row_id   NULL  NULL
 table description t3        NULL  NULL
@@ -59,6 +60,7 @@ v2 integer false NULL
 v3 integer false NULL
 _row_id serial true NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 
 statement ok
 drop table t3;

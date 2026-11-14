@@ -169,9 +169,9 @@
   logical_plan: |-
     LogicalProject { exprs: [a.a1, b.b1, regexp_matches] }
     └─LogicalApply { type: Inner, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: a, columns: [a.a1, a._row_id, a._rw_timestamp, a.__rw_vnode] }
+      ├─LogicalScan { table: a, columns: [a.a1, a._row_id, a._rw_timestamp, a._rw_vnode] }
       └─LogicalApply { type: Inner, on: true, correlated_id: 2 }
-        ├─LogicalScan { table: b, columns: [b.b1, b._row_id, b._rw_timestamp, b.__rw_vnode] }
+        ├─LogicalScan { table: b, columns: [b.b1, b._row_id, b._rw_timestamp, b._rw_vnode] }
         └─LogicalTableFunction { table_function: RegexpMatches(Repeat(CorrelatedInputRef { index: 0, correlated_id: 2 }, CorrelatedInputRef { index: 0, correlated_id: 1 }), '.':Varchar, 'g':Varchar) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }

@@ -225,8 +225,7 @@ impl IndexSelectionRule {
         let offset = index_scan.table().columns().len();
 
         let primary_table_scan = LogicalScan::create(
-            // Preserve query-only system columns on the primary-table lookup.
-            logical_scan.table().clone(),
+            index.primary_table.clone(),
             logical_scan.ctx(),
             logical_scan.as_of(),
         );

@@ -431,6 +431,7 @@ pub mod tests {
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
+        RW_VNODE_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -488,6 +489,7 @@ pub mod tests {
             // .with_ids([3, 4, 7].map(ColumnId::new))
             .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
+            RW_VNODE_COLUMN_NAME => DataType::Int16,
         };
         assert_eq!(columns, expected_columns, "{columns:#?}");
     }

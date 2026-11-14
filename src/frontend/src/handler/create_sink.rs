@@ -542,16 +542,16 @@ pub async fn gen_sink_plan(
         for column in sink_catalog.full_columns() {
             if !column.can_dml() {
                 unreachable!(
-                    "cannot derive generated columns or the `_rw_timestamp` system column in a sink catalog, but found one"
+                    "cannot derive generated columns or system columns in a sink catalog, but found one"
                 );
             }
         }
 
-        let table_columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
+        let table_columns_without_system_columns = table_catalog.columns_without_system_columns();
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
-            &table_columns_without_rw_timestamp,
+            &table_columns_without_system_columns,
             user_specified_columns,
         )?;
 
@@ -560,7 +560,7 @@ pub async fn gen_sink_plan(
         sink_plan = StreamProject::new(logical_project).into();
 
         let exprs = LogicalSource::derive_output_exprs_from_generated_columns(
-            &table_columns_without_rw_timestamp,
+            &table_columns_without_system_columns,
         )?;
 
         if let Some(exprs) = exprs {
@@ -748,7 +748,7 @@ async fn create_sink_or_replace(
         match &mode {
             SinkCreateMode::Create { .. } => {
                 if let Some(table_catalog) = &target_table_catalog {
-                    sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
+                    sink.original_target_columns = table_catalog.columns_without_system_columns();
                 }
             }
             SinkCreateMode::Replace { original_sink } => {

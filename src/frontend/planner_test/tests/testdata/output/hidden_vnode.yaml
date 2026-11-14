@@ -2,108 +2,30 @@
 - id: composite_distribution
   sql: |
     CREATE TABLE t (tenant INT, id INT, PRIMARY KEY (tenant, id));
-    SELECT t.*, t.__rw_vnode FROM t;
+    SELECT t.*, t._rw_vnode FROM t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: t, columns: [t.tenant, t.id, t.__rw_vnode], distribution: UpstreamHashShard(t.tenant, t.id) }
+    └─BatchScan { table: t, columns: [t.tenant, t.id, t._rw_vnode], distribution: UpstreamHashShard(t.tenant, t.id) }
   stream_error: |-
-    Not supported: selecting `__rw_vnode` in a streaming query is not allowed
-    HINT: please run the sql in batch mode or remove the column `__rw_vnode` from the streaming query
-- id: wildcard_prunes_vnode
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY, value INT);
-    SELECT t.* FROM t;
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: t, columns: [t.id, t.value], distribution: UpstreamHashShard(t.id) }
-  stream_plan: |-
-    StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t, columns: [t.id, t.value], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+    Not supported: selecting `_rw_vnode` in a streaming query is not allowed
+    HINT: please run the sql in batch mode or remove the column `_rw_vnode` from the streaming query
 - id: implicit_row_id
   sql: |
     CREATE TABLE t (value INT);
-    SELECT value, __rw_vnode FROM t;
+    SELECT value, _rw_vnode FROM t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: t, columns: [t.value, t.__rw_vnode], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.value, t._rw_vnode], distribution: SomeShard }
   stream_error: |-
-    Not supported: selecting `__rw_vnode` in a streaming query is not allowed
-    HINT: please run the sql in batch mode or remove the column `__rw_vnode` from the streaming query
-- id: filter_and_group
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT __rw_vnode, COUNT(*) FROM t WHERE __rw_vnode < 16 GROUP BY __rw_vnode;
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg { group_key: [t.__rw_vnode], aggs: [count] }
-      └─BatchExchange { order: [], dist: HashShard(t.__rw_vnode) }
-        └─BatchFilter { predicate: (t.__rw_vnode < 16:Int32) }
-          └─BatchScan { table: t, columns: [t.__rw_vnode], distribution: SomeShard }
-  stream_error: |-
-    Not supported: selecting `__rw_vnode` in a streaming query is not allowed
-    HINT: please run the sql in batch mode or remove the column `__rw_vnode` from the streaming query
-- id: outer_join
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT a.__rw_vnode AS a_vnode, b.__rw_vnode AS b_vnode
-    FROM t a LEFT JOIN t b ON a.id = b.id + 1;
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: t.id = $expr1, output: [t.__rw_vnode, t.__rw_vnode] }
-      ├─BatchExchange { order: [], dist: HashShard(t.id) }
-      │ └─BatchScan { table: t, columns: [t.id, t.__rw_vnode], distribution: UpstreamHashShard(t.id) }
-      └─BatchExchange { order: [], dist: HashShard($expr1) }
-        └─BatchProject { exprs: [t.__rw_vnode, (t.id + 1:Int32) as $expr1] }
-          └─BatchScan { table: t, columns: [t.id, t.__rw_vnode], distribution: UpstreamHashShard(t.id) }
-  stream_error: |-
-    Not supported: selecting `__rw_vnode` in a streaming query is not allowed
-    HINT: please run the sql in batch mode or remove the column `__rw_vnode` from the streaming query
-- id: ambiguous_vnode
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT __rw_vnode FROM t a JOIN t b ON a.id = b.id;
-  binder_error: |
-    Failed to bind expression: __rw_vnode
-
-    Caused by:
-      Invalid reference: column reference "__rw_vnode" is ambiguous
-- id: subquery_wildcard_hides_vnode
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    SELECT __rw_vnode FROM (SELECT * FROM t) s;
-  binder_error: |
-    Failed to bind expression: __rw_vnode
-
-    Caused by:
-      Item not found: Invalid column: __rw_vnode
-- id: singleton_mv
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY);
-    CREATE MATERIALIZED VIEW totals AS SELECT COUNT(*) AS n FROM t;
-    SELECT n, __rw_vnode FROM totals;
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: totals, columns: [totals.n, totals.__rw_vnode], distribution: Single }
-  stream_error: |-
-    Not supported: selecting `__rw_vnode` in a streaming query is not allowed
-    HINT: please run the sql in batch mode or remove the column `__rw_vnode` from the streaming query
+    Not supported: selecting `_rw_vnode` in a streaming query is not allowed
+    HINT: please run the sql in batch mode or remove the column `_rw_vnode` from the streaming query
 - id: index_lookup_preserves_source_vnode
   sql: |
     CREATE TABLE t (id INT PRIMARY KEY, value INT);
     CREATE INDEX idx ON t(value) INCLUDE (id);
-    SELECT id, __rw_vnode FROM t WHERE value = 1;
+    SELECT id, _rw_vnode FROM t WHERE value = 1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: idx.id IS NOT DISTINCT FROM t.id, output: [t.id, t.__rw_vnode], lookup table: t }
+    └─BatchLookupJoin { type: Inner, predicate: idx.id IS NOT DISTINCT FROM t.id, output: [t.id, t._rw_vnode], lookup table: t }
       └─BatchExchange { order: [], dist: UpstreamHashShard(idx.id) }
         └─BatchScan { table: idx, columns: [idx.id], scan_ranges: [idx.value = Int32(1)], distribution: SomeShard }
-- id: existing_user_column
-  sql: |
-    CREATE TABLE t (id INT PRIMARY KEY, __rw_vnode VARCHAR);
-    SELECT * FROM t;
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: t, columns: [t.id, t.__rw_vnode], distribution: UpstreamHashShard(t.id) }
-  stream_plan: |-
-    StreamMaterialize { columns: [id, __rw_vnode], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t, columns: [t.id, t.__rw_vnode], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }

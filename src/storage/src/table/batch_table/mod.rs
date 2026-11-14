@@ -464,6 +464,10 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             {
                 vnode_idx = Some(*idx);
             } else {
+                assert_eq!(
+                    table_columns[*idx].column_id,
+                    risingwave_common::catalog::RW_TIMESTAMP_COLUMN_ID,
+                );
                 assert!(epoch_idx.is_none());
                 epoch_idx = Some(*idx);
             }

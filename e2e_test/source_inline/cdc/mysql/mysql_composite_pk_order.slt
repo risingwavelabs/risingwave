@@ -47,6 +47,7 @@ relatedid integer false NULL
 clientid integer false NULL
 payload character varying false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key relatedid, typeid, clientid NULL NULL
 distribution key relatedid, typeid, clientid NULL NULL
 table description rw_mysql_composite_pk_order NULL NULL

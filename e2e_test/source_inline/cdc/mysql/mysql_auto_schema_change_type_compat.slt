@@ -79,6 +79,7 @@ v_unsigned_bigint numeric false NULL
 note character varying false NULL
 added integer false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_mysql_auto_schema_change_type_compat NULL NULL
