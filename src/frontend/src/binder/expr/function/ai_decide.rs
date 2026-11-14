@@ -15,6 +15,7 @@
 use risingwave_common::types::{DataType, Datum, JsonbVal, MapType, ScalarImpl, ScalarRefImpl};
 use risingwave_expr::scalar::ai_decide::QuestionSchema;
 use serde_json::{Map, Value, json};
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, Literal};
@@ -67,7 +68,7 @@ pub(super) fn bind(mut inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
             .cast_implicit_mut(&MapType::from_kv(DataType::Varchar, DataType::Varchar).into())?;
     }
     let questions = json_constant(&inputs[3], "ai_decide questions")?;
-    let schema = QuestionSchema::parse(&questions).map_err(|e| invalid(e.to_string()))?;
+    let schema = QuestionSchema::parse(&questions).map_err(|e| invalid(e.to_report_string()))?;
     // Ship the validated constant to the executor, not an unevaluated expression.
     inputs[3] = Literal::new(Some(questions.into()), DataType::Jsonb).into();
     Ok(FunctionCall::new_unchecked(ExprType::AiDecide, inputs, schema.return_type()).into())
@@ -148,7 +149,7 @@ pub(super) fn question(kind: &str, inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
         }
     }
     let result = json!({id: definition});
-    QuestionSchema::parse(&JsonbVal::from(result.clone())).map_err(|e| invalid(e.to_string()))?;
+    QuestionSchema::parse(&JsonbVal::from(result.clone())).map_err(|e| invalid(e.to_report_string()))?;
     Ok(literal(result))
 }
 
@@ -168,6 +169,6 @@ pub(super) fn questions(inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
         }
     }
     let result = Value::Object(questions);
-    QuestionSchema::parse(&JsonbVal::from(result.clone())).map_err(|e| invalid(e.to_string()))?;
+    QuestionSchema::parse(&JsonbVal::from(result.clone())).map_err(|e| invalid(e.to_report_string()))?;
     Ok(literal(result))
 }
