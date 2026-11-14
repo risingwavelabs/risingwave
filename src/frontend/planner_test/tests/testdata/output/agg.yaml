@@ -1107,13 +1107,13 @@
     select count(*) from t group by grouping sets ((), ());
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [count] }
-    └─LogicalAgg { group_key: [flag], aggs: [count] }
-      └─LogicalExpand { column_subsets: [[], []] }
+    └─LogicalExpand { column_subsets: [[], []] }
+      └─LogicalAgg { aggs: [count] }
         └─LogicalScan { table: t, columns: [] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [count] }
-    └─LogicalAgg { group_key: [flag], aggs: [count] }
-      └─LogicalExpand { column_subsets: [[], []] }
+    └─LogicalExpand { column_subsets: [[], []] }
+      └─LogicalAgg { aggs: [count] }
         └─LogicalScan { table: t, columns: [] }
 - name: split distinct agg with row id prunes hidden columns
   sql: |
