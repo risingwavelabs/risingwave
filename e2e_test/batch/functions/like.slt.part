@@ -116,3 +116,48 @@ statement ok
 drop table like_escape_trades;
 
 # End
+
+# A trailing underscore must retain LIKE filtering after prefix range rewriting.
+statement ok
+create table like_prefix_rewrite(v varchar);
+
+statement ok
+insert into like_prefix_rewrite values
+    ('ABC'), ('ABCx'), ('ABCxx'), ('ABC_'), ('ABC_x'), ('ABC_xx'),
+    ('ABD'), (NULL);
+
+query T rowsort
+select v from like_prefix_rewrite where v like 'ABC_';
+----
+ABC_
+ABCx
+
+query T rowsort
+select v from like_prefix_rewrite where v like 'ABC%';
+----
+ABC
+ABC_
+ABC_x
+ABC_xx
+ABCx
+ABCxx
+
+query T rowsort
+select v from like_prefix_rewrite where v like 'ABC\__';
+----
+ABC_x
+
+query T rowsort
+select v from like_prefix_rewrite where v like 'ABC\_%';
+----
+ABC_
+ABC_x
+ABC_xx
+
+query T rowsort
+select v from like_prefix_rewrite where v like 'ABC\_';
+----
+ABC_
+
+statement ok
+drop table like_prefix_rewrite;
