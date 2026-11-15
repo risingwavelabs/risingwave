@@ -122,7 +122,7 @@ impl StreamNode for StreamFsFetch {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
-                ingest_mode: source_catalog.ingest_mode().map(IngestMode::to_proto),
+                ingest_mode: source_catalog.kind.ingest_mode().map(IngestMode::to_proto),
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });

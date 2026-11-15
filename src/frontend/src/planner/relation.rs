@@ -423,27 +423,23 @@ impl Planner {
         } else {
             let mut as_of = source.as_of.clone();
 
-            if let Some(scan) = source
-                .catalog
-                .ingest_mode()
-                .and_then(|mode| mode.iceberg_bounded_scan())
-            {
-                if as_of.is_some() {
-                    return Err(ErrorCode::NotSupported(
-                        "AS OF on a bounded source is not supported".to_owned(),
-                        "A bounded source always reads its pinned snapshot. Remove the AS OF clause"
-                            .to_owned(),
-                    )
-                    .into());
-                }
+            let ingest_mode = source.catalog.kind.ingest_mode();
 
-                if self.plan_for().is_batch() {
-                    as_of = Some(match scan {
-                        IcebergBoundedScan::Snapshot { snapshot_id } => {
-                            AsOf::VersionNum(snapshot_id)
-                        }
-                    });
-                }
+            if ingest_mode.is_some_and(|mode| mode.is_bounded()) && as_of.is_some() {
+                return Err(ErrorCode::NotSupported(
+                    "AS OF on a bounded source is not supported".to_owned(),
+                    "A bounded source always reads its pinned snapshot. Remove the AS OF clause"
+                        .to_owned(),
+                )
+                .into());
+            }
+
+            if let Some(scan) = ingest_mode.and_then(|mode| mode.iceberg_bounded_scan())
+                && self.plan_for().is_batch()
+            {
+                as_of = Some(match scan {
+                    IcebergBoundedScan::Snapshot { snapshot_id } => AsOf::VersionNum(snapshot_id),
+                });
             }
 
             self.check_no_time_travel_in_stream(as_of.as_ref())?;

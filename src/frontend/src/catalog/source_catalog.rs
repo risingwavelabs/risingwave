@@ -14,10 +14,8 @@
 
 use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SOURCE_PREFIX, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
-use risingwave_pb::catalog::source::Kind as PbSourceKind;
-use risingwave_pb::catalog::{PbHybridSource, PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
@@ -29,6 +27,9 @@ use crate::catalog::{CatalogError, TableId};
 use crate::error::Result;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
+
+mod kind;
+pub use kind::SourceKind;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
@@ -56,12 +57,6 @@ pub struct SourceCatalog {
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
     pub kind: SourceKind,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum SourceKind {
-    Connector(IngestMode),
-    Hybrid(Vec<SourceId>),
 }
 
 impl SourceCatalog {
@@ -101,12 +96,7 @@ impl SourceCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
-            kind: Some(match &self.kind {
-                SourceKind::Connector(mode) => PbSourceKind::IngestMode(mode.to_proto()),
-                SourceKind::Hybrid(stages) => PbSourceKind::Hybrid(
-                    PbHybridSource::from_stage_source_ids(stages.iter().copied()),
-                ),
-            }),
+            kind: Some(self.kind.to_proto()),
         }
     }
 
@@ -130,30 +120,6 @@ impl SourceCatalog {
         self.info.external_table.is_some()
     }
 
-    pub fn ingest_mode(&self) -> Option<IngestMode> {
-        match &self.kind {
-            SourceKind::Connector(mode) => Some(*mode),
-            SourceKind::Hybrid(_) => None,
-        }
-    }
-
-    pub fn is_full_reload(&self) -> bool {
-        self.ingest_mode().is_some_and(|mode| mode.is_full_reload())
-    }
-
-    /// The stages of a hybrid source, in order. Empty for other sources.
-    pub fn hybrid_stages(&self) -> &[SourceId] {
-        match &self.kind {
-            SourceKind::Connector(_) => &[],
-            SourceKind::Hybrid(stages) => stages,
-        }
-    }
-
-    /// Whether this source reads other sources as ordered stages.
-    pub fn is_hybrid(&self) -> bool {
-        matches!(self.kind, SourceKind::Hybrid(_))
-    }
-
     /// Whether this source loads a bounded input once instead of streaming continuously.
     /// A hybrid source is bounded when its last stage is.
     pub fn is_bounded(&self, catalog: &Catalog) -> Result<bool> {
@@ -166,6 +132,7 @@ impl SourceCatalog {
                     .iter_schemas()
                     .find_map(|schema| schema.get_source_by_id(*last))
                     .ok_or_else(|| CatalogError::not_found("source", last.to_string()))?;
+
                 stage.is_bounded(catalog)
             }
         }
@@ -252,13 +219,7 @@ impl From<&PbSource> for SourceCatalog {
 
         let connection_id = prost.connection_id;
         let rate_limit = prost.rate_limit;
-        let kind = match prost.hybrid() {
-            Some(hybrid) => SourceKind::Hybrid(hybrid.stage_source_ids()),
-            None => SourceKind::Connector(
-                IngestMode::from_proto(prost.ingest_mode())
-                    .expect("stored ingest mode should be valid"),
-            ),
-        };
+        let kind = SourceKind::from_proto(prost.kind.as_ref());
 
         Self {
             id,

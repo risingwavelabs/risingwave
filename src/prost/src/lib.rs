@@ -563,15 +563,6 @@ impl catalog::Source {
 }
 
 impl catalog::HybridSource {
-    pub fn from_stage_source_ids(ids: impl IntoIterator<Item = SourceId>) -> Self {
-        Self {
-            stages: ids
-                .into_iter()
-                .map(|source_id| catalog::HybridStage { source_id })
-                .collect(),
-        }
-    }
-
     pub fn stage_source_ids(&self) -> Vec<SourceId> {
         self.stages.iter().map(|stage| stage.source_id).collect()
     }
