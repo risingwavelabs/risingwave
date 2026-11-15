@@ -3,6 +3,9 @@ control substitution on
 statement ok
 DROP TABLE IF EXISTS ck_dist_input CASCADE;
 
+statement ok
+DROP TABLE IF EXISTS ck_dist_append_input CASCADE;
+
 system ok
 clickhouse --multiquery --query="
 DROP TABLE IF EXISTS rw_dist_nested;
@@ -27,11 +30,18 @@ SET sink_decouple = false;
 statement ok
 CREATE TABLE ck_dist_input (id INT PRIMARY KEY, payload INT, ver BIGINT);
 
+statement error ClickHouse Distributed tables only support append-only sinks
+CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_replace',
+    clickhouse.delete.column = 'deleted'
+);
+
 statement ok
 CREATE SINK ck_dist_replace AS SELECT id, payload, ver FROM ck_dist_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert',
-    primary_key = 'id',
+    type = 'append-only',
+    force_append_only = 'true',
     clickhouse.table = 'rw_dist_replace',
     clickhouse.delete.column = 'deleted',
     commit_checkpoint_interval = '1'
@@ -41,8 +51,8 @@ CREATE SINK ck_dist_replace AS SELECT id, payload, ver FROM ck_dist_input WITH (
 statement ok
 CREATE SINK ck_dist_collapse AS SELECT id, payload FROM ck_dist_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert',
-    primary_key = 'id',
+    type = 'append-only',
+    force_append_only = 'true',
     clickhouse.table = 'rw_dist_collapse',
     commit_checkpoint_interval = '1'
 );
@@ -76,46 +86,35 @@ statement ok
 DROP SINK ck_dist_append;
 
 statement ok
-UPDATE ck_dist_input SET payload = 11, ver = 2 WHERE id = 1;
-
-statement ok
-DELETE FROM ck_dist_input WHERE id = 2;
-
-statement ok
-FLUSH;
-
-# FINAL applies replacement/collapse without depending on background merge timing.
-system ok retry 30 backoff 1s
-test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, ver))) FROM rw_distributed_target.replacing FINAL WHERE deleted = 0")" = '[(1,11,2)]'
-
-system ok retry 30 backoff 1s
-test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, sign))) FROM rw_distributed_target.collapsing FINAL")" = '[(1,11,1)]'
-
-statement ok
 DROP SINK ck_dist_replace;
 
 statement ok
 DROP SINK ck_dist_collapse;
 
-# A Distributed wrapper must not grant upsert capability to an ordinary MergeTree.
-statement error If you want to use upsert
-CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
+statement ok
+CREATE TABLE ck_dist_append_input (id INT, payload INT) APPEND ONLY;
+
+statement ok
+CREATE SINK ck_dist_append FROM ck_dist_append_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_append'
+    type = 'append-only', clickhouse.table = 'rw_dist_append',
+    commit_checkpoint_interval = '1'
 );
 
-statement error must set a .*clickhouse.delete.column
-CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
-    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_replace'
-);
+statement ok
+INSERT INTO ck_dist_append_input VALUES (3, 30);
 
-statement error pk is not match
-CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
-    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert', primary_key = 'payload', clickhouse.table = 'rw_dist_replace',
-    clickhouse.delete.column = 'deleted'
-);
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload))) FROM rw_dist_append_local")" = '[(1,10),(2,20),(3,30)]'
+
+statement ok
+DROP SINK ck_dist_append;
+
+statement ok
+DROP TABLE ck_dist_append_input;
 
 # The outer schema must accept every written column, including generated columns.
 system ok
@@ -142,7 +141,7 @@ clickhouse --multiquery --query="DROP TABLE rw_dist_bad; CREATE TABLE rw_dist_ba
 statement error Column .*deleted.* is missing from the Distributed table
 CREATE SINK ck_dist_invalid AS SELECT id, payload, ver FROM ck_dist_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_bad',
+    type = 'append-only', force_append_only = 'true', clickhouse.table = 'rw_dist_bad',
     clickhouse.delete.column = 'deleted'
 );
 
@@ -152,7 +151,7 @@ clickhouse --multiquery --query="DROP TABLE rw_dist_bad; CREATE TABLE rw_dist_ba
 statement error Column .*sign.* has type .*UInt8.* in the Distributed table but .*Int8.* in the underlying local table
 CREATE SINK ck_dist_invalid AS SELECT id, payload FROM ck_dist_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_bad'
+    type = 'append-only', force_append_only = 'true', clickhouse.table = 'rw_dist_bad'
 );
 
 system ok

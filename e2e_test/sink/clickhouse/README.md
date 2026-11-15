@@ -1,10 +1,8 @@
 # ClickHouse sink tests
 
 - `basic.slt` covers basic sink behavior and data types.
-- `distributed_table.slt` covers Distributed tables and requires the cluster
-  configuration described below.
-- `distributed_remote.slt` covers append-only and upsert sinks with the
-  Distributed table and its storage tables on separate ClickHouse instances.
+- `distributed_table.slt` covers append-only writes for Distributed tables and requires the cluster configuration described below.
+- `distributed_remote.slt` covers append-only writes with the Distributed table and its storage tables on separate ClickHouse instances.
 
 ## Distributed table setup
 

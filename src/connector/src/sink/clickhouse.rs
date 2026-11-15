@@ -932,6 +932,12 @@ async fn query_column_engine_from_ck(
             .await?;
 
     let (mut clickhouse_column, clickhouse_engine) = if engine.engine == "Distributed" {
+        if config.r#type != SINK_TYPE_APPEND_ONLY {
+            return Err(SinkError::ClickHouse(
+                "ClickHouse Distributed tables only support append-only sinks; set type = 'append-only'"
+                    .to_owned(),
+            ));
+        }
         let distributed_context = |err: SinkError| {
             SinkError::ClickHouse(format!(
                 "Cannot resolve Distributed table {:?}.{:?}: {}",

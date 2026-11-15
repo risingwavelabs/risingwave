@@ -42,6 +42,13 @@ SET sink_decouple = false;
 statement ok
 CREATE TABLE ck_dist_remote_input (id INT PRIMARY KEY, payload INT, ver BIGINT);
 
+statement error ClickHouse Distributed tables only support append-only sinks
+CREATE SINK ck_dist_remote_invalid AS SELECT id, payload, ver FROM ck_dist_remote_input WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert', primary_key = 'id', clickhouse.table = 'rw_dist_remote_replace',
+    clickhouse.delete.column = 'deleted'
+);
+
 statement ok
 CREATE SINK ck_dist_remote_append AS SELECT id, payload FROM ck_dist_remote_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
@@ -54,8 +61,8 @@ CREATE SINK ck_dist_remote_append AS SELECT id, payload FROM ck_dist_remote_inpu
 statement ok
 CREATE SINK ck_dist_remote_replace AS SELECT id, payload, ver FROM ck_dist_remote_input WITH (
     ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
-    type = 'upsert',
-    primary_key = 'id',
+    type = 'append-only',
+    force_append_only = 'true',
     clickhouse.table = 'rw_dist_remote_replace',
     clickhouse.delete.column = 'deleted',
     commit_checkpoint_interval = '1'
@@ -79,22 +86,6 @@ test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload))) FROM rw_
 
 statement ok
 DROP SINK ck_dist_remote_append;
-
-statement ok
-UPDATE ck_dist_remote_input SET payload = 11, ver = 2 WHERE id = 1;
-
-statement ok
-DELETE FROM ck_dist_remote_input WHERE id = 2;
-
-statement ok
-FLUSH;
-
-system ok retry 30 backoff 1s
-test "$(CLICKHOUSE_HOST="$CLICKHOUSE_SHARD_HOST" CLICKHOUSE_NATIVE_PORT="$CLICKHOUSE_SHARD_NATIVE_PORT" CLICKHOUSE_CONTAINER="${CLICKHOUSE_SHARD_CONTAINER:-}" clickhouse --query="SELECT arraySort(groupArray((id, payload, ver))) FROM rw_distributed_remote_target.replace_local FINAL WHERE deleted = 0")" = '[(1,11,2)]'
-
-# FINAL must also expose the updated result through the router.
-system ok retry 30 backoff 1s
-test "$(clickhouse --query="SELECT arraySort(groupArray((id, payload, ver))) FROM rw_dist_remote_replace FINAL WHERE deleted = 0")" = '[(1,11,2)]'
 
 statement ok
 DROP SINK ck_dist_remote_replace;
