@@ -22,8 +22,7 @@ use thiserror_ext::AsReport as _;
 
 use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
-use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{CatalogError, TableId};
+use crate::catalog::TableId;
 use crate::error::Result;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
@@ -118,24 +117,6 @@ impl SourceCatalog {
     /// Whether this source represents an external table exposed by a shared CDC source.
     pub fn is_cdc_table_source(&self) -> bool {
         self.info.external_table.is_some()
-    }
-
-    /// Whether this source loads a bounded input once instead of streaming continuously.
-    /// A hybrid source is bounded when its last stage is.
-    pub fn is_bounded(&self, catalog: &Catalog) -> Result<bool> {
-        match &self.kind {
-            SourceKind::Connector(mode) => Ok(mode.is_bounded()),
-            SourceKind::Hybrid(stages) => {
-                let last = stages.last().expect("a hybrid source has stages");
-                let database = catalog.get_database_by_id(self.database_id)?;
-                let stage = database
-                    .iter_schemas()
-                    .find_map(|schema| schema.get_source_by_id(*last))
-                    .ok_or_else(|| CatalogError::not_found("source", last.to_string()))?;
-
-                stage.is_bounded(catalog)
-            }
-        }
     }
 
     /// If this source is an iceberg source, returns the corresponding iceberg table name.

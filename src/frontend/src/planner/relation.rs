@@ -425,7 +425,7 @@ impl Planner {
 
             let ingest_mode = source.catalog.kind.ingest_mode();
 
-            if ingest_mode.is_some_and(|mode| mode.is_bounded()) && as_of.is_some() {
+            if source.catalog.kind.is_bounded() && as_of.is_some() {
                 return Err(ErrorCode::NotSupported(
                     "AS OF on a bounded source is not supported".to_owned(),
                     "A bounded source always reads its pinned snapshot. Remove the AS OF clause"

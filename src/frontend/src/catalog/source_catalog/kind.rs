@@ -63,6 +63,10 @@ impl SourceKind {
         self.ingest_mode().is_some_and(|mode| mode.is_streaming())
     }
 
+    pub fn is_bounded(&self) -> bool {
+        self.ingest_mode().is_some_and(|mode| mode.is_bounded())
+    }
+
     pub fn is_full_reload(&self) -> bool {
         self.ingest_mode().is_some_and(|mode| mode.is_full_reload())
     }

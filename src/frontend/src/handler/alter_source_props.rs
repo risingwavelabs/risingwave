@@ -52,7 +52,7 @@ pub async fn handle_alter_table_connector_props(
         let (source_catalog, _) =
             reader.get_source_by_id(db_name, schema_path, associate_source_id)?;
 
-        if source_catalog.is_bounded(&reader)? {
+        if source_catalog.kind.is_bounded() {
             return Err(ErrorCode::NotSupported(
                 "altering connector properties of a bounded table is not supported".to_owned(),
                 "Drop and recreate the table".to_owned(),
@@ -145,7 +145,7 @@ pub async fn handle_alter_source_connector_props(
             .into());
         }
 
-        if source.is_bounded(&reader)? {
+        if source.kind.is_bounded() {
             return Err(ErrorCode::NotSupported(
                 "altering connector properties of a bounded source is not supported".to_owned(),
                 "Drop and recreate the source".to_owned(),

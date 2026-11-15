@@ -205,12 +205,9 @@ impl LogicalSource {
     }
 
     fn is_bounded(core: &generic::Source) -> bool {
-        core.catalog.as_ref().is_some_and(|catalog| {
-            catalog
-                .kind
-                .ingest_mode()
-                .is_some_and(|mode| mode.is_bounded())
-        })
+        core.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.kind.is_bounded())
     }
 
     /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
