@@ -618,6 +618,9 @@ pub struct BlockwisePrefetchConfig {
     /// Enable the same bounded blockwise lookahead for change log scans independently of prefix scans.
     #[serde(default)]
     pub changelog_enabled: bool,
+    /// Use blockwise instead of contiguous range prefetch for ordinary Snapshot Backfill source scans.
+    #[serde(default)]
+    pub snapshot_backfill_enabled: bool,
     /// Use blockwise instead of contiguous range prefetch for Locality Backfill snapshot scans.
     #[serde(default)]
     pub locality_backfill_enabled: bool,
@@ -634,16 +637,16 @@ pub struct BlockwisePrefetchConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadBatchConfig {
-    /// HashAgg and Materialize use `MultiGet` when enabled.
+    /// `HashAgg` and Materialize use `MultiGet` when enabled.
     #[serde(default)]
     pub enabled: bool,
     /// Maximum keys executing concurrently in each `MultiGet`, not a node-wide limit.
     #[serde(default = "default_read_batch_concurrency")]
     pub concurrency: NonZeroUsize,
-    /// Share SST metadata within `MultiGet` and within HashJoin chunk iterator initialization.
+    /// Share SST metadata within `MultiGet` and within `HashJoin` chunk iterator initialization.
     #[serde(default)]
     pub meta_reuse: bool,
-    /// Maximum retained regular metadata entries per `MultiGet` or HashJoin chunk.
+    /// Maximum retained regular metadata entries per `MultiGet` or `HashJoin` chunk.
     #[serde(default = "default_read_meta_entries")]
     pub meta_max_entries: NonZeroUsize,
     /// Retained regular metadata bytes; one oversized SST may additionally be retained.
@@ -655,6 +658,13 @@ pub struct ReadBatchConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadSchedulerConfig {
+    /// Run scheduled object reads on a small runtime shared by all schedulers in the process.
+    #[serde(default)]
+    pub use_dedicated_io_runtime: bool,
+    /// Worker threads for the shared process runtime. All schedulers using it
+    /// must specify the same count. Applies when dedicated I/O is enabled.
+    #[serde(default = "default_dedicated_io_runtime_workers")]
+    pub dedicated_io_runtime_workers: NonZeroUsize,
     /// Maximum intentional wait for compatible reads in a prefetch batch, in microseconds.
     /// Zero disables waiting after cache registration. Timer wakeups have runtime granularity.
     #[serde(default)]
@@ -677,14 +687,14 @@ pub struct ReadSchedulerConfig {
         deserialize_with = "deserialize_read_permits"
     )]
     pub max_inflight_reads: NonZeroUsize,
-    /// Share a scheduled GET with later reads whose ranges it fully covers.
+    /// Share a scheduled GET with fully covered reads, including waiters blocked on group admission.
     #[serde(default)]
     pub reuse_inflight_reads: bool,
     /// Maximum input or merged range length. Larger reads bypass scheduling.
     #[serde(default = "default_read_window_bytes")]
     pub max_read_bytes: NonZeroUsize,
     /// Maximum unread gap between neighboring ranges in the same object. The merged
-    /// range including all gaps must fit max_read_bytes. Zero only merges contiguous
+    /// range including all gaps must fit `max_read_bytes`. Zero only merges contiguous
     /// and overlapping ranges.
     #[serde(default)]
     pub max_gap_bytes: usize,
@@ -720,6 +730,9 @@ fn default_read_meta_entries() -> NonZeroUsize {
 }
 fn default_read_meta_bytes() -> NonZeroUsize {
     NonZeroUsize::new(1024 * 1024).unwrap()
+}
+fn default_dedicated_io_runtime_workers() -> NonZeroUsize {
+    NonZeroUsize::new(2).unwrap()
 }
 fn default_read_inflight_reads() -> NonZeroUsize {
     NonZeroUsize::new(32).unwrap()

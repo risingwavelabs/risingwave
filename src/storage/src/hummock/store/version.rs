@@ -1010,8 +1010,7 @@ impl HummockVersionReader {
             epoch,
             table_id,
             read_options,
-            imms,
-            uncommitted_ssts,
+            (imms, uncommitted_ssts),
             &committed,
             &mut local_stats,
             &mut factory,
@@ -1071,8 +1070,7 @@ impl HummockVersionReader {
             epoch,
             table_id,
             read_options,
-            imms,
-            uncommitted_ssts,
+            (imms, uncommitted_ssts),
             &committed,
             &mut local_stats,
             &mut factory,
@@ -1103,8 +1101,7 @@ impl HummockVersionReader {
         epoch: u64,
         table_id: TableId,
         read_options: ReadOptions,
-        imms: Vec<ImmutableMemtable>,
-        uncommitted_ssts: Vec<SstableInfo>,
+        (imms, uncommitted_ssts): (Vec<ImmutableMemtable>, Vec<SstableInfo>),
         committed: &CommittedVersion,
         local_stats: &mut StoreLocalStatistic,
         factory: &mut F,
@@ -1157,10 +1154,13 @@ impl HummockVersionReader {
         let prefetch_config = &self.sstable_store.blockwise_prefetch;
         sst_read_options.prefetch = match read_options.prefetch_options.mode {
             PrefetchMode::Blockwise if !prefetch_config.enabled => PrefetchMode::Disabled,
+            PrefetchMode::SnapshotBackfill if prefetch_config.snapshot_backfill_enabled => {
+                PrefetchMode::Blockwise
+            }
             PrefetchMode::LocalityBackfill if prefetch_config.locality_backfill_enabled => {
                 PrefetchMode::Blockwise
             }
-            PrefetchMode::LocalityBackfill => PrefetchMode::Range,
+            PrefetchMode::SnapshotBackfill | PrefetchMode::LocalityBackfill => PrefetchMode::Range,
             mode => mode,
         };
         let sst_read_options = Arc::new(sst_read_options);
@@ -1816,16 +1816,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_locality_backfill_prefetch_mode() {
+    async fn test_backfill_prefetch_modes_are_independent() {
         use std::ops::Bound::{Excluded, Unbounded};
 
         use crate::hummock::test_utils::{gen_default_test_sstable, test_key_of};
         use crate::store::PrefetchOptions;
 
-        for blockwise in [false, true] {
+        for (source, blockwise) in [(true, false), (false, false), (true, true), (false, true)] {
             let mut store = mock_sstable_store().await;
             let inner = Arc::get_mut(&mut store).unwrap();
-            inner.blockwise_prefetch.locality_backfill_enabled = blockwise;
+            // Enable the other backfill policy in each off case. The prefix
+            // policy stays off in all cases, including both Blockwise cases.
+            inner.blockwise_prefetch.snapshot_backfill_enabled = source == blockwise;
+            inner.blockwise_prefetch.locality_backfill_enabled = source != blockwise;
+            let prefetch_options = if source {
+                PrefetchOptions::prefetch_for_snapshot_backfill()
+            } else {
+                PrefetchOptions::prefetch_for_locality_backfill()
+            };
+            let traced = risingwave_hummock_trace::TracedPrefetchOptions::from(prefetch_options);
+            assert!(traced.prefetch);
+            assert_eq!(traced.for_large_query, source);
             inner.blockwise_prefetch.max_blocks = 3.try_into().unwrap();
             inner.read_metrics = Arc::new(HummockStateStoreMetrics::new(
                 &Registry::new(),
@@ -1848,7 +1859,7 @@ mod tests {
                     table_id,
                     TableOption::default(),
                     ReadOptions {
-                        prefetch_options: PrefetchOptions::prefetch_for_locality_backfill(),
+                        prefetch_options,
                         ..Default::default()
                     },
                     (vec![], vec![], build_version_from_sstable(table_id, info)),

@@ -374,6 +374,7 @@ algorithm = "Lru"
 [storage.blockwise_prefetch]
 enabled = false
 changelog_enabled = false
+snapshot_backfill_enabled = false
 locality_backfill_enabled = false
 max_blocks = 3
 max_bytes = 262144
@@ -503,6 +504,8 @@ retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 use_opendal = true
 
 [storage.object_store.read_scheduler]
+use_dedicated_io_runtime = false
+dedicated_io_runtime_workers = 2
 prefetch_batch_wait_us = 0
 max_batch_requests = 16
 max_admitted_groups = 64

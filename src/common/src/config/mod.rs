@@ -987,6 +987,7 @@ pub mod tests {
             (
                 "storage.object_store.read_scheduler",
                 vec![
+                    "dedicated_io_runtime_workers",
                     "max_batch_requests",
                     "max_admitted_groups",
                     "max_inflight_reads",
@@ -1015,9 +1016,60 @@ pub mod tests {
         let defaults = RwConfig::default();
         assert!(!defaults.storage.blockwise_prefetch.enabled);
         assert!(!defaults.storage.blockwise_prefetch.changelog_enabled);
+        assert!(
+            !defaults
+                .storage
+                .blockwise_prefetch
+                .snapshot_backfill_enabled
+        );
+        assert!(
+            !defaults
+                .storage
+                .blockwise_prefetch
+                .locality_backfill_enabled
+        );
+        let source = toml::from_str::<RwConfig>(
+            "[storage.blockwise_prefetch]\nsnapshot_backfill_enabled = true\n",
+        )
+        .unwrap()
+        .storage
+        .blockwise_prefetch;
+        assert!(source.snapshot_backfill_enabled);
+        assert!(!source.enabled);
+        assert!(!source.changelog_enabled);
+        assert!(!source.locality_backfill_enabled);
         assert!(!defaults.storage.read_batch.enabled);
         assert!(!defaults.storage.read_batch.meta_reuse);
         assert!(!defaults.storage.object_store.enable_hummock_read_coalescing);
+        let scheduler = defaults.storage.object_store.read_scheduler;
+        assert!(!scheduler.use_dedicated_io_runtime);
+        assert_eq!(scheduler.dedicated_io_runtime_workers.get(), 2);
+        let config = toml::from_str::<RwConfig>(
+            "[storage.object_store.read_scheduler]\nuse_dedicated_io_runtime = true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .storage
+                .object_store
+                .read_scheduler
+                .dedicated_io_runtime_workers
+                .get(),
+            2,
+        );
+        let config = toml::from_str::<RwConfig>(
+            "[storage.object_store.read_scheduler]\nuse_dedicated_io_runtime = true\ndedicated_io_runtime_workers = 8\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .storage
+                .object_store
+                .read_scheduler
+                .dedicated_io_runtime_workers
+                .get(),
+            8,
+        );
     }
 
     #[test]

@@ -40,6 +40,7 @@ pub struct ObjectStoreMetrics {
     pub(super) read_scheduler_groups: IntGaugeVec,
     pub(super) read_scheduler_queued: IntGaugeVec,
     pub(super) read_scheduler_in_flight: IntGaugeVec,
+    pub(super) read_scheduler_reserved: IntGaugeVec,
     pub(super) read_scheduler_waiting: IntGaugeVec,
     pub(super) read_scheduler_admission_duration: HistogramVec,
     pub(super) read_scheduler_batch_wait: HistogramVec,
@@ -79,7 +80,7 @@ impl ObjectStoreMetrics {
         .unwrap();
         let read_scheduler_groups = register_int_gauge_vec_with_registry!(
             "object_store_read_scheduler_groups",
-            "Read groups in group admission mode, either admitted (through completion) or queued (awaiting dispatch)",
+            "Read groups by stage: admitted through completion, queued until selection, or ready to claim a physical permit (queued minus dispatch reservations)",
             &["media_type", "stage"],
             registry
         )
@@ -92,8 +93,15 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
         let read_scheduler_in_flight = register_int_gauge_vec_with_registry!(
-            "object_store_read_scheduler_in_flight", "Scheduled physical reads including retry loops and range-error fallbacks; excludes direct reads",
+            "object_store_read_scheduler_in_flight", "Scheduled physical reads from first backend future poll through completion or cancellation, including retry loops and range-error fallbacks",
             &["media_type"], registry).unwrap();
+        let read_scheduler_reserved = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_reserved",
+            "Scheduled group reads holding a physical permit before starting the backend future",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
         let read_scheduler_waiting = register_int_gauge_vec_with_registry!(
             "object_store_read_scheduler_waiting",
             "Logical reads waiting for scheduler admission in caller futures",
@@ -238,7 +246,7 @@ impl ObjectStoreMetrics {
         let read_scheduler_physical_duration = register_histogram_vec_with_registry!(
             histogram_opts!(
                 "object_store_read_scheduler_physical_duration_seconds",
-                "Scheduled backend read duration (including retries), or physical permit wait for range-error fallback",
+                "Scheduled backend read duration (including retries), permit wait for range-error fallback, or reservation-to-backend-start time for dispatched groups",
                 exponential_buckets(0.000_01, 2.0, 22).unwrap()
             ),
             &["media_type", "stage"],
@@ -260,6 +268,7 @@ impl ObjectStoreMetrics {
             read_scheduler_groups,
             read_scheduler_queued,
             read_scheduler_in_flight,
+            read_scheduler_reserved,
             read_scheduler_waiting,
             read_scheduler_admission_duration,
             read_scheduler_batch_wait,

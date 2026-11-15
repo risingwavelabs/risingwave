@@ -15,6 +15,7 @@ Backfill, and fixed-SST replay experiments below.
 [storage.blockwise_prefetch]
 enabled = true
 changelog_enabled = false
+snapshot_backfill_enabled = false
 locality_backfill_enabled = false
 max_blocks = 3
 max_bytes = 262144
@@ -23,9 +24,11 @@ max_bytes = 262144
 enable_hummock_read_coalescing = true
 
 [storage.object_store.read_scheduler]
-batch_prepare_timeout_ms = 1
+use_dedicated_io_runtime = false
+dedicated_io_runtime_workers = 2
+prefetch_batch_wait_us = 0
 max_batch_requests = 16
-max_admitted_requests = 32
+max_admitted_groups = 64
 max_inflight_reads = 32
 max_read_bytes = 262144
 
@@ -37,9 +40,9 @@ meta_reuse = false
 point_get_concurrency = 1
 ```
 
-Numeric limits must be positive. `batch_prepare_timeout_ms` accepts 0 to
-disable window preparation. The `blockwise_prefetch` and `read_scheduler`
-sections reject unknown fields. Keep `point_get_concurrency` at 1 for
+The counts and byte budgets must be positive, except that `max_gap_bytes`
+and `prefetch_batch_wait_us` accept zero. The `blockwise_prefetch`, `read_batch`,
+and `read_scheduler` sections reject unknown fields. Keep `point_get_concurrency` at 1 for
 streaming-only experiments. A value of 1 for `max_blocks` disables speculative
 neighbors, while still permitting demand reads.
 
@@ -47,40 +50,56 @@ neighbors, while still permitting demand reads.
 | --- | --- | --- |
 | `blockwise_prefetch.enabled` | Bounded blockwise lookahead for HashJoin row/degree reads and fully consumed forward scans in Temporal Join, AsOf Join, and OverWindow. | Window distribution and consumed/discarded handles. |
 | `changelog_enabled` | Independent opt-in for Hummock change log scans; the vnode/key upper bound is passed to SST iterators before lookahead. | Long cold sequential scans are candidates; verify old/new value rows and epoch/range boundaries. |
+| `snapshot_backfill_enabled` | Opt in to Blockwise for ordinary Snapshot Backfill source scans; the default is Range. Independent of prefix scans, LocalityProvider and changelog catch-up. | Compare source scan progress, physical GETs and prefetch memory against Range. |
 | `locality_backfill_enabled` | Switches LocalityProvider snapshot scans from contiguous range reads to blockwise prefetch. | Compare backfill duration, physical GETs and bytes with the same scheduler and backfill rate. |
 | `max_blocks` | Per-iterator window including the demand block. Later windows are issued as consumption advances. | First-poll `consume_pending` together with material wait duration and consumed windows can motivate an N comparison. Single-block ranges cannot benefit. |
 | `max_bytes` | Window sum of max(compressed, decoded) block bytes. An oversized demand block reads alone. This is not a CN-wide memory cap. | `limit="bytes"`, window bytes, RSS and discarded handles. |
-| `batch_prepare_timeout_ms` | Bounds preparation after the first cold member of an explicit prefetch window. `0` disables window preparation. | Preparation timeouts, GET count and logical read latency. |
-| `max_batch_requests` | Logical receive budget per dequeue pass, capped by Q. A packet that does not fit the remaining budget is deferred intact. | Pending requests from multiple passes can enter one GET. |
-| `max_admitted_requests` | Ordinary retained logical requests, queued plus in flight, per scheduler. A complete mergeable window can keep its existing preparation permits through completion when ordinary admission is short. | Pending/waiting gauges, admission latency, and `window_admitted_with_preparation`. |
+| `max_batch_requests` | Maximum members in one group. | Dispatched group sizes. |
+| `max_admitted_groups` | Groups retained from queue admission through completion. Compatible reads can join a pending group at capacity. | Group depth, waiting producers and admission latency. |
+| `use_dedicated_io_runtime` | Opt in to a process-shared runtime for the dispatcher, scheduled backend reads and range-error fallback. Foyer producers and deferred admission stay on their existing runtime. Disabled by default. | Physical reservations, active reads and reservation-to-start latency. |
+| `dedicated_io_runtime_workers` | Worker threads in the shared runtime, when enabled. All schedulers in the process that opt in must agree. | Compare with the same streaming workers, G and P. |
 | `max_inflight_reads` | Concurrent scheduled physical reads, including retry loops and range-error fallback children. One merged GET uses one slot. | Scheduled physical in-flight gauge and enqueue-to-dispatch latency. Oversized/unbounded direct reads are excluded. |
-| `max_read_bytes` | Maximum eligible input and merged contiguous range. Same object, adjacent/overlapping ranges only. | `route="oversized"`, `split_bytes`, actual operation bytes and latency. |
+| `max_read_bytes` | Maximum eligible input and merged range span. | `route="oversized"`, actual operation bytes and latency. |
+| `max_gap_bytes` | Maximum gap between merged ranges from the same object. Zero still permits adjacent and overlapping ranges. | GET count, read bytes and overread. |
+| `prefetch_batch_wait_us` | Maximum intentional wait for compatible late readers in a prefetch batch. Zero releases ready candidates at registration close. | `object_store_read_scheduler_batch_wait_seconds` and the release reason counters. |
+| `reuse_inflight_reads` | Allow fully covered reads to share a scheduled GET, including readers waiting for group admission. | `inflight_reused`, GET count and latency. |
 | `read_batch.enabled` | Opt-in point MultiGet for missing state in HashAgg and Materialize. | `state_store_get_batch_keys`, `state_store_get_batch_duration`, and `state_store_get_batch_outcomes`. |
-| `read_batch.meta_reuse` | Reuse Foyer SST metadata handles within one MultiGet. | Compare `meta_total` and `meta_batch_ready` for the same table and workload. |
+| `read_batch.meta_reuse` | Reuse Foyer SST metadata handles within one MultiGet or the initial iterator seeks of one HashJoin chunk. | Compare `meta_total` and `meta_batch_ready` for the same table and workload. |
 
-Ordinary eligible reads wait for an admission slot before allocating an owned scheduler request.
-Explicit windows reserve preparation capacity before staging cold reads. The scheduler
-keeps unsubmitted requests available for merging until physical capacity is available,
-then selects the group containing the oldest request. An isolated request dispatches
-without waiting for future neighbors. Logical admission still bounds visibility; it
-does not guarantee that every prefetch window is admitted together. Oversized and unbounded reads still go directly to the backend.
-The limit bounds scheduler-retained requests, not upstream Foyer producer tasks. Dropping
-a prefetch handle does not necessarily cancel its independently running Foyer producer.
-Dispatcher failure returns an error and wakes admission waiters.
-Physical reads run in independent tasks. The fixed-SST changelog comparison below
-selected this mode with a 1 ms preparation deadline, so it is now the default
-when coalescing is enabled. Remove `independent_io_execution` from older test TOMLs.
+Blockwise submits lookahead through Foyer. Each outer read within the scheduler
+range limit first tries to merge into a pending group. Reads that need a new
+group can wait for admission before the scheduler retains a request descriptor.
+An isolated request can dispatch as soon as there is physical capacity.
+Oversized and unbounded reads go directly to the backend. A dropped iterator
+handle does not necessarily cancel its Foyer producer. Dispatcher failure
+returns an error and wakes admission waiters.
 
-For an in-image control, disable prefix, changelog and Locality Backfill
-Blockwise prefetch, read coalescing, and point MultiGet. For a main comparison,
+For an in-image control, disable Blockwise for prefix, source snapshot, changelog
+and Locality Backfill paths, read coalescing, and point MultiGet. For a main comparison,
 use a separate main image built with the same architecture, features and profile.
 
 To isolate metadata reuse, set `storage.read_batch.enabled = true` in both
 arms and toggle only `meta_reuse`. `concurrency` limits concurrent keys per
 call. `meta_max_entries` and `meta_max_bytes` bound regular retained handles,
-with one extra slot for an oversized SST. The call owns these handles until
-it returns. Foyer handles metadata loads and single-flight. Historical
-MultiGet results below identify the builds and settings they measured.
+with one extra slot for an oversized SST. Retained handles live until the
+MultiGet call returns or the HashJoin chunk ends. HashJoin metadata reuse
+does not require point MultiGet to be enabled. Foyer handles metadata loads
+and single-flight. Historical results identify the builds and settings they
+measured.
+
+For a new SF10 Q18 run, use the [read-path test overlay](./read-optimization-evidence/q18-read-path.toml)
+on a dedicated test cluster. It enables ordinary source Snapshot Backfill,
+Locality Backfill and prefix Blockwise, read coalescing, in-flight reuse,
+MultiGet and SST metadata reuse. It retains G128/P32, N16/B16, 1 MiB, zero
+gap, 100 µs and two dedicated I/O workers from the tested Mac SF10 read-path
+profile. The ordinary source scan now uses the typed startup config rather
+than a process environment flag. Changelog scanning is independent and
+remains off in this overlay. The overlay captures read-path settings; cluster
+topology, seed and SQL conditions are documented with the archived runs.
+The [historical Q64](./read-optimization-evidence/q18-q64.toml) controls apply
+only to their archived binaries. The earlier `max_admitted_requests` counted
+logical requests and `batch_prepare_timeout_ms` used a different preparation
+policy; neither key is accepted by the current parser.
 
 ## Metric meanings
 
@@ -88,9 +107,6 @@ Metrics below are available without TRACE. Storage per-table counters use the us
 Info metric level. Aggregate all relevant CN instances; retain instance labels when
 investigating skew. Take deltas over a common interval and drain in-flight operations
 before reconciling counts. Counts from different layers are not interchangeable.
-The defaults retain logical admission=32 and physical concurrency=32 for compatibility,
-not as tuned values. Keeping logical admission too small still restricts merging even
-with a separate physical limit; increase that capacity independently in experiments.
 
 | Metric | Meaning / exclusions |
 | --- | --- |
@@ -102,19 +118,19 @@ with a separate physical limit; increase that capacity independently in experime
 | `object_store_operation_bytes{type="read"}` | Successful physical read result sizes. `_count` is successful physical operations; `_sum` is successful returned bytes. Neither counts failed/partial network transfers. |
 | `object_store_operation_latency{type="read"}` | Physical read duration including its retry loop. Compare with logical latency and queue latency. |
 | `object_store_request_retry_count{type="read"}`, `object_store_failure_count{type="read"}` | Wrapper retries and terminal failures. Use with attempt outcomes; do not count group-size savings as net savings during failures. |
-| `object_store_read_scheduler_batch_size` | Requests received together at dequeue, including ones cancelled before dispatch. Requests from different dequeues can merge while waiting for physical capacity; this is not a merge-window histogram. |
 | `object_store_read_scheduler_group_size` | Logical members per dispatched group. Sum minus count is *planned* consolidation, not exact net GET savings under cancellation/fallback. |
 | `object_store_read_scheduler_queue_duration_seconds` | Logical admission to initial physical dispatch, including time waiting for physical capacity. Excludes retry/fallback after that initial dispatch. |
 | `object_store_read_scheduler_waiting` | Caller futures waiting for admission; excludes admitted requests. Returns to zero on admission, cancellation or worker failure. |
+| `object_store_read_scheduler_batch_wait_seconds` | Time from external read arrival to release of its prefetch batch group. Compare with admission, dispatch and GET latency. |
 | `object_store_read_scheduler_admission_duration_seconds` | Admission acquisition duration, including immediately admitted requests and cancelled/failed waits. Logical read latency includes this interval. |
-| `object_store_read_scheduler_preparing` | Preparation reservations before publication. A prefix that moves to ordinary admission releases its reservations while the tail waits. |
-| `object_store_read_scheduler_prepare_duration_seconds{reason}`, `object_store_read_scheduler_prepared_batch_size` | Time from the first staged cold member until window release, and the number of surviving cold reads at release. All-hit windows may resolve without starting a preparation driver. |
-| `object_store_read_scheduler_queued` | Admitted logical requests awaiting their initial physical dispatch; includes channel and worker pending requests. |
+| `object_store_read_scheduler_queued` | Admitted logical requests awaiting their initial physical dispatch; belongs to pending groups. |
 | `object_store_read_scheduler_in_flight` | Scheduled physical reads, including retry loops and fallback children; excludes direct reads. Bounded by `max_inflight_reads`. |
 | `object_store_read_scheduler_pending` | Admitted queued/in-flight logical requests. Should return to zero when quiescent. |
-| `object_store_read_scheduler_events{event}` | split_object/split_gap/split_bytes right boundaries of selected dispatch groups; cancelled_queued (while pending before dispatch), cancelled_before_dispatch (after planning); group_ok/error/cancelled; range_fallback_requests; merged_requests (members minus one for successful groups). Boundaries describe the pending set at group selection, not all potential future neighbors; they are not directly comparable to the earlier per-dequeue planner counts. |
-| Window events in `object_store_read_scheduler_events` | `window_complete` and `window_timeout` count window closures, `window_late` counts members, and `window_budget_reject` counts failed preparation reservations. `window_split_admission` and `window_split_limit` count prefix-publication boundaries. `window_admitted_with_preparation` counts packets that transferred preparation permits. These counts describe distinct stages. |
-| `object_store_read_scheduler_gap_bytes` | Positive same-object gaps limiting the selected dispatch group. Cancellation after planning can leave an interior hole in a retained group. |
+| `object_store_read_scheduler_groups{stage}` | `admitted` holds a group credit, `queued` is not yet selected, and `ready` excludes groups already claimed by a dispatch reservation. |
+| `object_store_read_scheduler_reserved` | Group reads holding a physical permit before the first backend poll. These are not yet in `object_store_read_scheduler_in_flight`. |
+| `object_store_read_scheduler_physical_duration_seconds{stage}` | Backend read time including retries (`group` or `fallback`), physical permit wait for fallback (`fallback_wait`), or time from dispatch reservation to backend start (`reservation_to_start`). |
+| `object_store_read_scheduler_events{event}` | Group outcomes, queued and pre-dispatch cancellations, successful merged members saved, gap groups, range fallback and prefetch group releases (`batch_ready`, `batch_deadline`, `batch_pressure`). |
+| `object_store_read_scheduler_overread_bytes` | Gap bytes returned by successful merged reads, including gaps left by cancelled members. |
 | `state_store_sst_store_block_request_counts{table_id,type}` | Cache query and miss counts. For point MultiGet, `meta_total` counts metadata lookups through Foyer, `meta_batch_ready` counts ready handles reused within the call, and `meta_batch_budget_reject` counts metadata returned by Foyer without retaining a handle due to the per-call budget. |
 | `state_store_blockwise_prefetch_window_blocks{limit}` | Window size including demand, clipped by range/blocks/bytes. A window of one produces no lookahead. |
 | `state_store_blockwise_prefetch_window_bytes` | Selected window budget weight, including demand. Not transferred bytes. |
@@ -138,7 +154,7 @@ cache metrics plus a short capture with `RW_STORAGE_IO_FASTRACE=true` on the rea
 compute node. Set `RW_TRACING_ENDPOINT` to the OTLP gRPC collector if RiseDev or the
 deployment does not supply it. The flag routes `state_store_read_batch` and
 `object_store_read_scheduler` to the existing Fastrace exporter. Match logical
-`request_id` to `request_ids` on scheduler dequeue and dispatch spans to follow a
+`request_id` to `request_ids` on scheduler selection and dispatch spans to follow a
 block read through the scheduler. Both targets use DEBUG so release binaries
 retain them, and require explicit enablement. The exporter sends up to 512 spans
 per request by default. Set `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` to lower the span

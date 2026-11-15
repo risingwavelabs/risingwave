@@ -279,7 +279,10 @@ impl InMemObjectStore {
         if let Some(end) = range.end()
             && end > obj.len()
         {
-            return Err(Error::other("bad block offset and size").into());
+            return Err(ObjectError::read_length_mismatch(format!(
+                "read range ends at {end}, past object length {}",
+                obj.len()
+            )));
         }
 
         Ok(obj.slice(range))

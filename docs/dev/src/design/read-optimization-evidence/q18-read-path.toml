@@ -1,0 +1,30 @@
+# Read-path overlay for a dedicated SF10 Q18 test cluster; not product defaults.
+# Keep topology, seed, session settings and local service configuration separate.
+[streaming]
+actor_runtime_worker_threads_num = 8
+
+[storage.blockwise_prefetch]
+enabled = true
+snapshot_backfill_enabled = true
+locality_backfill_enabled = true
+changelog_enabled = false
+max_blocks = 16
+max_bytes = 1048576
+
+[storage.read_batch]
+enabled = true
+meta_reuse = true
+
+[storage.object_store]
+enable_hummock_read_coalescing = true
+
+[storage.object_store.read_scheduler]
+use_dedicated_io_runtime = true
+dedicated_io_runtime_workers = 2
+max_admitted_groups = 128
+max_inflight_reads = 32
+max_batch_requests = 16
+max_read_bytes = 1048576
+max_gap_bytes = 0
+prefetch_batch_wait_us = 100
+reuse_inflight_reads = true

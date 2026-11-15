@@ -502,6 +502,8 @@ pub enum PrefetchMode {
     Range,
     /// Request a small window through the block cache, leaving I/O merging to the scheduler.
     Blockwise,
+    /// Use the storage instance's ordinary Snapshot Backfill source policy.
+    SnapshotBackfill,
     /// Use the storage instance's Locality Backfill policy. Resolved before building SST iterators.
     LocalityBackfill,
 }
@@ -529,6 +531,13 @@ impl PrefetchOptions {
         Self {
             mode: PrefetchMode::Blockwise,
             for_large_query: false,
+        }
+    }
+
+    pub fn prefetch_for_snapshot_backfill() -> Self {
+        Self {
+            mode: PrefetchMode::SnapshotBackfill,
+            for_large_query: true,
         }
     }
 
@@ -562,10 +571,12 @@ impl From<PrefetchOptions> for TracedPrefetchOptions {
         Self {
             // Preserve the existing trace encoding. Replay blockwise scans on demand instead
             // of accidentally routing them through the unrelated contiguous range reader.
-            // Locality Backfill replays with its default range policy.
+            // Both backfill requests replay with their default range policy.
             prefetch: matches!(
                 value.mode,
-                PrefetchMode::Range | PrefetchMode::LocalityBackfill
+                PrefetchMode::Range
+                    | PrefetchMode::SnapshotBackfill
+                    | PrefetchMode::LocalityBackfill
             ),
             for_large_query: value.for_large_query,
         }
