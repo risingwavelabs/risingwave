@@ -99,6 +99,9 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             owner: UserId,
         }
+        HybridStage {
+            source_id: SourceId,
+        }
         Index {
             id: IndexId,
             index_table_id: TableId,

@@ -546,6 +546,28 @@ impl stream_plan::DispatchOutputMapping {
     }
 }
 
+impl catalog::Source {
+    pub fn ingest_mode(&self) -> Option<&plan_common::SourceIngestMode> {
+        match &self.kind {
+            Some(catalog::source::Kind::IngestMode(mode)) => Some(mode),
+            _ => None,
+        }
+    }
+
+    pub fn hybrid(&self) -> Option<&catalog::HybridSource> {
+        match &self.kind {
+            Some(catalog::source::Kind::Hybrid(hybrid)) => Some(hybrid),
+            _ => None,
+        }
+    }
+}
+
+impl catalog::HybridSource {
+    pub fn stage_source_ids(&self) -> Vec<SourceId> {
+        self.stages.iter().map(|stage| stage.source_id).collect()
+    }
+}
+
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {

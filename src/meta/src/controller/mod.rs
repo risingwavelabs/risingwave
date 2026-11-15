@@ -309,6 +309,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
 
 impl From<ObjectModel<source::Model>> for PbSource {
     fn from(value: ObjectModel<source::Model>) -> Self {
+        let kind = value.0.kind();
         let mut secret_ref_map = BTreeMap::new();
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
@@ -341,7 +342,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
             rate_limit: value.0.rate_limit.map(|v| v as _),
-            ingest_mode: value.0.ingest_mode.map(|mode| mode.to_protobuf()),
+            kind,
         }
     }
 }

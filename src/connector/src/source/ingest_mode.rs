@@ -82,6 +82,10 @@ impl IngestMode {
         }
     }
 
+    pub fn is_streaming(&self) -> bool {
+        matches!(self, Self::Streaming)
+    }
+
     pub fn is_full_reload(&self) -> bool {
         matches!(self, Self::FullReload { .. })
     }

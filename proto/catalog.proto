@@ -151,13 +151,24 @@ message Source {
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
 
-  // How the source ingests data: streaming, full reload, or bounded.
-  plan_common.SourceIngestMode ingest_mode = 20;
+  oneof kind {
+    plan_common.SourceIngestMode ingest_mode = 20;
+    HybridSource hybrid = 21;
+  }
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 
   optional uint32 rate_limit = 101;
+}
+
+// A source that reads its stages in order, each one starting after the previous one completes.
+message HybridSource {
+  repeated HybridStage stages = 1;
+}
+
+message HybridStage {
+  uint32 source_id = 1;
 }
 
 enum SinkType {

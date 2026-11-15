@@ -88,7 +88,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::source_catalog::{SourceCatalog, SourceKind};
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::{Expr, ExprRewriter, SessionTimezone};
@@ -1175,7 +1175,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        ingest_mode,
+        kind: SourceKind::Connector(ingest_mode),
     };
     Ok(source)
 }
@@ -1530,7 +1530,7 @@ async fn handle_create_cdc_table_source(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: None,
-        ingest_mode: upstream_source.ingest_mode,
+        kind: upstream_source.kind.clone(),
     };
 
     session

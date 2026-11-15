@@ -466,6 +466,7 @@ derive_from_blob!(
     SourceIngestMode,
     risingwave_pb::plan_common::PbSourceIngestMode
 );
+derive_from_blob!(HybridSource, risingwave_pb::catalog::PbHybridSource);
 
 derive_from_blob!(
     SinkSchemachange,

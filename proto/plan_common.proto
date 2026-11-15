@@ -331,7 +331,7 @@ message IcebergBoundedScan {
   }
 }
 
-// How a source table ingests data.
+// How the source ingests data: streaming, full reload, or bounded.
 message SourceIngestMode {
   // Ingests continuously.
   message SourceIngestModeStreaming {}
