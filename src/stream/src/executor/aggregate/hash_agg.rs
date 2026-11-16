@@ -123,6 +123,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// The maximum heap size of dirty groups. If exceeds, the executor should flush dirty groups.
     max_dirty_groups_heap_size: usize,
 
+    /// The maximum number of groups in `agg_group_cache`. 0 means unlimited.
+    group_cache_max_entries: usize,
+
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
 }
@@ -227,6 +230,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
+                group_cache_max_entries: args.extra.group_cache_max_entries,
                 emit_on_window_close: args.extra.emit_on_window_close,
             },
         })
@@ -511,6 +515,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
+        if this.group_cache_max_entries > 0 {
+            vars.agg_group_cache
+                .evict_to_capacity(this.group_cache_max_entries);
+        }
     }
 
     fn flush_metrics(_this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {

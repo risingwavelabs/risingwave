@@ -74,6 +74,7 @@ pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
     pub max_dirty_groups_heap_size: usize,
+    pub group_cache_max_entries: usize,
     pub emit_on_window_close: bool,
 }
 impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}
