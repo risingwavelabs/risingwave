@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::bail;
+use risingwave_common::license::{Feature, FeatureNotAvailable};
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
@@ -53,6 +54,10 @@ impl CdcSourceDdlValidator for Oracle {
             bail!("'{HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY}' requires 'heartbeat.table.name'");
         }
         Ok(())
+    }
+
+    fn check_license() -> Result<(), FeatureNotAvailable> {
+        Feature::OracleCdcSource.check_available()
     }
 
     fn check_alter_with_options(
