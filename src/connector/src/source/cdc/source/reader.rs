@@ -155,6 +155,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 
         let instance = match T::source_type() {
             CdcSourceType::Mysql
+            | CdcSourceType::Mariadb
             | CdcSourceType::Postgres
             | CdcSourceType::Mongodb
             | CdcSourceType::SqlServer

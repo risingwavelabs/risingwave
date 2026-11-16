@@ -1,0 +1,123 @@
+control substitution on
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('dotted_name_db') IS NOT NULL BEGIN ALTER DATABASE dotted_name_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE dotted_name_db; END; CREATE DATABASE dotted_name_db;" -b
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('dotted.name.db') IS NOT NULL BEGIN ALTER DATABASE [dotted.name.db] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [dotted.name.db]; END; CREATE DATABASE [dotted.name.db];" -b
+
+system ok
+sqlcmd -C -d dotted_name_db -i e2e_test/source_inline/cdc/sql_server/sql_server_dotted_name_prepare.sql -b
+
+system ok
+sqlcmd -C -d dotted.name.db -i e2e_test/source_inline/cdc/sql_server/sql_server_dotted_name_prepare.sql -b
+
+statement ok
+create source mssql_dotted_name_source with (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'dotted_name_db',
+);
+
+statement ok
+create source mssql_dotted_database_source with (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'dotted.name.db',
+);
+
+control substitution off
+
+statement ok
+create table rw_dotted (id int primary key, v varchar)
+include table_name as upstream_table
+from mssql_dotted_name_source table 'dbo.[a.b]';
+
+statement ok
+create table rw_dotted_with_database (id int primary key, v varchar)
+from mssql_dotted_name_source table '[dotted_name_db].dbo.[a.b]';
+
+statement ok
+create table rw_decoy (id int primary key, v varchar)
+from mssql_dotted_name_source table 'a.b';
+
+statement ok
+create table rw_plain (id int primary key, v varchar)
+from mssql_dotted_name_source table 'dbo.plain';
+
+statement ok
+create table rw_dotted_schema (id int primary key, v varchar)
+from mssql_dotted_name_source table '[s.x].t';
+
+statement ok
+create table rw_dotted_database_dotted_schema (id int primary key, v varchar)
+from mssql_dotted_database_source table '[s.x].t';
+
+statement ok
+create table rw_dotted_database_dotted_schema_with_database (id int primary key, v varchar)
+from mssql_dotted_database_source table '[dotted.name.db].[s.x].t';
+
+statement ok
+create table rw_dotted_database_dotted (id int primary key, v varchar)
+from mssql_dotted_database_source table 'dbo.[a.b]';
+
+statement ok
+create table rw_dotted_database_plain (id int primary key, v varchar)
+include database_name as upstream_database
+from mssql_dotted_database_source table 'dbo.plain';
+
+system ok
+sqlcmd -C -d dotted_name_db -i e2e_test/source_inline/cdc/sql_server/sql_server_dotted_name_insert.sql -b
+
+system ok
+sqlcmd -C -d dotted.name.db -i e2e_test/source_inline/cdc/sql_server/sql_server_dotted_name_insert.sql -b
+
+query TIT retry 60 backoff 1s
+select 'dotted', id, v from rw_dotted
+union all select 'dotted_with_database', * from rw_dotted_with_database
+union all select 'decoy', * from rw_decoy
+union all select 'plain', * from rw_plain
+union all select 'dotted_schema', * from rw_dotted_schema
+union all select 'dotted_database_dotted_schema', * from rw_dotted_database_dotted_schema
+union all select 'dotted_database_dotted_schema_with_database', * from rw_dotted_database_dotted_schema_with_database
+union all select 'dotted_database_dotted', * from rw_dotted_database_dotted
+union all select 'dotted_database_plain', id, v from rw_dotted_database_plain
+order by 1, 2;
+----
+decoy 2 decoy
+dotted 1 dotted
+dotted_database_dotted 1 dotted
+dotted_database_dotted_schema 4 dotted schema
+dotted_database_dotted_schema_with_database 4 dotted schema
+dotted_database_plain 3 plain
+dotted_schema 4 dotted schema
+dotted_with_database 1 dotted
+plain 3 plain
+
+query IT
+select id, upstream_table from rw_dotted;
+----
+1 a.b
+
+query IT
+select id, upstream_database from rw_dotted_database_plain;
+----
+3 dotted.name.db
+
+statement ok
+drop source mssql_dotted_name_source cascade;
+
+statement ok
+drop source mssql_dotted_database_source cascade;
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('dotted_name_db') IS NOT NULL BEGIN ALTER DATABASE dotted_name_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE dotted_name_db; END;" -b
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('dotted.name.db') IS NOT NULL BEGIN ALTER DATABASE [dotted.name.db] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [dotted.name.db]; END;" -b

@@ -22,7 +22,7 @@ use risingwave_pb::compute::config_service_server::ConfigService;
 use risingwave_pb::compute::{
     ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
 };
-use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
+use risingwave_storage::hummock::{Block, SstableBlockIndex, SstableMetaCacheValue};
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
@@ -30,7 +30,7 @@ use tonic::{Code, Request, Response, Status};
 pub struct ConfigServiceImpl {
     batch_mgr: Arc<BatchManager>,
     stream_mgr: LocalStreamManager,
-    meta_cache: Option<HybridCache<HummockSstableObjectId, Box<Sstable>>>,
+    meta_cache: Option<HybridCache<HummockSstableObjectId, SstableMetaCacheValue>>,
     block_cache: Option<HybridCache<SstableBlockIndex, Box<Block>>>,
 }
 
@@ -109,7 +109,7 @@ impl ConfigServiceImpl {
     pub fn new(
         batch_mgr: Arc<BatchManager>,
         stream_mgr: LocalStreamManager,
-        meta_cache: Option<HybridCache<HummockSstableObjectId, Box<Sstable>>>,
+        meta_cache: Option<HybridCache<HummockSstableObjectId, SstableMetaCacheValue>>,
         block_cache: Option<HybridCache<SstableBlockIndex, Box<Block>>>,
     ) -> Self {
         Self {

@@ -103,12 +103,14 @@ macro_rules! define_encode_metadata_to_writer {
             metadata: &MetadataV2,
             writer: &mut SnapshotPayloadWriter,
         ) -> BackupResult<()> {
+            // Keep each section's encoding future off the stack. The generated encoder
+            // otherwise needs a large poll frame in unoptimized simulation builds.
             let mut _idx = 0;
             $(
                 if _idx == 1 {
-                    write_1(writer, &metadata.hummock_version.to_protobuf()).await?;
+                    Box::pin(write_1(writer, &metadata.hummock_version.to_protobuf())).await?;
                 }
-                write_n(writer, &metadata.$name).await?;
+                Box::pin(write_n(writer, &metadata.$name)).await?;
                 _idx += 1;
             )*
             Ok(())

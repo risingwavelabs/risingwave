@@ -31,6 +31,7 @@ pub mod obs;
 
 pub mod azblob;
 pub mod oss;
+mod rotating_transport;
 pub mod s3;
 
 pub mod fs;

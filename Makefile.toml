@@ -1346,6 +1346,16 @@ script = """
 scripts/check/check-trailing-spaces.sh --fix
 """
 
+[tasks.check-unused-patches]
+private = true
+category = "RiseDev - Check"
+description = "Check that every [patch] entry is used"
+script = """
+#!/usr/bin/env bash
+
+scripts/check/check-unused-patches.py
+"""
+
 [tasks.check-fast]
 category = "RiseDev - Check"
 dependencies = [
@@ -1355,6 +1365,7 @@ dependencies = [
     "check-dep-sort",
     "check-fmt",
     "check-trailing-spaces",
+    "check-unused-patches",
     "check-typos",
     "check-machete",
 ]

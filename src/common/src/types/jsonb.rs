@@ -645,15 +645,43 @@ mod tests {
     fn test_hash_backward_compatible() {
         use std::hash::Hasher as _;
 
-        // Hash of sample input `"foo"` required to be the the magic number below.
+        // Hashes of sample inputs required to be the the magic numbers below.
         // See #25336 for how the backward compatibility is doomed.
-        let s = r#""foo""#;
-        let j: JsonbVal = s.parse().unwrap();
-        let expected = expect_test::expect!["10172337927241793445"];
+        for (expected, s) in [
+            (expect_test::expect!["10172337927241793445"], r#""foo""#),
+            (expect_test::expect!["6833014238368373072"], r#"2e16"#),
+        ] {
+            let j: JsonbVal = s.parse().unwrap();
+            let mut state = std::hash::DefaultHasher::new();
+            j.hash(&mut state);
+            let actual = state.finish();
+            expected.assert_eq(&actual.to_string());
+        }
+    }
 
-        let mut state = std::hash::DefaultHasher::new();
-        j.hash(&mut state);
-        let actual = state.finish();
-        expected.assert_eq(&actual.to_string());
+    #[test]
+    fn test_float_text_backward_compatible() {
+        // The memcmp and value encodings store the text form, so the float format must stay
+        // ryu's: zmij, used by serde_json since 1.0.147, writes `2e+16` unless patched.
+        let j: JsonbVal = r#"{"a": [2e16, 1.5e300, 1e-7, 0.5]}"#.parse().unwrap();
+        let r = j.as_scalar_ref();
+        let compact = r#"{"a":[2e16,1.5e300,1e-7,0.5]}"#;
+
+        let value = r.value_serialize();
+        let mut memcmp = memcomparable::Serializer::new(vec![]);
+        r.memcmp_serialize(&mut memcmp).unwrap();
+
+        let mut expected_memcmp = memcomparable::Serializer::new(vec![]);
+        serde::Serialize::serialize(compact, &mut expected_memcmp).unwrap();
+
+        // (value version byte, value text, memcmp bytes)
+        assert_eq!(
+            (
+                value[0],
+                std::str::from_utf8(&value[1..]).unwrap(),
+                memcmp.into_inner()
+            ),
+            (1, compact, expected_memcmp.into_inner()),
+        );
     }
 }

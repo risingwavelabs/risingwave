@@ -86,6 +86,16 @@ pub struct StorageConfig {
     )]
     pub max_prefetch_block_number: usize,
 
+    /// Maximum number of concurrent `SSTable` metadata fetches per state store scan during
+    /// iterator initialization. Must be greater than 0. The default of 1 fetches sequentially;
+    /// set a larger value to opt in to concurrent fetching. Does not affect point lookups or
+    /// the lazy metadata reads within concatenated `SSTable` iterators.
+    #[serde(
+        default = "default::storage::sstable_meta_fetch_concurrency",
+        deserialize_with = "deserialize_sstable_meta_fetch_concurrency"
+    )]
+    pub sstable_meta_fetch_concurrency: usize,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -238,7 +248,8 @@ pub struct StorageConfig {
     )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
-    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores.
+    /// Capped at `worker_num` * `compactor_max_task_multiplier`, the most a compactor can run.
     #[serde(default = "default::storage::iceberg_compaction_task_parallelism_ratio")]
     pub iceberg_compaction_task_parallelism_ratio: f32,
     /// Whether to enable heuristic output parallelism in iceberg compaction.
@@ -577,6 +588,18 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::http_concurrent_limit")]
     pub http_concurrent_limit: usize,
 
+    /// Maximum bytes per request for fully buffered `OpenDAL` streaming reads.
+    /// 0 (the default) disables chunking.
+    /// Each chunk uses the existing `OpenDAL` streaming read retry and timeout layers.
+    /// Other object store backends are unaffected.
+    #[serde(default)]
+    pub opendal_streaming_read_chunk_size: usize,
+
+    /// Maximum concurrent range requests when `opendal_streaming_read_chunk_size` is positive.
+    /// Defaults to 1 for sequential reads. `OpenDAL` treats 0 as 1.
+    #[serde(default = "default::object_store_config::opendal_streaming_read_chunk_concurrency")]
+    pub opendal_streaming_read_chunk_concurrency: usize,
+
     // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
@@ -587,6 +610,19 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+fn deserialize_sstable_meta_fetch_concurrency<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.sstable_meta_fetch_concurrency must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
@@ -615,6 +651,21 @@ where
     Ok(value)
 }
 
+fn deserialize_http_client_rotation_interval_ms<'de, D>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = none_as_empty_string::deserialize(deserializer)?;
+    if value == Some(0) {
+        return Err(D::Error::custom(
+            "storage.object_store.s3.http_client_rotation_interval_ms must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
 impl ObjectStoreConfig {
     pub fn set_atomic_write_dir(&mut self) {
         self.set_atomic_write_dir = true;
@@ -631,6 +682,18 @@ pub struct S3ObjectStoreConfig {
         alias = "object_store_keepalive_ms"
     )]
     pub keepalive_ms: Option<u64>,
+    /// Periodically replace the `OpenDAL` S3/MinIO HTTP client to allow new connections to
+    /// follow DNS changes. Disabled by default (empty string). Must be greater than zero
+    /// when set. The first refresh occurs after one interval plus up to one interval of
+    /// random jitter; later refreshes use the fixed interval. In-flight responses continue
+    /// normally and may outlive the interval; this is not a strict TCP connection lifetime limit.
+    #[serde_with(skip_apply)]
+    #[serde(
+        default,
+        serialize_with = "none_as_empty_string::serialize",
+        deserialize_with = "deserialize_http_client_rotation_interval_ms"
+    )]
+    pub http_client_rotation_interval_ms: Option<u64>,
     #[serde(
         default = "default::object_store_config::s3::recv_buffer_size",
         alias = "object_store_recv_buffer_size"
@@ -931,7 +994,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .meta_file_cache
         .flush_buffer_threshold_mb
-        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+        .unwrap_or(default::storage::meta_file_cache_flush_buffer_threshold_mb());
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
@@ -1118,6 +1181,10 @@ pub mod default {
             2 * 1024 * 1024 * 1024 // 2g
         }
 
+        pub fn sstable_meta_fetch_concurrency() -> usize {
+            1
+        }
+
         pub fn max_prefetch_block_number() -> usize {
             16
         }
@@ -1164,7 +1231,7 @@ pub mod default {
         }
 
         pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
-            64
+            256
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
@@ -1381,6 +1448,10 @@ pub mod default {
         const DEFAULT_REQ_BACKOFF_INTERVAL_MS: u64 = 1000; // 1s
         const DEFAULT_REQ_BACKOFF_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
         const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 3;
+
+        pub fn opendal_streaming_read_chunk_concurrency() -> usize {
+            1
+        }
 
         pub fn set_atomic_write_dir() -> bool {
             false

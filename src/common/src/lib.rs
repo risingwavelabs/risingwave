@@ -134,9 +134,8 @@ macro_rules! git_sha {
     };
 }
 
-// FIXME: We expand `unwrap_or` since it's unavailable in const context now.
-// `const_option_ext` was broken by https://github.com/rust-lang/rust/pull/110393
-// Tracking issue: https://github.com/rust-lang/rust/issues/91930
+// `git_sha!` expands to a `match` because `Option::unwrap_or` is not const yet
+// (https://github.com/rust-lang/rust/issues/143874), and it also treats an empty value as unknown.
 pub const GIT_SHA: &str = git_sha!("GIT_SHA");
 
 pub fn current_cluster_version() -> String {

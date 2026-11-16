@@ -189,6 +189,10 @@ impl GlobalRefreshManager {
         associated_source_id: Option<SourceId>,
         reason: TriggerReason,
     ) -> MetaResult<()> {
+        // Like a creating job: no reschedule or replacement of the table (e.g. `DROP CONNECTOR`)
+        // between the checks below and the collection of the barrier, after which the job is
+        // `Refreshing`.
+        let _reschedule_guard = self.scale_controller.reschedule_lock.read().await;
         let catalog = &self.metadata_manager.catalog_controller;
         let table = catalog.get_table_by_id(table_id).await?;
         if !table.refreshable {
@@ -226,9 +230,6 @@ impl GlobalRefreshManager {
             .await?
             .ok_or_else(|| anyhow!("staging table not found for refreshable table {}", table_id))?;
 
-        // Like a creating job: no reschedule or replacement of the table between the check above
-        // and the collection of the barrier, after which the job is `Refreshing`.
-        let _reschedule_guard = self.scale_controller.reschedule_lock.read().await;
         let trigger_time = now_millis();
         tracing::info!(%table_id, %trigger_time, ?reason, "scheduling refresh cycle");
         self.barrier_scheduler

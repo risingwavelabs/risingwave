@@ -43,7 +43,8 @@ pub struct StreamingConfig {
     pub snapshot_backfill_finish_max_lagged_barriers: usize,
 
     /// The multiplier applied to `in_flight_barrier_nums` when limiting pending barriers in a
-    /// snapshot backfill partial graph. A value of 0 is treated as 1.
+    /// snapshot backfill partial graph. A value of 0 is treated as 1. The resulting limit must
+    /// be at least 2, so that queued catch-up barriers can still drain.
     #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
     pub snapshot_backfill_barrier_amplification_factor: usize,
 
@@ -262,6 +263,14 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergFetchExecutor`: The number of files the executor will fetch concurrently in a batch.
     #[serde(default = "default::developer::iceberg_fetch_batch_size")]
     pub iceberg_fetch_batch_size: u64,
+
+    /// `IcebergUpdateListExecutor`: A `streaming_updates` phase with at most this many files
+    /// (capped by `iceberg_fetch_batch_size`) is fetched in order by a single Fetch actor,
+    /// without waiting for the previous phase to commit.
+    /// Larger phases are spread across Fetch actors and wait for their completion. Set to 0 to
+    /// always spread phases.
+    #[serde(default = "default::developer::iceberg_update_ordered_max_tasks")]
+    pub iceberg_update_ordered_max_tasks: u64,
 
     /// `IcebergSink`: The size of the cache for positional delete in the sink.
     #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]

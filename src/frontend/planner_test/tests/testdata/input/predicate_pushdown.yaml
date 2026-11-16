@@ -73,6 +73,39 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+- name: impure filter should not transpose over window
+  sql: |
+    create table t(g int, v int);
+    select *
+    from (
+      select g, v, row_number() over (partition by g order by v) as rn
+      from t
+    ) ranked
+    where g = 1 and random() < 0.5;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: impure filter should not transpose hop window
+  sql: |
+    create table t(v int, ts timestamp);
+    select *
+    from hop(t, ts, interval '1' minute, interval '5' minute)
+    where v > 0 and v + random() > 1;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: impure filter should not transpose project set
+  sql: |
+    create table t(v int, arr int[]);
+    select *
+    from (
+      select v, unnest(arr) as u
+      from t
+    ) expanded
+    where v > 0 and random() < 0.5;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
 - name: filter project set transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, arr int[]);

@@ -37,12 +37,6 @@
   >
     <img alt="X" src="https://img.shields.io/twitter/follow/risingwavelabs" />
   </a>
-  <a
-    href="https://www.youtube.com/@risingwave-labs"
-    target="_blank"
-  >
-    <img alt="YouTube" src="https://img.shields.io/youtube/channel/views/UCsHwdyBRxBpmkA5RRd0YNEA" />
-  </a>
 </div>
 
 RisingWave is an event streaming platform for agentic AI. It continuously ingests data from databases, event streams, and webhooks, processes it incrementally, and serves fresh results at low latency, replacing the traditional event streaming stack (e.g., Debezium + Kafka + Flink + serving DB) with a single system.
