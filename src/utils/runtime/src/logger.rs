@@ -238,7 +238,7 @@ impl LogFilterControl for LogFilterController {
                 self.defaults.clone(),
                 filter
                     .parse::<Targets>()
-                    .map_err(|error| LogFilterError::InvalidFilter(error.to_string()))?,
+                    .map_err(|error| LogFilterError::InvalidFilter(error.to_report_string()))?,
             )
             // Keep tracing-only events out of stdout/stderr after applying overrides.
             .with_target("rw_tracing", Level::OFF),
@@ -247,7 +247,7 @@ impl LogFilterControl for LogFilterController {
         let mut state = self.state.lock();
         self.handle
             .reload(next.clone())
-            .map_err(|error| LogFilterError::Reload(error.to_string()))?;
+            .map_err(|error| LogFilterError::Reload(error.to_report_string()))?;
         state.current_filter = next.to_string();
         Ok(state.clone())
     }

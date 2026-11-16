@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 use risingwave_pb::monitor_service::{GetLogFilterRequest, LogFilterState, SetLogFilterRequest};
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 #[derive(Debug, Error)]
@@ -31,9 +32,9 @@ pub enum LogFilterError {
 impl From<LogFilterError> for Status {
     fn from(error: LogFilterError) -> Self {
         match error {
-            LogFilterError::InvalidFilter(_) => Status::invalid_argument(error.to_string()),
+            LogFilterError::InvalidFilter(_) => Status::invalid_argument(error.to_report_string()),
             LogFilterError::NotInitialized | LogFilterError::Reload(_) => {
-                Status::failed_precondition(error.to_string())
+                Status::failed_precondition(error.to_report_string())
             }
         }
     }

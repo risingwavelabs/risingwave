@@ -13,14 +13,18 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use anyhow::{Context, bail, ensure};
 use clap::{Args, Subcommand};
 use futures::{StreamExt, stream};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_rpc_client::MonitorClientPool;
+use thiserror_ext::AsReport;
 
 use crate::common::{CtlContext, WorkerTypeArg};
+
+const WORKER_LOG_FILTER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Explicitly select workers. IDs and types cannot be mixed.
 #[derive(Args, Clone, Debug)]
@@ -115,11 +119,11 @@ pub async fn run(context: &CtlContext, command: LogCommands) -> anyhow::Result<(
     // Resolve every requested ID before modifying any worker.
     let workers = selector.select(workers)?;
     let clients = MonitorClientPool::adhoc();
-    let results = stream::iter(workers.into_iter().map(|worker| {
+    let mut results = stream::iter(workers.into_iter().map(|worker| {
         let clients = &clients;
         let command = &command;
         async move {
-            let result = async {
+            let result = tokio::time::timeout(WORKER_LOG_FILTER_TIMEOUT, async {
                 let client = clients.get(&worker).await?;
                 let state = match command {
                     LogCommands::Get { .. } => client.get_log_filter().await?,
@@ -129,15 +133,18 @@ pub async fn run(context: &CtlContext, command: LogCommands) -> anyhow::Result<(
                     LogCommands::Reset { .. } => client.set_log_filter(None).await?,
                 };
                 Ok::<_, anyhow::Error>(state)
-            }
+            })
             .await
+            .context("timed out waiting for worker log filter response")
+            .and_then(|result| result)
             .with_context(|| format!("worker {} ({:?})", worker.id, worker.r#type()));
             (worker, result)
         }
     }))
-    .buffered(16)
+    .buffer_unordered(16)
     .collect::<Vec<_>>()
     .await;
+    results.sort_by_key(|(worker, _)| worker.id);
 
     let mut failures = 0;
     for (worker, result) in results {
@@ -149,7 +156,7 @@ pub async fn run(context: &CtlContext, command: LogCommands) -> anyhow::Result<(
             }
             Err(error) => {
                 failures += 1;
-                eprintln!("{error:#}");
+                eprintln!("{}", error.as_report());
             }
         }
     }
