@@ -281,7 +281,7 @@ impl ReadBatchInner {
             + Duration::from_micros(self.scheduler.config.prefetch_batch_wait_us);
         let batch = Arc::downgrade(self);
         let start = group.span.start;
-        let task = tokio::spawn(async move {
+        let task = self.scheduler.spawn_background(async move {
             tokio::time::sleep_until(deadline).await;
             let Some(batch) = batch.upgrade() else {
                 return;
@@ -824,6 +824,19 @@ impl Drop for GroupQueueWorker {
 }
 
 impl ReadScheduler {
+    // Keep scheduler waits on the same executor as physical reads when opted in.
+    fn spawn_background(
+        &self,
+        task: impl Future<Output = ()> + Send + 'static,
+    ) -> tokio::task::JoinHandle<()> {
+        #[cfg(not(madsim))]
+        if self.config.use_dedicated_io_runtime {
+            return dedicated_io_runtime(self.config.dedicated_io_runtime_workers.get())
+                .spawn(task);
+        }
+        tokio::spawn(task)
+    }
+
     pub(super) fn can_schedule(&self, range: &Range<usize>) -> bool {
         !range.is_empty() && range.len() <= self.config.max_read_bytes.get()
     }
@@ -1044,7 +1057,7 @@ impl ReadScheduler {
         }
         if !deferred.is_empty() {
             let scheduler = self.clone();
-            tokio::spawn(async move {
+            self.spawn_background(async move {
                 // Each group can progress even when another needs a new G permit.
                 join_all(
                     deferred
@@ -1698,6 +1711,80 @@ mod tests {
                     .send(Ok(Bytes::from_static(b"abcd")))
                     .unwrap();
                 assert_eq!(response.await.unwrap().unwrap(), "abcd");
+
+                // A missing member must reach the store at its deadline even when
+                // the timer cannot first-poll on the parked caller worker.
+                let timer_scheduler = Arc::new(ReadScheduler::new(
+                    &metrics,
+                    "timer",
+                    ReadSchedulerConfig {
+                        prefetch_batch_wait_us: 10_000,
+                        // One staged read must not trigger admission pressure.
+                        max_admitted_groups: 2.try_into().unwrap(),
+                        ..config
+                    },
+                    move |path, range| async move {
+                        assert_eq!(tokio::runtime::Handle::current().id(), io_id);
+                        assert_eq!(path, "deadline");
+                        assert_eq!(range, 0..1);
+                        Ok(Bytes::from_static(b"a"))
+                    },
+                ));
+                let batch = ReadBatch::new(timer_scheduler.clone(), 2);
+                batch.expect(0..1);
+                batch.expect(1..2);
+                let member = batch.member();
+                let timed = member
+                    .stage(&timer_scheduler, "deadline", 0..1, None)
+                    .unwrap();
+                let deadline = {
+                    let state = member.0.state.lock().unwrap();
+                    let ReadBatchState::Registering { reads: staged, .. } = &*state else {
+                        unreachable!()
+                    };
+                    staged[0].arrived.unwrap()
+                        + Duration::from_micros(timer_scheduler.config.prefetch_batch_wait_us)
+                };
+                drop(batch);
+                assert_eq!(timed.await.unwrap().unwrap(), "a");
+                assert!(BatchInstant::now() >= deadline);
+                assert!(
+                    member
+                        .stage(&timer_scheduler, "deadline", 1..2, None)
+                        .is_none()
+                );
+                drop(member);
+                drop(
+                    timer_scheduler
+                        .groups
+                        .slots
+                        .clone()
+                        .acquire_many_owned(2)
+                        .await
+                        .unwrap(),
+                );
+                assert_eq!(timer_scheduler.waiting.get(), 0);
+                assert_eq!(timer_scheduler.pending.get(), 0);
+                drop(timer_scheduler);
+
+                // Sealing with G occupied forces deferred admission. Releasing G
+                // must advance the whole group without resuming the caller worker.
+                let holder = scheduler.submit("holder", 0..1, None).await.unwrap();
+                let release_holder = check(reads.recv().await.unwrap(), "holder", 0..1);
+                let batch = ReadBatch::new(scheduler.clone(), 2);
+                let member = batch.member();
+                let left = member.stage(&scheduler, "deferred", 0..2, None).unwrap();
+                let right = member.stage(&scheduler, "deferred", 2..4, None).unwrap();
+                assert_eq!(scheduler.groups.slots.available_permits(), 0);
+                drop(batch);
+                drop(member);
+                release_holder.send(Ok(Bytes::from_static(b"a"))).unwrap();
+                assert_eq!(holder.await.unwrap().unwrap(), "a");
+                check(reads.recv().await.unwrap(), "deferred", 0..4)
+                    .send(Ok(Bytes::from_static(b"abcd")))
+                    .unwrap();
+                assert_eq!(left.await.unwrap().unwrap(), "ab");
+                assert_eq!(right.await.unwrap().unwrap(), "cd");
 
                 // Exercise range-error fallback separately. If sealing defers admission
                 // because the queue is busy, it must not depend on the parked scan worker.
