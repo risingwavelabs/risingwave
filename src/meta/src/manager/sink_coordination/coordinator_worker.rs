@@ -79,9 +79,11 @@ type HandleId = usize;
 
 /// Terminal request that stops a coordinator worker.
 ///
-/// It is sent on its own oneshot channel and selected against the whole coordination future, so it
-/// also interrupts nested waits, such as waiting for writers to align during initialization or
-/// rescaling. The writer-registration channel and its event handling are not involved.
+/// It is sent on its own oneshot channel and observed only in
+/// `CoordinationHandleManager::next_event`, alongside the writer events. Every wait of the
+/// coordination loop goes through that method, including the nested waits for writers to align
+/// during initialization or rescaling, so the request interrupts all of them. Initialization,
+/// external commits and metadata updates in progress finish before the request is observed.
 pub(super) enum CoordinatorStopRequest {
     /// Stop the worker. Uncommitted epochs stay in `pending_sink_state` for recovery.
     Stop,
@@ -94,6 +96,36 @@ pub(super) enum CoordinatorStopRequest {
         target_epoch: u64,
         reply: oneshot::Sender<anyhow::Result<()>>,
     },
+}
+
+/// Error of the coordination loop.
+///
+/// `Stop` is not a failure. It carries the terminal request observed by the handle manager, which
+/// propagates through `?` like the failures, and only `execute_coordinator` tells them apart.
+enum CoordinationError {
+    Internal(anyhow::Error),
+    Sink(SinkError),
+    Stop(CoordinatorStopRequest),
+}
+
+type CoordinationResult<T> = Result<T, CoordinationError>;
+
+impl From<anyhow::Error> for CoordinationError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Internal(e)
+    }
+}
+
+impl From<SinkError> for CoordinationError {
+    fn from(e: SinkError) -> Self {
+        Self::Sink(e)
+    }
+}
+
+impl From<CoordinatorStopRequest> for CoordinationError {
+    fn from(request: CoordinatorStopRequest) -> Self {
+        Self::Stop(request)
+    }
 }
 
 #[derive(Default)]
@@ -297,6 +329,9 @@ struct CoordinationHandleManager {
     writer_handles: HashMap<HandleId, SinkWriterCoordinationHandle>,
     next_handle_id: HandleId,
     request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+    /// Receiver of the terminal stop request. It is polled only in `next_event` and never again
+    /// once the request is observed, because the request ends the coordination loop.
+    stop_rx: oneshot::Receiver<CoordinatorStopRequest>,
 }
 
 impl CoordinationHandleManager {
@@ -400,8 +435,14 @@ impl CoordinationHandleManagerEvent {
 }
 
 impl CoordinationHandleManager {
-    async fn next_event(&mut self) -> anyhow::Result<(HandleId, CoordinationHandleManagerEvent)> {
+    async fn next_event(
+        &mut self,
+    ) -> CoordinationResult<(HandleId, CoordinationHandleManagerEvent)> {
         select! {
+            // The manager dropping the sender without a request also means stop.
+            stop_request = &mut self.stop_rx => {
+                Err(stop_request.unwrap_or(CoordinatorStopRequest::Stop).into())
+            }
             handle = self.request_rx.recv() => {
                 let handle = handle.ok_or_else(|| anyhow!("end of writer request stream"))?;
                 if handle.param() != &self.param {
@@ -451,7 +492,7 @@ impl CoordinationHandleManager {
             .stop()
     }
 
-    async fn wait_init_handles(&mut self) -> anyhow::Result<HashSet<HandleId>> {
+    async fn wait_init_handles(&mut self) -> CoordinationResult<HashSet<HandleId>> {
         assert!(self.writer_handles.is_empty());
         let mut init_requests = AligningRequests::default();
         while !init_requests.aligned() {
@@ -466,7 +507,8 @@ impl CoordinationHandleManager {
             return Err(anyhow!(
                 "expect new handle during init, but got {}",
                 unexpected_event
-            ));
+            )
+            .into());
         }
         Ok(init_requests.handle_ids)
     }
@@ -474,7 +516,7 @@ impl CoordinationHandleManager {
     async fn alter_parallelisms(
         &mut self,
         altered_handles: impl Iterator<Item = HandleId>,
-    ) -> anyhow::Result<HashSet<HandleId>> {
+    ) -> CoordinationResult<HashSet<HandleId>> {
         let mut requests = AligningRequests::default();
         for handle_id in altered_handles {
             requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
@@ -538,9 +580,6 @@ pub struct CoordinatorWorker {
     /// committed epoch persisted in `pending_sink_state`.
     last_writer_acked_epoch: Option<u64>,
     curr_state: CoordinatorWorkerState,
-    /// Whether the commit coordinator has been initialized, so that a drain after the
-    /// coordination future is dropped knows whether to initialize it first.
-    coordinator_initialized: bool,
 }
 
 enum CoordinatorWorkerEvent {
@@ -600,35 +639,45 @@ impl CoordinatorWorker {
                 writer_handles: HashMap::new(),
                 next_handle_id: 0,
                 request_rx,
+                stop_rx,
             },
             last_writer_acked_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
-            coordinator_initialized: false,
         };
 
-        // The commit coordinator is kept outside the coordination future. When a stop request
-        // arrives, the future is dropped first, so the final drain below never runs concurrently
-        // with the normal commit path.
-        let stop_request = select! {
-            biased;
-            // The manager dropping the sender without a request also means stop.
-            stop_request = stop_rx => stop_request.unwrap_or(CoordinatorStopRequest::Stop),
-            result = worker.run_coordination(&db, &mut coordinator, subscriber) => {
-                if let Err(e) = result {
-                    for handle in worker.handle_manager.writer_handles.into_values() {
-                        handle.abort(Status::internal(format!(
-                            "failed to run coordination: {:?}",
-                            e.as_report()
-                        )))
-                    }
-                }
+        // The commit coordinator is kept outside the coordination loop, so that it can still be
+        // used for the final drain after the loop returns on a stop request.
+        let error: anyhow::Error = match worker
+            .run_coordination(&db, &mut coordinator, subscriber)
+            .await
+        {
+            Ok(()) => return,
+            Err(CoordinationError::Stop(stop_request)) => {
+                worker
+                    .handle_stop_request(&db, &mut coordinator, stop_request)
+                    .await;
                 return;
             }
+            Err(CoordinationError::Internal(e)) => e,
+            Err(CoordinationError::Sink(e)) => e.into(),
         };
+        for handle in worker.handle_manager.writer_handles.into_values() {
+            handle.abort(Status::internal(format!(
+                "failed to run coordination: {:?}",
+                error.as_report()
+            )))
+        }
+    }
 
+    async fn handle_stop_request(
+        mut self,
+        db: &DatabaseConnection,
+        coordinator: &mut SinkCommitCoordinator,
+        stop_request: CoordinatorStopRequest,
+    ) {
         match stop_request {
             CoordinatorStopRequest::Stop => {
-                for handle in worker.handle_manager.writer_handles.into_values() {
+                for handle in self.handle_manager.writer_handles.into_values() {
                     handle.abort(Status::internal("sink coordinator is stopped"));
                 }
             }
@@ -638,12 +687,13 @@ impl CoordinatorWorker {
             } => {
                 // The caller gives up after a timeout, which fails the replacement and triggers
                 // recovery, and recovery waits for this worker to exit. Abandon the drain once the
-                // caller is gone, so that a hanging external commit cannot block recovery. Like
-                // `Stop`, this may cancel an in-flight commit, and the epochs left pending are
+                // caller is gone, so that a hanging external commit cannot block recovery. This
+                // may cancel an in-flight commit of the drain. The worker then exits without
+                // reusing the coordinator, as after a crash, and the epochs left pending are
                 // committed in recovery.
-                let sink_id = worker.handle_manager.param.sink_id;
+                let sink_id = self.handle_manager.param.sink_id;
                 let result = select! {
-                    result = worker.drain_and_stop(&db, &mut coordinator, target_epoch) => result,
+                    result = self.drain_and_stop(db, coordinator, target_epoch) => result,
                     _ = reply.closed() => {
                         warn!(
                             %sink_id,
@@ -672,7 +722,9 @@ impl CoordinatorWorker {
     /// been collected and committed to Hummock. The old writers have already persisted their final
     /// pre-commit metadata, received their stop acknowledgements and flushed their log stores, so
     /// their handles are dropped without further checks, and every pending epoch is ready to
-    /// commit. A failure fails the replacement and triggers recovery.
+    /// commit. The commit coordinator has been initialized, because the coordination loop only
+    /// observes stop requests after initialization. A failure fails the replacement and triggers
+    /// recovery.
     async fn drain_and_stop(
         &mut self,
         db: &DatabaseConnection,
@@ -681,14 +733,6 @@ impl CoordinatorWorker {
     ) -> anyhow::Result<()> {
         self.handle_manager.writer_handles.clear();
         let sink_id = self.handle_manager.param.sink_id;
-
-        if !self.coordinator_initialized {
-            match &mut *coordinator {
-                SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
-                SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
-            }
-            self.coordinator_initialized = true;
-        }
 
         let mut last_committed_epoch = None;
         for (epoch, state, metadata, schema_change) in
@@ -776,7 +820,7 @@ impl CoordinatorWorker {
         &mut self,
         pending_handle_ids: &HashSet<HandleId>,
         two_phase_handler: &mut TwoPhaseCommitHandler,
-    ) -> anyhow::Result<()> {
+    ) -> CoordinationResult<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
         if two_phase_handler.has_uncommitted_schema_change() {
             // Delay handling init requests until all pending epochs are flushed.
@@ -791,7 +835,7 @@ impl CoordinatorWorker {
     async fn handle_init_requests_impl(
         &mut self,
         pending_handle_ids: impl IntoIterator<Item = HandleId>,
-    ) -> anyhow::Result<()> {
+    ) -> CoordinationResult<()> {
         let log_store_rewind_start_epoch = self.last_writer_acked_epoch;
         self.handle_manager
             .start(log_store_rewind_start_epoch, pending_handle_ids)?;
@@ -808,7 +852,9 @@ impl CoordinatorWorker {
                         )?;
                     }
                     other => {
-                        return Err(anyhow!("expect AlignInitialEpoch but got {}", other.name()));
+                        return Err(
+                            anyhow!("expect AlignInitialEpoch but got {}", other.name()).into()
+                        );
                     }
                 }
             }
@@ -826,7 +872,7 @@ impl CoordinatorWorker {
     async fn next_event(
         &mut self,
         two_phase_handler: &mut TwoPhaseCommitHandler,
-    ) -> anyhow::Result<CoordinatorWorkerEvent> {
+    ) -> CoordinationResult<CoordinatorWorkerEvent> {
         if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
             && two_phase_handler.is_empty()
         {
@@ -853,13 +899,14 @@ impl CoordinatorWorker {
         db: &DatabaseConnection,
         coordinator: &mut SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
-    ) -> anyhow::Result<()> {
+    ) -> CoordinationResult<()> {
         let sink_id = self.handle_manager.param.sink_id;
 
         let coordinator_init_permit = COORDINATOR_INIT_SEMAPHORE
             .acquire()
             .instrument_await("acquire_sink_coordinator_init_permit")
-            .await?;
+            .await
+            .map_err(anyhow::Error::from)?;
         let mut two_phase_handler = self
             .init_state_from_store(db, sink_id, subscriber, coordinator)
             .await?;
@@ -867,7 +914,6 @@ impl CoordinatorWorker {
             SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
             SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
         }
-        self.coordinator_initialized = true;
         drop(coordinator_init_permit);
 
         let mut running_handles = self.handle_manager.wait_init_handles().await?;
@@ -973,7 +1019,8 @@ impl CoordinatorWorker {
                             "got different schema change {:?} to prev schema change {:?}",
                             schema_change,
                             first_schema_change
-                        ));
+                        )
+                        .into());
                     }
                     metadatas.push(metadata);
                 }
