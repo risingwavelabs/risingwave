@@ -21,6 +21,7 @@ create source backfill_caching_up_src (k varchar, v int)
 with (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'test_backfill_progress_after_caching_up',
+    properties.fetch.wait.max.ms = 10,
     scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
