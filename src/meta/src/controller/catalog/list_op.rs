@@ -15,7 +15,6 @@
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
-use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 use sea_orm::prelude::DateTime;
 
 use super::*;
@@ -180,10 +179,7 @@ impl CatalogController {
 
     pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
         let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-        let dependencies = list_object_dependencies(&txn, false).await?;
-        txn.commit().await?;
-        Ok(dependencies)
+        inner.list_created_object_dependencies().await
     }
 
     pub async fn list_schemas(&self) -> MetaResult<Vec<PbSchema>> {

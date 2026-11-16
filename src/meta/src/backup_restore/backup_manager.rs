@@ -336,6 +336,11 @@ impl BackupManager {
     pub async fn manifest(&self) -> Arc<MetaSnapshotManifest> {
         self.backup_store.load().0.manifest().await
     }
+
+    /// Retain the current store and configuration while borrowing the store's manifest.
+    pub fn snapshot_storage(&self) -> Arc<(ObjectStoreMetaSnapshotStorage, StoreConfig)> {
+        self.backup_store.load_full()
+    }
 }
 
 /// `BackupWorker` creates a database snapshot.

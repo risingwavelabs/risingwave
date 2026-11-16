@@ -75,8 +75,7 @@ use crate::controller::scale::{
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
-    get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
-    resolve_no_shuffle_actor_mapping,
+    get_sink_fragment_by_ids, has_table_been_migrated, resolve_no_shuffle_actor_mapping,
 };
 use crate::error::MetaError;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
@@ -871,8 +870,7 @@ impl CatalogController {
 
     pub async fn count_streaming_jobs(&self) -> MetaResult<usize> {
         let inner = self.inner.read().await;
-        let count = StreamingJob::find().count(&inner.db).await?;
-        Ok(usize::try_from(count).context("streaming job count overflow")?)
+        inner.count_streaming_jobs().await
     }
 
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
@@ -1219,10 +1217,7 @@ impl CatalogController {
 
     pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
         let guard = self.env.shared_actor_info.read_guard();
-        guard
-            .iter_over_fragments()
-            .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
-            .collect_vec()
+        guard.worker_slot_mappings()
     }
 
     pub async fn list_fragment_descs_with_node(

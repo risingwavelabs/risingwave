@@ -63,7 +63,8 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
 use risingwave_pb::meta::{
-    PbObject, PbObjectGroup, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
+    ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup, PbTableCacheRefillPolicies,
+    PbTableRefillRuntimeConfig,
 };
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
@@ -190,6 +191,18 @@ fn explicit_cache_refill_policy(config_override: &str) -> MetaResult<Option<Cach
 }
 
 impl CatalogControllerInner {
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependency>> {
+        let txn = self.db.begin().await?;
+        let dependencies = list_object_dependencies(&txn, false).await?;
+        txn.commit().await?;
+        Ok(dependencies)
+    }
+
+    pub async fn count_streaming_jobs(&self) -> MetaResult<usize> {
+        let count = StreamingJob::find().count(&self.db).await?;
+        Ok(usize::try_from(count).context("streaming job count overflow")?)
+    }
+
     pub(crate) async fn table_cache_refill_policies_snapshot_if_job_has_explicit_policy(
         &self,
         job_id: JobId,
@@ -341,7 +354,9 @@ impl CatalogController {
     }
 
     /// Used in `NotificationService::subscribe`.
-    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    /// Acquire Hummock versioning and compaction group guards before this guard: `commit_epoch`
+    /// reads the catalog while holding those locks. Acquire synchronous snapshot guards last,
+    /// after all awaits, and retain the state guards until snapshot delivery and registration.
     pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, CatalogControllerInner> {
         self.inner.read().await
     }

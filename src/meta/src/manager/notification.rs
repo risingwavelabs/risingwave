@@ -28,7 +28,7 @@ use risingwave_pb::meta::{
 };
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tonic::Status;
 
 use crate::controller::SqlMetaStore;
@@ -101,61 +101,29 @@ impl From<SubscribeType> for Target {
     }
 }
 
-#[derive(Debug)]
-struct Task {
-    target: Target,
-    operation: Operation,
-    info: Info,
-    /// `None` means using the latest version published to the notification queue without
-    /// incrementing it.
-    version: Option<NotificationVersion>,
-}
-
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
 pub struct NotificationManager {
-    core: Arc<parking_lot::Mutex<NotificationManagerCore>>,
-    /// Sender used to add a notification into the waiting queue.
-    task_tx: UnboundedSender<Task>,
+    core: parking_lot::Mutex<NotificationManagerCore>,
     /// The current notification version generator.
     version_generator: Mutex<NotificationVersionGenerator>,
 }
 
 impl NotificationManager {
     pub async fn new(meta_store_impl: SqlMetaStore) -> Self {
-        // notification waiting queue.
-        let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
-        let core = Arc::new(parking_lot::Mutex::new(NotificationManagerCore::new()));
-        let core_clone = core.clone();
         let version_generator = NotificationVersionGenerator::new(meta_store_impl)
             .await
             .unwrap();
-        let mut latest_version = version_generator.current_version();
-
-        tokio::spawn(async move {
-            while let Some(task) = task_rx.recv().await {
-                if let Some(version) = task.version {
-                    latest_version = version;
-                }
-                let response = SubscribeResponse {
-                    status: None,
-                    operation: task.operation as i32,
-                    info: Some(task.info),
-                    version: latest_version,
-                };
-                core.lock().notify(task.target, response);
-            }
-        });
+        let core = NotificationManagerCore::new(version_generator.current_version());
 
         Self {
-            core: core_clone,
-            task_tx,
+            core: parking_lot::Mutex::new(core),
             version_generator: Mutex::new(version_generator),
         }
     }
 
     pub fn abort_all(&self) {
         let mut guard = self.core.lock();
-        *guard = NotificationManagerCore::new();
+        *guard = NotificationManagerCore::new(guard.latest_version);
         guard.exiting = true;
     }
 
@@ -167,16 +135,22 @@ impl NotificationManager {
         info: Info,
         version: Option<NotificationVersion>,
     ) {
-        let task = Task {
-            target,
-            operation,
-            info,
-            version,
+        // Publish immediately so callers can order notifications with snapshots by retaining
+        // the corresponding state guard, without leaving work pending in a background queue.
+        let mut core = self.core.lock();
+        if let Some(version) = version {
+            core.latest_version = version;
+        }
+        let response = SubscribeResponse {
+            status: None,
+            operation: operation as i32,
+            info: Some(info),
+            version: core.latest_version,
         };
-        self.task_tx.send(task).unwrap();
+        core.notify(target, response);
     }
 
-    /// Add a notification to the waiting queue and increase notification version.
+    /// Add a notification and increase notification version.
     async fn notify_with_version(
         &self,
         target: Target,
@@ -190,7 +164,7 @@ impl NotificationManager {
         version
     }
 
-    /// Assign consecutive versions to a frontend notification batch and enqueue the complete batch
+    /// Assign consecutive versions to a frontend notification batch and publish the complete batch
     /// while holding the version generator lock.
     async fn notify_frontend_batch(
         &self,
@@ -227,20 +201,31 @@ impl NotificationManager {
         self.notify(target, operation, info, None);
     }
 
-    pub fn notify_snapshot(
+    /// Create a channel, send the initial snapshot, and register its sender in one critical section.
+    /// The caller must retain all snapshot state guards until this returns, and acquire `core` last.
+    pub fn subscribe_with_snapshot(
         &self,
-        sender: UnboundedSender<Notification>,
+        subscribe_type: SubscribeType,
+        worker_key: WorkerKey,
         meta_snapshot: MetaSnapshot,
-    ) {
+    ) -> UnboundedReceiver<Notification> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let mut core = self.core.lock();
+        if core.exiting {
+            tracing::warn!("notification manager exiting.");
+            return receiver;
+        }
         let response = SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as i32,
             info: Some(Info::Snapshot(meta_snapshot)),
             version: Default::default(),
         };
-        let _ = sender.send(Ok(response)).inspect_err(|err| {
-            tracing::warn!("Failed to notify direct subscriber: {}", err.as_report());
-        });
+        sender
+            .send(Ok(response))
+            .expect("new notification receiver is open");
+        core.senders_of(subscribe_type).insert(worker_key, sender);
+        receiver
     }
 
     pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
@@ -382,6 +367,8 @@ impl NotificationManager {
 type SenderMap = HashMap<WorkerKey, UnboundedSender<Notification>>;
 
 struct NotificationManagerCore {
+    /// Catalog version of the latest synchronously published notification batch entry.
+    latest_version: NotificationVersion,
     /// The notification sender to frontends.
     frontend_senders: SenderMap,
     /// The notification sender to nodes that subscribes the hummock.
@@ -396,8 +383,9 @@ struct NotificationManagerCore {
 }
 
 impl NotificationManagerCore {
-    fn new() -> Self {
+    fn new(latest_version: NotificationVersion) -> Self {
         Self {
+            latest_version,
             frontend_senders: HashMap::new(),
             hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
@@ -475,13 +463,15 @@ mod tests {
             host: "a".to_owned(),
             port: 2,
         });
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
         let (tx3, mut rx3) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1.clone());
+        let mut rx1 = mgr.subscribe_with_snapshot(
+            SubscribeType::Hummock,
+            worker_key1.clone(),
+            MetaSnapshot::default(),
+        );
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2);
         mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3);
-        mgr.notify_snapshot(tx1, MetaSnapshot::default());
         assert!(rx1.recv().await.is_some());
         assert!(rx2.try_recv().is_err());
         assert!(rx3.try_recv().is_err());
@@ -567,15 +557,25 @@ mod tests {
             host: "a".to_owned(),
             port: 1,
         });
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key.clone(), tx1.clone());
-        mgr.notify_snapshot(tx1, MetaSnapshot::default());
+        let mut rx1 = mgr.subscribe_with_snapshot(
+            SubscribeType::Hummock,
+            worker_key.clone(),
+            MetaSnapshot::default(),
+        );
 
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key, tx2);
+        let mut rx2 = mgr.subscribe_with_snapshot(
+            SubscribeType::Hummock,
+            worker_key,
+            MetaSnapshot::default(),
+        );
 
-        assert!(rx1.recv().await.is_some());
-        assert!(rx2.try_recv().is_err());
+        for rx in [&mut rx1, &mut rx2] {
+            assert!(matches!(
+                rx.try_recv().unwrap().unwrap().info,
+                Some(Info::Snapshot(_))
+            ));
+            assert!(rx.try_recv().is_err());
+        }
 
         let version = mgr.current_version().await;
         mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
@@ -583,6 +583,73 @@ mod tests {
         let notification = rx2.recv().await.unwrap().unwrap();
         assert_eq!(notification.version, version);
         assert_eq!(mgr.current_version().await, version);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_registration_excludes_earlier_notifications() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        let (old_tx, mut old_rx) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Frontend, key.clone(), old_tx);
+
+        let database = risingwave_pb::catalog::Database {
+            id: 123.into(),
+            name: "before_snapshot".to_owned(),
+            ..Default::default()
+        };
+        let version = mgr
+            .notify_frontend(Operation::Add, Info::Database(database.clone()))
+            .await;
+        // Publication has completed before a replacement subscriber can be registered.
+        assert_eq!(old_rx.try_recv().unwrap().unwrap().version, version);
+
+        let mut rx = mgr.subscribe_with_snapshot(
+            SubscribeType::Frontend,
+            key,
+            MetaSnapshot {
+                databases: vec![database],
+                version: Some(risingwave_pb::meta::meta_snapshot::SnapshotVersion {
+                    catalog_version: version,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        assert!(matches!(
+            rx.try_recv().unwrap().unwrap().info,
+            Some(Info::Snapshot(_))
+        ));
+        // Give any background work a chance to run: no older update may arrive after snapshot.
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let next_version = mgr
+            .notify_frontend(Operation::Delete, Info::Database(Default::default()))
+            .await;
+        assert!(next_version > version);
+        assert_eq!(rx.try_recv().unwrap().unwrap().version, next_version);
+        assert!(old_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_subscription_after_abort_is_closed() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        mgr.abort_all();
+        let mut rx =
+            mgr.subscribe_with_snapshot(SubscribeType::Frontend, key, MetaSnapshot::default());
+
+        assert!(rx.recv().await.is_none());
+        assert!(mgr.core.lock().frontend_senders.is_empty());
     }
 
     #[tokio::test]

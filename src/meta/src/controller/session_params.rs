@@ -25,7 +25,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 use thiserror_ext::AsReport;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
 use crate::controller::SqlMetaStore;
@@ -125,6 +125,11 @@ impl SessionParamsController {
 
     pub async fn get_params(&self) -> SessionConfig {
         self.params.read().await.clone()
+    }
+
+    /// Retain the read guard until the initial notification snapshot has been registered.
+    pub async fn get_params_read_guard(&self) -> RwLockReadGuard<'_, SessionConfig> {
+        self.params.read().await
     }
 
     async fn flush_params(&self) -> MetaResult<()> {

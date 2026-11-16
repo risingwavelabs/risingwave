@@ -54,13 +54,9 @@ impl NotificationClient for MockNotificationClient {
         &self,
         subscribe_type: SubscribeType,
     ) -> Result<Self::Channel, ObserverError> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
         let worker_key = WorkerKey(self.addr.to_protobuf());
-        self.notification_manager
-            .insert_sender(subscribe_type, worker_key.clone(), tx.clone());
-
-        let hummock_version = self.hummock_manager.get_current_version().await;
+        let version_guard = self.hummock_manager.read_version().await;
+        let hummock_version = version_guard.version();
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version.into()),
             version: Some(Default::default()),
@@ -72,7 +68,11 @@ impl NotificationClient for MockNotificationClient {
             ..Default::default()
         };
 
-        self.notification_manager.notify_snapshot(tx, meta_snapshot);
+        let rx = self.notification_manager.subscribe_with_snapshot(
+            subscribe_type,
+            worker_key,
+            meta_snapshot,
+        );
 
         Ok(TestChannel(rx))
     }

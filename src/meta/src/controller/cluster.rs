@@ -571,7 +571,7 @@ impl ClusterControllerInner {
     }
 
     /// Get the total resource of the cluster.
-    async fn cluster_resource(&self) -> MetaResult<ClusterResource> {
+    pub async fn cluster_resource(&self) -> MetaResult<ClusterResource> {
         // For each hostname, we only consider the maximum resource, in case a host has multiple nodes.
         let mut per_host = HashMap::new();
 

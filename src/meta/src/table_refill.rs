@@ -14,24 +14,25 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_meta_model::{FragmentId, WorkerId};
 use risingwave_pb::meta::{PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig};
 
 use crate::controller::fragment::FragmentServingInfo;
 use crate::manager::NotificationVersion;
-use crate::serving::{ServingVnodeMappingRef, to_pb_serving_table_vnode_mappings};
+use crate::serving::{table_vnode_mappings_by_worker, to_pb_serving_table_vnode_mappings};
 
 pub fn build_hummock_table_refill_runtime_config(
-    serving_vnode_mapping: &ServingVnodeMappingRef,
+    serving_vnode_mappings: &HashMap<FragmentId, WorkerSlotMapping>,
     worker_id: WorkerId,
     table_cache_refill_policies: PbTableCacheRefillPolicies,
     fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
     version: NotificationVersion,
 ) -> PbTableRefillRuntimeConfig {
-    let table_vnode_mapping = serving_vnode_mapping
-        .table_vnode_mappings_by_worker([worker_id], fragment_serving_infos)
-        .remove(&worker_id)
-        .expect("requested worker must have a table vnode mapping");
+    let table_vnode_mapping =
+        table_vnode_mappings_by_worker(serving_vnode_mappings, [worker_id], fragment_serving_infos)
+            .remove(&worker_id)
+            .expect("requested worker must have a table vnode mapping");
 
     PbTableRefillRuntimeConfig {
         table_cache_refill_policies: Some(table_cache_refill_policies),
@@ -106,7 +107,7 @@ mod tests {
             }],
         };
         let config = build_hummock_table_refill_runtime_config(
-            &serving_vnode_mapping,
+            &serving_vnode_mapping.read_guard(),
             worker1.id,
             policies.clone(),
             &fragment_serving_infos,

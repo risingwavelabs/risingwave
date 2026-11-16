@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::monitor::MonitoredRwLockGuard;
 use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
@@ -37,8 +38,9 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tokio::sync::RwLockReadGuard;
 
-use super::GroupStateValidator;
+use super::{CompactionGroupManager, GroupStateValidator};
 use crate::MetaResult;
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
@@ -49,6 +51,28 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
 use crate::model::VarTransaction;
+
+/// Holds the versioning read lock, protecting the Hummock version until dropped.
+pub struct HummockVersionReadGuard<'a> {
+    guard: MonitoredRwLockGuard<RwLockReadGuard<'a, Versioning>>,
+}
+
+impl HummockVersionReadGuard<'_> {
+    pub fn version(&self) -> &HummockVersion {
+        &self.guard.current_version
+    }
+}
+
+/// Holds the compaction group manager read lock, protecting write limits until dropped.
+pub struct HummockWriteLimitsReadGuard<'a> {
+    guard: MonitoredRwLockGuard<RwLockReadGuard<'a, CompactionGroupManager>>,
+}
+
+impl HummockWriteLimitsReadGuard<'_> {
+    pub fn write_limits(&self) -> &HashMap<CompactionGroupId, WriteLimit> {
+        &self.guard.write_limit
+    }
+}
 
 #[derive(Default)]
 pub struct Versioning {
@@ -171,6 +195,18 @@ impl HummockManager {
             .as_ref())
     }
 
+    /// Keep versioning locked until the subscription snapshot has been sent and registered.
+    /// Acquire this before the catalog lock: `commit_epoch` reads the catalog while holding
+    /// the versioning write lock (and, when creating groups, the compaction group manager lock).
+    pub async fn read_version(&self) -> HummockVersionReadGuard<'_> {
+        HummockVersionReadGuard {
+            guard: self
+                .versioning
+                .read_with_process_name("notification_snapshot")
+                .await,
+        }
+    }
+
     pub async fn on_current_version_and_table_change_log<T>(
         &self,
         mut f: impl FnMut(&HummockVersion, &TableChangeLogs) -> T,
@@ -281,6 +317,16 @@ impl HummockManager {
             .read_with_process_name("write_limits")
             .await;
         guard.write_limit.clone()
+    }
+
+    /// Acquire after versioning and before catalog, retaining the guard through registration.
+    pub async fn read_write_limits(&self) -> HummockWriteLimitsReadGuard<'_> {
+        HummockWriteLimitsReadGuard {
+            guard: self
+                .compaction_group_manager
+                .read_with_process_name("notification_snapshot")
+                .await,
+        }
     }
 
     pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
