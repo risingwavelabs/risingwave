@@ -10,7 +10,7 @@ ai_decide(
     model_url VARCHAR,
     model VARCHAR,
     questions JSONB,
-    api_key VARCHAR
+    api_key VARCHAR [, headers MAP(VARCHAR, VARCHAR)]
 ) -> STRUCT<...>
 ```
 
@@ -106,7 +106,28 @@ Additional response metadata is ignored.
 State, endpoint, model and API key may be expressions or columns. A SQL NULL in
 any of these four arguments produces a NULL STRUCT without a request; JSON null
 is sent as a real state. Questions must be a non-null constant. The function
-accepts exactly five arguments; there is no execution-options argument.
+accepts five arguments, or a sixth `headers MAP(VARCHAR, VARCHAR)` argument.
+Omitting `headers` or passing an empty map adds no custom headers. A SQL NULL
+map produces a NULL result without sending a request. Header names and values
+must be strings; values must not be NULL. Names must be valid HTTP header tokens
+and values must be valid HTTP header values (no CR/LF). Header names are
+case-insensitive: duplicate names differing only in case and any `Authorization`
+entry are rejected. The API key remains the sole source of Bearer authentication.
+Invalid headers or maps exceeding the HTTP client's header capacity are
+request-construction errors, outside the retry loop.
+
+Headers can depend on each input row. If `ticket_context` also has a
+`tenant_id` column, for example:
+
+```sql
+SELECT ai_decide(state, model_url, model,
+    ai_questions(ai_prob_question('resolved', 'Is the issue resolved?')),
+    api_key, MAP {'X-Tenant-ID': tenant_id::varchar, 'X-Route': 'production'})
+FROM ticket_context;
+```
+
+Header options configure request content, not execution settings. The JSON
+request body is unchanged. Retries reuse the same validated headers.
 
 `model_url` is the complete HTTP(S) evaluation endpoint, for example
 `https://api.impossibl.com/v1/systemone`. It is separate from the model identifier,
@@ -117,10 +138,10 @@ is one context, not a batch of independent requests. The AI name does not imply
 support for arbitrary model-provider protocols.
 
 This version accepts an ordinary VARCHAR API key; SQL SECRET references are not
-supported. Expression displays redact the key argument and HTTP/response errors
-exclude request and response contents. SQL statement text, binding errors,
-catalog definitions and argument columns can still contain key literals. Use
-dummy credentials in checked-in SQL and test fixtures.
+supported. Expression displays redact the key and headers arguments, and
+HTTP/response errors exclude request and response contents. SQL statement text,
+binding errors, catalog definitions and argument columns can still contain key
+or header literals. Use dummy credentials in checked-in SQL and test fixtures.
 
 ## Constructing grouped or windowed context
 
@@ -271,7 +292,8 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
 - Schema tests: named mixed result types and invalid question definitions.
 - Mock HTTP tests: request shape, response decoding and contract failures,
   retries/timeouts and truncated bodies, known/chunked response size limits,
-  credential redaction, scalar arguments, NULL and invisible rows, empty chunks,
+  credential redaction, custom header validation and per-row values, scalar arguments,
+  NULL and invisible rows, empty chunks,
   concurrent requests across chunks, ordered results despite a blocked first row, and cancellation
   during persistent failure.
 - Project tests: saved results across updates, deletes and recovery; retrying evaluations

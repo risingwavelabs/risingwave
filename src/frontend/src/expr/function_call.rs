@@ -52,7 +52,7 @@ impl std::fmt::Debug for FunctionCall {
         if self.func_type == ExprType::AiDecide {
             let mut builder = f.debug_tuple("AiDecide");
             for (index, child) in self.inputs.iter().enumerate() {
-                if index == 4 {
+                if index >= 4 {
                     builder.field(&"<redacted>");
                 } else {
                     builder.field(child);
@@ -337,7 +337,7 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
         if that.func_type == ExprType::AiDecide {
             let mut builder = f.debug_tuple("AiDecide");
             for (index, child) in that.inputs.iter().enumerate() {
-                if index == 4 {
+                if index >= 4 {
                     builder.field(&"<redacted>");
                 } else {
                     builder.field(&ExprDisplay {

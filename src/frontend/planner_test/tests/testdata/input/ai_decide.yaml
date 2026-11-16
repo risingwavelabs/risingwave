@@ -172,3 +172,36 @@
   sql: SELECT ai_decide(NULL::jsonb, 'url', 'model', '{"q":{"type":"text","instructions":"Explain?"}}'::jsonb, 'key');
   expected_outputs:
     - binder_error
+
+- name: optional header map supports row values and redacts credentials
+  sql: |
+    CREATE TABLE contexts (state JSONB, tenant VARCHAR);
+    SELECT ai_decide(state, 'http://127.0.0.1:1/evaluate', 'test-model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key',
+      MAP {'X-Tenant-ID': tenant, 'X-Api-Key': 'planner-header-secret'}) FROM contexts;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan
+    - stream_dist_plan
+
+- name: header values must be strings
+  sql: |
+    SELECT ai_decide('{}'::jsonb, 'url', 'model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {'X-Tenant-ID': 42});
+  expected_outputs:
+    - binder_error
+
+- name: header keys must be strings
+  sql: |
+    SELECT ai_decide('{}'::jsonb, 'url', 'model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {42: 'tenant'});
+  expected_outputs:
+    - binder_error
+
+- name: more than six arguments is rejected
+  sql: |
+    SELECT ai_decide('{}'::jsonb, 'url', 'model',
+      ai_questions(ai_prob_question('q', 'Resolved?')), 'key', MAP {'X-Tenant-ID': 'tenant'}, 1);
+  expected_outputs:
+    - binder_error
