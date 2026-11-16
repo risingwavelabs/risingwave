@@ -1,0 +1,35 @@
+# SQL NULL arguments do not make a request, even with an invalid endpoint.
+query T
+SELECT ai_decide(NULL::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key');
+----
+NULL
+
+query T
+SELECT CASE WHEN false THEN (ai_decide('{}'::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key')).q ELSE 0::float8 END;
+----
+0
+
+# JSON null is a real input. Request-construction errors follow ordinary strictness.
+statement ok
+SET batch_expr_strict_mode = true;
+
+statement error ai_decide: invalid model_url
+SELECT coalesce((ai_decide('null'::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key')).q, 0);
+
+statement ok
+SET batch_expr_strict_mode = false;
+
+query R
+SELECT coalesce((ai_decide('null'::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key')).q, -1);
+----
+-1
+
+statement ok
+SET batch_expr_strict_mode TO DEFAULT;
+
+# The fixture uses a real local HTTP server and psql, which cannot run under madsim.
+skipif madsim
+system ok
+python3 e2e_test/streaming/ai_decide_http.py
+----
+ai_decide HTTP integration passed
