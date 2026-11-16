@@ -281,6 +281,14 @@
     select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
   expected_outputs:
     - optimizer_error
+- name: a correlated equality between integers of different widths keeps the outer column type
+  sql: |
+    CREATE TABLE t1(a BIGINT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v VARCHAR);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
 
 - name: test grouping sets subquery 1
   sql: |
