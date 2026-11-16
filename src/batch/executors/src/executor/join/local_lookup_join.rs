@@ -142,11 +142,8 @@ impl InnerSideExecutorBuilder {
         let prost_exchange_source = PbExchangeSource {
             task_output_id: Some(TaskOutputId {
                 task_id: Some(PbTaskId {
-                    // FIXME: We should replace this random generated uuid to current query_id for
-                    // better dashboard. However, due to the lack of info of
-                    // stage_id and task_id, we can not do it now. Now just make sure it will not
-                    // conflict.
                     query_id: self.task_id.query_id.clone(),
+                    // Offset the stage id so that it does not conflict with the stages of the query.
                     stage_id: self.task_id.stage_id + 10000 + self.next_stage_id as u32,
                     task_id: (*id).into(),
                 }),

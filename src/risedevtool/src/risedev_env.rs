@@ -17,7 +17,10 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{Application, HummockInMemoryStrategy, ServiceConfig, add_hummock_backend};
+use crate::{
+    Application, DORIS_CONTAINER_HOST, DORIS_CONTAINER_QUERY_PORT, HummockInMemoryStrategy,
+    STARROCKS_CONTAINER_HOST, STARROCKS_CONTAINER_QUERY_PORT, ServiceConfig, add_hummock_backend,
+};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future
@@ -140,6 +143,82 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::Doris(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let query_port = &c.query_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let admin_user = &c.admin_user;
+                let admin_password = &c.admin_password;
+                let url = format!("http://{host}:{http_port}");
+                writeln!(env, r#"DORIS_HOST="{host}""#).unwrap();
+                writeln!(env, r#"DORIS_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"DORIS_QUERY_PORT="{query_port}""#).unwrap();
+                writeln!(env, r#"DORIS_USER="{user}""#).unwrap();
+                writeln!(env, r#"DORIS_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"DORIS_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"DORIS_ADMIN_USER="{admin_user}""#).unwrap();
+                writeln!(env, r#"DORIS_ADMIN_PASSWORD="{admin_password}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"DORIS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                    writeln!(env, r#"DORIS_CONTAINER_HOST="{DORIS_CONTAINER_HOST}""#).unwrap();
+                    writeln!(
+                        env,
+                        r#"DORIS_CONTAINER_QUERY_PORT="{DORIS_CONTAINER_QUERY_PORT}""#
+                    )
+                    .unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_DORIS_WITH_OPTIONS_COMMON="connector='doris',doris.url='{url}',doris.user='{user}',doris.password='{password}',doris.database='{database}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::Starrocks(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let query_port = &c.query_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let admin_user = &c.admin_user;
+                let admin_password = &c.admin_password;
+                let database_is_disposable = !c.user_managed || c.database_is_disposable;
+
+                writeln!(env, r#"STARROCKS_HOST="{host}""#).unwrap();
+                writeln!(env, r#"STARROCKS_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"STARROCKS_QUERY_PORT="{query_port}""#).unwrap();
+                writeln!(env, r#"STARROCKS_USER="{user}""#).unwrap();
+                writeln!(env, r#"STARROCKS_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"STARROCKS_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"STARROCKS_ADMIN_USER="{admin_user}""#).unwrap();
+                writeln!(env, r#"STARROCKS_ADMIN_PASSWORD="{admin_password}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"STARROCKS_DATABASE_IS_DISPOSABLE="{database_is_disposable}""#
+                )
+                .unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                    writeln!(
+                        env,
+                        r#"STARROCKS_CONTAINER_HOST="{STARROCKS_CONTAINER_HOST}""#
+                    )
+                    .unwrap();
+                    writeln!(
+                        env,
+                        r#"STARROCKS_CONTAINER_QUERY_PORT="{STARROCKS_CONTAINER_QUERY_PORT}""#
+                    )
+                    .unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_STARROCKS_WITH_OPTIONS_COMMON="connector='starrocks',starrocks.host='{host}',starrocks.mysqlport='{query_port}',starrocks.httpport='{http_port}',starrocks.user='{user}',starrocks.password='{password}',starrocks.database='{database}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;
@@ -156,6 +235,24 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 // Note: user and password are not included in the common WITH options.
                 // It's expected to create another dedicated user for the source.
                 writeln!(env, r#"RISEDEV_MYSQL_WITH_OPTIONS_COMMON="connector='mysql-cdc',hostname='{host}',port='{port}'""#,).unwrap();
+            }
+            ServiceConfig::MariaDb(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                writeln!(env, r#"MARIADB_HOST="{host}""#).unwrap();
+                writeln!(env, r#"MARIADB_TCP_PORT="{port}""#).unwrap();
+                writeln!(env, r#"RISEDEV_MARIADB_USER="{user}""#).unwrap();
+                writeln!(env, r#"MARIADB_PWD="{password}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"RISEDEV_MARIADB_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_MARIADB_WITH_OPTIONS_COMMON="connector='mariadb-cdc',hostname='{host}',port='{port}'""#,
+                )
+                .unwrap();
             }
             ServiceConfig::Pubsub(c) => {
                 let address = &c.address;

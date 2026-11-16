@@ -1,0 +1,94 @@
+control substitution on
+
+statement ok
+drop source if exists s_mysql_sanitized_name cascade;
+
+system ok
+mysql --default-character-set=utf8mb4 <<'EOF'
+DROP USER IF EXISTS 'sanitized_name_cdc'@'%';
+DROP DATABASE IF EXISTS mysql_sanitized_name;
+CREATE DATABASE mysql_sanitized_name;
+CREATE USER 'sanitized_name_cdc'@'%' IDENTIFIED BY 'sanitized_name_cdc_pwd';
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'sanitized_name_cdc'@'%';
+USE mysql_sanitized_name;
+CREATE TABLE `t_1` (id INT PRIMARY KEY, v VARCHAR(20));
+CREATE TABLE `t$1` (id INT PRIMARY KEY, v VARCHAR(20));
+CREATE TABLE `t#1` (id INT PRIMARY KEY, v VARCHAR(20));
+CREATE TABLE `t中1` (id INT PRIMARY KEY, v VARCHAR(20));
+INSERT INTO `t_1` VALUES (10, 'snapshot');
+INSERT INTO `t$1` VALUES (20, 'snapshot');
+INSERT INTO `t#1` VALUES (30, 'snapshot');
+INSERT INTO `t中1` VALUES (40, 'snapshot');
+EOF
+
+statement ok
+create source s_mysql_sanitized_name with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = 'sanitized_name_cdc',
+  password = 'sanitized_name_cdc_pwd',
+  database.name = 'mysql_sanitized_name'
+);
+
+control substitution off
+
+statement ok
+create table rw_underscore (id int primary key, v varchar)
+from s_mysql_sanitized_name table 'mysql_sanitized_name.t_1';
+
+statement ok
+create table rw_dollar (id int primary key, v varchar)
+from s_mysql_sanitized_name table 'mysql_sanitized_name.t$1';
+
+statement ok
+create table rw_hash (id int primary key, v varchar)
+from s_mysql_sanitized_name table 'mysql_sanitized_name.t#1';
+
+statement ok
+create table rw_non_ascii (id int primary key, v varchar)
+from s_mysql_sanitized_name table 'mysql_sanitized_name.t中1';
+
+query TIT retry 10 backoff 1s
+select 'underscore', * from rw_underscore
+union all select 'dollar', * from rw_dollar
+union all select 'hash', * from rw_hash
+union all select 'non_ascii', * from rw_non_ascii
+order by 2;
+----
+underscore 10 snapshot
+dollar 20 snapshot
+hash 30 snapshot
+non_ascii 40 snapshot
+
+system ok
+mysql --default-character-set=utf8mb4 <<'EOF'
+USE mysql_sanitized_name;
+INSERT INTO `t$1` VALUES (21, 'stream');
+INSERT INTO `t#1` VALUES (31, 'stream');
+INSERT INTO `t中1` VALUES (41, 'stream');
+INSERT INTO `t_1` VALUES (11, 'stream');
+EOF
+
+query TIT retry 10 backoff 1s
+select 'underscore', * from rw_underscore
+union all select 'dollar', * from rw_dollar
+union all select 'hash', * from rw_hash
+union all select 'non_ascii', * from rw_non_ascii
+order by 2;
+----
+underscore 10 snapshot
+underscore 11 stream
+dollar 20 snapshot
+dollar 21 stream
+hash 30 snapshot
+hash 31 stream
+non_ascii 40 snapshot
+non_ascii 41 stream
+
+statement ok
+drop source s_mysql_sanitized_name cascade;
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS mysql_sanitized_name;
+    DROP USER IF EXISTS 'sanitized_name_cdc'@'%';
+"

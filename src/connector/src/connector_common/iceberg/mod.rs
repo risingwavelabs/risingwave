@@ -14,6 +14,9 @@
 
 pub mod compaction;
 mod jni_catalog;
+#[cfg(any(test, feature = "test"))]
+pub mod mock_catalog;
+#[cfg(not(any(test, feature = "test")))]
 mod mock_catalog;
 mod storage_catalog;
 

@@ -22,9 +22,10 @@ impl Planner {
         &mut self,
         relation: Relation,
         key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
     ) -> Result<PlanRef> {
         let root = self.plan_relation(relation)?;
-        let plan = LogicalChangeLog::create(root, key_indices);
+        let plan = LogicalChangeLog::create(root, key_indices, distribution_key_indices);
         Ok(plan)
     }
 }

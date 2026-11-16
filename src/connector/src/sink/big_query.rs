@@ -825,23 +825,22 @@ impl BigQuerySinkWriter {
         if serialized_rows.is_empty() {
             return Ok(0);
         }
-        let mut result = Vec::new();
-        let mut result_inner = Vec::new();
-        let mut size_count = 0;
-        for i in serialized_rows {
-            size_count += i.len();
-            if size_count > MAX_ROW_SIZE {
-                result.push(result_inner);
-                result_inner = Vec::new();
-                size_count = i.len();
+        let mut batches = Vec::new();
+        let mut batch = Vec::new();
+        let mut batch_size = 0;
+        for row in serialized_rows {
+            if !batch.is_empty() && batch_size + row.len() > MAX_ROW_SIZE {
+                batches.push(std::mem::take(&mut batch));
+                batch_size = 0;
             }
-            result_inner.push(i);
+            batch_size += row.len();
+            batch.push(row);
         }
-        if !result_inner.is_empty() {
-            result.push(result_inner);
+        if !batch.is_empty() {
+            batches.push(batch);
         }
-        let len = result.len();
-        for serialized_rows in result {
+        let len = batches.len();
+        for serialized_rows in batches {
             let rows = AppendRowsRequestRows::ProtoRows(ProtoData {
                 writer_schema: Some(self.writer_pb_schema.clone()),
                 rows: Some(ProtoRows { serialized_rows }),
@@ -868,7 +867,7 @@ struct ChangeSequenceClock {
 impl ChangeSequenceClock {
     const fn new() -> Self {
         Self {
-            next: parking_lot::const_mutex((0, 0)),
+            next: Mutex::new((0, 0)),
         }
     }
 
@@ -1086,7 +1085,9 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Variant => {
-            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Variant")));
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Don't support Variant"
+            )));
         }
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
         DataType::Float32 | DataType::Int256 => {
@@ -1320,6 +1321,53 @@ mod test {
             );
         }
         rows
+    }
+
+    #[test]
+    fn test_oversized_first_row_not_sent_as_empty_batch() {
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(DataType::Varchar, "v"),
+            ],
+        };
+        let (request_sender, mut request_rx) = mpsc::unbounded_channel();
+        let client = StorageWriterClient {
+            environment: Environment::Emulator(String::new()),
+            request_sender,
+        };
+        let mut writer = BigQuerySinkWriter::with_client(
+            sink_config("upsert"),
+            schema,
+            vec![0],
+            false,
+            client,
+        )
+        .unwrap();
+
+        let big = "x".repeat(9 * 1024 * 1024);
+        let small = "x".repeat(4 * 1024 * 1024 + 512 * 1024);
+        let chunk = StreamChunk::from_pretty(&format!(
+            " I T
+            + 1 {big}
+            + 2 {small}
+            + 3 {small}"
+        ));
+        let batch_num = writer.write_chunk(chunk).unwrap();
+
+        let mut batch_row_counts = vec![];
+        while let Ok(request) = request_rx.try_recv() {
+            let Some(AppendRowsRequestRows::ProtoRows(ProtoData {
+                rows: Some(proto_rows),
+                ..
+            })) = request.rows
+            else {
+                panic!("expected proto rows");
+            };
+            batch_row_counts.push(proto_rows.serialized_rows.len());
+        }
+        assert_eq!(batch_num, 3);
+        assert_eq!(batch_row_counts, vec![1, 1, 1]);
     }
 
     #[test]

@@ -127,6 +127,7 @@ async fn start_v3_test_cluster(
     } else {
         ""
     };
+    // Fault-injection tests need frequent commits within their short failure windows.
     session
         .run(&format!(
             "CREATE SINK test_v3_sink FROM test_v3_mv \
@@ -139,6 +140,7 @@ async fn start_v3_test_cluster(
                is_exactly_once = 'true', \
                enable_pk_index = 'true', \
                format_version = '3', \
+               commit_checkpoint_interval = '1', \
                {compaction_options} \
                type = 'upsert' \
              )"

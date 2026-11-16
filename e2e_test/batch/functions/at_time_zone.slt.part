@@ -37,3 +37,9 @@ select local AT TIME ZONE tz from t order by 1;
 
 statement ok
 drop table t;
+
+# 2026f
+query T
+select '2026-11-02T12:00:00Z'::timestamptz AT TIME ZONE 'America/Vancouver';
+----
+2026-11-02 05:00:00

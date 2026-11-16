@@ -295,6 +295,10 @@ impl<RF: RankFuncCount> WindowState for RankState<RF> {
         }
     }
 
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     fn slide(&mut self) -> Result<(Datum, StateEvictHint)> {
         let (rank, evict_hint) = self.slide_inner();
         Ok((Some(rank.into()), evict_hint))

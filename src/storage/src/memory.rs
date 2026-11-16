@@ -710,6 +710,10 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     type Iter = RangeKvStateStoreIter<R>;
     type RevIter = RangeKvStateStoreRevIter<R>;
 
+    fn read_epoch(&self) -> Option<u64> {
+        Some(self.epoch)
+    }
+
     async fn iter(
         &self,
         key_range: TableKeyRange,
@@ -957,7 +961,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         epoch: HummockReadEpoch,
         options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
-        Ok(self.new_read_snapshot_impl(epoch.get_epoch(), options.table_id))
+        Ok(self.new_read_snapshot_impl(epoch.get_epoch().unwrap_or(u64::MAX), options.table_id))
     }
 
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {

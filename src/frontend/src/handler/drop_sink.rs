@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
+use crate::catalog::RelationKind;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
@@ -47,7 +48,15 @@ pub async fn handle_drop_sink(
                             .notice(format!("sink \"{}\" does not exist, skipping", sink_name))
                             .into())
                     } else {
-                        Err(e.into())
+                        Err(catalog_reader
+                            .wrong_kind_for_drop(
+                                db_name,
+                                schema_path,
+                                &sink_name,
+                                RelationKind::Sink,
+                            )
+                            .unwrap_or(e)
+                            .into())
                     };
                 }
             };

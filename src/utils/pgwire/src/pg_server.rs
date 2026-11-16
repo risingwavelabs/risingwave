@@ -763,25 +763,27 @@ mod tests {
 
         use base64::Engine;
         use jsonwebtoken::{Algorithm, EncodingKey, Header};
-        use rsa::pkcs1::EncodeRsaPrivateKey;
-        use rsa::traits::PublicKeyParts;
-        use rsa::{RsaPrivateKey, RsaPublicKey};
+        use openssl::pkey::{Private, Public};
+        use openssl::rsa::Rsa;
         use serde_json::json;
 
         use crate::pg_server::{Jwk, Jwks, resolve_oauth_audience, validate_jwt_with_jwks};
 
-        fn create_test_rsa_keys() -> (RsaPrivateKey, RsaPublicKey) {
-            let mut rng = rand::thread_rng();
-            let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate a key");
-            let public_key = RsaPublicKey::from(&private_key);
+        fn create_test_rsa_keys() -> (Rsa<Private>, Rsa<Public>) {
+            let private_key = Rsa::generate(2048).expect("failed to generate a key");
+            let public_key = Rsa::from_public_components(
+                private_key.n().to_owned().unwrap(),
+                private_key.e().to_owned().unwrap(),
+            )
+            .unwrap();
             (private_key, public_key)
         }
 
-        fn create_test_jwks(public_key: &RsaPublicKey, kid: &str, alg: Option<&str>) -> Jwks {
-            let n = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(public_key.n().to_bytes_be());
-            let e = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(public_key.e().to_bytes_be());
+        fn create_test_jwks(public_key: &Rsa<Public>, kid: &str, alg: Option<&str>) -> Jwks {
+            let n =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n().to_vec());
+            let e =
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_vec());
 
             Jwks {
                 keys: vec![Jwk {
@@ -795,7 +797,7 @@ mod tests {
         }
 
         fn create_jwt_token(
-            private_key: &RsaPrivateKey,
+            private_key: &Rsa<Private>,
             kid: &str,
             algorithm: Algorithm,
             issuer: &str,
@@ -819,13 +821,8 @@ mod tests {
                 claims[key] = value;
             }
 
-            let encoding_key = EncodingKey::from_rsa_pem(
-                private_key
-                    .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
-                    .unwrap()
-                    .as_bytes(),
-            )
-            .unwrap();
+            let encoding_key =
+                EncodingKey::from_rsa_pem(&private_key.private_key_to_pem().unwrap()).unwrap();
 
             jsonwebtoken::encode(&header, &claims, &encoding_key).unwrap()
         }

@@ -211,16 +211,15 @@ async fn deleted_catalog_cannot_start_a_fresh_registration() {
 #[cfg(not(madsim))]
 async fn initialized_coordinator(
     sink_id: SinkId,
-    config: IcebergConfig,
+    _config: IcebergConfig,
     db: sea_orm::DatabaseConnection,
 ) -> anyhow::Result<IcebergPkIndexSinkCoordinator> {
-    Box::pin(coordinator_with_snapshot(sink_id, config, db, None)).await
+    Box::pin(coordinator_with_snapshot(sink_id, db, None)).await
 }
 
 #[cfg(not(madsim))]
 async fn coordinator_with_snapshot(
     sink_id: SinkId,
-    config: IcebergConfig,
     db: sea_orm::DatabaseConnection,
     snapshot_id: Option<i64>,
 ) -> anyhow::Result<IcebergPkIndexSinkCoordinator> {
@@ -274,7 +273,7 @@ async fn coordinator_with_snapshot(
             .build()?;
     }
     Ok(IcebergPkIndexSinkCoordinator::for_test(
-        sink_id, table, catalog, config, db,
+        sink_id, table, catalog, db,
     ))
 }
 
@@ -447,9 +446,9 @@ async fn readiness_reads_the_current_head_instead_of_the_initial_head() {
         .config())
     .clone();
     config.enable_compaction = true;
-    manager.on_sink_config_changed(sink_id, config.clone());
+    manager.on_sink_config_changed(sink_id, config);
     let db = compaction.env.meta_store_ref().conn.clone();
-    *coordinator.lock().await = Box::pin(coordinator_with_snapshot(sink_id, config, db, Some(42)))
+    *coordinator.lock().await = Box::pin(coordinator_with_snapshot(sink_id, db, Some(42)))
         .await
         .unwrap();
     manager

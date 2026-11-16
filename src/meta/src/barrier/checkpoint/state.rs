@@ -1599,6 +1599,16 @@ impl DatabaseCheckpointControl {
             }
 
             Some(Command::ConnectorPropsChange(config)) => {
+                // PK-index commit pacing lives in Meta rather than in the sink executor.
+                for (object_id, properties) in &config {
+                    if let Some(IndependentCheckpointJob::IcebergV3(job)) = self
+                        .independent_checkpoint_job_controls
+                        .get_mut(&object_id.as_job_id())
+                        .and_then(IndependentCheckpointJobControl::running_mut)
+                    {
+                        job.update_commit_checkpoint_interval(properties)?;
+                    }
+                }
                 let mutation = Some(Command::connector_props_change_to_mutation(&config));
                 let (table_ids, node_actors) = self.collect_base_info();
                 (
