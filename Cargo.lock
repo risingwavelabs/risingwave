@@ -15153,6 +15153,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
+ "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.17",
  "thiserror-ext",
