@@ -19,6 +19,7 @@ pub(crate) mod separate_consecutive_join_rule;
 pub(crate) mod split_now_and_rule;
 pub(crate) mod split_now_or_rule;
 pub(crate) mod stream_project_merge_rule;
+pub(crate) mod stream_project_split_rule;
 
 mod prelude {
     pub(super) use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef};
