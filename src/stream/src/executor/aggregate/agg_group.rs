@@ -243,11 +243,12 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
 
 impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
     fn estimated_heap_size(&self) -> usize {
-        // TODO(rc): should include the size of `prev_inter_states` and `prev_outputs`
         self.states
             .iter()
             .map(|state| state.estimated_heap_size())
-            .sum()
+            .sum::<usize>()
+            + self.prev_inter_states.estimated_heap_size()
+            + self.prev_outputs.estimated_heap_size()
     }
 }
 
@@ -622,5 +623,127 @@ impl AggStateCacheStats {
     fn merge(&mut self, other: Self) {
         self.agg_state_cache_lookup_count += other.agg_state_cache_lookup_count;
         self.agg_state_cache_miss_count += other.agg_state_cache_miss_count;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
+    use risingwave_expr::aggregate::{AggCall, build_retractable};
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::executor::test_utils::agg_executor::{
+        create_agg_state_storage, create_intermediate_state_table,
+    };
+
+    /// The estimated size must include the previous intermediate states and previous outputs that
+    /// the group keeps after building its changes, not only the agg states.
+    #[tokio::test]
+    async fn test_agg_group_estimated_size_includes_prev_rows() {
+        let store = MemoryStateStore::new();
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Varchar),
+            Field::unnamed(DataType::Varchar),
+        ]);
+        let agg_calls = vec![
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(max:varchar $1:varchar)"),
+        ];
+        let agg_funcs = agg_calls
+            .iter()
+            .map(build_retractable)
+            .collect::<risingwave_expr::Result<Vec<_>>>()
+            .unwrap();
+        let group_key_indices = [0];
+        let stream_key = [0, 1];
+        let mut storages = vec![];
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            storages.push(
+                create_agg_state_storage(
+                    store.clone(),
+                    TableId::new(idx as u32),
+                    agg_call,
+                    &group_key_indices,
+                    &stream_key,
+                    input_schema.fields.clone(),
+                    true,
+                )
+                .await,
+            );
+        }
+        let mut intermediate_state_table = create_intermediate_state_table(
+            store.clone(),
+            TableId::new(agg_calls.len() as u32),
+            &agg_calls,
+            &group_key_indices,
+            input_schema.fields.clone(),
+        )
+        .await;
+        intermediate_state_table
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+            .await
+            .unwrap();
+
+        let group_key = GroupKey::new(OwnedRow::new(vec![Some("k".into())]), None);
+        let (mut agg_group, _) = AggGroup::<MemoryStateStore, OnlyOutputIfHasInput>::create(
+            PbAggNodeVersion::LATEST,
+            Some(group_key),
+            &agg_calls,
+            &agg_funcs,
+            &storages,
+            &intermediate_state_table,
+            &stream_key,
+            0,
+            false,
+            1024,
+            &input_schema,
+        )
+        .await
+        .unwrap();
+        // A new group has no previous rows.
+        assert!(agg_group.prev_inter_states.is_none());
+        assert!(agg_group.prev_outputs.is_none());
+
+        let value = "v".repeat(1000);
+        let chunk = StreamChunk::from_pretty(&format!(
+            " T T
+            + k {value}"
+        ));
+        let visibilities = vec![chunk.visibility().clone(); agg_calls.len()];
+        agg_group
+            .apply_chunk(&chunk, &agg_calls, &agg_funcs, visibilities)
+            .await
+            .unwrap();
+        let states_size: usize = agg_group
+            .states
+            .iter()
+            .map(|state| state.estimated_heap_size())
+            .sum();
+        assert_eq!(agg_group.estimated_heap_size(), states_size);
+
+        // Building the changes saves the current intermediate states and outputs as the previous
+        // ones, which the group then keeps in memory.
+        agg_group.build_states_change(&agg_funcs).unwrap().unwrap();
+        agg_group
+            .build_outputs_change(&storages, &agg_funcs)
+            .await
+            .unwrap()
+            .0
+            .unwrap();
+        let prev_inter_states = agg_group.prev_inter_states.as_ref().unwrap();
+        let prev_outputs = agg_group.prev_outputs.as_ref().unwrap();
+        assert!(prev_inter_states.estimated_heap_size() >= value.len());
+        assert!(prev_outputs.estimated_heap_size() >= value.len());
+        assert_eq!(
+            agg_group.estimated_heap_size(),
+            states_size
+                + prev_inter_states.estimated_heap_size()
+                + prev_outputs.estimated_heap_size()
+        );
     }
 }
