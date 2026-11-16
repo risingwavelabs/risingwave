@@ -168,6 +168,28 @@ fn parse_insert_parenthesized_query() {
         }
         _ => unreachable!(),
     }
+
+    let sql = "INSERT INTO dst2 (VALUES (1, 2))";
+    match verified_stmt(sql) {
+        Statement::Insert {
+            columns, source, ..
+        } => {
+            assert!(columns.is_empty());
+            assert!(matches!(source.body, SetExpr::Query(_)));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "INSERT INTO dst2 (WITH s AS (SELECT 1 AS a) SELECT a FROM s)";
+    match verified_stmt(sql) {
+        Statement::Insert {
+            columns, source, ..
+        } => {
+            assert!(columns.is_empty());
+            assert!(matches!(source.body, SetExpr::Query(_)));
+        }
+        _ => unreachable!(),
+    }
 }
 
 #[test]
