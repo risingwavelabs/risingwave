@@ -361,6 +361,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::ScalarRefImpl;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
 
@@ -436,7 +437,9 @@ mod tests {
         for _ in 0..4 {
             let augmented = writer.augmented_chunk(chunk.clone()).unwrap();
             assert_eq!(augmented.visibility(), chunk.visibility());
-            for ((original_op, original), (_, augmented)) in chunk.rows().zip(augmented.rows()) {
+            for ((original_op, original), (_, augmented)) in
+                chunk.rows().zip_eq_debug(augmented.rows())
+            {
                 assert_eq!(original.datum_at(0), augmented.datum_at(0));
                 assert_eq!(
                     augmented.datum_at(2),
