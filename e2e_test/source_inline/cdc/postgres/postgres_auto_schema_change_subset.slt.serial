@@ -1,0 +1,167 @@
+# Relation metadata must preserve columns deliberately omitted from a CDC table.
+# Recovery is global, so this test runs in the serial CDC lane.
+control substitution on
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.cdc_subset_projection;
+    CREATE TABLE public.cdc_subset_projection (id integer PRIMARY KEY, name varchar, email varchar);
+    INSERT INTO public.cdc_subset_projection VALUES (1, 'snapshot', 'one@example.com');
+"
+
+statement ok
+CREATE SOURCE s_cdc_subset_projection WITH (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    auto.schema.change = 'true'
+);
+
+statement ok
+CREATE TABLE cdc_subset_projection (id integer PRIMARY KEY, name varchar)
+FROM s_cdc_subset_projection TABLE 'public.cdc_subset_projection';
+
+# A second table consuming the same relation must keep its own projection.
+statement ok
+CREATE TABLE cdc_full_projection (*)
+FROM s_cdc_subset_projection TABLE 'public.cdc_subset_projection';
+
+query IT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection ORDER BY id;
+----
+1 snapshot
+
+query ITT retry 30 backoff 1s
+SELECT * FROM cdc_full_projection ORDER BY id;
+----
+1 snapshot one@example.com
+
+# First streaming write, without recovery, emits relation metadata too.
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO public.cdc_subset_projection VALUES (2, 'streaming', 'two@example.com');"
+
+query IT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection ORDER BY id;
+----
+1 snapshot
+2 streaming
+
+statement ok
+FLUSH;
+
+onlyif can-use-recover
+statement ok
+RECOVER;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO public.cdc_subset_projection VALUES (3, 'recovered', 'three@example.com');"
+
+query IT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 recovered
+
+# A genuinely new column must still be added, without exposing the old omitted column.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    ALTER TABLE public.cdc_subset_projection ADD COLUMN phone varchar;
+    INSERT INTO public.cdc_subset_projection VALUES (4, 'added', 'four@example.com', '123');
+"
+
+query ITT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection ORDER BY id;
+----
+1 snapshot NULL
+2 streaming NULL
+3 recovered NULL
+4 added 123
+
+query ITTT retry 30 backoff 1s
+SELECT * FROM cdc_full_projection WHERE id = 4;
+----
+4 added four@example.com 123
+
+# Replacement must retain the omitted-column metadata for the next recovery.
+statement ok
+FLUSH;
+
+onlyif can-use-recover
+statement ok
+RECOVER;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO public.cdc_subset_projection VALUES (5, 'recovered-again', 'five@example.com', '456');"
+
+query ITT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection ORDER BY id;
+----
+1 snapshot NULL
+2 streaming NULL
+3 recovered NULL
+4 added 123
+5 recovered-again 456
+
+# A real drop of a selected column must also continue to work.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    ALTER TABLE public.cdc_subset_projection DROP COLUMN phone;
+    INSERT INTO public.cdc_subset_projection VALUES (6, 'dropped', 'six@example.com');
+"
+
+query IT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 recovered
+4 added
+5 recovered-again
+6 dropped
+
+# Explicit ALTERs change the user's projection. Recovery must honor the new selection.
+statement ok
+ALTER TABLE cdc_subset_projection ADD COLUMN email varchar;
+
+statement ok
+ALTER TABLE cdc_subset_projection DROP COLUMN name;
+
+statement ok
+FLUSH;
+
+onlyif can-use-recover
+statement ok
+RECOVER;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO public.cdc_subset_projection VALUES (7, 'manual-projection', 'seven@example.com');"
+
+query IT retry 30 backoff 1s
+SELECT * FROM cdc_subset_projection WHERE id = 7;
+----
+7 seven@example.com
+
+query T
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'cdc_subset_projection'
+ORDER BY ordinal_position;
+----
+id
+email
+
+statement ok
+DROP TABLE cdc_subset_projection;
+
+statement ok
+DROP TABLE cdc_full_projection;
+
+statement ok
+DROP SOURCE s_cdc_subset_projection CASCADE;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "DROP TABLE public.cdc_subset_projection;"

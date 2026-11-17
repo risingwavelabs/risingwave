@@ -181,6 +181,10 @@ impl From<PbCdcTableType> for CdcTableType {
 }
 
 crate::derive_from_blob!(VectorIndexInfo, PbVectorIndexInfo);
+crate::derive_from_blob!(
+    CdcTableProjection,
+    risingwave_pb::catalog::CdcTableProjection
+);
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
@@ -221,6 +225,7 @@ pub struct Model {
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
+    pub cdc_table_projection: Option<CdcTableProjection>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -387,6 +392,7 @@ impl From<PbTable> for ActiveModel {
                 .vector_index_info
                 .as_ref()
                 .map(VectorIndexInfo::from)),
+            cdc_table_projection: Set(pb_table.cdc_table_projection.as_ref().map(Into::into)),
             cdc_table_type: Set(pb_table.cdc_table_type.map(|cdc_table_type| {
                 match cdc_table_type {
                     0 => CdcTableType::Postgres, // Map Unspecified to Postgres as default

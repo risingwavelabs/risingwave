@@ -74,9 +74,10 @@ use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
-    bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
-    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
+    bind_cdc_pk_comparisons_externally, bind_cdc_table_projection, bind_cdc_table_schema,
+    bind_cdc_table_schema_externally, derive_connect_properties_for_cdc_table,
+    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
+    sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -1149,10 +1150,14 @@ pub(super) async fn handle_create_table_plan(
             // (non-CDC) tables don't hit this check.
             reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
+            let cdc_table_projection =
+                bind_cdc_table_projection(&cdc_with_options, &columns, wildcard_idx.is_some())
+                    .await?;
+
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options)?.into();
             let shared_source_id = source.id;
-            let (plan, table) = gen_create_table_plan_for_cdc_table(
+            let (plan, mut table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
                 external_table_name,
@@ -1173,6 +1178,7 @@ pub(super) async fn handle_create_table_plan(
                 TableId::placeholder(),
                 engine,
             )?;
+            table.cdc_table_projection = cdc_table_projection;
 
             (
                 (plan, None, table),
@@ -2022,6 +2028,11 @@ pub async fn generate_stream_graph_for_replace_table(
     }
 
     let graph = build_graph(plan, Some(GraphJobType::Table))?;
+
+    // Preserve the original projection instead of rediscovering it from today's upstream schema.
+    // Rediscovery would hide real columns added while RisingWave was offline.
+    // Keep legacy tables untracked so upgrades preserve their schema-change behavior.
+    table.cdc_table_projection = original_catalog.cdc_table_projection.clone();
 
     // Fill the original table ID.
     table.id = original_catalog.id();

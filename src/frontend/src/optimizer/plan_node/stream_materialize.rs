@@ -423,6 +423,7 @@ impl StreamMaterialize {
             refreshable,
             vector_index_info: None,
             cdc_table_type: None,
+            cdc_table_projection: None,
         })
     }
 
@@ -472,6 +473,7 @@ impl StreamMaterialize {
             refreshable,
             vector_index_info,
             cdc_table_type,
+            cdc_table_projection,
         }: TableCatalog,
     ) -> TableCatalog {
         tracing::info!(
@@ -542,6 +544,7 @@ impl StreamMaterialize {
             refreshable: false,
             vector_index_info,
             cdc_table_type,
+            cdc_table_projection,
         }
     }
 

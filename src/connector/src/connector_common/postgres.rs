@@ -229,6 +229,31 @@ struct PostgresTablePrivilege {
 }
 
 impl PostgresExternalTable {
+    /// Discover names without mapping types: an explicitly omitted column may have a type
+    /// that RisingWave cannot represent. Read the full relation, not just selectable columns.
+    pub async fn discover_column_names(
+        config: &PgConnectionConfig,
+        schema: &str,
+        table: &str,
+    ) -> ConnectorResult<Vec<String>> {
+        let connection = PgPool::connect_with(config.to_sqlx_connect_options()).await?;
+        Self::ensure_table_privilege(&connection, schema, table, "SELECT").await?;
+        let rows = sqlx::query(
+            r#"SELECT a.attname
+               FROM pg_catalog.pg_attribute a
+               JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+               JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND c.relname = $2
+                 AND a.attnum > 0 AND NOT a.attisdropped
+               ORDER BY a.attnum"#,
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&connection)
+        .await?;
+        Ok(rows.into_iter().map(|row| row.get("attname")).collect())
+    }
+
     /// Discover primary key columns directly from PostgreSQL system tables.
     /// This bypasses querying `information_schema.table_constraints` to avoid requiring table owner permissions.
     async fn discover_primary_key(

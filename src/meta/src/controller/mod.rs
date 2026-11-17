@@ -299,6 +299,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .unwrap_or_default(),
             refreshable: value.0.refreshable,
             vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
+            cdc_table_projection: value
+                .0
+                .cdc_table_projection
+                .map(|schema| schema.to_protobuf()),
             cdc_table_type: value
                 .0
                 .cdc_table_type

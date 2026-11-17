@@ -168,6 +168,13 @@ pub async fn handle_alter_table_column(
     // - Check against the persisted schema, instead of resolving again.
     //
     // Applied only to tables with schema registry.
+    let projection_change = match &operation {
+        AlterTableOperation::AddColumn { column_def } => Some((column_def.name.real_value(), true)),
+        AlterTableOperation::DropColumn { column_name, .. } => {
+            Some((column_name.real_value(), false))
+        }
+        _ => None,
+    };
     let sql_column_strategy = match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
@@ -296,7 +303,7 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     };
-    let (source, table, graph, job_type) = Box::pin(get_replace_table_plan(
+    let (source, mut table, graph, job_type) = Box::pin(get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -304,6 +311,18 @@ pub async fn handle_alter_table_column(
         sql_column_strategy,
     ))
     .await?;
+
+    // A manual ALTER changes the user's projection; automatic upstream DDL does not.
+    if let Some(projection) = &mut table.cdc_table_projection
+        && let Some((name, added)) = projection_change
+    {
+        projection
+            .excluded_column_names
+            .retain(|excluded| excluded != &name);
+        if !added {
+            projection.excluded_column_names.push(name);
+        }
+    }
 
     let catalog_writer = session.catalog_writer()?;
 
@@ -366,6 +385,112 @@ mod tests {
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_cdc_schema_change_preserves_projection_metadata() {
+        use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+        use risingwave_connector::source::cdc::external::ExternalCdcTableType;
+        use risingwave_pb::catalog::CdcTableProjection;
+        use risingwave_sqlparser::ast::ObjectName;
+
+        use super::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+        use crate::handler::create_source::SqlColumnStrategy;
+
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql("CREATE SOURCE s WITH (connector = 'postgres-cdc', hostname = 'localhost', port = '5432', username = 'postgres', password = '', database.name = 'db') FORMAT PLAIN ENCODE JSON").await.unwrap();
+        frontend
+            .run_sql("CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR) FROM s TABLE 'public.t'")
+            .await
+            .unwrap();
+        let mut original = frontend
+            .session_ref()
+            .env()
+            .catalog_reader()
+            .read_guard()
+            .get_created_table_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "t",
+            )
+            .unwrap()
+            .0
+            .as_ref()
+            .clone();
+        original.cdc_table_type = Some(ExternalCdcTableType::Postgres);
+        original.definition =
+            "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR) FROM s TABLE 'public.t'".into();
+        let mut columns = original
+            .columns
+            .iter()
+            .filter(|c| !c.is_hidden())
+            .cloned()
+            .collect::<Vec<_>>();
+        columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "phone",
+            ColumnId::new(100),
+            DataType::Varchar,
+        )));
+
+        // Legacy tables retain automatic additions for both explicit and wildcard definitions.
+        // Replacement must not opt them into projection tracking using today's upstream schema.
+        for definition in [
+            "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR) FROM s TABLE 'public.t'",
+            "CREATE TABLE t (*) FROM s TABLE 'public.t'",
+        ] {
+            let mut legacy = original.clone();
+            legacy.definition = definition.into();
+            let legacy = std::sync::Arc::new(legacy);
+            let definition = get_new_table_definition_for_cdc_table(legacy.clone(), &columns)
+                .await
+                .unwrap();
+            assert!(definition.to_string().contains("phone"));
+            let (_, replacement, _, _) = get_replace_table_plan(
+                &frontend.session_ref(),
+                ObjectName::from(vec!["t".into()]),
+                definition,
+                &legacy,
+                SqlColumnStrategy::FollowUnchecked,
+            )
+            .await
+            .unwrap();
+            assert_eq!(replacement.cdc_table_projection, None);
+            assert!(
+                replacement
+                    .columns
+                    .iter()
+                    .any(|column| column.name() == "phone")
+            );
+        }
+        get_new_table_definition_for_cdc_table(original.clone().into(), &columns[..1])
+            .await
+            .unwrap();
+
+        // Known omissions allow a real new column, including one first seen after recovery.
+        original.cdc_table_projection = Some(CdcTableProjection {
+            excluded_column_names: vec!["email".into()],
+        });
+        let restored = crate::TableCatalog::from(original.to_prost());
+        assert_eq!(restored.cdc_table_projection, original.cdc_table_projection);
+        let restored = std::sync::Arc::new(restored);
+        let definition = get_new_table_definition_for_cdc_table(restored.clone(), &columns)
+            .await
+            .unwrap();
+        assert!(definition.to_string().contains("phone"));
+        assert!(!definition.to_string().contains("email"));
+        let (_, replacement, _, _) = get_replace_table_plan(
+            &frontend.session_ref(),
+            ObjectName::from(vec!["t".into()]),
+            definition,
+            &restored,
+            SqlColumnStrategy::FollowUnchecked,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            replacement.cdc_table_projection,
+            original.cdc_table_projection
+        );
+    }
 
     #[tokio::test]
     async fn test_add_column_handler() {
