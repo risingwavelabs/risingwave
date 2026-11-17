@@ -62,7 +62,6 @@ mod gc;
 mod tests;
 mod versioning;
 pub use context::HummockVersionSafePoint;
-pub use versioning::HummockWriteLimitsReadGuard;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod commit_epoch;
@@ -552,7 +551,7 @@ impl HummockManager {
                 ..Default::default()
             });
 
-        versioning_guard.current_version = Arc::new(redo_state);
+        versioning_guard.current_version.set(redo_state);
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
         versioning_guard.table_change_log =
             risingwave_meta_model::hummock_table_change_log::Entity::find()
@@ -622,7 +621,7 @@ impl HummockManager {
         version_new.apply_version_delta(&version_delta);
 
         let compaction_group_ids = version_delta.group_deltas.keys().cloned().collect();
-        versioning_guard.current_version = Arc::new(version_new.clone());
+        versioning_guard.current_version.set(version_new.clone());
         Ok((version_new, compaction_group_ids))
     }
 

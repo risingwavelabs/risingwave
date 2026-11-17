@@ -22,11 +22,8 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{
-    MetaSnapshot, PbObject, PbObjectGroup, SubscribeResponse, SubscribeType,
-};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -81,28 +78,11 @@ impl NotificationPart {
             SubscribeType::Unspecified => unreachable!(),
         }
     }
-}
 
-/// Internal channel events. Snapshot payloads stay in the snapshot-building methods.
-#[derive(Clone, Debug)]
-pub enum SubscriptionEvent {
-    SnapshotMarker(NotificationPart),
-    Delta {
-        part: NotificationPart,
-        response: SubscribeResponse,
-    },
-    /// Notifications without a corresponding snapshot part must always be retained.
-    Unscoped(SubscribeResponse),
-}
-
-impl SubscriptionEvent {
-    fn delta(response: SubscribeResponse) -> Self {
+    /// The part a notification changes. Subscribers always keep notifications of `None`.
+    pub fn of(info: &Info) -> Option<Self> {
         use NotificationPart::*;
-        let part = match response
-            .info
-            .as_ref()
-            .expect("notification must contain info")
-        {
+        let part = match info {
             Info::Database(_)
             | Info::Schema(_)
             | Info::ObjectGroup(_)
@@ -133,12 +113,41 @@ impl SubscriptionEvent {
             Info::MetaBackupManifestId(_)
             | Info::HummockStats(_)
             | Info::Recovery(_)
-            | Info::SystemParams(_) => {
-                return Self::Unscoped(response);
-            }
+            | Info::SystemParams(_) => return None,
             Info::Snapshot(_) => unreachable!("initial snapshots bypass delta publishing"),
         };
-        Self::Delta { part, response }
+        Some(part)
+    }
+}
+
+/// The state behind the lock of a [`NotificationPart`]. It is only reachable through a guard of
+/// that lock, so `&Self` proves that the lock is held, and `&mut Self` that it is held for writing.
+pub trait NotificationPartState {
+    const PART: NotificationPart;
+}
+
+/// Internal channel events. Snapshot payloads stay in the snapshot-building methods.
+#[derive(Clone, Debug)]
+pub enum SubscriptionEvent {
+    SnapshotMarker(NotificationPart),
+    Delta {
+        part: NotificationPart,
+        response: SubscribeResponse,
+    },
+    /// Notifications without a corresponding snapshot part must always be retained.
+    Unscoped(SubscribeResponse),
+}
+
+impl SubscriptionEvent {
+    fn delta(response: SubscribeResponse) -> Self {
+        let info = response
+            .info
+            .as_ref()
+            .expect("notification must contain info");
+        match NotificationPart::of(info) {
+            Some(part) => Self::Delta { part, response },
+            None => Self::Unscoped(response),
+        }
     }
 
     /// Convert a live channel event, rejecting unexpected initialization markers.
@@ -152,16 +161,45 @@ impl SubscriptionEvent {
     }
 }
 
-/// A cloneable sender used only to mark reads on this exact subscription's channel.
-#[derive(Clone)]
-pub struct SnapshotMarkerSender(UnboundedSender<SubscriptionEvent>);
+/// Marks reads on this exact subscription's channel.
+pub struct SnapshotMarkerSender {
+    sender: UnboundedSender<SubscriptionEvent>,
+    marked: parking_lot::Mutex<HashSet<NotificationPart>>,
+}
 
 impl SnapshotMarkerSender {
-    /// Call after reading every field of the part, before releasing its state guard.
-    /// Producers must modify and publish under the corresponding exclusive guard.
-    pub fn snapshot_read(&self, part: NotificationPart) {
+    /// Call after reading every field of the part from `state`, before releasing its guard.
+    pub fn snapshot_read<S: NotificationPartState>(&self, _state: &S) {
+        self.mark(S::PART);
+    }
+
+    /// Mark a part whose snapshot fields are constants rather than state read under its lock.
+    #[cfg(any(test, feature = "test"))]
+    pub fn mark_constant_part(&self, part: NotificationPart) {
+        self.mark(part);
+    }
+
+    fn mark(&self, part: NotificationPart) {
+        assert!(
+            self.marked.lock().insert(part),
+            "snapshot part {part:?} read twice"
+        );
         // A closed receiver means the subscription has already been cancelled.
-        let _ = self.0.send(SubscriptionEvent::SnapshotMarker(part));
+        let _ = self.sender.send(SubscriptionEvent::SnapshotMarker(part));
+    }
+
+    /// Check that the snapshot read every part of its subscriber, so the stream does not wait
+    /// for a marker that never comes.
+    pub fn finish(self, subscribe_type: SubscribeType) {
+        let expected: HashSet<_> = NotificationPart::for_subscriber(subscribe_type)
+            .iter()
+            .copied()
+            .collect();
+        assert_eq!(
+            self.marked.into_inner(),
+            expected,
+            "snapshot parts read for {subscribe_type:?}"
+        );
     }
 }
 
@@ -212,6 +250,28 @@ pub async fn notification_stream(
     }
 }
 
+/// Mark the parts of `subscribe_type` that `tx` has not read as constants, then return the stream
+/// of the subscription with an empty snapshot.
+#[cfg(any(test, feature = "test"))]
+pub fn finish_test_subscription(
+    tx: SnapshotMarkerSender,
+    subscribe_type: SubscribeType,
+    receiver: UnboundedReceiver<SubscriptionEvent>,
+) -> futures::stream::BoxStream<'static, Notification> {
+    use futures::StreamExt;
+
+    let unread = NotificationPart::for_subscriber(subscribe_type)
+        .iter()
+        .copied()
+        .filter(|part| !tx.marked.lock().contains(part))
+        .collect::<Vec<_>>();
+    for part in unread {
+        tx.mark_constant_part(part);
+    }
+    tx.finish(subscribe_type);
+    notification_stream(subscribe_type, receiver, MetaSnapshot::default()).boxed()
+}
+
 /// A batch of frontend notifications that belong to the same catalog update.
 ///
 /// Publishing the batch assigns consecutive catalog notification versions to its notifications.
@@ -235,7 +295,14 @@ impl<'a> FrontendNotificationBatch<'a> {
     }
 
     #[must_use]
-    pub async fn publish(self) -> Option<NotificationVersion> {
+    pub async fn publish<S: NotificationPartState>(
+        self,
+        _state: &mut S,
+    ) -> Option<NotificationVersion> {
+        const { assert!(matches!(S::PART, NotificationPart::Catalog)) };
+        for (_, info) in &self.pending {
+            assert_eq!(NotificationPart::of(info), Some(S::PART));
+        }
         self.notification_manager
             .notify_frontend_batch(self.pending)
             .await
@@ -319,20 +386,6 @@ impl NotificationManager {
         core.notify(target, response);
     }
 
-    /// Add a notification and increase notification version.
-    async fn notify_with_version(
-        &self,
-        target: Target,
-        operation: Operation,
-        info: Info,
-    ) -> NotificationVersion {
-        let mut version_guard = self.version_generator.lock().await;
-        version_guard.increase_version().await;
-        let version = version_guard.current_version();
-        self.notify(target, operation, info, Some(version));
-        version
-    }
-
     /// Assign consecutive versions to a frontend notification batch and publish the complete batch
     /// while holding the version generator lock.
     async fn notify_frontend_batch(
@@ -364,10 +417,56 @@ impl NotificationManager {
         Some(final_version)
     }
 
-    /// Add a notification using the latest published version without incrementing it.
+    /// Add a notification that no snapshot part covers, using the latest published version
+    /// without incrementing it.
     #[inline(always)]
     fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
+        assert_eq!(NotificationPart::of(&info), None);
         self.notify(target, operation, info, None);
+    }
+
+    /// Notify subscribers of a change to the part of `S`, without incrementing the version.
+    pub fn notify_part<S: NotificationPartState>(
+        &self,
+        state: &mut S,
+        subscribe_type: SubscribeType,
+        operation: Operation,
+        info: Info,
+    ) {
+        self.notify_part_target(state, subscribe_type.into(), operation, info);
+    }
+
+    fn notify_part_target<S: NotificationPartState>(
+        &self,
+        _state: &mut S,
+        target: Target,
+        operation: Operation,
+        info: Info,
+    ) {
+        assert_eq!(NotificationPart::of(&info), Some(S::PART));
+        assert!(
+            S::PART != NotificationPart::Catalog
+                || target.subscribe_type != SubscribeType::Frontend,
+            "catalog notifications to frontends must increase the version"
+        );
+        self.notify(target, operation, info, None);
+    }
+
+    /// Like [`Self::notify_part`], for every type of subscribers.
+    pub fn notify_part_to_all<S: NotificationPartState>(
+        &self,
+        state: &mut S,
+        operation: Operation,
+        info: Info,
+    ) {
+        for subscribe_type in [
+            SubscribeType::Frontend,
+            SubscribeType::Hummock,
+            SubscribeType::Compactor,
+            SubscribeType::Compute,
+        ] {
+            self.notify_part(state, subscribe_type, operation, info.clone());
+        }
     }
 
     /// Register before reading any snapshot part. Boundaries and deltas share this channel;
@@ -384,7 +483,13 @@ impl NotificationManager {
         }
         core.senders_of(subscribe_type)
             .insert(worker_key, sender.clone());
-        Ok((SnapshotMarkerSender(sender), receiver))
+        Ok((
+            SnapshotMarkerSender {
+                sender,
+                marked: Default::default(),
+            },
+            receiver,
+        ))
     }
 
     pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
@@ -398,33 +503,14 @@ impl NotificationManager {
         }
     }
 
-    #[must_use]
-    pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
-            .await
-    }
-
-    #[must_use]
-    pub async fn notify_frontend_object_info(
+    pub(crate) fn notify_hummock_targeted_update<S: NotificationPartState>(
         &self,
-        operation: Operation,
-        object_info: PbObjectInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Frontend.into(),
-            operation,
-            Info::ObjectGroup(PbObjectGroup {
-                objects: vec![PbObject {
-                    object_info: object_info.into(),
-                }],
-                dependencies: vec![],
-            }),
-        )
-        .await
-    }
-
-    pub(crate) fn notify_hummock_targeted_update(&self, worker_key: WorkerKey, info: Info) {
-        self.notify_without_version(
+        state: &mut S,
+        worker_key: WorkerKey,
+        info: Info,
+    ) {
+        self.notify_part_target(
+            state,
             Target {
                 subscribe_type: SubscribeType::Hummock,
                 worker_key: Some(worker_key),
@@ -613,6 +699,40 @@ mod tests {
     use super::*;
     use crate::manager::WorkerKey;
 
+    struct TestCatalog;
+    impl NotificationPartState for TestCatalog {
+        const PART: NotificationPart = NotificationPart::Catalog;
+    }
+
+    struct TestCluster;
+    impl NotificationPartState for TestCluster {
+        const PART: NotificationPart = NotificationPart::Cluster;
+    }
+
+    struct TestServing;
+    impl NotificationPartState for TestServing {
+        const PART: NotificationPart = NotificationPart::ServingMappings;
+    }
+
+    async fn notify_frontend(
+        mgr: &NotificationManager,
+        operation: Operation,
+        info: Info,
+    ) -> NotificationVersion {
+        let mut batch = FrontendNotificationBatch::new(mgr);
+        batch.add(operation, info);
+        batch.publish(&mut TestCatalog).await.unwrap()
+    }
+
+    fn notify_compute_cluster_resource(mgr: &NotificationManager) {
+        mgr.notify_part(
+            &mut TestCluster,
+            SubscribeType::Compute,
+            Operation::Update,
+            Info::ClusterResource(Default::default()),
+        );
+    }
+
     #[tokio::test]
     async fn test_multiple_subscribers_one_worker() {
         let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
@@ -633,9 +753,8 @@ mod tests {
         assert!(rx2.try_recv().is_err());
         assert!(rx3.try_recv().is_err());
 
-        let version = mgr
-            .notify_frontend(Operation::Add, Info::Database(Default::default()))
-            .await;
+        let version =
+            notify_frontend(&mgr, Operation::Add, Info::Database(Default::default())).await;
         assert!(rx1.try_recv().is_err());
         let frontend_notification = rx2.recv().await.unwrap().into_notification().unwrap();
         assert_eq!(frontend_notification.version, version);
@@ -649,7 +768,12 @@ mod tests {
             frontend_notification.version
         );
 
-        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
+        mgr.notify_part(
+            &mut TestCatalog,
+            SubscribeType::Hummock,
+            Operation::Add,
+            Info::Database(Default::default()),
+        );
         assert_eq!(
             rx1.recv()
                 .await
@@ -676,7 +800,7 @@ mod tests {
         batch.add(Operation::Add, Info::Database(Default::default()));
         batch.add(Operation::Add, Info::Schema(Default::default()));
         let published_version = batch
-            .publish()
+            .publish(&mut TestCatalog)
             .await
             .expect("the test notification batch contains two notifications");
 
@@ -721,7 +845,11 @@ mod tests {
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), frontend_tx1);
 
         let version = mgr.current_version().await;
-        mgr.notify_hummock_targeted_update(worker_key1, Info::Database(Default::default()));
+        mgr.notify_hummock_targeted_update(
+            &mut TestCatalog,
+            worker_key1,
+            Info::Database(Default::default()),
+        );
 
         let notification = hummock_rx1
             .recv()
@@ -743,19 +871,20 @@ mod tests {
     }
 
     fn delta(tx: &SnapshotMarkerSender, part: NotificationPart, version: u64) {
-        tx.0.send(SubscriptionEvent::Delta {
-            part,
-            response: SubscribeResponse {
-                version,
-                ..Default::default()
-            },
-        })
-        .unwrap();
+        tx.sender
+            .send(SubscriptionEvent::Delta {
+                part,
+                response: SubscribeResponse {
+                    version,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
     }
 
     fn complete_markers(tx: &SnapshotMarkerSender, subscribe_type: SubscribeType) {
         for &part in NotificationPart::for_subscriber(subscribe_type) {
-            tx.snapshot_read(part);
+            tx.mark_constant_part(part);
         }
     }
 
@@ -767,15 +896,16 @@ mod tests {
             .unwrap();
         delta(&tx, NotificationPart::Catalog, 1);
         delta(&tx, NotificationPart::Cluster, 2);
-        tx.snapshot_read(NotificationPart::Catalog);
+        tx.mark_constant_part(NotificationPart::Catalog);
         delta(&tx, NotificationPart::Catalog, 3);
         delta(&tx, NotificationPart::Cluster, 4);
-        tx.0.send(SubscriptionEvent::Unscoped(SubscribeResponse {
-            version: 5,
-            ..Default::default()
-        }))
-        .unwrap();
-        tx.snapshot_read(NotificationPart::Cluster);
+        tx.sender
+            .send(SubscriptionEvent::Unscoped(SubscribeResponse {
+                version: 5,
+                ..Default::default()
+            }))
+            .unwrap();
+        tx.mark_constant_part(NotificationPart::Cluster);
         // This is already in the channel when initialization finishes, but behind its last marker.
         delta(&tx, NotificationPart::Cluster, 6);
         drop(tx);
@@ -792,10 +922,7 @@ mod tests {
             assert_eq!(stream.next().await.unwrap().unwrap().version, version);
         }
         // Equal catalog versions must not cause a newer unversioned state update to be dropped.
-        mgr.notify_compute_without_version(
-            Operation::Update,
-            Info::ClusterResource(Default::default()),
-        );
+        notify_compute_cluster_resource(&mgr);
         assert!(matches!(
             stream.next().await.unwrap().unwrap().info,
             Some(Info::ClusterResource(_))
@@ -808,16 +935,13 @@ mod tests {
         let (tx, rx) = mgr
             .start_subscription(SubscribeType::Frontend, key())
             .unwrap();
-        let before = mgr
-            .notify_frontend(Operation::Add, Info::Database(Default::default()))
-            .await;
-        tx.snapshot_read(NotificationPart::Catalog);
-        let after = mgr
-            .notify_frontend(Operation::Add, Info::Schema(Default::default()))
-            .await;
+        let before =
+            notify_frontend(&mgr, Operation::Add, Info::Database(Default::default())).await;
+        tx.mark_constant_part(NotificationPart::Catalog);
+        let after = notify_frontend(&mgr, Operation::Add, Info::Schema(Default::default())).await;
         for &part in NotificationPart::for_subscriber(SubscribeType::Frontend) {
             if part != NotificationPart::Catalog {
-                tx.snapshot_read(part);
+                tx.mark_constant_part(part);
             }
         }
         let mut stream = Box::pin(notification_stream(
@@ -846,8 +970,8 @@ mod tests {
         let (tx, rx) = mgr
             .start_subscription(SubscribeType::Frontend, key())
             .unwrap();
-        tx.snapshot_read(NotificationPart::Catalog);
-        tx.snapshot_read(NotificationPart::Cluster);
+        tx.mark_constant_part(NotificationPart::Catalog);
+        tx.mark_constant_part(NotificationPart::Cluster);
         delta(&tx, NotificationPart::Cluster, 10);
         delta(&tx, NotificationPart::Catalog, 11);
         delta(&tx, NotificationPart::Cluster, 12);
@@ -857,7 +981,7 @@ mod tests {
             NotificationPart::HummockVersion,
             NotificationPart::SessionParams,
         ] {
-            tx.snapshot_read(part);
+            tx.mark_constant_part(part);
         }
         let mut stream = Box::pin(notification_stream(
             SubscribeType::Frontend,
@@ -877,8 +1001,11 @@ mod tests {
             let (tx, rx) = mgr
                 .start_subscription(SubscribeType::Compute, key())
                 .unwrap();
-            tx.snapshot_read(NotificationPart::Catalog);
-            tx.snapshot_read(invalid);
+            tx.mark_constant_part(NotificationPart::Catalog);
+            // Send the marker directly, bypassing the sender's own check against duplicates.
+            tx.sender
+                .send(SubscriptionEvent::SnapshotMarker(invalid))
+                .unwrap();
             let mut stream = Box::pin(notification_stream(
                 SubscribeType::Compute,
                 rx,
@@ -889,10 +1016,7 @@ mod tests {
                 tonic::Code::Internal
             );
         }
-        mgr.notify_compute_without_version(
-            Operation::Update,
-            Info::ClusterResource(Default::default()),
-        );
+        notify_compute_cluster_resource(&mgr);
         assert!(mgr.core.lock().compute_senders.is_empty());
     }
 
@@ -912,18 +1036,20 @@ mod tests {
         let (tx, rx) = mgr
             .start_subscription(SubscribeType::Frontend, key())
             .unwrap();
-        mgr.notify_frontend_without_version(
-            Operation::Snapshot,
-            Info::ServingWorkerSlotMappings(Default::default()),
-        );
-        tx.snapshot_read(NotificationPart::ServingMappings);
-        mgr.notify_frontend_without_version(
-            Operation::Snapshot,
-            Info::ServingWorkerSlotMappings(Default::default()),
-        );
+        let notify_mapping_snapshot = || {
+            mgr.notify_part(
+                &mut TestServing,
+                SubscribeType::Frontend,
+                Operation::Snapshot,
+                Info::ServingWorkerSlotMappings(Default::default()),
+            )
+        };
+        notify_mapping_snapshot();
+        tx.mark_constant_part(NotificationPart::ServingMappings);
+        notify_mapping_snapshot();
         for &part in NotificationPart::for_subscriber(SubscribeType::Frontend) {
             if part != NotificationPart::ServingMappings {
-                tx.snapshot_read(part);
+                tx.mark_constant_part(part);
             }
         }
         let mut stream = Box::pin(notification_stream(
@@ -949,7 +1075,7 @@ mod tests {
         let (tx, rx) = mgr
             .start_subscription(SubscribeType::Compute, key())
             .unwrap();
-        tx.snapshot_read(NotificationPart::Catalog);
+        tx.mark_constant_part(NotificationPart::Catalog);
         drop(tx);
         mgr.abort_all();
         let mut stream = Box::pin(notification_stream(
@@ -988,10 +1114,7 @@ mod tests {
         assert!(old_stream.next().await.is_none());
         drop(old_stream);
         assert_eq!(mgr.core.lock().compute_senders.len(), 1);
-        mgr.notify_compute_without_version(
-            Operation::Update,
-            Info::ClusterResource(Default::default()),
-        );
+        notify_compute_cluster_resource(&mgr);
         let mut new_stream = Box::pin(notification_stream(
             SubscribeType::Compute,
             new_rx,
@@ -1006,10 +1129,7 @@ mod tests {
             Some(Info::ClusterResource(_))
         ));
         drop(new_stream);
-        mgr.notify_compute_without_version(
-            Operation::Update,
-            Info::ClusterResource(Default::default()),
-        );
+        notify_compute_cluster_resource(&mgr);
         assert!(mgr.core.lock().compute_senders.is_empty());
     }
 
@@ -1022,11 +1142,8 @@ mod tests {
         drop(rx);
         assert_eq!(mgr.core.lock().compute_senders.len(), 1);
         // Reading a snapshot after cancellation does not need to expose a send error.
-        tx.snapshot_read(NotificationPart::Catalog);
-        mgr.notify_compute_without_version(
-            Operation::Update,
-            Info::ClusterResource(Default::default()),
-        );
+        tx.mark_constant_part(NotificationPart::Catalog);
+        notify_compute_cluster_resource(&mgr);
         assert!(mgr.core.lock().compute_senders.is_empty());
     }
 
@@ -1036,15 +1153,19 @@ mod tests {
         let (tx, rx) = mgr
             .start_subscription(SubscribeType::Hummock, key())
             .unwrap();
-        tx.snapshot_read(NotificationPart::Catalog);
-        mgr.notify_hummock(
+        tx.mark_constant_part(NotificationPart::Catalog);
+        mgr.notify_part(
+            &mut TestCatalog,
+            SubscribeType::Hummock,
             Operation::Update,
             Info::TableRefillRuntimeConfig(risingwave_pb::meta::PbTableRefillRuntimeConfig {
                 table_cache_refill_policies: Some(Default::default()),
                 ..Default::default()
             }),
         );
-        mgr.notify_hummock(
+        mgr.notify_part(
+            &mut TestServing,
+            SubscribeType::Hummock,
             Operation::Update,
             Info::TableRefillRuntimeConfig(risingwave_pb::meta::PbTableRefillRuntimeConfig {
                 serving_table_vnode_mappings: Some(Default::default()),
@@ -1057,7 +1178,7 @@ mod tests {
             NotificationPart::HummockVersion,
             NotificationPart::HummockWriteLimits,
         ] {
-            tx.snapshot_read(part);
+            tx.mark_constant_part(part);
         }
         let stream = notification_stream(SubscribeType::Hummock, rx, MetaSnapshot::default());
         let responses = Box::pin(stream)

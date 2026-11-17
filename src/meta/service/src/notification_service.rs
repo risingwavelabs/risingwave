@@ -12,30 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
-use risingwave_meta::controller::fragment::FragmentServingInfo;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::{FragmentId, WorkerId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
+use risingwave_pb::common::{ClusterResource, WorkerNode};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, ObjectDependency,
-    PbTableCacheRefillPolicies, SubscribeRequest, SubscribeType,
+    PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig, SubscribeRequest, SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tonic::{Request, Response, Status};
@@ -43,11 +37,10 @@ use tonic::{Request, Response, Status};
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    MetaSrvEnv, Notification, NotificationPart, NotificationVersion, SnapshotMarkerSender,
-    WorkerKey, notification_stream,
+    MetaSrvEnv, Notification, NotificationVersion, SnapshotMarkerSender, WorkerKey,
+    notification_stream,
 };
 use crate::serving::ServingVnodeMappingRef;
-use crate::table_refill::build_hummock_table_refill_runtime_config;
 
 pub struct NotificationServiceImpl {
     env: MetaSrvEnv,
@@ -119,7 +112,7 @@ impl NotificationServiceImpl {
         ) = catalog_guard.snapshot().await?;
         let object_dependencies = catalog_guard.list_created_object_dependencies().await?;
         let notification_version = self.env.notification_manager().current_version().await;
-        tx.snapshot_read(NotificationPart::Catalog);
+        tx.snapshot_read(&*catalog_guard);
         Ok((
             (
                 databases,
@@ -154,7 +147,7 @@ impl NotificationServiceImpl {
         let notification_version = self.env.notification_manager().current_version().await;
 
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
-        tx.snapshot_read(NotificationPart::Catalog);
+        tx.snapshot_read(&*catalog_guard);
 
         Ok((decrypted_secrets, notification_version))
     }
@@ -188,47 +181,32 @@ impl NotificationServiceImpl {
         tx: &SnapshotMarkerSender,
     ) -> Vec<FragmentWorkerSlotMapping> {
         let actor_guard = self.env.shared_actor_infos().read_guard();
-        let mappings = actor_guard.worker_slot_mappings();
-        tx.snapshot_read(NotificationPart::StreamingMappings);
-        mappings
+        tx.snapshot_read(&*actor_guard);
+        actor_guard.worker_slot_mappings()
     }
 
     fn get_serving_vnode_mappings_for_frontend(
         &self,
         tx: &SnapshotMarkerSender,
     ) -> Vec<FragmentWorkerSlotMapping> {
-        let serving_guard = self.serving_vnode_mapping.read_guard();
-        let mappings = serving_guard
+        self.serving_vnode_mapping
+            .all_for_snapshot(tx)
             .iter()
             .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
                 fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
-            .collect();
-        tx.snapshot_read(NotificationPart::ServingMappings);
-        mappings
+            .collect()
     }
 
     async fn get_cluster_snapshot_for_frontend(
         &self,
         tx: &SnapshotMarkerSender,
     ) -> MetaResult<(Vec<WorkerNode>, ClusterResource)> {
-        let cluster_guard = self
-            .metadata_manager
+        self.metadata_manager
             .cluster_controller
-            .get_inner_read_guard()
-            .await;
-        let compute_nodes = cluster_guard
-            .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
-            .await?;
-        let frontends = cluster_guard
-            .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
-            .await?;
-        let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
-        // Nodes and resources share one part: sample both before its single boundary.
-        let cluster_resource = cluster_guard.cluster_resource().await?;
-        tx.snapshot_read(NotificationPart::Cluster);
-        Ok((worker_nodes, cluster_resource))
+            .get_worker_nodes_snapshot(tx)
+            .await
     }
 
     /// Compactor subscribers only need state tables from the catalog domain.
@@ -244,20 +222,14 @@ impl NotificationServiceImpl {
         let mut tables = catalog_guard.list_all_state_tables().await?;
         tables.extend(catalog_guard.dropped_tables.values().cloned());
         let notification_version = self.env.notification_manager().current_version().await;
-        tx.snapshot_read(NotificationPart::Catalog);
+        tx.snapshot_read(&*catalog_guard);
         Ok((tables, notification_version))
     }
 
     async fn get_catalog_snapshot_for_hummock(
         &self,
         tx: &SnapshotMarkerSender,
-    ) -> MetaResult<(
-        Vec<Table>,
-        PbTableCacheRefillPolicies,
-        HashMap<FragmentId, FragmentServingInfo>,
-        HashMap<FragmentId, WorkerSlotMapping>,
-        NotificationVersion,
-    )> {
+    ) -> MetaResult<(Vec<Table>, PbTableCacheRefillPolicies, NotificationVersion)> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
@@ -267,25 +239,9 @@ impl NotificationServiceImpl {
         tables.extend(catalog_guard.dropped_tables.values().cloned());
         let table_cache_refill_policies =
             catalog_guard.table_cache_refill_policies_snapshot().await?;
-        let fragment_serving_infos = catalog_guard.fragment_serving_infos().await?;
         let notification_version = self.env.notification_manager().current_version().await;
-
-        // This projection depends on both states. Keep catalog -> serving lock order so a
-        // table cannot be created between reading its catalog identity and its vnode mapping.
-        // Otherwise, a new table's mapping can be absent from the projection (its catalog
-        // identity was not read) while its delta is discarded before the serving marker.
-        // All awaits are above: never await while holding the parking_lot serving guard.
-        let serving_guard = self.serving_vnode_mapping.read_guard();
-        let serving_mappings = serving_guard.clone();
-        tx.snapshot_read(NotificationPart::Catalog);
-        tx.snapshot_read(NotificationPart::ServingMappings);
-        Ok((
-            tables,
-            table_cache_refill_policies,
-            fragment_serving_infos,
-            serving_mappings,
-            notification_version,
-        ))
+        tx.snapshot_read(&*catalog_guard);
+        Ok((tables, table_cache_refill_policies, notification_version))
     }
 
     /// Hummock, compute, and compactor subscribers only need resources from the cluster domain.
@@ -294,14 +250,10 @@ impl NotificationServiceImpl {
         &self,
         tx: &SnapshotMarkerSender,
     ) -> MetaResult<ClusterResource> {
-        let cluster_guard = self
-            .metadata_manager
+        self.metadata_manager
             .cluster_controller
-            .get_inner_read_guard()
-            .await;
-        let resource = cluster_guard.cluster_resource().await?;
-        tx.snapshot_read(NotificationPart::Cluster);
-        Ok(resource)
+            .get_cluster_resource_snapshot(tx)
+            .await
     }
 
     async fn compactor_subscribe(&self, tx: &SnapshotMarkerSender) -> MetaResult<MetaSnapshot> {
@@ -356,23 +308,14 @@ impl NotificationServiceImpl {
 
         let (nodes, cluster_resource) = self.get_cluster_snapshot_for_frontend(tx).await?;
 
-        let hummock_version = self
-            .hummock_manager
-            .on_current_version_arc(|version| {
-                let snapshot = Arc::clone(version);
-                tx.snapshot_read(NotificationPart::HummockVersion);
-                snapshot
-            })
-            .await;
+        let hummock_version = self.hummock_manager.current_version_for_snapshot(tx).await;
         let hummock_version = FrontendHummockVersion::from_version(&hummock_version).to_protobuf();
 
-        let session_params_manager = self.env.session_params_manager_impl_ref();
-        let session_params = {
-            let guard = session_params_manager.get_params_read_guard().await;
-            let params = guard.clone();
-            tx.snapshot_read(NotificationPart::SessionParams);
-            params
-        };
+        let session_params = self
+            .env
+            .session_params_manager_impl_ref()
+            .get_params_for_snapshot(tx)
+            .await;
 
         let session_params = Some(GetSessionParamsResponse {
             params: serde_json::to_string(&session_params)
@@ -412,37 +355,21 @@ impl NotificationServiceImpl {
         worker_id: WorkerId,
         tx: &SnapshotMarkerSender,
     ) -> MetaResult<MetaSnapshot> {
-        let (
-            tables,
-            table_cache_refill_policies,
-            fragment_serving_infos,
-            serving_mappings,
-            catalog_version,
-        ) = self.get_catalog_snapshot_for_hummock(tx).await?;
-        let hummock_version = self
-            .hummock_manager
-            .on_current_version_arc(|version| {
-                let snapshot = Arc::clone(version);
-                tx.snapshot_read(NotificationPart::HummockVersion);
-                snapshot
-            })
-            .await;
+        let (tables, table_cache_refill_policies, catalog_version) =
+            self.get_catalog_snapshot_for_hummock(tx).await?;
+        let hummock_version = self.hummock_manager.current_version_for_snapshot(tx).await;
         let hummock_version = hummock_version.as_ref().into();
-        let hummock_write_limits = {
-            let guard = self.hummock_manager.read_write_limits().await;
-            let limits = guard.write_limits().clone();
-            tx.snapshot_read(NotificationPart::HummockWriteLimits);
-            limits
-        };
+        let hummock_write_limits = self.hummock_manager.write_limits_for_snapshot(tx).await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource_snapshot_for_workers(tx).await?;
-        let table_refill_runtime_config = build_hummock_table_refill_runtime_config(
-            &serving_mappings,
-            worker_id,
-            table_cache_refill_policies,
-            &fragment_serving_infos,
-            catalog_version,
-        );
+        let table_refill_runtime_config = PbTableRefillRuntimeConfig {
+            table_cache_refill_policies: Some(table_cache_refill_policies),
+            serving_table_vnode_mappings: Some(
+                self.serving_vnode_mapping
+                    .table_vnode_mapping_for_snapshot(worker_id, tx),
+            ),
+            version: catalog_version,
+        };
 
         Ok(MetaSnapshot {
             tables,
@@ -517,7 +444,7 @@ impl NotificationService for NotificationServiceImpl {
             SubscribeType::Unspecified => unreachable!(),
         };
 
-        drop(tx);
+        tx.finish(subscribe_type);
         tracing::info!(
             ?host_address,
             ?subscribe_type,

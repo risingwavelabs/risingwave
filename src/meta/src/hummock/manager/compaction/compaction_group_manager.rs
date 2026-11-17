@@ -48,7 +48,7 @@ use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_metrics;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_group_id;
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, NotificationPart, NotificationPartState};
 use crate::model::{
     BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModelError,
 };
@@ -618,6 +618,10 @@ pub(crate) struct CompactionGroupManager {
     default_config: Arc<CompactionConfig>,
     /// Tables that write limit is trigger for.
     pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
+}
+
+impl NotificationPartState for CompactionGroupManager {
+    const PART: NotificationPart = NotificationPart::HummockWriteLimits;
 }
 
 impl CompactionGroupManager {

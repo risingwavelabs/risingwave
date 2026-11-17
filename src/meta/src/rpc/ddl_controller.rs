@@ -936,11 +936,12 @@ impl DdlController {
             return Err(err);
         }
 
+        // Frontends are notified when the command finishes, and any later version covers it.
         let version = self
             .metadata_manager
             .catalog_controller
-            .notify_create_subscription(subscription.id)
-            .await?;
+            .current_notification_version()
+            .await;
         tracing::debug!("finish create subscription");
         Ok(version)
     }
