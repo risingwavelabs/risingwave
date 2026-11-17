@@ -1333,28 +1333,14 @@ impl DdlService for DdlServiceImpl {
         request: Request<AutoSchemaChangeRequest>,
     ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
         let req = request.into_inner();
-
-        // randomly select a frontend worker to get the replace table plan
-        let workers = self
-            .metadata_manager
-            .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
-            .await?;
-        let worker = workers
-            .choose(&mut thread_rng())
-            .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
-
-        let client = self
-            .env
-            .frontend_client_pool()
-            .get(worker)
-            .await
-            .map_err(MetaError::from)?;
-
         let Some(schema_change) = req.schema_change else {
             return Err(Status::invalid_argument(
                 "schema change message is required",
             ));
         };
+
+        let mut applied_cdc_table_ids = HashSet::new();
+        let mut frontend_client = None;
 
         for table_change in schema_change.table_changes {
             for c in &table_change.columns {
@@ -1498,7 +1484,7 @@ impl DdlService for DdlServiceImpl {
                 }
                 // skip the schema change if there is no change to original columns
                 if original_columns == new_columns {
-                    tracing::warn!(target: "auto_schema_change",
+                    tracing::debug!(target: "auto_schema_change",
                                    table_id = %table.id,
                                    cdc_table_id = table.cdc_table_id,
                                    upstraem_ddl = table_change.upstream_ddl,
@@ -1507,6 +1493,29 @@ impl DdlService for DdlServiceImpl {
                                    "No change to columns, skipping the schema change");
                     continue;
                 }
+
+                // PostgreSQL also sends relation metadata when a stream reconnects.
+                // Validate it against the durable catalog before contacting a frontend:
+                // a no-op must not depend on frontend availability during recovery.
+                let client = match &frontend_client {
+                    Some(client) => client,
+                    None => {
+                        let workers = self
+                            .metadata_manager
+                            .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+                            .await?;
+                        let worker = workers.choose(&mut thread_rng()).ok_or_else(|| {
+                            MetaError::from(anyhow!("no frontend worker available"))
+                        })?;
+                        frontend_client.insert(
+                            self.env
+                                .frontend_client_pool()
+                                .get(worker)
+                                .await
+                                .map_err(MetaError::from)?,
+                        )
+                    }
+                };
 
                 let latency_timer = self
                     .meta_metrics
@@ -1544,6 +1553,7 @@ impl DdlService for DdlServiceImpl {
 
                             match replace_res {
                                 Ok(_) => {
+                                    applied_cdc_table_ids.insert(table_change.cdc_table_id.clone());
                                     tracing::info!(
                                         target: "auto_schema_change",
                                         table_id = %table.id,
@@ -1604,7 +1614,11 @@ impl DdlService for DdlServiceImpl {
             }
         }
 
-        Ok(Response::new(AutoSchemaChangeResponse {}))
+        let mut applied_cdc_table_ids: Vec<_> = applied_cdc_table_ids.into_iter().collect();
+        applied_cdc_table_ids.sort_unstable();
+        Ok(Response::new(AutoSchemaChangeResponse {
+            applied_cdc_table_ids,
+        }))
     }
 
     async fn wait_iceberg_pk_index_sink_epoch(

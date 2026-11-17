@@ -109,7 +109,7 @@ impl StreamReaderBuilder {
             let _join_handle = tokio::task::spawn(async move {
                 while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
                     let table_ids = schema_change.table_ids();
-                    tracing::info!(
+                    tracing::debug!(
                         target: "auto_schema_change",
                         "recv a schema change event for tables: {:?}", table_ids);
                     // TODO: retry on rpc error
@@ -118,10 +118,13 @@ impl StreamReaderBuilder {
                             .auto_schema_change(schema_change.to_protobuf())
                             .await
                         {
-                            Ok(_) => {
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
+                            Ok(response) => {
+                                if !response.applied_cdc_table_ids.is_empty() {
+                                    tracing::info!(
+                                        target: "auto_schema_change",
+                                        "schema change success for tables: {:?}",
+                                        response.applied_cdc_table_ids);
+                                }
                                 let _ = finish_tx.send(());
                             }
                             Err(e) => {

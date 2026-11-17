@@ -21,6 +21,7 @@
 #![cfg_attr(madsim, feature(impl_trait_in_assoc_type))]
 
 mod backfill_tests;
+mod cdc_schema_change;
 mod batch;
 mod compaction;
 mod default_parallelism;

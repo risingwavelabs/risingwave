@@ -684,7 +684,11 @@ message AutoSchemaChangeRequest {
   SchemaChangeEnvelope schema_change = 1;
 }
 
-message AutoSchemaChangeResponse {}
+message AutoSchemaChangeResponse {
+  // CDC tables for which at least one catalog table was successfully replaced.
+  // An unchanged schema or a failed replacement must not be reported as applied.
+  repeated string applied_cdc_table_ids = 1;
+}
 
 message AlterDatabaseParamRequest {
   uint32 database_id = 1;
