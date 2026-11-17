@@ -48,7 +48,8 @@ pub struct ExternalStorageTable {
     // Clones used by reader retries must observe connector changes as well.
     config: watch::Sender<ExternalTableConfig>,
 
-    source_id: Option<SourceId>,
+    /// The shared CDC source whose connector changes apply to this table.
+    source_id: SourceId,
 
     table_type: ExternalCdcTableType,
 
@@ -83,6 +84,7 @@ impl ExternalStorageTable {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
+        source_id: SourceId,
         SchemaTableName {
             table_name,
             schema_name,
@@ -105,7 +107,7 @@ impl ExternalStorageTable {
             schema_name,
             database_name,
             config: watch::Sender::new(config),
-            source_id: None,
+            source_id,
             table_type,
             schema,
             pk_order_types,
@@ -121,14 +123,14 @@ impl ExternalStorageTable {
     }
 
     #[cfg(test)]
-    pub fn for_test_undefined() -> Self {
+    pub fn for_test_undefined(source_id: SourceId) -> Self {
         Self {
             table_id: 1.into(),
             table_name: "for_test_table_name".into(),
             schema_name: "for_test_schema_name".into(),
             database_name: "for_test_database_name".into(),
             config: watch::Sender::new(ExternalTableConfig::default()),
-            source_id: None,
+            source_id,
             table_type: ExternalCdcTableType::Unspecified,
             schema: Schema::empty().to_owned(),
             pk_order_types: vec![],
@@ -166,20 +168,14 @@ impl ExternalStorageTable {
         self.table_id
     }
 
-    pub fn with_source_id(mut self, source_id: SourceId) -> Self {
-        self.source_id = Some(source_id);
-        self
-    }
-
     pub(crate) fn is_connector_props_change(&self, mutation: &Mutation) -> bool {
         matches!(mutation, Mutation::ConnectorPropsChange(props)
-            if self.source_id.is_some_and(|id| props.contains_key(&id.as_raw_id())))
+            if props.contains_key(&self.source_id.as_raw_id()))
     }
 
     pub(crate) fn update_connector_props(&self, mutation: &Mutation) -> ConnectorResult<()> {
         if let Mutation::ConnectorPropsChange(props) = mutation
-            && let Some(source_id) = self.source_id
-            && let Some(props) = props.get(&source_id.as_raw_id())
+            && let Some(props) = props.get(&self.source_id.as_raw_id())
         {
             // The mutation contains resolved source properties. Retain the identity of
             // this particular table, rather than the source's table/database filters.

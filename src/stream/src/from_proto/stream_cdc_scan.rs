@@ -148,6 +148,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 
         let external_table = ExternalStorageTable::new(
             table_desc.table_id,
+            table_desc.source_id,
             schema_table_name,
             database_name,
             table_config,
@@ -156,8 +157,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             table_pk_order_types,
             table_pk_comparisons,
             table_pk_indices,
-        )
-        .with_source_id(table_desc.source_id);
+        );
 
         let output_columns = table_desc.columns.iter().map(Into::into).collect_vec();
         if scan_options.is_parallelized_backfill() {

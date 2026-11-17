@@ -120,8 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connector_props_change_unblocks_reader_creation() {
-        let table = ExternalStorageTable::for_test_undefined()
-            .with_source_id(42.into())
+        let table = ExternalStorageTable::for_test_undefined(42.into())
             .with_mock_snapshot_errors([0])
             .with_mock_required_password("new_password");
         let mut reader = Box::pin(create_table_reader_with_retry(

@@ -1200,6 +1200,7 @@ mod tests {
         );
         let external_table = ExternalStorageTable::new(
             TableId::new(1234),
+            42.into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "mock_table".to_owned(),
@@ -1215,7 +1216,6 @@ mod tests {
             Some(vec![CdcKeyComparison::Native]),
             vec![0],
         )
-        .with_source_id(42.into())
         .with_mock_snapshot_errors([usize::from(!connector_props_change), 0]);
         let external_table_for_assertion = external_table.clone();
 

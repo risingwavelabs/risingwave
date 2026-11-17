@@ -1521,6 +1521,7 @@ mod tests {
         let table_id = TableId::new(1234);
         let external_storage_table = ExternalStorageTable::new(
             table_id,
+            42.into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "missing_table".to_owned(),
@@ -1654,9 +1655,7 @@ mod tests {
     #[tokio::test]
     async fn test_connector_props_change_rebuilds_reader() {
         for change_before_snapshot in [true, false] {
-            let external_table = create_mock_external_table()
-                .with_source_id(42.into())
-                .with_mock_snapshot_errors([0, 0]);
+            let external_table = create_mock_external_table().with_mock_snapshot_errors([0, 0]);
             let probe = external_table.clone();
             let config = probe.subscribe_config();
             let (tx, executor) = create_mock_cdc_backfill(
@@ -1886,6 +1885,7 @@ mod tests {
         let actor_context = ActorContext::for_test(1);
         let external_storage_table = ExternalStorageTable::new(
             TableId::new(1234),
+            42.into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "orders".to_owned(),
@@ -2015,6 +2015,7 @@ mod tests {
     fn create_mock_external_table() -> ExternalStorageTable {
         ExternalStorageTable::new(
             TableId::new(1234),
+            42.into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "mock_table".to_owned(),
