@@ -118,13 +118,11 @@ impl StreamReaderBuilder {
                             .auto_schema_change(schema_change.to_protobuf())
                             .await
                         {
-                            Ok(response) => {
-                                if !response.applied_cdc_table_ids.is_empty() {
-                                    tracing::info!(
-                                        target: "auto_schema_change",
-                                        "schema change success for tables: {:?}",
-                                        response.applied_cdc_table_ids);
-                                }
+                            Ok(_) => {
+                                // A successful RPC can be a no-op. Meta logs actual table replacements.
+                                tracing::debug!(
+                                    target: "auto_schema_change",
+                                    "schema change request completed for tables: {:?}", table_ids);
                                 let _ = finish_tx.send(());
                             }
                             Err(e) => {
