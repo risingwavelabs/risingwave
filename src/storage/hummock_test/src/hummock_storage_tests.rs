@@ -161,14 +161,12 @@ async fn test_latest_committed_snapshot() {
             reverse.reverse();
             assert_eq!(rows, reverse);
         };
-    assert_eq!(snapshot.read_epoch(), Some(epoch1));
     check(&snapshot, &[("a", "old"), ("b", "deleted")]).await;
     assert!(futures::poll!(&mut wait).is_pending());
     test_env.commit_epoch(epoch2).await;
     wait.await.unwrap();
 
     // Reads started after the version update still use the original snapshot's version and epoch.
-    assert_eq!(snapshot.read_epoch(), Some(epoch1));
     check(&snapshot, &[("a", "old"), ("b", "deleted")]).await;
     let newer = storage
         .new_read_snapshot(
@@ -181,7 +179,6 @@ async fn test_latest_committed_snapshot() {
         .now_or_never()
         .unwrap()
         .unwrap();
-    assert_eq!(newer.read_epoch(), Some(epoch2));
     check(&newer, &[("a", "new"), ("c", "inserted")]).await;
 }
 

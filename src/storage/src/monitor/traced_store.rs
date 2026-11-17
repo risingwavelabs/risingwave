@@ -43,7 +43,17 @@ pub struct TracedStateStore<S, E = ()> {
     extra: E,
 }
 
-type TableSnapshot = (TableId, Option<HummockReadEpoch>, TableOption);
+#[derive(Clone)]
+pub struct TableSnapshot {
+    table_id: TableId,
+    epoch: Option<HummockReadEpoch>,
+    table_option: TableOption,
+    trace_reads: bool,
+}
+
+fn should_trace_epoch(epoch: HummockReadEpoch) -> bool {
+    !matches!(epoch, HummockReadEpoch::LatestCommitted(_))
+}
 
 impl<S> TracedStateStore<S, TableSnapshot> {
     fn new_with_snapshot_epoch(inner: S, epoch: TableSnapshot) -> Self {
@@ -59,7 +69,7 @@ impl<S> TracedStateStore<S, TableSnapshot> {
     }
 
     fn epoch(&self) -> Option<HummockReadEpoch> {
-        self.extra.1
+        self.extra.epoch
     }
 
     fn raw_epoch(&self) -> Option<u64> {
@@ -67,11 +77,15 @@ impl<S> TracedStateStore<S, TableSnapshot> {
     }
 
     fn table_id(&self) -> TableId {
-        self.extra.0
+        self.extra.table_id
     }
 
     fn table_option(&self) -> TableOption {
-        self.extra.2
+        self.extra.table_option
+    }
+
+    fn trace_reads(&self) -> bool {
+        self.extra.trace_reads
     }
 
     pub fn new_local(inner: S, options: NewLocalOptions) -> Self {
@@ -86,7 +100,12 @@ impl<S> TracedStateStore<S, TableSnapshot> {
         Self {
             inner,
             storage_type,
-            extra: (table_id, None, table_option),
+            extra: TableSnapshot {
+                table_id,
+                epoch: None,
+                table_option,
+                trace_reads: true,
+            },
         }
     }
 }
@@ -131,16 +150,20 @@ impl<S> TracedStateStore<S, TableSnapshot> {
         read_options: ReadOptions,
         get_future: impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>>,
     ) -> StorageResult<Option<StateStoreKeyedRow>> {
-        let span = TraceSpan::new_get_span(
-            key.0.clone(),
-            self.raw_epoch(),
-            read_options.clone().into_traced_read_options(
-                self.table_id(),
-                self.epoch(),
-                self.table_option(),
-            ),
-            self.storage_type,
-        );
+        let span = if self.trace_reads() {
+            TraceSpan::new_get_span(
+                key.0.clone(),
+                self.raw_epoch(),
+                read_options.clone().into_traced_read_options(
+                    self.table_id(),
+                    self.epoch(),
+                    self.table_option(),
+                ),
+                self.storage_type,
+            )
+        } else {
+            None.into()
+        };
 
         let res = get_future.await;
 
@@ -257,7 +280,12 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
         TracedStateStore::new_with_snapshot_epoch(
             self.inner.new_flushed_snapshot_reader(),
-            (self.table_id(), None, self.table_option()),
+            TableSnapshot {
+                table_id: self.table_id(),
+                epoch: None,
+                table_option: self.table_option(),
+                trace_reads: true,
+            },
         )
     }
 
@@ -312,6 +340,9 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         epoch: HummockReadEpoch,
         options: TryWaitEpochOptions,
     ) -> StorageResult<()> {
+        if !should_trace_epoch(epoch) {
+            return self.inner.try_wait_epoch(epoch, options).await;
+        }
         let span = TraceSpan::new_try_wait_epoch_span(epoch, options.clone().into());
 
         let res = self.inner.try_wait_epoch(epoch, options).await;
@@ -336,19 +367,15 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
             .new_read_snapshot(epoch, options)
             .await
             .map(|snapshot| {
-                // Replay needs the epoch captured by this snapshot, not a later local version.
-                let epoch = if matches!(epoch, HummockReadEpoch::LatestCommitted(_)) {
-                    HummockReadEpoch::Committed(
-                        snapshot
-                            .read_epoch()
-                            .expect("latest-committed snapshot must resolve its epoch"),
-                    )
-                } else {
-                    epoch
-                };
                 TracedStateStore::new_with_snapshot_epoch(
                     snapshot,
-                    (table_id, Some(epoch), table_option),
+                    TableSnapshot {
+                        table_id,
+                        epoch: Some(epoch),
+                        table_option,
+                        // Resolving this again during replay could select a different snapshot.
+                        trace_reads: should_trace_epoch(epoch),
+                    },
                 )
             })
     }
@@ -376,10 +403,6 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, TableSnapshot> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
-    fn read_epoch(&self) -> Option<u64> {
-        self.inner.read_epoch()
-    }
-
     fn iter(
         &self,
         key_range: TableKeyRange,
@@ -387,16 +410,20 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, TableSnapshot> {
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
-        let span = TraceSpan::new_iter_span(
-            bytes_key_range,
-            self.raw_epoch(),
-            read_options.clone().into_traced_read_options(
-                self.table_id(),
-                self.epoch(),
-                self.table_option(),
-            ),
-            self.storage_type,
-        );
+        let span = if self.trace_reads() {
+            TraceSpan::new_iter_span(
+                bytes_key_range,
+                self.raw_epoch(),
+                read_options.clone().into_traced_read_options(
+                    self.table_id(),
+                    self.epoch(),
+                    self.table_option(),
+                ),
+                self.storage_type,
+            )
+        } else {
+            None.into()
+        };
         self.traced_iter(self.inner.iter(key_range, read_options), span)
     }
 
@@ -407,16 +434,20 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, TableSnapshot> {
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
-        let span = TraceSpan::new_iter_span(
-            bytes_key_range,
-            self.raw_epoch(),
-            read_options.clone().into_traced_read_options(
-                self.table_id(),
-                self.epoch(),
-                self.table_option(),
-            ),
-            self.storage_type,
-        );
+        let span = if self.trace_reads() {
+            TraceSpan::new_iter_span(
+                bytes_key_range,
+                self.raw_epoch(),
+                read_options.clone().into_traced_read_options(
+                    self.table_id(),
+                    self.epoch(),
+                    self.table_option(),
+                ),
+                self.storage_type,
+            )
+        } else {
+            None.into()
+        };
         self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
     }
 }
@@ -532,7 +563,12 @@ mod tests {
     use crate::memory::MemoryStateStore;
 
     #[tokio::test]
-    async fn test_latest_committed_trace_resolves_epoch() {
+    async fn test_latest_committed_snapshot_is_not_traced() {
+        assert!(should_trace_epoch(HummockReadEpoch::Committed(1)));
+        assert!(!should_trace_epoch(HummockReadEpoch::LatestCommitted(
+            0.into()
+        )));
+
         let store = TracedStateStore::new_global(MemoryStateStore::new());
         let snapshot = store
             .new_read_snapshot(
@@ -544,8 +580,8 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(snapshot.raw_epoch(), Some(u64::MAX));
-        assert_eq!(snapshot.read_epoch(), Some(u64::MAX));
+        assert_eq!(snapshot.raw_epoch(), None);
+        assert!(!snapshot.trace_reads());
         assert!(snapshot.epoch().unwrap().is_read_committed());
     }
 }
