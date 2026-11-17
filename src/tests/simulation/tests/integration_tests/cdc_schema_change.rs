@@ -52,7 +52,10 @@ async fn test_cdc_schema_noop_without_frontend() -> Result<()> {
         .await?;
     assert_eq!(updated.rows_affected, 1);
     db.close().await?;
-    cluster.handle().kill("frontend-1");
+    #[cfg(madsim)]
+    {
+        cluster.handle().kill("frontend-1");
+    }
 
     cluster
         .run_on_client(async move {
