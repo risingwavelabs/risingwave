@@ -20,6 +20,7 @@ use bytes::BytesMut;
 use opendal::Operator;
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::hash::ActorId;
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use serde_json::{Map, Value};
@@ -42,15 +43,28 @@ pub mod snowflake;
 pub const __ROW_ID: &str = "__row_id";
 pub const __OP: &str = "__op";
 
+/// Sort by epoch, writer-local sequence, then actor. Updates to the same key are
+/// routed to the same actor within an epoch; the actor suffix disambiguates writers.
+/// The widths cover u64/u64/u32 and match Redshift's legacy ID normalization.
+fn cdc_row_id(epoch: u64, row_count: usize, actor_id: ActorId) -> String {
+    format!("{epoch:020}_{row_count:020}_{:010}", actor_id.as_raw_id())
+}
+
 pub struct AugmentedRow {
     row_encoder: JsonEncoder,
     current_epoch: u64,
     current_row_count: usize,
+    actor_id: ActorId,
     is_append_only: bool,
 }
 
 impl AugmentedRow {
-    pub fn new(current_epoch: u64, is_append_only: bool, schema: Schema) -> Self {
+    pub fn new(
+        current_epoch: u64,
+        is_append_only: bool,
+        schema: Schema,
+        actor_id: ActorId,
+    ) -> Self {
         let row_encoder = JsonEncoder::new(
             schema,
             None,
@@ -64,6 +78,7 @@ impl AugmentedRow {
             row_encoder,
             current_epoch,
             current_row_count: 0,
+            actor_id,
             is_append_only,
         }
     }
@@ -82,7 +97,7 @@ impl AugmentedRow {
             return Ok(row);
         }
         self.current_row_count += 1;
-        let row_id = format!("{}_{}", self.current_epoch, self.current_row_count);
+        let row_id = cdc_row_id(self.current_epoch, self.current_row_count, self.actor_id);
         row.insert(__ROW_ID.to_owned(), Value::String(row_id));
         row.insert(
             __OP.to_owned(),
@@ -95,14 +110,16 @@ impl AugmentedRow {
 pub struct AugmentedChunk {
     current_epoch: u64,
     current_row_count: usize,
+    actor_id: ActorId,
     is_append_only: bool,
 }
 
 impl AugmentedChunk {
-    pub fn new(current_epoch: u64, is_append_only: bool) -> Self {
+    pub fn new(current_epoch: u64, is_append_only: bool, actor_id: ActorId) -> Self {
         Self {
             current_epoch,
             current_row_count: 0,
+            actor_id,
             is_append_only,
         }
     }
@@ -125,7 +142,13 @@ impl AugmentedChunk {
 
         let op_column = ops.iter().map(|op| op.to_i16() as i32).collect::<Vec<_>>();
         let row_column_strings: Vec<String> = (0..chunk_row_count)
-            .map(|i| format!("{}_{}", self.current_epoch, self.current_row_count + i))
+            .map(|i| {
+                cdc_row_id(
+                    self.current_epoch,
+                    self.current_row_count + i,
+                    self.actor_id,
+                )
+            })
             .collect();
 
         let row_column_refs: Vec<&str> = row_column_strings.iter().map(|s| s.as_str()).collect();
@@ -160,13 +183,14 @@ impl SnowflakeRedshiftSinkS3Writer {
         schema: Schema,
         is_append_only: bool,
         target_table_name: String,
+        actor_id: ActorId,
     ) -> Result<Self> {
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_config)?;
         Ok(Self {
             s3_config,
             s3_operator,
             opendal_writer_path: None,
-            augmented_row: AugmentedRow::new(0, is_append_only, schema),
+            augmented_row: AugmentedRow::new(0, is_append_only, schema, actor_id),
             target_table_name,
         })
     }
@@ -303,7 +327,7 @@ impl SnowflakeRedshiftSinkJdbcWriter {
             CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
 
         Ok(Self {
-            augmented_row: AugmentedChunk::new(0, is_append_only),
+            augmented_row: AugmentedChunk::new(0, is_append_only, writer_param.actor_id),
             jdbc_sink_writer,
         })
     }
@@ -329,5 +353,112 @@ impl SnowflakeRedshiftSinkJdbcWriter {
         // TODO: abort should clean up all the data written in this epoch
         self.jdbc_sink_writer.abort().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::types::ScalarRefImpl;
+
+    use super::*;
+
+    fn schema() -> Schema {
+        Schema::new(vec![Field::with_name(DataType::Int64, "id")])
+    }
+
+    fn chunk_row_ids(chunk: &StreamChunk) -> Vec<String> {
+        chunk
+            .rows()
+            .map(|(op, row)| {
+                assert_eq!(op, Op::Insert);
+                let Some(ScalarRefImpl::Utf8(id)) = row.datum_at(1) else {
+                    panic!("missing CDC row ID");
+                };
+                id.to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_cdc_row_id_ordering() {
+        let tuples = [
+            (99, usize::MAX, u32::MAX),
+            (100, 9, u32::MAX),
+            (100, 10, 9),
+            (100, 10, 10),
+            (u64::MAX, usize::MAX, u32::MAX),
+        ];
+        let ids: Vec<_> = tuples
+            .into_iter()
+            .map(|(epoch, count, actor)| cdc_row_id(epoch, count, actor.into()))
+            .collect();
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(ids.iter().all(|id| id.len() == 52));
+    }
+
+    #[test]
+    fn test_augmented_row_ids() {
+        let chunk = StreamChunk::from_pretty("I\n + 1");
+        let (_, row) = chunk.rows().next().unwrap();
+        let mut writer = AugmentedRow::new(99, false, schema(), 9.into());
+        let mut other_writer = AugmentedRow::new(99, false, schema(), 10.into());
+        let mut ids = Vec::new();
+        for _ in 0..12 {
+            let encoded = writer.augmented_row(row, Op::UpdateInsert).unwrap();
+            assert_eq!(encoded[__OP], Op::UpdateInsert.to_i16());
+            ids.push(encoded[__ROW_ID].as_str().unwrap().to_owned());
+            // Re-entering the same epoch must not reuse IDs.
+            writer.reset_epoch(99);
+        }
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        let other = other_writer.augmented_row(row, Op::Insert).unwrap();
+        assert_ne!(ids[0], other[__ROW_ID].as_str().unwrap());
+        writer.reset_epoch(100);
+        let next = writer.augmented_row(row, Op::Delete).unwrap();
+        assert!(ids.last().unwrap().as_str() < next[__ROW_ID].as_str().unwrap());
+        assert_eq!(writer.current_row_count, 1);
+    }
+
+    #[test]
+    fn test_augmented_chunk_ids() {
+        let chunk = StreamChunk::from_pretty("I\n + 1\n - 2 D\n U- 3\n U+ 4");
+        let mut writer = AugmentedChunk::new(99, false, 9.into());
+        let mut other_writer = AugmentedChunk::new(99, false, 10.into());
+        let mut ids = Vec::new();
+        for _ in 0..4 {
+            let augmented = writer.augmented_chunk(chunk.clone()).unwrap();
+            assert_eq!(augmented.visibility(), chunk.visibility());
+            for ((original_op, original), (_, augmented)) in chunk.rows().zip(augmented.rows()) {
+                assert_eq!(original.datum_at(0), augmented.datum_at(0));
+                assert_eq!(
+                    augmented.datum_at(2),
+                    Some(ScalarRefImpl::Int32(original_op.to_i16() as i32))
+                );
+            }
+            ids.extend(chunk_row_ids(&augmented));
+            writer.reset_epoch(99);
+        }
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        let other = chunk_row_ids(&other_writer.augmented_chunk(chunk.clone()).unwrap());
+        assert_ne!(ids[0], other[0]);
+        writer.reset_epoch(100);
+        let next = chunk_row_ids(&writer.augmented_chunk(chunk.clone()).unwrap());
+        assert!(ids.last().unwrap() < &next[0]);
+        assert_eq!(writer.current_row_count, chunk.capacity());
+    }
+
+    #[test]
+    fn test_append_only_is_not_augmented() {
+        let chunk = StreamChunk::from_pretty("I\n + 1\n + 2");
+        let mut writer = AugmentedChunk::new(100, true, 1.into());
+        assert_eq!(writer.augmented_chunk(chunk.clone()).unwrap(), chunk);
+        let mut writer = AugmentedRow::new(100, true, schema(), 1.into());
+        for (op, row) in chunk.rows() {
+            let encoded = writer.augmented_row(row, op).unwrap();
+            assert_eq!(encoded.len(), 1);
+            assert!(encoded.contains_key("id"));
+        }
     }
 }

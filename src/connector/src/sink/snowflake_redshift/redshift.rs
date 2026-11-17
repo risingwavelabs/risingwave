@@ -318,6 +318,7 @@ impl RedShiftSinkWriter {
                 schema,
                 is_append_only,
                 config.table,
+                writer_param.actor_id,
             )?;
             Ok(Self::S3(s3_writer))
         } else {
@@ -912,14 +913,25 @@ fn build_create_merge_into_task_sql(
         .collect::<Vec<String>>()
         .join(", ");
 
+    // Normalize both legacy epoch_counter IDs and padded epoch_counter_actor IDs.
+    // SPLIT_PART returns an empty string for a missing actor, which LPAD maps to
+    // zero. Use the same key for the watermark, deduplication, and cleanup so an
+    // upgrade can drain existing CDC rows without comparing different formats.
+    // Legacy IDs that already collide cannot recover their missing actor IDs.
+    let row_id = format!("{cdc_table_name}.{__ROW_ID}");
+    let row_id_key = format!(
+        "(LPAD(SPLIT_PART({row_id}, '_', 1), 20, '0') || '_' || \
+         LPAD(SPLIT_PART({row_id}, '_', 2), 20, '0') || '_' || \
+         LPAD(SPLIT_PART({row_id}, '_', 3), 10, '0'))"
+    );
+
     vec![
         format!(
             r#"
             CREATE TEMP TABLE max_id_table AS
-            SELECT COALESCE(MAX({redshift_sink_row_id}), '0') AS max_row_id
+            SELECT COALESCE(MAX({row_id_key}), '0') AS max_row_id
             FROM {cdc_table_name};
             "#,
-            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
         ),
         format!(
@@ -930,10 +942,10 @@ fn build_create_merge_into_task_sql(
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
-                        ORDER BY {redshift_sink_row_id} DESC
+                        ORDER BY {row_id_key} DESC
                     ) AS dedupe_id
                     FROM {cdc_table_name}, max_id_table
-                    WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id
+                    WHERE {row_id_key} <= max_id_table.max_row_id
                 ) AS subquery
                 WHERE dedupe_id = 1 AND {redshift_sink_op} IN (2, 4)
             ) AS source
@@ -941,7 +953,6 @@ fn build_create_merge_into_task_sql(
             "#,
             target_table_name = target_table_name,
             pk_names_str = pk_names_str,
-            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
             redshift_sink_op = __OP,
             pk_names_eq_str = pk_names_eq_str,
@@ -954,10 +965,10 @@ fn build_create_merge_into_task_sql(
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
-                        ORDER BY {redshift_sink_row_id} DESC
+                        ORDER BY {row_id_key} DESC
                     ) AS dedupe_id
                     FROM {cdc_table_name}, max_id_table
-                    WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id
+                    WHERE {row_id_key} <= max_id_table.max_row_id
                 ) AS subquery
                 WHERE dedupe_id = 1 AND {redshift_sink_op} IN (1, 3)
             ) AS source
@@ -969,7 +980,6 @@ fn build_create_merge_into_task_sql(
             "#,
             target_table_name = target_table_name,
             pk_names_str = pk_names_str,
-            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
             redshift_sink_op = __OP,
             pk_names_eq_str = pk_names_eq_str,
@@ -981,10 +991,9 @@ fn build_create_merge_into_task_sql(
             r#"
             DELETE FROM {cdc_table_name}
             USING max_id_table
-            WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id;
+            WHERE {row_id_key} <= max_id_table.max_row_id;
             "#,
             cdc_table_name = cdc_table_name,
-            redshift_sink_row_id = __ROW_ID,
         ),
         "DROP TABLE IF EXISTS max_id_table;".to_owned(),
     ]
@@ -1030,6 +1039,30 @@ fn build_copy_into_sql(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_merge_sql_normalizes_legacy_row_ids() {
+        let sql = build_create_merge_into_task_sql(
+            Some("staging"),
+            Some("public"),
+            "cdc",
+            "target",
+            &vec!["id".to_owned()],
+            &vec!["id".to_owned(), "value".to_owned()],
+        );
+        let key = "(LPAD(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 1), 20, '0') || '_' || \
+                   LPAD(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 2), 20, '0') || '_' || \
+                   LPAD(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 3), 10, '0'))";
+        assert_eq!(sql.len(), 5);
+        assert!(sql[0].contains(&format!("MAX({key})")));
+        for statement in &sql[1..=2] {
+            assert!(statement.contains(&format!("ORDER BY {key} DESC")));
+        }
+        // The delete, merge, and CDC cleanup must all use the same watermark.
+        for statement in &sql[1..=3] {
+            assert!(statement.contains(&format!("WHERE {key} <= max_id_table.max_row_id")));
+        }
+    }
 
     #[test]
     fn test_convert_redshift_decimal_data_type() {

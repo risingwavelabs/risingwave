@@ -606,6 +606,7 @@ impl SnowflakeSinkWriter {
                 schema,
                 is_append_only,
                 table_name,
+                writer_param.actor_id,
             )?;
             Ok(Self::S3(s3_writer))
         } else {
