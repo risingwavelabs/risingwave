@@ -4059,3 +4059,9 @@ The local archive is
 identity and new overlap observations. `prefetch16g-vs-4g.md` gives
 the complete comparison table. Raw startup, congestion, source and
 whole-query metrics and verified cleanup remain beside them.
+
+### SF10 Q18 source GET increase after ColdRanges fixes
+
+Retained metrics reconcile the extra 8,594 source-phase GETs. The fixed build has 8,485 internal cache gaps versus zero before, with 101 more nonempty windows. Remaining logical submission and scheduler merge/reuse differences account for the residual 109 GETs. The fixed gap count is already high before LocalityProvider startup. The code now publishes decoded blocks on consumption, giving concurrent scans a mechanism for fragmented cache visibility. The current ordinary-block buffered-overlap counter records 323 source observations and excludes new direct ranges against completed private buffers. Individual gap causality and a complete duplicate-read census remain open. The gap histogram has 8,458 gaps at most 64 KiB and 187.08 MiB of total gap bytes. No workload or application changes were made.
+
+See [source GET attribution](read-optimization-evidence/q18-sf10-cold-ranges-source-get-attribution.md) and its JSON for code references, exact accounting, histograms, counter-coverage limits and pre-provider samples.

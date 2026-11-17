@@ -1,0 +1,355 @@
+{
+  "comparison": "6c1ab58217 six IO workers versus 0bb0df4acf six IO workers with 16 GiB",
+  "scope": "CN metrics from query start to the recorded full-source checkpoint",
+  "source_phase": {
+    "before": {
+      "source_commit": "6c1ab582177236100bb178b939e64191051acc5f",
+      "source_checkpoint_s": 86.03079312480986,
+      "first_locality_provider_s": 85.1386031875196,
+      "physical_gets": 35938,
+      "physical_bytes": 13473229173,
+      "logical_requests": 39223,
+      "prefetch_windows": 38673,
+      "nonempty_prefetch_windows": 38122,
+      "declared_cold_segments": 38122,
+      "direct_cold_segments": 38122,
+      "singleton_registrations": null,
+      "windows_split_by_internal_cache_gap": 0,
+      "internal_gap_count": 0,
+      "internal_gap_bytes": 0,
+      "internal_gap_blocks": 0,
+      "gaps_over_64kib": 0,
+      "merged_requests": 3233,
+      "in_flight_reused_requests": 52,
+      "other_logical_minus_declared_cold_segments": 1101,
+      "request_routes": {
+        "scheduled": 38555,
+        "oversized": 0,
+        "unbounded": 668,
+        "empty_range": 0,
+        "direct": 0
+      },
+      "window_run_histogram": {
+        "sample_count": 38673,
+        "sum": 38122.0,
+        "mean": 0.9857523336694852,
+        "percentile_bucket_upper": {
+          "50": 1.0,
+          "95": 1.0,
+          "99": 1.0,
+          "99.9": 1.0
+        },
+        "noncumulative_buckets": [
+          [
+            0.0,
+            551
+          ],
+          [
+            1.0,
+            38122
+          ]
+        ],
+        "count_above": {
+          "0": 38122,
+          "1": 0
+        }
+      },
+      "gap_byte_histogram": null,
+      "gap_block_histogram": null,
+      "errors": 0,
+      "retries": 0
+    },
+    "after": {
+      "source_commit": "0bb0df4acf388a958e9592787ec36ceebcb376ed",
+      "source_checkpoint_s": 81.03853991720825,
+      "first_locality_provider_s": 81.10497122961897,
+      "physical_gets": 44532,
+      "physical_bytes": 13197831583,
+      "logical_requests": 47731,
+      "prefetch_windows": 38229,
+      "nonempty_prefetch_windows": 38223,
+      "declared_cold_segments": 46708,
+      "direct_cold_segments": 45680,
+      "singleton_registrations": 1028,
+      "windows_split_by_internal_cache_gap": 8485,
+      "internal_gap_count": 8485,
+      "internal_gap_bytes": 196170757,
+      "internal_gap_blocks": 11589,
+      "gaps_over_64kib": 27,
+      "merged_requests": 3091,
+      "in_flight_reused_requests": 108,
+      "other_logical_minus_declared_cold_segments": 1023,
+      "request_routes": {
+        "scheduled": 47117,
+        "oversized": 0,
+        "unbounded": 614,
+        "empty_range": 0,
+        "direct": 0
+      },
+      "window_run_histogram": {
+        "sample_count": 38229,
+        "sum": 46708.0,
+        "mean": 1.2217949724031494,
+        "percentile_bucket_upper": {
+          "50": 1.0,
+          "95": 2.0,
+          "99": 2.0,
+          "99.9": 2.0
+        },
+        "noncumulative_buckets": [
+          [
+            0.0,
+            6
+          ],
+          [
+            1.0,
+            29738
+          ],
+          [
+            2.0,
+            8485
+          ]
+        ],
+        "count_above": {
+          "0": 38223,
+          "1": 8485
+        }
+      },
+      "gap_byte_histogram": {
+        "sample_count": 8485,
+        "sum": 196170757.0,
+        "mean": 23119.712080141428,
+        "percentile_bucket_upper": {
+          "50": 32768.0,
+          "95": 65536.0,
+          "99": 65536.0,
+          "99.9": 131072.0
+        },
+        "noncumulative_buckets": [
+          [
+            4096.0,
+            4
+          ],
+          [
+            8192.0,
+            18
+          ],
+          [
+            16384.0,
+            102
+          ],
+          [
+            32768.0,
+            5562
+          ],
+          [
+            65536.0,
+            2772
+          ],
+          [
+            131072.0,
+            27
+          ]
+        ],
+        "count_above": {
+          "4096": 8481,
+          "16384": 8361,
+          "65536": 27
+        }
+      },
+      "gap_block_histogram": {
+        "sample_count": 8485,
+        "sum": 11589.0,
+        "mean": 1.3658220388921627,
+        "percentile_bucket_upper": {
+          "50": 1.0,
+          "95": 2.0,
+          "99": 4.0,
+          "99.9": 4.0
+        },
+        "noncumulative_buckets": [
+          [
+            1.0,
+            5527
+          ],
+          [
+            2.0,
+            2813
+          ],
+          [
+            4.0,
+            145
+          ]
+        ],
+        "count_above": {
+          "1": 2958
+        }
+      },
+      "errors": 0,
+      "retries": 0
+    }
+  },
+  "physical_get_delta_accounting": {
+    "extra_internal_gaps": 8485,
+    "extra_nonempty_windows": 101,
+    "remaining_logical_submission_difference": -78,
+    "fewer_merges": 142,
+    "more_in_flight_reuse": -56
+  },
+  "added_physical_gets": 8594,
+  "fixed_build_source_overlap": {
+    "direct_runs": 45680,
+    "singleton_registrations": 1028,
+    "budget_denied": 0,
+    "partial_overlap_dispatch": 228,
+    "partial_overlap_bytes": 16288342,
+    "outer_fetches": null,
+    "buffered_overlap": {
+      "fill": {
+        "reads": 323,
+        "bytes": 5301413
+      },
+      "not_fill": {
+        "reads": 0,
+        "bytes": 0
+      },
+      "disable": {
+        "reads": 0,
+        "bytes": 0
+      }
+    },
+    "iter_init": {
+      "32": {
+        "sum": 0,
+        "count": 0
+      },
+      "38": {
+        "sum": 0,
+        "count": 0
+      }
+    }
+  },
+  "progress_before_any_locality_provider": {
+    "before": [
+      {
+        "elapsed_scrape_s": 5.0074830409139395,
+        "prefetch_windows": 6636,
+        "declared_cold_segments": 6506,
+        "internal_gaps": 0,
+        "gap_bytes": 0,
+        "physical_gets": 3844,
+        "physical_bytes": 2696413826
+      },
+      {
+        "elapsed_scrape_s": 15.06742824986577,
+        "prefetch_windows": 10996,
+        "declared_cold_segments": 10770,
+        "internal_gaps": 0,
+        "gap_bytes": 0,
+        "physical_gets": 8082,
+        "physical_bytes": 4788775466
+      },
+      {
+        "elapsed_scrape_s": 30.375306874979287,
+        "prefetch_windows": 17058,
+        "declared_cold_segments": 16805,
+        "internal_gaps": 0,
+        "gap_bytes": 0,
+        "physical_gets": 14238,
+        "physical_bytes": 6871384985
+      },
+      {
+        "elapsed_scrape_s": 45.48457529069856,
+        "prefetch_windows": 24111,
+        "declared_cold_segments": 23659,
+        "internal_gaps": 0,
+        "gap_bytes": 0,
+        "physical_gets": 21113,
+        "physical_bytes": 8871889670
+      },
+      {
+        "elapsed_scrape_s": 60.665796499699354,
+        "prefetch_windows": 29920,
+        "declared_cold_segments": 29468,
+        "internal_gaps": 0,
+        "gap_bytes": 0,
+        "physical_gets": 27035,
+        "physical_bytes": 10652921340
+      },
+      {
+        "elapsed_scrape_s": 75.89575274987146,
+        "prefetch_windows": 36118,
+        "declared_cold_segments": 35619,
+        "internal_gaps": 0,
+        "gap_bytes": 0,
+        "physical_gets": 33317,
+        "physical_bytes": 12748501948
+      }
+    ],
+    "after": [
+      {
+        "elapsed_scrape_s": 5.007657084148377,
+        "prefetch_windows": 6636,
+        "declared_cold_segments": 6777,
+        "internal_gaps": 141,
+        "gap_bytes": 3440987,
+        "physical_gets": 4123,
+        "physical_bytes": 2719636712
+      },
+      {
+        "elapsed_scrape_s": 15.09005895908922,
+        "prefetch_windows": 11464,
+        "declared_cold_segments": 12763,
+        "internal_gaps": 1299,
+        "gap_bytes": 26837130,
+        "physical_gets": 10096,
+        "physical_bytes": 5026678044
+      },
+      {
+        "elapsed_scrape_s": 30.346671792212874,
+        "prefetch_windows": 17623,
+        "declared_cold_segments": 20875,
+        "internal_gaps": 3252,
+        "gap_bytes": 68893463,
+        "physical_gets": 18301,
+        "physical_bytes": 7015225036
+      },
+      {
+        "elapsed_scrape_s": 45.53280587494373,
+        "prefetch_windows": 24792,
+        "declared_cold_segments": 30691,
+        "internal_gaps": 5899,
+        "gap_bytes": 130802496,
+        "physical_gets": 28141,
+        "physical_bytes": 9044572826
+      },
+      {
+        "elapsed_scrape_s": 60.69446208421141,
+        "prefetch_windows": 30817,
+        "declared_cold_segments": 38157,
+        "internal_gaps": 7340,
+        "gap_bytes": 165277376,
+        "physical_gets": 35674,
+        "physical_bytes": 10821911273
+      },
+      {
+        "elapsed_scrape_s": 75.95704887481406,
+        "prefetch_windows": 37323,
+        "declared_cold_segments": 45679,
+        "internal_gaps": 8356,
+        "gap_bytes": 192434710,
+        "physical_gets": 43396,
+        "physical_bytes": 13006019034
+      }
+    ]
+  },
+  "caveats": [
+    "All gap counters count logical window splits. They are not independently tagged physical GETs.",
+    "The residual term includes other requests and registration/sharing/timing differences; it is not a dedicated measured request category.",
+    "The ordinary-block buffered overlap metric excludes a new direct range against an already completed buffered range.",
+    "Partial-flight overlap and buffered-block overlap have different scopes and cannot be added into a duplicate GET total.",
+    "The old source checkpoint is 0.89 seconds after its first LocalityProvider starts. That provider's local stats have not yet been fully reported.",
+    "Counter differences and gap growth also appear in pre-provider 5-second samples.",
+    "Gap timing and causes are not linked to individual iterators or requests in trace-off data."
+  ]
+}
