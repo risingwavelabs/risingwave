@@ -414,7 +414,7 @@ mod tests {
                         (TABLE_NAME_KEY.into(), "updated_source_filter".into()),
                     ]
                     .into(),
-                    [("password".into(), secret.clone())].into(),
+                    [("password".into(), secret)].into(),
                 )
                 .unwrap();
             let (refreshed, refreshed_name) = refresh_cdc_table_connect_properties(

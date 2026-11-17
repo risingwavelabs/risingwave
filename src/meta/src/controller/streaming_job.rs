@@ -4382,7 +4382,7 @@ mod tests {
                 ("table.name".into(), "source_filter".into()),
                 ("hostname".into(), "new_host".into()),
             ]),
-            BTreeMap::from([("password".into(), secret.clone())]),
+            BTreeMap::from([("password".into(), secret)]),
         );
 
         // Another shared source must not change this table's plan.
