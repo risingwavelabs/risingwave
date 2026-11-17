@@ -22,7 +22,7 @@ use risingwave_object_store::object::{
     InMemObjectStore, MonitoredObjectStore, MonitoredStreamingReader, ObjectError, ObjectStoreImpl,
     ObjectStoreRef,
 };
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::RwLock;
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
 use crate::{
@@ -65,11 +65,6 @@ pub struct ObjectStoreMetaSnapshotStorage {
 
 // TODO #6482: purge stale snapshots that is not in manifest.
 impl ObjectStoreMetaSnapshotStorage {
-    /// Keep the manifest stable while initializing a notification subscription.
-    pub async fn manifest_read_guard(&self) -> RwLockReadGuard<'_, Arc<MetaSnapshotManifest>> {
-        self.manifest.read().await
-    }
-
     pub async fn new(path: &str, store: ObjectStoreRef) -> BackupResult<Self> {
         let instance = Self {
             path: path.to_owned(),
@@ -226,27 +221,6 @@ mod tests {
     use super::{MetaSnapshotStorage, unused};
     use crate::meta_snapshot::MetaSnapshot;
     use crate::meta_snapshot_v2::{MetadataV2, decode_hummock_sequences_from_stream};
-
-    #[tokio::test]
-    async fn test_borrowed_manifest_guard_blocks_updates_through_another_handle() {
-        let storage = std::sync::Arc::new(unused().await);
-        let snapshot_storage = storage.clone();
-        let manifest_guard = snapshot_storage.manifest_read_guard().await;
-        let update = storage.delete(&[]);
-        tokio::pin!(update);
-
-        // Cloned storage handles share the manifest lock. An update cannot publish a new
-        // manifest while subscription initialization still holds its borrowed read guard.
-        assert!(futures::poll!(update.as_mut()).is_pending());
-        assert_eq!(manifest_guard.manifest_id, 0);
-        drop(manifest_guard);
-
-        tokio::time::timeout(std::time::Duration::from_secs(5), update)
-            .await
-            .expect("releasing the manifest read guard must unblock the update")
-            .unwrap();
-        assert_eq!(snapshot_storage.manifest().await.manifest_id, 1);
-    }
 
     #[tokio::test]
     async fn test_create_v2_snapshot_with_streaming_upload() {

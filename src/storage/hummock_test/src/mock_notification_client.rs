@@ -15,16 +15,20 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::StreamExt;
+use futures::stream::BoxStream;
 use risingwave_common::id::WorkerId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_meta::controller::cluster::ClusterControllerRef;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
-use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::manager::{
+    MessageStatus, MetaSrvEnv, NotificationManagerRef, NotificationPart, WorkerKey,
+    notification_stream,
+};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct MockNotificationClient {
     addr: HostAddr,
@@ -55,10 +59,30 @@ impl NotificationClient for MockNotificationClient {
         subscribe_type: SubscribeType,
     ) -> Result<Self::Channel, ObserverError> {
         let worker_key = WorkerKey(self.addr.to_protobuf());
-        let version_guard = self.hummock_manager.read_version().await;
-        let hummock_version = version_guard.version();
+        let (tx, rx) = self
+            .notification_manager
+            .start_subscription(subscribe_type, worker_key)
+            .map_err(MessageStatus::from)?;
+        // These mock fields are constant; only the Hummock version is sampled from live state.
+        for &part in NotificationPart::for_subscriber(subscribe_type) {
+            if part != NotificationPart::HummockVersion {
+                tx.snapshot_read(part);
+            }
+        }
+        let hummock_version = self
+            .hummock_manager
+            .on_current_version_arc(|hummock_version| {
+                let snapshot = Arc::clone(hummock_version);
+                if NotificationPart::for_subscriber(subscribe_type)
+                    .contains(&NotificationPart::HummockVersion)
+                {
+                    tx.snapshot_read(NotificationPart::HummockVersion);
+                }
+                snapshot
+            })
+            .await;
         let meta_snapshot = MetaSnapshot {
-            hummock_version: Some(hummock_version.into()),
+            hummock_version: Some(hummock_version.as_ref().into()),
             version: Some(Default::default()),
             meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
             hummock_write_limits: Some(WriteLimits {
@@ -67,14 +91,10 @@ impl NotificationClient for MockNotificationClient {
             cluster_resource: Some(Default::default()),
             ..Default::default()
         };
-
-        let rx = self.notification_manager.subscribe_with_snapshot(
-            subscribe_type,
-            worker_key,
-            meta_snapshot,
-        );
-
-        Ok(TestChannel(rx))
+        drop(tx);
+        Ok(TestChannel(
+            notification_stream(subscribe_type, rx, meta_snapshot).boxed(),
+        ))
     }
 }
 
@@ -97,14 +117,14 @@ pub async fn get_notification_client_for_test(
     )
 }
 
-pub struct TestChannel<T>(UnboundedReceiver<Result<T, MessageStatus>>);
+pub struct TestChannel<T>(BoxStream<'static, Result<T, MessageStatus>>);
 
 #[async_trait::async_trait]
 impl<T: Send + 'static> Channel for TestChannel<T> {
     type Item = T;
 
     async fn message(&mut self) -> Result<Option<T>, MessageStatus> {
-        match self.0.recv().await {
+        match self.0.next().await {
             None => Ok(None),
             Some(result) => result.map(|r| Some(r)),
         }

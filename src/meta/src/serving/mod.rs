@@ -554,8 +554,8 @@ mod tests {
         )
         .await;
 
-        let response1 = rx1.recv().await.unwrap().unwrap();
-        let response2 = rx2.recv().await.unwrap().unwrap();
+        let response1 = rx1.recv().await.unwrap().into_notification().unwrap();
+        let response2 = rx2.recv().await.unwrap().into_notification().unwrap();
         assert!(rx1.try_recv().is_err());
         assert!(rx2.try_recv().is_err());
 

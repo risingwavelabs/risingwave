@@ -870,7 +870,8 @@ impl CatalogController {
 
     pub async fn count_streaming_jobs(&self) -> MetaResult<usize> {
         let inner = self.inner.read().await;
-        inner.count_streaming_jobs().await
+        let count = StreamingJob::find().count(&inner.db).await?;
+        Ok(usize::try_from(count).context("streaming job count overflow")?)
     }
 
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
@@ -1213,11 +1214,6 @@ impl CatalogController {
         };
 
         Ok(actor_infos)
-    }
-
-    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
-        let guard = self.env.shared_actor_info.read_guard();
-        guard.worker_slot_mappings()
     }
 
     pub async fn list_fragment_descs_with_node(

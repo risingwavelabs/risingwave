@@ -52,17 +52,6 @@ use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats}
 use crate::hummock::model::CompactionGroup;
 use crate::model::VarTransaction;
 
-/// Holds the versioning read lock, protecting the Hummock version until dropped.
-pub struct HummockVersionReadGuard<'a> {
-    guard: MonitoredRwLockGuard<RwLockReadGuard<'a, Versioning>>,
-}
-
-impl HummockVersionReadGuard<'_> {
-    pub fn version(&self) -> &HummockVersion {
-        &self.guard.current_version
-    }
-}
-
 /// Holds the compaction group manager read lock, protecting write limits until dropped.
 pub struct HummockWriteLimitsReadGuard<'a> {
     guard: MonitoredRwLockGuard<RwLockReadGuard<'a, CompactionGroupManager>>,
@@ -187,24 +176,19 @@ impl HummockManager {
     }
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
-        f(self
-            .versioning
-            .read_with_process_name("on_current_version")
-            .await
-            .current_version
-            .as_ref())
+        self.on_current_version_arc(|version| f(version)).await
     }
 
-    /// Keep versioning locked until the subscription snapshot has been sent and registered.
-    /// Acquire this before the catalog lock: `commit_epoch` reads the catalog while holding
-    /// the versioning write lock (and, when creating groups, the compaction group manager lock).
-    pub async fn read_version(&self) -> HummockVersionReadGuard<'_> {
-        HummockVersionReadGuard {
-            guard: self
-                .versioning
-                .read_with_process_name("notification_snapshot")
-                .await,
-        }
+    /// Access the shared version under its read lock, allowing a cheap clone before conversion.
+    pub async fn on_current_version_arc<T>(
+        &self,
+        mut f: impl FnMut(&Arc<HummockVersion>) -> T,
+    ) -> T {
+        let guard = self
+            .versioning
+            .read_with_process_name("on_current_version")
+            .await;
+        f(&guard.current_version)
     }
 
     pub async fn on_current_version_and_table_change_log<T>(
@@ -319,7 +303,8 @@ impl HummockManager {
         guard.write_limit.clone()
     }
 
-    /// Acquire after versioning and before catalog, retaining the guard through registration.
+    /// Retain through reading the write-limit snapshot and sending its marker; release before
+    /// sampling another snapshot part.
     pub async fn read_write_limits(&self) -> HummockWriteLimitsReadGuard<'_> {
         HummockWriteLimitsReadGuard {
             guard: self

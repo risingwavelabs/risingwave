@@ -28,7 +28,9 @@ use risingwave_hummock_trace::{
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp, TracedTryWaitEpochOptions,
 };
-use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::manager::{
+    MessageStatus, MetaSrvEnv, NotificationManagerRef, SubscriptionEvent, WorkerKey,
+};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
@@ -310,7 +312,7 @@ impl ReplayNotificationClient {
 
 #[async_trait::async_trait]
 impl NotificationClient for ReplayNotificationClient {
-    type Channel = ReplayChannel<SubscribeResponse>;
+    type Channel = ReplayChannel;
 
     async fn subscribe(
         &self,
@@ -350,16 +352,16 @@ pub fn get_replay_notification_client(
     )
 }
 
-pub struct ReplayChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
+pub struct ReplayChannel(UnboundedReceiver<SubscriptionEvent>);
 
 #[async_trait::async_trait]
-impl<T: Send + 'static> Channel for ReplayChannel<T> {
-    type Item = T;
+impl Channel for ReplayChannel {
+    type Item = SubscribeResponse;
 
-    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
+    async fn message(&mut self) -> std::result::Result<Option<SubscribeResponse>, MessageStatus> {
         match self.0.recv().await {
             None => Ok(None),
-            Some(result) => result.map(|r| Some(r)),
+            Some(event) => event.into_notification().map(Some),
         }
     }
 }

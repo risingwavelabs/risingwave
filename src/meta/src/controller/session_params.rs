@@ -127,7 +127,7 @@ impl SessionParamsController {
         self.params.read().await.clone()
     }
 
-    /// Retain the read guard until the initial notification snapshot has been registered.
+    /// Retain the read guard through reading the session snapshot and sending its marker.
     pub async fn get_params_read_guard(&self) -> RwLockReadGuard<'_, SessionConfig> {
         self.params.read().await
     }
