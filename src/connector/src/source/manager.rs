@@ -18,7 +18,8 @@ use risingwave_common::catalog::{
     CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME, ColumnDesc, ColumnId,
     KAFKA_TIMESTAMP_COLUMN_NAME, ROW_ID_COLUMN_ID, ROW_ID_COLUMN_NAME,
 };
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 
@@ -43,6 +44,8 @@ pub struct SourceColumnDesc {
     pub is_pk: bool,
     /// `is_hidden_addition_col` is used to indicate whether the column is a hidden addition column.
     pub is_hidden_addition_col: bool,
+    /// Default evaluated when the column was created or added, used for missing fields.
+    pub default_value: Datum,
 }
 
 /// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
@@ -89,6 +92,7 @@ impl SourceColumnDesc {
             column_type: SourceColumnType::Normal,
             is_pk: false,
             is_hidden_addition_col: false,
+            default_value: None,
             additional_column: AdditionalColumn { column_type: None },
         }
     }
@@ -125,8 +129,8 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             column_id,
             name,
             additional_column,
-            // ignored fields below
             generated_or_default_column,
+            // ignored fields below
             description: _,
             version: _,
             system_column: _,
@@ -140,6 +144,15 @@ impl From<&ColumnDesc> for SourceColumnDesc {
                 generated_or_default_column.as_ref().unwrap()
             )
         }
+
+        let default_value = match generated_or_default_column {
+            Some(GeneratedOrDefaultColumn::DefaultColumn(default)) => {
+                default.snapshot_value.as_ref().and_then(|value| {
+                    Datum::from_protobuf(value, data_type).expect("invalid default value")
+                })
+            }
+            _ => None,
+        };
 
         let column_type = SourceColumnType::from_name(name);
         if column_type == SourceColumnType::RowId {
@@ -156,6 +169,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             column_type,
             is_pk: false,
             is_hidden_addition_col: false,
+            default_value,
         }
     }
 }
@@ -171,6 +185,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             column_type: _,
             is_pk: _,
             is_hidden_addition_col: _,
+            default_value: _,
         }: &SourceColumnDesc,
     ) -> Self {
         ColumnDesc {

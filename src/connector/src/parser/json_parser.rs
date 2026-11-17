@@ -498,6 +498,7 @@ mod tests {
             column_type: SourceColumnType::Normal,
             is_pk: true,
             is_hidden_addition_col: false,
+            default_value: None,
             additional_column: AdditionalColumn {
                 column_type: Some(AdditionalColumnType::Key(AdditionalColumnKey {})),
             },
