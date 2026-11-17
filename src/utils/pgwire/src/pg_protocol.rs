@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
-use std::str::Utf8Error;
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::{Duration, Instant};
 use std::{io, str};
@@ -194,13 +193,15 @@ struct PortalData<P> {
 /// Truncate 0 from C string in Bytes and stringify it (returns slice, no allocations).
 ///
 /// PG protocol strings are always C strings.
-pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
+pub fn cstr_to_str(b: &Bytes) -> PsqlResult<&str> {
     let without_null = if b.last() == Some(&0) {
         &b[..b.len() - 1]
     } else {
         &b[..]
     };
-    std::str::from_utf8(without_null)
+    std::str::from_utf8(without_null).map_err(|err| {
+        PsqlError::protocol_error(format!("invalid UTF-8 in protocol string: {err}"))
+    })
 }
 
 fn get_redacted_and_truncated_sql(
@@ -676,7 +677,7 @@ where
             PgProtocolState::Authentication | PgProtocolState::Regular => {
                 self.stream.read_header().await?;
                 let guard = if let Some(ref header) = self.stream.read_header {
-                    let payload_len = std::cmp::max(header.payload_len, 0) as u64;
+                    let payload_len = header.payload_len as u64;
                     let (reason, guard) = self.message_memory_manager.add(payload_len);
                     if let Some(reason) = reason {
                         // Release the memory ASAP.
@@ -711,6 +712,9 @@ where
     }
 
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
+        if self.stream.is_ssl_connection().await {
+            return Err(PsqlError::protocol_error("SSL is already established"));
+        }
         if let Some(context) = self.tls_context.as_ref() {
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
@@ -999,9 +1003,9 @@ where
     }
 
     async fn process_parse_msg(&mut self, mut msg: FeParseMessage) -> PsqlResult<()> {
-        let sql = Arc::from(cstr_to_str(&msg.sql_bytes).unwrap());
+        let sql = Arc::from(cstr_to_str(&msg.sql_bytes)?);
         let session = self.session.clone().unwrap();
-        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
+        let statement_name = cstr_to_str(&msg.statement_name)?.to_owned();
         let type_ids = std::mem::take(&mut msg.type_ids);
         // The inner_process_parse_msg can be slow. Release potential large FeParseMessage early.
         drop(msg);
@@ -1080,8 +1084,8 @@ where
     }
 
     fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
-        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
-        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_owned();
+        let statement_name = cstr_to_str(&msg.statement_name)?.to_owned();
+        let portal_name = cstr_to_str(&msg.portal_name)?.to_owned();
         let session = self.session.clone().unwrap();
 
         if self.portal_store.contains_key(&portal_name) {
@@ -1135,7 +1139,7 @@ where
     }
 
     async fn process_execute_msg(&mut self, msg: FeExecuteMessage) -> PsqlResult<()> {
-        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_owned();
+        let portal_name = cstr_to_str(&msg.portal_name)?.to_owned();
         let row_max = msg.max_rows as usize;
         drop(msg);
         let session = self.session.clone().unwrap();
@@ -1177,12 +1181,14 @@ where
     }
 
     fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
-        let name = cstr_to_str(&msg.name).unwrap().to_owned();
+        let name = cstr_to_str(&msg.name)?.to_owned();
         let session = self.session.clone().unwrap();
         //  b'S' => Statement
         //  b'P' => Portal
 
-        assert!(msg.kind == b'S' || msg.kind == b'P');
+        if !matches!(msg.kind, b'S' | b'P') {
+            return Err(PsqlError::protocol_error("invalid Describe message kind"));
+        }
         if msg.kind == b'S' {
             let prepare_statement = self.get_statement(&name)?;
 
@@ -1224,8 +1230,10 @@ where
     }
 
     fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
-        let name = cstr_to_str(&msg.name).unwrap().to_owned();
-        assert!(msg.kind == b'S' || msg.kind == b'P');
+        let name = cstr_to_str(&msg.name)?.to_owned();
+        if !matches!(msg.kind, b'S' | b'P') {
+            return Err(PsqlError::protocol_error("invalid Close message kind"));
+        }
         if msg.kind == b'S' {
             if name.is_empty() {
                 self.unnamed_prepare_statement = None;
@@ -1501,11 +1509,14 @@ where
     async fn upgrade_to_ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<()> {
         let mut stream = self.stream.lock().await;
 
+        if matches!(&*stream, PgStreamInner::Ssl(_)) {
+            return Err(PsqlError::protocol_error("SSL is already established"));
+        }
+        let ssl = openssl::ssl::Ssl::new(ssl_ctx).map_err(|err| PsqlError::SslError(err.into()))?;
         match std::mem::replace(&mut *stream, PgStreamInner::Placeholder) {
             PgStreamInner::Unencrypted(unencrypted_stream) => {
-                let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
-                let mut ssl_stream =
-                    tokio_openssl::SslStream::new(ssl, unencrypted_stream).unwrap();
+                let mut ssl_stream = tokio_openssl::SslStream::new(ssl, unencrypted_stream)
+                    .map_err(|err| PsqlError::SslError(err.into()))?;
 
                 if let Err(e) = Pin::new(&mut ssl_stream).accept().await {
                     tracing::warn!(error = %e.as_report(), "Unable to set up an ssl connection");
@@ -1515,8 +1526,7 @@ where
 
                 *stream = PgStreamInner::Ssl(ssl_stream);
             }
-            PgStreamInner::Ssl(_) => panic!("the stream is already ssl"),
-            PgStreamInner::Placeholder => unreachable!(),
+            PgStreamInner::Ssl(_) | PgStreamInner::Placeholder => unreachable!(),
         }
 
         Ok(())
@@ -1689,11 +1699,175 @@ fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BufMut;
+    use openssl::asn1::Asn1Time;
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    use openssl::ssl::{Ssl, SslVerifyMode};
+    use openssl::x509::{X509, X509NameBuilder};
     use risingwave_sqlparser::ast::SqlOptionRedaction;
     use tokio::io::AsyncReadExt;
 
     use super::*;
+    use crate::memory_manager::MessageMemoryManager;
+    use crate::net::Address;
+    use crate::pg_server::tests::MockSessionManager;
     use crate::types::Row;
+
+    fn mock_protocol<S: PgByteStream>(stream: S) -> PgProtocol<S, MockSessionManager> {
+        PgProtocol::new(
+            stream,
+            Arc::new(MockSessionManager {}),
+            Arc::new(Address::Tcp("127.0.0.1:12345".parse().unwrap())),
+            ConnectionContext {
+                tls_config: None,
+                sql_option_redaction: None,
+                message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
+                    .into(),
+                stream_flush_threshold_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn test_malformed_messages_during_authentication_and_regular_queries() {
+        for state in [PgProtocolState::Authentication, PgProtocolState::Regular] {
+            for &(tag, payload) in &[
+                (b'P', &b"\0\0"[..]),
+                (b'B', &b"\0\0"[..]),
+                (b'E', &b"\0"[..]),
+                (b'D', &b""[..]),
+                (b'C', &b""[..]),
+                (b'p', &b"password without terminator"[..]),
+            ] {
+                let (server, mut client) = tokio::io::duplex(128);
+                let mut protocol = mock_protocol(server);
+                protocol.state = match state {
+                    PgProtocolState::Authentication => PgProtocolState::Authentication,
+                    _ => PgProtocolState::Regular,
+                };
+                let mut packet = BytesMut::new();
+                packet.put_u8(tag);
+                packet.put_i32(4 + payload.len() as i32);
+                packet.extend_from_slice(payload);
+                client.write_all(&packet).await.unwrap();
+                assert!(protocol.read_message().await.is_err(), "tag {tag}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_utf8_and_message_kinds_return_protocol_errors() {
+        for &(tag, payload) in &[
+            (b'P', &b"\0\xff\0\0\0"[..]),
+            (b'P', &b"\xff\0\0\0\0"[..]),
+            (b'B', &b"\xff\0\0\0\0\0\0\0\0"[..]),
+            (b'B', &b"\0\xff\0\0\0\0\0\0\0"[..]),
+            (b'E', &b"\xff\0\0\0\0\0"[..]),
+            (b'D', &b"S\xff\0"[..]),
+            (b'C', &b"P\xff\0"[..]),
+            (b'D', &b"?\0"[..]),
+            (b'C', &b"?\0"[..]),
+        ] {
+            let msg = FeMessage::read_body(
+                &mut &payload[..],
+                FeMessageHeader {
+                    tag,
+                    payload_len: payload.len(),
+                },
+            )
+            .await
+            .unwrap();
+            let (server, _client) = tokio::io::duplex(4096);
+            let mut protocol = mock_protocol(server);
+            protocol
+                .process_startup_msg(FeStartupMessage {
+                    config: HashMap::new(),
+                })
+                .await
+                .unwrap();
+            // Call the handler directly so that its panic catcher cannot hide regressions.
+            assert!(matches!(
+                protocol.do_process_inner(msg).await,
+                Err(PsqlError::ProtocolError(_))
+            ));
+        }
+    }
+
+    fn test_tls_context() -> SslContext {
+        let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "localhost").unwrap();
+        let name = name.build();
+        let mut cert = X509::builder().unwrap();
+        cert.set_version(2).unwrap();
+        cert.set_subject_name(&name).unwrap();
+        cert.set_issuer_name(&name).unwrap();
+        cert.set_pubkey(&key).unwrap();
+        cert.set_not_before(&Asn1Time::days_from_now(0).unwrap())
+            .unwrap();
+        cert.set_not_after(&Asn1Time::days_from_now(1).unwrap())
+            .unwrap();
+        cert.sign(&key, MessageDigest::sha256()).unwrap();
+
+        let mut acceptor = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).unwrap();
+        acceptor.set_private_key(&key).unwrap();
+        acceptor.set_certificate(&cert.build()).unwrap();
+        acceptor.build().into_context()
+    }
+
+    #[tokio::test]
+    async fn test_repeated_ssl_request_returns_protocol_error_over_tls() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let context = test_tls_context();
+            let (server, mut client) = tokio::io::duplex(4096);
+            let mut protocol = mock_protocol(server);
+            protocol.tls_context = Some(context);
+            let server = async { protocol.run().await };
+            let client = async {
+                let request = [0, 0, 0, 8, 4, 210, 22, 47];
+                client.write_all(&request).await.unwrap();
+                assert_eq!(client.read_u8().await.unwrap(), b'S');
+
+                let mut context = SslContext::builder(SslMethod::tls()).unwrap();
+                context.set_verify(SslVerifyMode::NONE);
+                let ssl = Ssl::new(&context.build()).unwrap();
+                let mut client = SslStream::new(ssl, client).unwrap();
+                Pin::new(&mut client).connect().await.unwrap();
+
+                // A second SSLRequest inside TLS used to leave the server stream as Placeholder.
+                client.write_all(&request).await.unwrap();
+                assert_eq!(client.read_u8().await.unwrap(), b'E');
+                let len = client.read_i32().await.unwrap();
+                let mut error = vec![0; (len - 4) as usize];
+                client.read_exact(&mut error).await.unwrap();
+                assert!(error.windows(7).any(|part| part == b"C08P01\0"));
+            };
+            tokio::join!(server, client);
+        })
+        .await
+        .expect("repeated SSLRequest must terminate cleanly");
+    }
+
+    #[tokio::test]
+    async fn test_ssl_upgrade_preserves_existing_stream() {
+        let context = test_tls_context();
+        let (server, _client) = tokio::io::duplex(4096);
+        // No handshake is needed to check that the state guard precedes stream replacement.
+        let ssl_stream = SslStream::new(Ssl::new(&context).unwrap(), server).unwrap();
+        let mut stream = PgStream {
+            stream: Arc::new(Mutex::new(PgStreamInner::Ssl(ssl_stream))),
+            write_buf: BytesMut::new(),
+            stream_flush_threshold_bytes: 4096,
+            read_header: None,
+        };
+        assert!(matches!(
+            stream.upgrade_to_ssl(&context).await,
+            Err(PsqlError::ProtocolError(_))
+        ));
+        assert!(stream.is_ssl_connection().await);
+    }
 
     #[tokio::test]
     async fn test_streaming_write_flushes_at_threshold() {

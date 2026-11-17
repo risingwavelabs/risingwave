@@ -438,34 +438,37 @@ pub async fn handle_connection<S, SM>(
         .await;
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use bytes::Bytes;
+    use bytes::{BufMut, Bytes, BytesMut};
     use futures::StreamExt;
     use futures::stream::BoxStream;
     use risingwave_common::id::DatabaseId;
     use risingwave_common::types::DataType;
     use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
     use tokio_postgres::NoTls;
 
     use crate::error::PsqlResult;
     use crate::memory_manager::MessageMemoryManager;
+    use crate::net::Address;
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_message::TransactionStatus;
     use crate::pg_protocol::ConnectionContext;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
         BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
-        UserAuthenticator, pg_serve,
+        UserAuthenticator, handle_connection, pg_serve,
     };
     use crate::types;
     use crate::types::Row;
 
-    struct MockSessionManager {}
-    struct MockSession {}
+    pub(crate) struct MockSessionManager {}
+    pub(crate) struct MockSession {}
 
     const STREAMING_TEST_QUERY: &str = "SELECT 'pgwire_streaming_test'";
 
@@ -691,6 +694,84 @@ mod tests {
     #[tokio::test]
     async fn test_query_tcp() {
         do_test_query("127.0.0.1:10000", "host=localhost port=10000").await;
+    }
+
+    #[tokio::test]
+    async fn test_malformed_startup_requests_keep_server_accepting_connections() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let mut packets = Vec::new();
+            for len in [8, 12, 17] {
+                let mut packet = BytesMut::new();
+                packet.put_i32(len);
+                packet.put_i32(80877102);
+                packet.resize(len as usize, 0);
+                packets.push(packet.freeze());
+            }
+            for len in [i32::MIN, -1, 0, 7, i32::MAX] {
+                packets.push(Bytes::copy_from_slice(&len.to_be_bytes()));
+            }
+            for code in [80877103, 80877104, 0] {
+                let mut packet = BytesMut::new();
+                packet.put_i32(9);
+                packet.put_i32(code);
+                packet.put_u8(0);
+                packets.push(packet.freeze());
+            }
+            let connections = packets.len() + 1;
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let session_mgr = Arc::new(MockSessionManager {});
+                // Handle malformed requests followed by a normal query connection.
+                for _ in 0..connections {
+                    let (stream, peer_addr) = listener.accept().await.unwrap();
+                    handle_connection(
+                        stream,
+                        session_mgr.clone(),
+                        Arc::new(Address::Tcp(peer_addr)),
+                        ConnectionContext {
+                            tls_config: None,
+                            sql_option_redaction: None,
+                            message_memory_manager: MessageMemoryManager::new(
+                                u64::MAX,
+                                u64::MAX,
+                                u64::MAX,
+                            )
+                            .into(),
+                            stream_flush_threshold_bytes: 64 * 1024,
+                        },
+                    )
+                    .await;
+                }
+            });
+
+            for packet in packets {
+                let mut stream = TcpStream::connect(addr).await.unwrap();
+                stream.write_all(&packet).await.unwrap();
+                // The complete malformed frame must be rejected while the client stays open.
+                match stream.read(&mut [0]).await {
+                    Ok(0) => {}
+                    // Rejecting a header before reading its body can reset the connection.
+                    Err(err) if err.kind() == std::io::ErrorKind::ConnectionReset => {}
+                    result => panic!("expected connection closure, got {result:?}"),
+                }
+            }
+
+            let (client, connection) = tokio_postgres::connect(
+                &format!("host=127.0.0.1 port={} user=mock", addr.port()),
+                NoTls,
+            )
+            .await
+            .unwrap();
+            let connection = tokio::spawn(connection);
+            assert_eq!(client.simple_query("SELECT ''").await.unwrap().len(), 2);
+            drop(client);
+            connection.await.unwrap().unwrap();
+            // A reader panic must fail the test even without the production panic hook.
+            server.await.unwrap();
+        })
+        .await
+        .expect("malformed requests must not prevent subsequent connections");
     }
 
     #[cfg(not(madsim))]
