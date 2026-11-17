@@ -79,7 +79,6 @@ use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkI
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
-use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
     NotificationVersion, StreamingJob, StreamingJobType,
@@ -97,8 +96,8 @@ use crate::stream::{
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
     StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    cleanup_dropped_sink_runtimes, create_source_worker, first_variant_column,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    create_source_worker, first_variant_column, rewrite_refresh_schema_sink_fragment, state_match,
+    validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -288,7 +287,6 @@ pub struct DdlController {
     pub(crate) stream_manager: GlobalStreamManagerRef,
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
-    sink_manager: SinkCoordinatorManager,
     iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
@@ -410,7 +408,6 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
-        sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -420,7 +417,6 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
-            sink_manager,
             iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
@@ -1266,11 +1262,6 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let cross_db_subscriptions = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_cross_db_subscriptions_by_job(job_id)
-                    .await?;
                 let abort_result = self
                     .metadata_manager
                     .catalog_controller
@@ -1295,11 +1286,6 @@ impl DdlController {
                             })
                             .await;
                     }
-                }
-                for subscription in cross_db_subscriptions {
-                    self.stream_manager
-                        .drop_cross_db_subscription(&subscription)
-                        .await;
                 }
                 Err(err)
             }
@@ -1915,15 +1901,9 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
-                cleanup_dropped_sink_runtimes(
-                    &self.sink_manager,
-                    &self.iceberg_pk_index_sink_manager,
-                    abort_result
-                        .aborted_sink_ids
-                        .iter()
-                        .map(|id| id.as_job_id()),
-                )
-                .await;
+                self.stream_manager
+                    .cleanup_aborted_streaming_job(abort_result)
+                    .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

@@ -932,52 +932,61 @@ impl GlobalStreamManager {
         &self,
         abort_result: AbortCreatingJobResult,
     ) -> MetaResult<()> {
-        if !abort_result.aborted {
+        let AbortCreatingJobResult {
+            aborted,
+            database_id,
+            aborted_sink_ids,
+            cancel_info,
+            cross_db_subscriptions,
+        } = abort_result;
+        if !aborted {
             return Ok(());
         }
         self.iceberg_pk_index_sink_manager
-            .retire_sinks(abort_result.aborted_sink_ids.iter().copied());
-        if let (Some(database_id), Some(cancel_info)) =
-            (abort_result.database_id, abort_result.cancel_info)
-        {
-            let result = self
-                .barrier_scheduler
-                .run_command(database_id, cancel_info.command)
-                .await;
-            if let Err(err) = result {
-                // Catalog deletion has committed. Recovery will release state, but must not be
-                // required to stop the coordinator of a job no longer present in the catalog.
+            .retire_sinks(aborted_sink_ids.iter().copied());
+        let cleanup_result =
+            if let (Some(database_id), Some(cancel_info)) = (database_id, cancel_info) {
+                let result = self
+                    .barrier_scheduler
+                    .run_command(database_id, cancel_info.command)
+                    .await;
+                if let Err(err) = result {
+                    // Catalog deletion has committed. Recovery will release state, but must not be
+                    // required to stop the coordinator of a job no longer present in the catalog.
+                    cleanup_dropped_sink_runtimes(
+                        &self.sink_manager,
+                        &self.iceberg_pk_index_sink_manager,
+                        cancel_info.streaming_job_ids,
+                    )
+                    .await;
+                    Err(err)
+                } else {
+                    cleanup_dropped_streaming_jobs(
+                        &self.refresh_manager,
+                        &self.hummock_manager,
+                        &self.metadata_manager,
+                        &self.sink_manager,
+                        &self.iceberg_pk_index_sink_manager,
+                        cancel_info.streaming_job_ids,
+                        cancel_info.state_table_ids,
+                        "cancel_streaming_job",
+                    )
+                    .await
+                }
+            } else {
                 cleanup_dropped_sink_runtimes(
                     &self.sink_manager,
                     &self.iceberg_pk_index_sink_manager,
-                    cancel_info.streaming_job_ids,
+                    aborted_sink_ids.iter().map(|id| id.as_job_id()),
                 )
                 .await;
-                return Err(err);
-            }
-            cleanup_dropped_streaming_jobs(
-                &self.refresh_manager,
-                &self.hummock_manager,
-                &self.metadata_manager,
-                &self.sink_manager,
-                &self.iceberg_pk_index_sink_manager,
-                cancel_info.streaming_job_ids,
-                cancel_info.state_table_ids,
-                "cancel_streaming_job",
-            )
-            .await?;
-        } else {
-            cleanup_dropped_sink_runtimes(
-                &self.sink_manager,
-                &self.iceberg_pk_index_sink_manager,
-                abort_result
-                    .aborted_sink_ids
-                    .iter()
-                    .map(|id| id.as_job_id()),
-            )
-            .await;
+                Ok(())
+            };
+
+        for subscription in cross_db_subscriptions {
+            self.drop_cross_db_subscription(&subscription).await;
         }
-        Ok(())
+        cleanup_result
     }
 
     /// Cancel streaming jobs and return the canceled table ids.
@@ -1264,7 +1273,7 @@ impl GlobalStreamManager {
     }
 
     pub async fn drop_cross_db_subscription(
-        self: &Arc<Self>,
+        &self,
         info: &crate::controller::catalog::CrossDbSubscriptionInfo,
     ) {
         self.drop_subscription(
@@ -1277,7 +1286,7 @@ impl GlobalStreamManager {
 
     // Don't need to add actor, just send a command
     pub async fn drop_subscription(
-        self: &Arc<Self>,
+        &self,
         database_id: DatabaseId,
         subscription_id: SubscriptionId,
         table_id: TableId,

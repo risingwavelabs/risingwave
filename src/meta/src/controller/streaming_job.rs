@@ -85,7 +85,8 @@ use super::rename::IndexItemRewriter;
 use crate::barrier::Command;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{
-    CatalogController, DropTableConnectorContext, load_object_models,
+    CatalogController, CrossDbSubscriptionInfo, DropTableConnectorContext, load_object_models,
+    resolve_cross_db_subscriptions,
 };
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
@@ -117,6 +118,8 @@ pub struct AbortCreatingJobResult {
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
     pub cancel_info: Option<CancelStreamingJobInfo>,
+    /// Internal subscriptions to drop from upstream databases after downstream cleanup.
+    pub cross_db_subscriptions: Vec<CrossDbSubscriptionInfo>,
 }
 
 /// Runtime and state cleanup information for canceling a creating streaming job.
@@ -1179,6 +1182,7 @@ impl CatalogController {
                 database_id: None,
                 aborted_sink_ids: vec![],
                 cancel_info: None,
+                cross_db_subscriptions: vec![],
             });
         };
         let database_id = obj
@@ -1194,6 +1198,7 @@ impl CatalogController {
                     database_id: Some(database_id),
                     aborted_sink_ids: vec![],
                     cancel_info: None,
+                    cross_db_subscriptions: vec![],
                 });
             }
 
@@ -1214,6 +1219,7 @@ impl CatalogController {
                         database_id: Some(database_id),
                         aborted_sink_ids: vec![],
                         cancel_info: None,
+                        cross_db_subscriptions: vec![],
                     });
                 }
             }
@@ -1233,6 +1239,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
         let object_models = load_object_models(&txn, &objects_to_abort).await?;
+        let cross_db_subscriptions = resolve_cross_db_subscriptions(&txn, &object_models).await?;
 
         let fragments: Vec<(FragmentId, i32, TableIdArray)> = Fragment::find()
             .select_only()
@@ -1367,6 +1374,7 @@ impl CatalogController {
             database_id: Some(database_id),
             aborted_sink_ids,
             cancel_info,
+            cross_db_subscriptions,
         })
     }
 

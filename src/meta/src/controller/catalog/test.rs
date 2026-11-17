@@ -2617,15 +2617,25 @@ mod tests {
             FragmentTypeMask::empty(),
         )
         .await?;
+        let subscriptions = mgr
+            .create_cross_db_subscriptions(job_id, [table_id])
+            .await?;
 
         let abort_result = mgr.try_abort_creating_streaming_job(job_id, false).await?;
         assert!(!abort_result.aborted);
         assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
+        assert!(abort_result.cross_db_subscriptions.is_empty());
 
         let db = &mgr.inner.read().await.db;
         assert!(Object::find_by_id(job_id).one(db).await?.is_some());
         assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_some());
         assert!(Table::find_by_id(table_id).one(db).await?.is_some());
+        assert!(
+            Subscription::find_by_id(subscriptions[0].subscription_id)
+                .one(db)
+                .await?
+                .is_some()
+        );
 
         Ok(())
     }
@@ -3190,6 +3200,15 @@ mod tests {
         else {
             unreachable!()
         };
+        let (aborted_downstream_job_id, _, _) =
+            insert_test_streaming_job(&txn, "cross_db_aborted_downstream_mv", true, None).await?;
+        streaming_job::ActiveModel {
+            job_id: Set(aborted_downstream_job_id),
+            job_status: Set(JobStatus::Initial),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
         fragment::ActiveModel {
             fragment_id: Set(FragmentId::new(101)),
             job_id: Set(downstream_job_id),
@@ -3274,6 +3293,36 @@ mod tests {
         assert_eq!(
             truncate_info.progress_table_subscribers[0].progress_table_id,
             progress_table_id
+        );
+
+        let aborted_subscriptions = mgr
+            .create_cross_db_subscriptions(
+                aborted_downstream_job_id,
+                [upstream_job_id.as_mv_table_id()],
+            )
+            .await?;
+        let abort_result = mgr
+            .try_abort_creating_streaming_job(aborted_downstream_job_id, false)
+            .await?;
+        assert!(abort_result.aborted);
+        assert_eq!(abort_result.cross_db_subscriptions.len(), 1);
+        assert_eq!(
+            abort_result.cross_db_subscriptions[0].subscription_id,
+            aborted_subscriptions[0].subscription_id
+        );
+        assert_eq!(
+            abort_result.cross_db_subscriptions[0].upstream_table_id,
+            upstream_job_id.as_mv_table_id()
+        );
+        assert_eq!(
+            abort_result.cross_db_subscriptions[0].upstream_database_id,
+            upstream_database.database_id
+        );
+        assert!(
+            Subscription::find_by_id(aborted_subscriptions[0].subscription_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
         );
 
         let (release_context, _) = mgr

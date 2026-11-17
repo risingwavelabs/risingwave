@@ -368,50 +368,6 @@ impl CatalogController {
         Ok(map)
     }
 
-    pub async fn get_cross_db_subscriptions_by_job(
-        &self,
-        downstream_job_id: JobId,
-    ) -> MetaResult<Vec<CrossDbSubscriptionInfo>> {
-        let inner = self.inner.read().await;
-        let subscriptions = Subscription::find()
-            .filter(subscription::Column::CrossDbDownstreamJobId.eq(downstream_job_id))
-            .all(&inner.db)
-            .await?;
-        let upstream_objects = Object::find()
-            .filter(
-                object::Column::Oid.is_in(
-                    subscriptions
-                        .iter()
-                        .map(|subscription| subscription.dependent_table_id.as_object_id()),
-                ),
-            )
-            .all(&inner.db)
-            .await?
-            .into_iter()
-            .map(|object| (object.oid, object))
-            .collect::<HashMap<_, _>>();
-
-        subscriptions
-            .into_iter()
-            .map(|subscription| {
-                let upstream_database_id = upstream_objects
-                    .get(&subscription.dependent_table_id.as_object_id())
-                    .and_then(|object| object.database_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "cannot resolve upstream database for cross-database subscription {}",
-                            subscription.subscription_id
-                        )
-                    })?;
-                Ok(CrossDbSubscriptionInfo {
-                    subscription_id: subscription.subscription_id,
-                    upstream_table_id: subscription.dependent_table_id,
-                    upstream_database_id,
-                })
-            })
-            .collect()
-    }
-
     pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
         let inner = self.inner.read().await;
         let table_options: Vec<(TableId, Option<i32>)> = Table::find()

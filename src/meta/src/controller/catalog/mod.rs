@@ -167,6 +167,60 @@ pub struct CrossDbSubscriptionInfo {
     pub upstream_database_id: DatabaseId,
 }
 
+pub(crate) async fn resolve_cross_db_subscriptions(
+    txn: &DatabaseTransaction,
+    object_models: &[PbObjectInfo],
+) -> MetaResult<Vec<CrossDbSubscriptionInfo>> {
+    let subscriptions = object_models
+        .iter()
+        .filter_map(|object_info| match object_info {
+            PbObjectInfo::Subscription(subscription)
+                if subscription.cross_db_downstream_job_id.is_some() =>
+            {
+                Some(subscription)
+            }
+            _ => None,
+        })
+        .collect_vec();
+    if subscriptions.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let upstream_objects = Object::find()
+        .filter(
+            object::Column::Oid.is_in(
+                subscriptions
+                    .iter()
+                    .map(|subscription| subscription.dependent_table_id.as_object_id()),
+            ),
+        )
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|object| (object.oid, object))
+        .collect::<HashMap<_, _>>();
+
+    subscriptions
+        .into_iter()
+        .map(|subscription| {
+            let upstream_database_id = upstream_objects
+                .get(&subscription.dependent_table_id.as_object_id())
+                .and_then(|object| object.database_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "cannot resolve upstream database for cross-database subscription {}",
+                        subscription.id
+                    )
+                })?;
+            Ok(CrossDbSubscriptionInfo {
+                subscription_id: subscription.id,
+                upstream_table_id: subscription.dependent_table_id,
+                upstream_database_id,
+            })
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub(crate) struct CleanedDirtyStreamingJobs {
     pub(crate) streaming_job_ids: Vec<JobId>,
