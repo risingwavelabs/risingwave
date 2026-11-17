@@ -85,6 +85,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 params.executor_stats.clone(),
                 Some(refresh_args),
                 node.cleaned_by_ttl_watermark,
+                node.preserve_changes,
                 params.local_barrier_manager.clone(),
             )
             .await
@@ -106,6 +107,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     params.executor_stats.clone(),
                     None, // No refresh args for regular tables
                     node.cleaned_by_ttl_watermark,
+                    node.preserve_changes,
                     params.local_barrier_manager.clone(),
                 )
                 .await
@@ -125,6 +127,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     params.executor_stats.clone(),
                     None, // No refresh args for regular tables
                     node.cleaned_by_ttl_watermark,
+                    node.preserve_changes,
                     params.local_barrier_manager.clone(),
                 )
                 .await
@@ -179,6 +182,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             params.executor_stats.clone(),
             None,  // ArrangeExecutor doesn't support refresh functionality
             false, // ArrangeExecutor doesn't support TTL watermark
+            false,
             params.local_barrier_manager.clone(),
         )
         .await;

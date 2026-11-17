@@ -49,6 +49,7 @@ use crate::telemetry::report_event;
 
 pub mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
+    pub const PRESERVE_CHANGES: &str = "preserve_changes";
 }
 
 pub const MV_REFRESH_INTERVAL_SEC_KEY: &str = "refresh.interval.sec";
@@ -136,7 +137,9 @@ impl WithOptions {
             .inner
             .into_iter()
             .filter(|(key, _)| {
-                key != OverwriteOptions::SOURCE_RATE_LIMIT_KEY && key != options::RETENTION_SECONDS
+                key != OverwriteOptions::SOURCE_RATE_LIMIT_KEY
+                    && key != options::RETENTION_SECONDS
+                    && key != options::PRESERVE_CHANGES
             })
             .collect();
 
@@ -153,6 +156,18 @@ impl WithOptions {
         self.inner
             .get(options::RETENTION_SECONDS)
             .and_then(|s| s.parse().ok())
+    }
+
+    pub fn preserve_changes(&self) -> RwResult<bool> {
+        let Some(s) = self.inner.get(options::PRESERVE_CHANGES) else {
+            return Ok(false);
+        };
+        s.to_lowercase().parse().map_err(|_| {
+            RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "`{}` must be `true` or `false`, got `{s}`",
+                options::PRESERVE_CHANGES
+            )))
+        })
     }
 
     pub fn refresh_interval_sec(&self) -> RwResult<Option<u64>> {

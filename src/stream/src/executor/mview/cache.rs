@@ -42,6 +42,7 @@ pub struct MaterializeCache {
     version_column_indices: Vec<u32>,
     conflict_behavior: ConflictBehavior,
     toastable_column_indices: Option<Vec<usize>>,
+    pub(super) preserve_changes: bool,
     metrics: MaterializeCacheMetrics,
 }
 
@@ -89,6 +90,7 @@ impl MaterializeCache {
         version_column_indices: Vec<u32>,
         conflict_behavior: ConflictBehavior,
         toastable_column_indices: Option<Vec<usize>>,
+        preserve_changes: bool,
         materialize_cache_metrics: MaterializeCacheMetrics,
     ) -> Option<Self> {
         match conflict_behavior {
@@ -110,17 +112,20 @@ impl MaterializeCache {
             version_column_indices,
             conflict_behavior,
             toastable_column_indices,
+            preserve_changes,
             metrics: materialize_cache_metrics,
         })
     }
 
-    /// First populate the cache from `table`, and then calculate a [`ChangeBuffer`].
+    /// First populate the cache from `table`, and then calculate [`ChangeBuffer`]s to apply in order.
+    /// There is a single buffer unless `preserve_changes` is set, in which case a new buffer is started
+    /// whenever a key repeats, so that every change is kept.
     /// `table` will not be written in this method.
     pub async fn handle_new<S: StateStore, SD: ValueRowSerde>(
         &mut self,
         chunk: StreamChunk,
         table: &StateTableInner<S, SD>,
-    ) -> StreamExecutorResult<ChangeBuffer> {
+    ) -> StreamExecutorResult<Vec<ChangeBuffer>> {
         if table.value_indices().is_some() {
             // TODO(st1page): when materialize partial columns(), we should
             // construct some columns in the pk
@@ -160,7 +165,7 @@ impl MaterializeCache {
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
-    ) -> StreamExecutorResult<ChangeBuffer> {
+    ) -> StreamExecutorResult<Vec<ChangeBuffer>> {
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
@@ -171,10 +176,14 @@ impl MaterializeCache {
         self.fetch_keys(key_set.iter().map(|v| v.deref()), table)
             .await?;
 
+        let mut change_buffers = vec![];
         let mut change_buffer = ChangeBuffer::new();
         let row_serde = self.row_serde.clone();
         let version_column_indices = self.version_column_indices.clone();
         for (op, key, row) in row_ops {
+            if self.preserve_changes && change_buffer.contains_key(&key) {
+                change_buffers.push(std::mem::take(&mut change_buffer));
+            }
             // Use a macro instead of method to workaround partial borrow.
             macro_rules! get_expected {
                 () => {
@@ -343,7 +352,8 @@ impl MaterializeCache {
                 }
             }
         }
-        Ok(change_buffer)
+        change_buffers.push(change_buffer);
+        Ok(change_buffers)
     }
 
     async fn fetch_keys<'a, S: StateStore, SD: ValueRowSerde>(
