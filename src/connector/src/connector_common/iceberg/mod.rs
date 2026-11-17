@@ -632,6 +632,7 @@ impl IcebergCommon {
                     .warehouse(warehouse)
                     .access_key(self.s3_access_key.clone())
                     .secret_key(self.s3_secret_key.clone())
+                    .iam_role_arn(self.s3_iam_role_arn.clone())
                     .region(self.s3_region.clone())
                     .endpoint(self.s3_endpoint.clone())
                     .path_style_access(Some(self.effective_s3_path_style_access()))
