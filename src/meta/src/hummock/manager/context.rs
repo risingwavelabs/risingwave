@@ -41,9 +41,11 @@ const GC_HISTORY_QUERY_BATCH_SIZE: usize = 1000;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
+/// It also keeps changelog references removed during its lifetime in a separate tracker.
 pub struct HummockVersionSafePoint {
     pub id: HummockVersionId,
     event_sender: HummockManagerEventSender,
+    _change_log_guard: super::gc::change_log_retention::ChangeLogObjectGuard,
 }
 
 impl Drop for HummockVersionSafePoint {
@@ -441,6 +443,7 @@ impl HummockManager {
         let safe_point = HummockVersionSafePoint {
             id: versioning.current_version.id,
             event_sender: self.event_sender.clone(),
+            _change_log_guard: self.gc_manager.change_log_retention.pin(false),
         };
         wl.version_safe_points.push(safe_point.id);
         trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);

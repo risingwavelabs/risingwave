@@ -729,9 +729,7 @@ impl SstableStore {
                 .read(&meta_path, range)
                 .instrument_await("get_meta_response".verbose())
                 .await?;
-            let meta = SstableMeta::decode(&buf[..])?;
-
-            let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
+            let sst = Sstable::from_meta_bytes(object_id, &buf, skip_bloom_filter_in_serde)?;
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
             Ok::<_, anyhow::Error>(Box::new(sst))
