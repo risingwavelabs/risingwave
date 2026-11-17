@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::reader::{
-    build_reader_and_poll_upstream, create_table_reader_with_retry,
+    apply_connector_props_changes, build_reader_and_poll_upstream, create_table_reader_with_retry,
 };
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -509,7 +509,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .cloned()
             .collect_vec();
 
-        let mut upstream = self.upstream.execute();
+        let mut upstream =
+            apply_connector_props_changes(self.upstream.execute(), self.external_table.clone())
+                .boxed();
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
@@ -657,6 +659,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             let mut upstream_table_reader =
                 UpstreamTableReader::new(self.external_table.clone(), table_reader);
+            let reader_config = self.external_table.subscribe_config();
 
             if last_binlog_offset.is_none() {
                 // Limit concurrent CDC connections globally to 10 using a semaphore.
@@ -752,7 +755,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             // the buffer will be drained when a barrier comes
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
-            let mut needs_reader_rebuild = false;
+            // A connector change may have arrived while waiting for the barrier that
+            // starts the snapshot, after the first reader was already constructed.
+            let mut needs_reader_rebuild = reader_config.has_changed().unwrap();
 
             'backfill_loop: loop {
                 if needs_reader_rebuild {
@@ -869,6 +874,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         barrier_count == self.options.snapshot_barrier_interval;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
+                                        if self.external_table.is_connector_props_change(mutation) {
+                                            needs_reader_rebuild = true;
+                                            // Do not poll the old connection again before replacing it.
+                                            should_bypass_snapshot_stream_patch = true;
+                                        }
                                         match mutation {
                                             Mutation::Pause => {
                                                 is_snapshot_paused = true;
@@ -1427,7 +1437,8 @@ mod tests {
     use crate::executor::prelude::StateTable;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{
-        ActorContext, Barrier, CdcBackfillExecutor, ExternalStorageTable, Message,
+        ActorContext, AddMutation, Barrier, CdcBackfillExecutor, ExternalStorageTable, Message,
+        Mutation,
     };
 
     #[tokio::test]
@@ -1638,6 +1649,103 @@ mod tests {
             Some(&recovered_position),
             true,
         ));
+    }
+
+    #[tokio::test]
+    async fn test_connector_props_change_rebuilds_reader() {
+        for change_before_snapshot in [true, false] {
+            let external_table = create_mock_external_table()
+                .with_source_id(42.into())
+                .with_mock_snapshot_errors([0, 0]);
+            let probe = external_table.clone();
+            let config = probe.subscribe_config();
+            let (tx, executor) = create_mock_cdc_backfill(
+                external_table,
+                create_cdc_state_table(MemoryStateStore::new()).await,
+                CdcScanOptions::default(),
+            );
+            let executor = executor.execute_inner();
+            pin_mut!(executor);
+
+            tx.send_barrier(
+                Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(
+                    AddMutation {
+                        pause: true,
+                        ..Default::default()
+                    },
+                )),
+            );
+            assert!(matches!(
+                executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            ));
+
+            let change = Mutation::ConnectorPropsChange(
+                [(
+                    42,
+                    [
+                        ("connector".into(), "mysql-cdc".into()),
+                        ("hostname".into(), "new_host".into()),
+                        ("port".into(), "3306".into()),
+                        ("username".into(), "user".into()),
+                        ("password".into(), "new_password".into()),
+                        ("database.name".into(), "mydb,other_db".into()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            let barrier = Barrier::new_test_barrier(test_epoch(2));
+            tx.send_barrier(if change_before_snapshot {
+                barrier.with_mutation(change.clone())
+            } else {
+                barrier
+            });
+            assert!(matches!(
+                executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            ));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), executor.next())
+                    .await
+                    .is_err()
+            );
+
+            if !change_before_snapshot {
+                assert_eq!(probe.mock_reader_create_count(), 1);
+                tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)).with_mutation(change));
+                assert!(matches!(
+                    executor.next().await.unwrap().unwrap(),
+                    Message::Barrier(_)
+                ));
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(20), executor.next())
+                        .await
+                        .is_err()
+                );
+            }
+            assert_eq!(probe.mock_reader_create_count(), 2);
+            assert_eq!(config.borrow().password, "new_password");
+            assert_eq!(config.borrow().host, "new_host");
+            assert_eq!(config.borrow().database, "mydb");
+            assert_eq!(config.borrow().schema, "public");
+            assert_eq!(config.borrow().table, "mock_table");
+
+            tx.send_barrier(
+                Barrier::new_test_barrier(test_epoch(if change_before_snapshot { 3 } else { 4 }))
+                    .with_mutation(Mutation::Resume),
+            );
+            assert!(matches!(
+                executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            ));
+            assert!(matches!(
+                executor.next().await.unwrap().unwrap(),
+                Message::Chunk(_)
+            ));
+        }
     }
 
     #[tokio::test]

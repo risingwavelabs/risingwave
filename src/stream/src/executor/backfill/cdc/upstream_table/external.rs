@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::VecDeque;
 #[cfg(test)]
@@ -20,12 +21,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use risingwave_common::catalog::{CdcKeyComparison, Schema, TableId};
+use risingwave_common::id::SourceId;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableConfig, ExternalTableReader,
     ExternalTableReaderImpl, SchemaTableName,
 };
+use tokio::sync::watch;
+
+use crate::executor::Mutation;
 
 /// This struct represents an external table to be read during backfill
 #[derive(Debug, Clone)]
@@ -40,7 +45,10 @@ pub struct ExternalStorageTable {
 
     database_name: String,
 
-    config: ExternalTableConfig,
+    // Clones used by reader retries must observe connector changes as well.
+    config: watch::Sender<ExternalTableConfig>,
+
+    source_id: Option<SourceId>,
 
     table_type: ExternalCdcTableType,
 
@@ -66,6 +74,9 @@ pub struct ExternalStorageTable {
 
     #[cfg(test)]
     mock_reader_create_count: Arc<AtomicUsize>,
+
+    #[cfg(test)]
+    mock_required_password: Option<String>,
 }
 
 impl ExternalStorageTable {
@@ -93,7 +104,8 @@ impl ExternalStorageTable {
             table_name,
             schema_name,
             database_name,
-            config,
+            config: watch::Sender::new(config),
+            source_id: None,
             table_type,
             schema,
             pk_order_types,
@@ -103,6 +115,8 @@ impl ExternalStorageTable {
             mock_snapshot_errors: None,
             #[cfg(test)]
             mock_reader_create_count: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            mock_required_password: None,
         }
     }
 
@@ -113,7 +127,8 @@ impl ExternalStorageTable {
             table_name: "for_test_table_name".into(),
             schema_name: "for_test_schema_name".into(),
             database_name: "for_test_database_name".into(),
-            config: ExternalTableConfig::default(),
+            config: watch::Sender::new(ExternalTableConfig::default()),
+            source_id: None,
             table_type: ExternalCdcTableType::Unspecified,
             schema: Schema::empty().to_owned(),
             pk_order_types: vec![],
@@ -121,6 +136,7 @@ impl ExternalStorageTable {
             pk_indices: vec![],
             mock_snapshot_errors: None,
             mock_reader_create_count: Arc::new(AtomicUsize::new(0)),
+            mock_required_password: None,
         }
     }
 
@@ -140,8 +156,45 @@ impl ExternalStorageTable {
         self.mock_reader_create_count.load(Ordering::Relaxed)
     }
 
+    #[cfg(test)]
+    pub fn with_mock_required_password(mut self, password: &str) -> Self {
+        self.mock_required_password = Some(password.to_owned());
+        self
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+
+    pub fn with_source_id(mut self, source_id: SourceId) -> Self {
+        self.source_id = Some(source_id);
+        self
+    }
+
+    pub(crate) fn is_connector_props_change(&self, mutation: &Mutation) -> bool {
+        matches!(mutation, Mutation::ConnectorPropsChange(props)
+            if self.source_id.is_some_and(|id| props.contains_key(&id.as_raw_id())))
+    }
+
+    pub(crate) fn update_connector_props(&self, mutation: &Mutation) -> ConnectorResult<()> {
+        if let Mutation::ConnectorPropsChange(props) = mutation
+            && let Some(source_id) = self.source_id
+            && let Some(props) = props.get(&source_id.as_raw_id())
+        {
+            // The mutation contains resolved source properties. Retain the identity of
+            // this particular table, rather than the source's table/database filters.
+            let mut props: BTreeMap<_, _> = props.clone().into_iter().collect();
+            props.insert("database.name".into(), self.database_name.clone());
+            props.insert("schema.name".into(), self.schema_name.clone());
+            props.insert("table.name".into(), self.table_name.clone());
+            let config = ExternalTableConfig::try_from_btreemap(props, BTreeMap::new())?;
+            self.config.send_replace(config);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn subscribe_config(&self) -> watch::Receiver<ExternalTableConfig> {
+        self.config.subscribe()
     }
 
     pub fn pk_order_types(&self) -> &[OrderType] {
@@ -180,6 +233,14 @@ impl ExternalStorageTable {
             self.mock_reader_create_count
                 .fetch_add(1, Ordering::Relaxed);
 
+            if self
+                .mock_required_password
+                .as_ref()
+                .is_some_and(|password| *password != self.config.borrow().password)
+            {
+                return Err(anyhow::anyhow!("mock authentication failure").into());
+            }
+
             let snapshot_errors = snapshot_errors
                 .lock()
                 .expect("mock snapshot error queue must not be poisoned")
@@ -191,9 +252,10 @@ impl ExternalStorageTable {
             ));
         }
 
+        let config = self.config.borrow().clone();
         self.table_type
             .create_table_reader(
-                self.config.clone(),
+                config,
                 self.schema.clone(),
                 self.pk_indices.clone(),
                 SchemaTableName {

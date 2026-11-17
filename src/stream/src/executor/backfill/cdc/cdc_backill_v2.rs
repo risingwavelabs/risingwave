@@ -35,7 +35,7 @@ use crate::executor::backfill::cdc::cdc_backfill::{
 use crate::executor::backfill::cdc::state_v2::{CdcStateRecord, ParallelizedCdcBackfillState};
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::reader::{
-    build_reader_and_poll_upstream, create_table_reader_with_retry,
+    apply_connector_props_changes, build_reader_and_poll_upstream, create_table_reader_with_retry,
 };
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -137,7 +137,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let cdc_table_snapshot_split_column =
             vec![self.external_table.schema().fields[snapshot_split_column_index].clone()];
 
-        let mut upstream = self.upstream.execute();
+        let mut upstream =
+            apply_connector_props_changes(self.upstream.execute(), self.external_table.clone())
+                .boxed();
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         // Make sure to use mapping_message after transform_upstream.
@@ -454,6 +456,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             state_impl.commit_state(barrier.epoch).await?;
 
                                             if let Some(mutation) = barrier.mutation.as_deref() {
+                                                if self
+                                                    .external_table
+                                                    .is_connector_props_change(mutation)
+                                                {
+                                                    // Reuse the retry path, retaining the split's
+                                                    // low watermark and buffered CDC changes.
+                                                    attempt_state = SnapshotAttemptState::Failed;
+                                                }
                                                 use crate::executor::Mutation;
                                                 match mutation {
                                                     Mutation::Pause => {
@@ -1170,6 +1180,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_rebuilds_reader_after_snapshot_error() {
+        check_reader_rebuild(false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_connector_props_change_rebuilds_reader() {
+        check_reader_rebuild(true).await;
+    }
+
+    async fn check_reader_rebuild(connector_props_change: bool) {
         let (mut tx, source) = MockSource::channel();
 
         let source = source.into_executor(
@@ -1196,7 +1215,8 @@ mod tests {
             Some(vec![CdcKeyComparison::Native]),
             vec![0],
         )
-        .with_mock_snapshot_errors([1, 0]);
+        .with_source_id(42.into())
+        .with_mock_snapshot_errors([usize::from(!connector_props_change), 0]);
         let external_table_for_assertion = external_table.clone();
 
         let state_table = create_parallel_cdc_state_table(MemoryStateStore::new()).await;
@@ -1245,6 +1265,7 @@ mod tests {
         // Assign the split to this actor on the initial barrier.
         tx.send_barrier(
             Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
+                pause: connector_props_change,
                 actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration {
                     splits: snapshot_splits,
                 },
@@ -1257,9 +1278,7 @@ mod tests {
             Message::Barrier(Barrier { epoch, .. }) if epoch.curr == curr_epoch
         ));
 
-        // This poll creates reader 1 and starts the snapshot, consuming its injected error. The
-        // executor then keeps polling the CDC upstream until a barrier provides a safe recovery
-        // boundary.
+        // Create the first reader, then wait with a paused snapshot or an injected error.
         assert!(
             tokio::time::timeout(Duration::from_millis(50), executor.next())
                 .await
@@ -1268,13 +1287,59 @@ mod tests {
         assert_eq!(external_table_for_assertion.mock_reader_create_count(), 1);
 
         curr_epoch.inc_epoch();
-        tx.push_barrier(curr_epoch, false);
+        if connector_props_change {
+            tx.send_barrier(
+                Barrier::new_test_barrier(curr_epoch).with_mutation(
+                    Mutation::ConnectorPropsChange(
+                        [(
+                            42,
+                            [
+                                ("connector".into(), "mysql-cdc".into()),
+                                ("hostname".into(), "new_host".into()),
+                                ("port".into(), "3306".into()),
+                                ("username".into(), "user".into()),
+                                ("password".into(), "new_password".into()),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                ),
+            );
+        } else {
+            tx.push_barrier(curr_epoch, false);
+        }
         assert!(matches!(
             executor.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier { epoch, .. }) if epoch.curr == curr_epoch
         ));
 
-        // Resuming after the barrier creates reader 2 and produces a snapshot chunk.
+        if connector_props_change {
+            // Rebuild even while paused, without polling the old snapshot connection.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), executor.next())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(external_table_for_assertion.mock_reader_create_count(), 2);
+            assert_eq!(
+                external_table_for_assertion
+                    .subscribe_config()
+                    .borrow()
+                    .password,
+                "new_password"
+            );
+            curr_epoch.inc_epoch();
+            tx.send_barrier(Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Resume));
+            assert!(matches!(
+                executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            ));
+        }
+
+        // The replacement reader can continue the snapshot.
         assert!(matches!(
             executor.next().await.unwrap().unwrap(),
             Message::Chunk(_)
