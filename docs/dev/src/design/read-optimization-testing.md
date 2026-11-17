@@ -98,6 +98,7 @@ flushes after one yield from the first actual outer read. The ordinary source sc
 than a process environment flag. Changelog scanning is independent and
 remains off in this overlay. The overlay captures read-path settings; cluster
 topology, seed and SQL conditions are documented with the archived runs.
+The [SF10 Q18 comparison](./read-optimization-evidence/q18-sf10-scheduler-simplify.md) records all three simplified runs and both three-run historical cohorts.
 The [historical Q64](./read-optimization-evidence/q18-q64.toml) controls apply
 only to their archived binaries. The earlier `max_admitted_requests` counted
 logical requests and `batch_prepare_timeout_ms` used a different preparation
