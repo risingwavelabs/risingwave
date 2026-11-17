@@ -15,6 +15,14 @@ use risingwave_object_store::object::ObjectResult;
 
 use super::*;
 
+// Planning may pin existing memory entries, but never starts IO or Foyer fetches.
+// Missing disk hints are resolved only after the final prefix has been admitted.
+enum PlannedBlock {
+    Cached(BlockHolder),
+    CacheLookup,
+    Cold,
+}
+
 enum Part {
     Cached(BlockHolder),
     CacheLookup(usize, foyer::HybridGet<SstableBlockIndex, Box<Block>>),
@@ -48,32 +56,58 @@ pub(crate) struct ColdRangePrefetch {
     parts: VecDeque<Part>,
     buffered: Option<BufferedRun>,
     start: usize,
-    // Covers compressed buffers overlapping decoded/pinned blocks and window bookkeeping.
-    // Private read tasks retain it until cancellation has actually been observed.
-    // This is an estimated prefetch budget, not an allocator/RSS limit.
+    // Charge raw buffers, pinned cache results, one direct-decode peak and bookkeeping.
+    // Delivered blocks belong to the caller/Foyer; this is not a query-wide RSS limit.
+    // Private read tasks retain the reservation until cancellation is observed.
     _tracker: Arc<MemoryUsageTracker>,
 }
 
 impl ColdRangePrefetch {
-    fn reservation_bytes(metas: &[BlockMeta]) -> Option<usize> {
-        // Charge every block before cache lookups: hits pin entries, and disk hints
-        // may become misses. Do not release budget early just because a block is cached.
+    fn planned_reservation_bytes(
+        metas: &[BlockMeta],
+        blocks: &[PlannedBlock],
+        planning_capacity: usize,
+        policy: CachePolicy,
+    ) -> Option<usize> {
         let overhead = size_of::<Part>()
-            .checked_add(size_of::<BlockHolder>())?
             .checked_add(size_of::<SstableBlockIndex>())?
             .checked_add(BufferedRangeGuard::estimated_overhead())?;
-        let initial = size_of::<Self>()
+        let mut bytes = size_of::<Self>()
             .checked_add(size_of::<MemoryUsageTracker>())?
-            .checked_add(2 * size_of::<usize>())?; // Arc reference counts.
-        metas.iter().try_fold(initial, |bytes, meta| {
+            .checked_add(2 * size_of::<usize>())? // Arc reference counts.
+            .checked_add(planning_capacity.checked_mul(size_of::<PlannedBlock>())?)?;
+        let mut decode_peak = 0;
+        for (idx, (meta, block)) in metas.iter().zip(blocks).enumerate() {
+            bytes = bytes.checked_add(overhead)?;
+            if let PlannedBlock::Cached(holder) = block {
+                // These entries are already decoded and can all remain pinned together.
+                bytes = bytes.checked_add(holder.estimated_memory_weight())?;
+                continue;
+            }
             let decoded = Block::estimated_decode_memory_weight(
                 meta.len.max(meta.uncompressed_size) as usize,
             )?;
-            bytes
-                .checked_add(meta.len as usize)?
-                .checked_add(decoded)?
-                .checked_add(overhead)
-        })
+            bytes = bytes.checked_add(meta.len as usize)?;
+            let shared_singleton = matches!(policy, CachePolicy::Fill(_))
+                && matches!(block, PlannedBlock::Cold)
+                && (idx == 0 || !matches!(blocks[idx - 1], PlannedBlock::Cold))
+                && (idx + 1 == blocks.len() || !matches!(blocks[idx + 1], PlannedBlock::Cold));
+            if matches!(block, PlannedBlock::CacheLookup) || shared_singleton {
+                // Cache lookups and shared singleton producers may complete concurrently
+                // and keep all their decoded results alive before consumption.
+                bytes = bytes.checked_add(decoded)?;
+            } else {
+                // Direct runs retain encoded bytes but decode only one block at a time.
+                decode_peak = decode_peak.max(decoded);
+            }
+        }
+        bytes.checked_add(decode_peak)
+    }
+
+    #[cfg(test)]
+    fn reservation_bytes(metas: &[BlockMeta]) -> Option<usize> {
+        let blocks: Vec<_> = metas.iter().map(|_| PlannedBlock::Cold).collect();
+        Self::planned_reservation_bytes(metas, &blocks, blocks.capacity(), CachePolicy::default())
     }
 
     pub(crate) async fn next(
@@ -236,16 +270,53 @@ impl SstableStore {
         if end <= start + 1 {
             return None;
         }
-        let reserved_bytes = ColdRangePrefetch::reservation_bytes(&metas[start..end])?;
-        let Some(tracker) = MemoryUsageTracker::try_new(
-            self.prefetch_buffer_usage.clone(),
-            reserved_bytes,
-            self.prefetch_buffer_capacity,
-        ) else {
-            self.read_metrics.cold_range_prefetch_budget_denied.inc();
-            return None;
+        let requested_end = end;
+        let mut plan: Vec<_> = (start..end)
+            .map(|idx| {
+                let key = SstableBlockIndex {
+                    sst_id: sst.id,
+                    block_idx: idx as _,
+                };
+                if policy == CachePolicy::Disable {
+                    PlannedBlock::Cold
+                } else if let Some(entry) = self.block_cache.memory().get(&key) {
+                    PlannedBlock::Cached(BlockHolder::from_hybrid_cache_entry(entry))
+                } else if self.block_cache.is_hybrid() && self.block_cache.contains(&key) {
+                    PlannedBlock::CacheLookup
+                } else {
+                    PlannedBlock::Cold
+                }
+            })
+            .collect();
+        let tracker = loop {
+            // Do not wait or discard batching immediately when the desired window is
+            // too large. Try smaller prefixes, each with an atomic reservation.
+            if plan.len() < 2 {
+                self.read_metrics.cold_range_prefetch_budget_denied.inc();
+                return None;
+            }
+            end = start + plan.len();
+            if let Some(tracker) = ColdRangePrefetch::planned_reservation_bytes(
+                &metas[start..end],
+                &plan,
+                plan.capacity(),
+                policy,
+            )
+            .and_then(|bytes| {
+                MemoryUsageTracker::try_new(
+                    self.prefetch_buffer_usage.clone(),
+                    bytes,
+                    self.prefetch_buffer_capacity,
+                )
+            }) {
+                break Arc::new(tracker);
+            }
+            // Dropping excluded cache hits releases their pins before trying again.
+            plan.pop();
         };
-        let tracker = Arc::new(tracker);
+        if end < requested_end {
+            self.read_metrics.cold_range_prefetch_budget_shrunk.inc();
+        }
         let mut window = ColdRangePrefetch {
             parts: VecDeque::with_capacity(end - start),
             buffered: None,
@@ -253,22 +324,18 @@ impl SstableStore {
             _tracker: tracker,
         };
         let mut cold_start = start;
-        for idx in start..end {
-            let key = SstableBlockIndex {
-                sst_id: sst.id,
-                block_idx: idx as _,
-            };
-            let cached = if policy == CachePolicy::Disable {
-                None
-            } else if let Some(entry) = self.block_cache.memory().get(&key) {
-                // Pin actual memory entries rather than trusting a presence check.
-                Some(Part::Cached(BlockHolder::from_hybrid_cache_entry(entry)))
-            } else if self.block_cache.is_hybrid() && self.block_cache.contains(&key) {
-                // Foyer starts the cache lookup now. Do not await disk IO while planning
-                // later cold runs; a stale positive hint has an explicit fallback above.
-                Some(Part::CacheLookup(idx, self.block_cache.get(&key)))
-            } else {
-                None
+        for (offset, planned) in plan.into_iter().enumerate() {
+            let idx = start + offset;
+            let cached = match planned {
+                PlannedBlock::Cached(block) => Some(Part::Cached(block)),
+                PlannedBlock::CacheLookup => Some(Part::CacheLookup(
+                    idx,
+                    self.block_cache.get(&SstableBlockIndex {
+                        sst_id: sst.id,
+                        block_idx: idx as _,
+                    }),
+                )),
+                PlannedBlock::Cold => None,
             };
             if let Some(cached) = cached {
                 self.start_cold_range(sst, cold_start..idx, policy, &mut window, stats)
@@ -775,6 +842,267 @@ mod tests {
         store.block_cache.close().await.unwrap();
     }
 
+    #[tokio::test]
+    async fn cold_range_merge_scan_keeps_batching_with_fixed_budget() {
+        use crate::hummock::iterator::{HummockIterator, MergeIterator};
+        use crate::hummock::test_utils::{gen_test_sstable, test_key_of};
+        use crate::hummock::value::HummockValue;
+        use crate::hummock::{SstableIterator, SstableIteratorReadOptions};
+        use crate::store::PrefetchMode;
+
+        for compression in [
+            crate::hummock::CompressionAlgorithm::None,
+            crate::hummock::CompressionAlgorithm::Lz4,
+            crate::hummock::CompressionAlgorithm::Zstd,
+        ] {
+            let (mut store, _, _, metrics, _, _dir) = setup(false).await;
+            let mut tables = Vec::new();
+            for (id, offset) in [(200, 4096), (201, 4096), (202, 0)] {
+                let mut opts = default_builder_opt_for_test();
+                opts.block_capacity = 32 * 1024;
+                opts.compression_algorithm = compression;
+                tables.push(
+                    gen_test_sstable(
+                        opts,
+                        id,
+                        (offset..offset + 8192)
+                            .map(|i| (test_key_of(i), HummockValue::put(vec![i as u8; 256]))),
+                        store.clone(),
+                    )
+                    .await,
+                );
+            }
+            store.clear_block_cache().await.unwrap();
+            // Independent fixed budget: do not derive admission expectations from the
+            // reservation formula being tested. All three raw windows total about 1.5 MiB.
+            const CAPACITY: usize = 4 * 1024 * 1024;
+            Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = CAPACITY;
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch: PrefetchMode::ColdRanges,
+                ..Default::default()
+            });
+            let children = tables
+                .iter()
+                .map(|(sst, info)| {
+                    SstableIterator::new(sst.clone(), store.clone(), options.clone(), info)
+                })
+                .collect::<Vec<_>>();
+            let mut iter = MergeIterator::new(children);
+            let physical = metrics.operation_size.with_label_values(&["read"]);
+            let before = physical.get_sample_count();
+            iter.rewind().await.unwrap();
+            let head_usage = store.get_prefetch_memory_usage();
+            for i in 0..2048 {
+                assert!(iter.is_valid());
+                assert_eq!(iter.key(), test_key_of(i).to_ref());
+                iter.next().await.unwrap();
+                assert!(store.get_prefetch_memory_usage() <= CAPACITY);
+            }
+            let gets = physical.get_sample_count() - before;
+            let denied = store.read_metrics.cold_range_prefetch_budget_denied.get();
+            println!(
+                "fixed_budget_merge compression={compression:?} capacity={CAPACITY} head_usage={head_usage} GETs={gets} denied={denied}"
+            );
+            drop(iter);
+            assert_eq!(store.get_prefetch_memory_usage(), 0);
+            store.block_cache.close().await.unwrap();
+            assert_eq!(gets, 4, "two parked heads and two active 16-block windows");
+            assert_eq!(denied, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn cold_range_shrinks_to_available_budget_before_demand_fallback() {
+        for policy in [
+            CachePolicy::default(),
+            CachePolicy::NotFill,
+            CachePolicy::Disable,
+        ] {
+            let (mut store, sst, _, metrics, _, _dir) = setup(false).await;
+            const CAPACITY: usize = 64 * 1024;
+            Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = CAPACITY;
+            let physical = metrics.operation_size.with_label_values(&["read"]);
+            let before = physical.get_sample_count();
+            let mut stats = StoreLocalStatistic::default();
+            let mut window = store
+                .prefetch_cold_ranges(&sst, 0, 16, policy, &mut stats)
+                .await
+                .expect("a smaller multi-block window must fit");
+            let blocks = stats.cache_data_prefetch_block_count;
+            assert!((2..16).contains(&blocks));
+            assert_eq!(
+                store.read_metrics.cold_range_prefetch_budget_shrunk.get(),
+                1
+            );
+            let mut max_decoded = 0;
+            let raw: usize = sst.meta.block_metas[..blocks as usize]
+                .iter()
+                .map(|m| m.len as usize)
+                .sum();
+            for _ in 0..blocks {
+                let block = window
+                    .next(&store, &sst, policy, &mut stats)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                max_decoded = max_decoded.max(block.estimated_memory_weight());
+                assert!(store.get_prefetch_memory_usage() <= CAPACITY);
+                assert!(store.get_prefetch_memory_usage() >= raw + max_decoded);
+            }
+            assert!(
+                window
+                    .next(&store, &sst, policy, &mut stats)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(physical.get_sample_count() - before, 1);
+            assert_eq!(
+                store.read_metrics.cold_range_prefetch_budget_denied.get(),
+                0
+            );
+            drop(window);
+            assert_eq!(store.get_prefetch_memory_usage(), 0);
+            store.block_cache.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn cold_range_hot_window_uses_actual_pinned_weights() {
+        for policy in [CachePolicy::default(), CachePolicy::NotFill] {
+            let (mut store, sst, _, metrics, _, _dir) = setup(false).await;
+            let mut pinned = 0;
+            for idx in 0..16 {
+                let block = store
+                    .get(
+                        &sst,
+                        idx,
+                        CachePolicy::default(),
+                        &mut StoreLocalStatistic::default(),
+                    )
+                    .await
+                    .unwrap();
+                pinned += block.estimated_memory_weight();
+            }
+            const CAPACITY: usize = 128 * 1024;
+            Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = CAPACITY;
+            let physical = metrics.operation_size.with_label_values(&["read"]);
+            let before = physical.get_sample_count();
+            let mut stats = StoreLocalStatistic::default();
+            let mut window = store
+                .prefetch_cold_ranges(&sst, 0, 16, policy, &mut stats)
+                .await
+                .unwrap();
+            let reserved = store.get_prefetch_memory_usage();
+            assert!((pinned..=CAPACITY).contains(&reserved));
+            assert_eq!(window.parts.len(), 16);
+            // Remove cache ownership; the window must retain the entries safely.
+            store.clear_block_cache().await.unwrap();
+            for _ in 0..16 {
+                assert!(
+                    window
+                        .next(&store, &sst, policy, &mut stats)
+                        .await
+                        .unwrap()
+                        .is_some()
+                );
+            }
+            assert_eq!(physical.get_sample_count(), before);
+            assert_eq!(stats.cache_data_prefetch_count, 0);
+            drop(window);
+            assert_eq!(store.get_prefetch_memory_usage(), 0);
+            store.block_cache.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn cold_range_shrink_does_not_start_excluded_disk_lookups() {
+        let (mut store, sst, _, metrics, _, _dir) = setup(true).await;
+        seed_hot(&store, &sst, 15, true).await;
+        let excluded = SstableBlockIndex {
+            sst_id: sst.id,
+            block_idx: 15,
+        };
+        let physical = metrics.operation_size.with_label_values(&["read"]);
+        let before = physical.get_sample_count();
+        Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = 0;
+        let mut stats = StoreLocalStatistic::default();
+        assert!(
+            store
+                .prefetch_cold_ranges(&sst, 0, 16, CachePolicy::default(), &mut stats)
+                .await
+                .is_none()
+        );
+        tokio::task::yield_now().await;
+        assert!(!store.block_cache.memory().contains(&excluded));
+        assert_eq!(physical.get_sample_count(), before);
+        Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = 64 * 1024;
+        let mut window = store
+            .prefetch_cold_ranges(&sst, 0, 16, CachePolicy::default(), &mut stats)
+            .await
+            .unwrap();
+        assert!((2..16).contains(&stats.cache_data_prefetch_block_count));
+        while window
+            .next(&store, &sst, CachePolicy::default(), &mut stats)
+            .await
+            .unwrap()
+            .is_some()
+        {}
+        assert_eq!(physical.get_sample_count(), before + 1);
+        assert!(!store.block_cache.memory().contains(&excluded));
+        assert!(store.block_cache.contains(&excluded));
+        drop(window);
+        assert_eq!(store.get_prefetch_memory_usage(), 0);
+        store.block_cache.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cold_range_shared_results_keep_concurrent_decode_reservations() {
+        let (store, _, _, _, _, _dir) = setup(false).await;
+        let mut opts = default_builder_opt_for_test();
+        opts.compression_algorithm = crate::hummock::CompressionAlgorithm::Lz4;
+        let (sst, _) = gen_default_test_sstable(opts, 11, store.clone()).await;
+        store.clear_block_cache().await.unwrap();
+        for idx in (1..16).step_by(2) {
+            seed_hot(&store, &sst, idx, false).await;
+        }
+        let mut stats = StoreLocalStatistic::default();
+        let mut window = store
+            .prefetch_cold_ranges(&sst, 0, 16, CachePolicy::default(), &mut stats)
+            .await
+            .unwrap();
+        assert_eq!(
+            window
+                .parts
+                .iter()
+                .filter(|part| matches!(part, Part::Single(_, _)))
+                .count(),
+            8
+        );
+        let reserved = store.get_prefetch_memory_usage();
+        let mut blocks = Vec::new();
+        for _ in 0..16 {
+            blocks.push(
+                window
+                    .next(&store, &sst, CachePolicy::default(), &mut stats)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
+        let actual = blocks
+            .iter()
+            .map(|block| block.estimated_memory_weight())
+            .sum::<usize>();
+        assert!(
+            reserved >= actual,
+            "cache results may all be alive together"
+        );
+        drop(window);
+        assert_eq!(store.get_prefetch_memory_usage(), 0);
+        store.block_cache.close().await.unwrap();
+    }
+
     // Run explicitly to compare decode delivery; timing is diagnostic, not a CI assertion.
     #[tokio::test]
     #[ignore]
@@ -1011,7 +1339,7 @@ mod tests {
                 ColdRangePrefetch::reservation_bytes(&sst.meta.block_metas[..16]).unwrap();
             Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = match fits {
                 0 => 0,
-                1 => required - 1,
+                1 => ColdRangePrefetch::reservation_bytes(&sst.meta.block_metas[..2]).unwrap() - 1,
                 _ => required,
             };
             let physical = metrics.operation_size.with_label_values(&["read"]);
@@ -1045,7 +1373,7 @@ mod tests {
                         .await
                         .unwrap()
                         .unwrap();
-                    decoded_weight += block.estimated_memory_weight();
+                    decoded_weight = decoded_weight.max(block.estimated_memory_weight());
                     assert_eq!(store.get_prefetch_memory_usage(), required);
                 }
                 let compressed: usize = sst.meta.block_metas[..16]

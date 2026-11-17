@@ -74,6 +74,7 @@ pub struct HummockStateStoreMetrics {
     pub cold_range_prefetch_single_blocks: IntCounter,
     pub cold_range_prefetch_hint_misses: IntCounter,
     pub cold_range_prefetch_budget_denied: IntCounter,
+    pub cold_range_prefetch_budget_shrunk: IntCounter,
 
     pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
     pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
@@ -226,9 +227,14 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let cold_range_prefetch_budget_shrunk = register_int_counter_with_registry!(
+            "state_store_cold_range_prefetch_budget_shrunk",
+            "ColdRanges windows admitted with fewer blocks to fit the prefetch budget; not demand fallbacks",
+            registry
+        ).unwrap();
         let cold_range_prefetch_budget_denied = register_int_counter_with_registry!(
             "state_store_cold_range_prefetch_budget_denied",
-            "Cold-range windows skipped because the shared prefetch reservation budget was unavailable",
+            "ColdRanges windows denied because no multi-block prefix fits the shared prefetch budget; no speculative IO is submitted",
             registry
         )
         .unwrap();
@@ -823,6 +829,7 @@ impl HummockStateStoreMetrics {
             cold_range_prefetch_single_blocks,
             cold_range_prefetch_hint_misses,
             cold_range_prefetch_budget_denied,
+            cold_range_prefetch_budget_shrunk,
             block_cache_read_events,
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,

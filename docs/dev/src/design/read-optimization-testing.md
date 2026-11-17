@@ -3854,3 +3854,100 @@ result is claimed before running the instrumented build on the user's workload.
 Evidence: `read-optimization-evidence/cold-range-overlap-metrics-validation.json`,
 `cold-range-overlap-metrics-source-identities.json`, and
 `cold-range-overlap-metrics-logs.json.gz`.
+
+### Fix budget-induced loss of batching (2026-11-18)
+
+This supersedes the whole-window decoded reservation described in the earlier
+memory-admission fix. The user reported a completed six-worker SF10 run with
+source-stage GETs increasing from 35,938 to 221,199, total GETs from 118,369 to
+304,407, source completion from 86.03 s to 96.25 s, and lower peak RSS. Window
+limits reportedly remained 16 blocks / 1 MiB, with a 4 GiB prefetch budget. The
+source phase accounts for 185,261 of the 186,038 extra GETs (99.6%). These are
+user-supplied results, not an independently rerun SF10 experiment.
+
+The previous implementation reserved encoded bytes plus a worst-case decoded
+allocation for every block. That matched neither typical restart metadata nor
+the retained demand-decode behavior: direct runs decode one block at a time.
+A ~510 KiB uncompressed cold window was charged ~2 MiB. MergeIterator initializes
+multiple SST children, and non-winning children retain their windows while
+another child advances. Full-window rejection then caused repeated single-block
+fallback, even when a smaller window would have fit. Tests previously proved
+bounded accounting and correct demand fallback, but used the same estimate to
+choose test capacities and missed this fixed-budget/read-pattern regression.
+
+The corrected planner briefly pins existing memory entries and records disk
+presence hints without starting disk lookups or external IO. Its reservation is:
+
+- Direct runs: all encoded bytes, plus the largest single direct-block decode
+  bound across the window. Delivered blocks belong to the caller/Foyer, rather
+  than remaining an undecoded neighbor allocation in the prefetch budget.
+- Actual memory hits: their measured decoded weights, since all can be pinned
+  concurrently by the window.
+- Pending cache lookups and split singleton Fill requests: encoded plus decoded
+  bounds individually, because these can complete concurrently and retain all
+  their results. They do not get the direct-run single-decode discount.
+- Bookkeeping: selected part slots, observation metadata, and the original
+  planning vector capacity, even if the accepted prefix is shorter.
+
+Admission still uses the existing atomic non-waiting reservation. If the desired
+window does not fit, the planner drops its last block and retries successively
+shorter prefixes, stopping at two blocks. Removing an edge can create a shared
+singleton, so each prefix's classification-dependent charge is recalculated;
+no monotonic-cost assumption or timer is needed. Only after admission are Foyer
+lookups/shared fetches and direct read tasks started. Excluded memory pins are
+dropped and excluded disk hints never start lookups. If even two blocks do not
+fit, the existing demand fallback remains available.
+
+The reservation remains window-scoped; it does not shrink after each consumed
+block, and private tasks retain it through cancellation. This intentionally
+avoids a new shared/per-buffer accounting system. It is a prefetch reservation
+limit, not a process/query RSS bound: caller-owned delivered blocks, Foyer cache
+memory, transient pre-admission pins of existing cache entries and unrelated
+allocations have different ownership. Legacy Range still has its previous
+reservation policy. More useful prefetch may increase RSS relative to the
+regressed run; do not interpret the reduced reservation counter as measured RSS
+reduction. Foyer, old Range, IO scheduler, decode runtime and configuration limits
+were not changed by this correction.
+
+New counter `state_store_cold_range_prefetch_budget_shrunk` counts windows admitted
+with fewer blocks due to the budget. `state_store_cold_range_prefetch_budget_denied`
+now means no multi-block prefix could be admitted; it is incremented once per
+failed window, not once per attempted prefix. Compare both over the same run:
+
+```promql
+sum(increase(state_store_cold_range_prefetch_budget_shrunk[1h]))
+sum(increase(state_store_cold_range_prefetch_budget_denied[1h]))
+```
+
+A permanent regression uses the real MergeIterator -> SstableIterator ->
+ColdRanges path with three SSTs whose key ranges overlap. Two higher-key heads
+remain parked while the third child consumes 2048 rows. Its fixed **4 MiB** budget
+is independent of the estimator under test; windows remain 16 blocks / 1 MiB.
+The uncompressed test failed against production commit `0bb0df4`, then passed
+after this fix without increasing its budget:
+
+| Same fixed-budget fixture | GETs | Window denials | Reservation at initialized heads |
+| --- | --- | --- | --- |
+| Before, no compression | 20 | 18 | 4,186,492 bytes |
+| After, no compression | 4 | 0 | 1,873,407 bytes |
+| After, LZ4 | 4 | 0 | 364,013 bytes |
+| After, Zstd | 4 | 0 | 341,246 bytes |
+
+This is a local in-memory mechanism regression, not an SF10 timing/RSS prediction.
+The before/after reservation populations also differ: the old implementation
+admits only two heads' windows while the corrected one admits all three.
+A second independent 64 KiB budget test also failed before the fix and now admits
+one smaller multi-block GET for Fill, NotFill and Disable. Further tests cover
+128 KiB fully cached windows using actual pinned weights, no disk promotion from
+rejected/excluded hints, and retaining the full charge for concurrent singleton
+cache results. Existing tests cover zero budget, concurrent admission, abort
+before first poll, truncated/corrupt reads, seeks, full-cold merging, observation
+metadata and single-flight behavior.
+
+Validation: storage and object-store test targets compiled; 78 relevant tests
+passed (scheduler 26, ColdRanges/observation 22, SST store 11, iterator 13,
+block stream 4, routing 2). Metrics inventory and diff checks passed. No SF10
+rerun has been performed locally. Evidence:
+`read-optimization-evidence/cold-range-budget-fix-validation.json`,
+`cold-range-budget-fix-source-identities.json`, and
+`cold-range-budget-fix-logs.json.gz` (includes the two expected pre-fix failures).

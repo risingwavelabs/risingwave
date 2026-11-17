@@ -1,0 +1,7 @@
+{
+  "baseline_commit": "0bb0df4acf388a958e9592787ec36ceebcb376ed",
+  "sources": {
+    "src/storage/src/hummock/sstable_store/cold_range.rs": "5a332b4a06fe9c8a386f35b1cb62033297ec6266e9bbcab6af8a5f79bd7c6873",
+    "src/storage/src/monitor/hummock_state_store_metrics.rs": "a041d281d6818c83d9fccfb9a9b28bb28fff504593939ac97ce66487f25f1369"
+  }
+}

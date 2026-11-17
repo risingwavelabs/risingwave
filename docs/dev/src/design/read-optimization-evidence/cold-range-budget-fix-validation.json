@@ -1,0 +1,43 @@
+{
+  "baseline_commit": "0bb0df4acf388a958e9592787ec36ceebcb376ed",
+  "tests": [
+    {
+      "case": "object::read_scheduler::tests",
+      "passed": 26
+    },
+    {
+      "case": "hummock::sstable_store::cold_range",
+      "passed": 22
+    },
+    {
+      "case": "hummock::sstable_store::tests",
+      "passed": 11
+    },
+    {
+      "case": "hummock::sstable::forward_sstable_iterator::tests",
+      "passed": 13
+    },
+    {
+      "case": "hummock::block_stream::tests",
+      "passed": 4
+    },
+    {
+      "case": "test_explicit_scan_prefetch_modes",
+      "passed": 1
+    },
+    {
+      "case": "test_backfill_prefetch_modes_are_independent",
+      "passed": 1
+    }
+  ],
+  "passed": 78,
+  "expected_before_failures": [
+    "cold_range_merge_scan_keeps_batching_with_fixed_budget",
+    "cold_range_shrinks_to_available_budget_before_demand_fallback"
+  ],
+  "fixed_budget_bytes": 4194304,
+  "source_reads_before": 20,
+  "source_reads_after": 4,
+  "denials_before": 18,
+  "denials_after": 0
+}
