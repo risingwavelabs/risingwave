@@ -46,10 +46,10 @@ impl PulsarSchemaCache {
     /// Only `AVRO` schemas can be used, as payloads are decoded as Avro binary. A `JSON` schema
     /// carries the same Avro definition, but its payloads are JSON text.
     fn parse_avro_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
-        match raw_schema.parse()? {
-            PulsarSchema::Avro(schema) => Ok(Arc::new(schema)),
-            PulsarSchema::Json(_) => bail!("expected Pulsar AVRO schema, got JSON"),
-        }
+        let PulsarSchema::Avro(schema) = raw_schema.parse()? else {
+            bail!("expected Pulsar AVRO schema, got {}", raw_schema.r#type);
+        };
+        Ok(Arc::new(schema))
     }
 
     /// Fetches the current latest schema for a parser's reader schema and caches its version.

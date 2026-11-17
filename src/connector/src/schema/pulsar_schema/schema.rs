@@ -14,6 +14,9 @@
 
 use anyhow::Context;
 use apache_avro::Schema;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use prost_reflect::{DescriptorPool, MessageDescriptor};
 use risingwave_common::bail;
 use serde::Deserialize;
 
@@ -33,19 +36,48 @@ pub struct PulsarSchemaInfo {
 pub enum PulsarSchema {
     Avro(Schema),
     Json(Schema),
+    ProtobufNative(MessageDescriptor),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtobufNativeSchemaData {
+    file_descriptor_set: String,
+    root_message_type_name: String,
 }
 
 impl PulsarSchemaInfo {
     /// Parses the schema definition according to its type.
     pub fn parse(&self) -> ConnectorResult<PulsarSchema> {
-        let wrap = match self.r#type.to_ascii_uppercase().as_str() {
-            "AVRO" => PulsarSchema::Avro,
-            "JSON" => PulsarSchema::Json,
+        match self.r#type.to_ascii_uppercase().as_str() {
+            "AVRO" => Ok(PulsarSchema::Avro(self.parse_avro()?)),
+            "JSON" => Ok(PulsarSchema::Json(self.parse_avro()?)),
+            "PROTOBUF_NATIVE" => Ok(PulsarSchema::ProtobufNative(self.parse_protobuf_native()?)),
             _ => bail!("unsupported Pulsar schema type {}", self.r#type),
-        };
-        let schema = Schema::parse_str(&self.data)
-            .with_context(|| format!("failed to parse Pulsar {} schema", self.r#type))?;
-        Ok(wrap(schema))
+        }
+    }
+
+    fn parse_avro(&self) -> ConnectorResult<Schema> {
+        Ok(Schema::parse_str(&self.data)
+            .with_context(|| format!("failed to parse Pulsar {} schema", self.r#type))?)
+    }
+
+    fn parse_protobuf_native(&self) -> ConnectorResult<MessageDescriptor> {
+        let data: ProtobufNativeSchemaData = serde_json::from_str(&self.data)
+            .context("failed to parse Pulsar PROTOBUF_NATIVE schema")?;
+        let file_descriptor_set = BASE64
+            .decode(&data.file_descriptor_set)
+            .context("failed to decode Pulsar PROTOBUF_NATIVE file descriptor set")?;
+        let pool = DescriptorPool::decode(file_descriptor_set.as_slice())
+            .context("failed to build descriptor pool from Pulsar PROTOBUF_NATIVE schema")?;
+        Ok(pool
+            .get_message_by_name(&data.root_message_type_name)
+            .with_context(|| {
+                format!(
+                    "cannot find root message `{}` in Pulsar PROTOBUF_NATIVE schema",
+                    data.root_message_type_name
+                )
+            })?)
     }
 }
 
@@ -98,6 +130,49 @@ mod tests {
             schema.parse().unwrap(),
             PulsarSchema::Json(Schema::Record(_))
         ));
+    }
+
+    #[test]
+    fn protobuf_native_schema_definition_is_parsed_as_root_message() {
+        use prost::Message;
+        use prost_types::{
+            DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+            field_descriptor_proto,
+        };
+
+        let file_descriptor_set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("test/user.proto".to_owned()),
+                package: Some("test".to_owned()),
+                message_type: vec![DescriptorProto {
+                    name: Some("User".to_owned()),
+                    field: vec![FieldDescriptorProto {
+                        name: Some("id".to_owned()),
+                        number: Some(1),
+                        r#type: Some(field_descriptor_proto::Type::Int32 as i32),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                syntax: Some("proto3".to_owned()),
+                ..Default::default()
+            }],
+        };
+        let schema: PulsarSchemaInfo = serde_json::from_value(serde_json::json!({
+            "version": 0,
+            "type": "PROTOBUF_NATIVE",
+            "data": serde_json::json!({
+                "fileDescriptorSet": BASE64.encode(file_descriptor_set.encode_to_vec()),
+                "rootMessageTypeName": "test.User",
+                "rootFileDescriptorName": "test/user.proto",
+            }).to_string(),
+        }))
+        .unwrap();
+        let PulsarSchema::ProtobufNative(message) = schema.parse().unwrap() else {
+            panic!("expected PROTOBUF_NATIVE schema");
+        };
+        assert_eq!(message.full_name(), "test.User");
+        assert!(message.get_field_by_name("id").is_some());
     }
 
     #[test]

@@ -136,10 +136,11 @@ pub async fn fetch_pulsar_json_schema_and_map_to_columns(
 ) -> ConnectorResult<Vec<Field>> {
     let client = pulsar_schema::Client::new(config)?;
     let topic = parse_partitioned_topic(get_pulsar_topic(props)?)?;
-    match client.get_schema(&topic, None).await?.parse()? {
-        PulsarSchema::Json(schema) => Ok(avro_schema_to_fields(&schema, None)?),
-        PulsarSchema::Avro(_) => bail!("expected Pulsar JSON schema, got AVRO"),
-    }
+    let raw_schema = client.get_schema(&topic, None).await?;
+    let PulsarSchema::Json(schema) = raw_schema.parse()? else {
+        bail!("expected Pulsar JSON schema, got {}", raw_schema.r#type);
+    };
+    Ok(avro_schema_to_fields(&schema, None)?)
 }
 
 #[cfg(test)]
