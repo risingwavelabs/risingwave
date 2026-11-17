@@ -45,6 +45,7 @@ use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
 };
 use risingwave_common::acl::AclMode;
+use risingwave_common::catalog::CatalogVersion;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
@@ -148,6 +149,7 @@ pub(crate) struct FrontendEnv {
     meta_client: Arc<dyn FrontendMetaClient>,
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
+    catalog_updated_rx: watch::Receiver<CatalogVersion>,
     user_info_writer: Arc<dyn UserInfoWriter>,
     user_info_reader: UserInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
@@ -265,6 +267,7 @@ impl FrontendEnv {
             meta_client,
             catalog_writer,
             catalog_reader,
+            catalog_updated_rx: watch::channel(0).1,
             user_info_writer,
             user_info_reader,
             worker_node_manager,
@@ -387,7 +390,7 @@ impl FrontendEnv {
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
-            catalog_updated_rx,
+            catalog_updated_rx.clone(),
         ));
 
         let system_params_manager =
@@ -555,6 +558,7 @@ impl FrontendEnv {
         Ok((
             Self {
                 catalog_reader,
+                catalog_updated_rx,
                 catalog_writer,
                 user_info_reader,
                 user_info_writer,
@@ -597,6 +601,15 @@ impl FrontendEnv {
     /// prove that the write operations are permitted in the current transaction.
     fn catalog_writer(&self, _guard: transaction::WriteGuard) -> &dyn CatalogWriter {
         &*self.catalog_writer
+    }
+
+    /// Wait for the observer to apply the catalog required by a meta planning request.
+    pub async fn wait_catalog_version(&self, version: CatalogVersion) -> Result<()> {
+        crate::catalog::catalog_service::wait_catalog_version(
+            self.catalog_updated_rx.clone(),
+            version,
+        )
+        .await
     }
 
     /// Get a reference to the frontend env's catalog reader.

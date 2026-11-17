@@ -186,6 +186,7 @@ impl DdlServiceImpl {
                         database_id: table.database_id,
                         table_id: table.id,
                         cdc_table_change: None,
+                        catalog_version: 0,
                     };
                     let resp = client
                         .get_table_replace_plan(req)
@@ -1520,6 +1521,8 @@ impl DdlService for DdlServiceImpl {
                         database_id: table.database_id,
                         table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
+                        // A preceding replacement may still be queued in the frontend observer.
+                        catalog_version: self.env.notification_manager().current_version().await,
                     })
                     .await;
 
@@ -1576,8 +1579,21 @@ impl DdlService for DdlServiceImpl {
                                         &self.env.event_log_manager_ref(),
                                         fail_info,
                                     );
+                                    return Err(e.into());
                                 }
                             };
+                        } else {
+                            let fail_info = "frontend returned no table replacement plan";
+                            add_auto_schema_change_fail_event_log(
+                                &self.meta_metrics,
+                                table.id,
+                                table.name.clone(),
+                                table_change.cdc_table_id.clone(),
+                                table_change.upstream_ddl.clone(),
+                                &self.env.event_log_manager_ref(),
+                                fail_info.to_owned(),
+                            );
+                            return Err(Status::internal(fail_info));
                         }
                     }
                     Err(e) => {
@@ -1599,6 +1615,7 @@ impl DdlService for DdlServiceImpl {
                             &self.env.event_log_manager_ref(),
                             fail_info,
                         );
+                        return Err(e);
                     }
                 };
             }

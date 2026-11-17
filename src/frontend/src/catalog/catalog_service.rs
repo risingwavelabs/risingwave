@@ -873,13 +873,51 @@ impl CatalogWriterImpl {
     }
 
     async fn wait_version(&self, version: WaitVersion) -> Result<()> {
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow_and_update() < version.catalog_version {
-            rx.changed().await.map_err(|e| anyhow!(e))?;
-        }
+        wait_catalog_version(self.catalog_updated_rx.clone(), version.catalog_version).await?;
         self.hummock_snapshot_manager
             .wait(version.hummock_version_id)
             .await;
         Ok(())
+    }
+}
+
+/// Wait without holding a catalog lock, so the observer can apply pending notifications.
+pub(crate) async fn wait_catalog_version(
+    mut rx: Receiver<CatalogVersion>,
+    version: CatalogVersion,
+) -> Result<()> {
+    rx.wait_for(|current| *current >= version)
+        .await
+        .map_err(|e| anyhow!(e))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod catalog_version_tests {
+    use futures::{FutureExt, pin_mut};
+    use tokio::sync::watch;
+
+    use super::wait_catalog_version;
+
+    #[tokio::test]
+    async fn replacement_planning_waits_for_preceding_catalog_update() {
+        let (tx, rx) = watch::channel(1);
+        let wait = wait_catalog_version(rx.clone(), 3);
+        pin_mut!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        tx.send(2).unwrap();
+        assert!(wait.as_mut().now_or_never().is_none());
+        tx.send(3).unwrap();
+        wait.await.unwrap();
+
+        // A different frontend that has already caught up must not wait for another update.
+        wait_catalog_version(rx, 2).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn replacement_planning_fails_if_observer_stops_before_catching_up() {
+        let (tx, rx) = watch::channel(1);
+        drop(tx);
+        assert!(wait_catalog_version(rx, 2).await.is_err());
     }
 }

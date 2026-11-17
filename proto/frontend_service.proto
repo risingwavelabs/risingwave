@@ -11,6 +11,8 @@ message GetTableReplacePlanRequest {
   uint32 database_id = 1;
   uint32 table_id = 2;
   ddl_service.TableSchemaChange cdc_table_change = 3;
+  // Wait until this catalog notification version has been applied before planning.
+  uint64 catalog_version = 4;
 }
 
 message GetTableReplacePlanResponse {
