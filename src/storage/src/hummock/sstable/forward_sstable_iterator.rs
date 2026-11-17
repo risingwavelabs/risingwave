@@ -287,13 +287,13 @@ impl SstableIterator {
                 }
             }
         }
-        let mut read_batch = None;
+        let mut read_plug = None;
         if prefetched_block.is_none() && self.options.prefetch == PrefetchMode::Blockwise {
             if idx >= self.read_ahead_end
                 && let Some(register) = self.register_read_ahead(idx)
             {
                 let start = profile_seek.then(Instant::now);
-                read_batch = register.await;
+                read_plug = register.await;
                 SeekAwait::Prefetch.record(start);
             }
             if !self.read_ahead.is_empty() && idx == self.read_ahead_end - self.read_ahead.len() {
@@ -358,12 +358,12 @@ impl SstableIterator {
                 let start = profile_seek.then(Instant::now);
                 let result = self
                     .sstable_store
-                    .get_with_read_batch(
+                    .get_with_read_plug(
                         &self.sst,
                         idx,
                         self.options.cache_policy,
                         &mut self.stats,
-                        read_batch,
+                        read_plug,
                     )
                     .await;
                 SeekAwait::DemandBlock.record(start);
@@ -414,7 +414,7 @@ impl SstableIterator {
     fn register_read_ahead(
         &mut self,
         idx: usize,
-    ) -> Option<impl Future<Output = Option<risingwave_object_store::object::ReadBatch>> + Send + '_>
+    ) -> Option<impl Future<Output = Option<risingwave_object_store::object::ReadPlug>> + Send + '_>
     {
         use crate::hummock::CachePolicy;
 
@@ -467,17 +467,17 @@ impl SstableIterator {
         // Keep registration's async state out of ordinary seek futures. Only a new window
         // pays for this box, not consumption of existing responses.
         Some(Box::pin(async move {
-            let batch = self.sstable_store.store().read_batch(end - idx);
+            let plug = self.sstable_store.store().read_plug(end - idx);
             let span = tracing::debug_span!(target: "state_store_read_batch", "block_read_ahead",
                 object_id = %self.sst.id, head = idx, scan_end = self.block_end_idx_exclusive);
             for next in idx + 1..end {
                 self.read_ahead.push_back(
                     self.sstable_store
-                        .get_block_response_with_batch(
+                        .get_block_response_with_plug(
                             &self.sst,
                             next,
                             CachePolicy::Fill(foyer::Hint::Low),
-                            batch.as_ref(),
+                            plug.as_ref(),
                         )
                         .instrument(span.clone())
                         .await,
@@ -500,7 +500,15 @@ impl SstableIterator {
             tracing::debug!(target: "state_store_read_batch", parent: &span, object_id = %self.sst.id,
                 head = idx, end = self.read_ahead_end, scan_end = self.block_end_idx_exclusive,
                 "blockwise read-ahead window");
-            batch
+            // Retained immediate cache hits cannot issue outer IO. If all neighbors
+            // are already in memory, the demand read has nothing to batch with.
+            if self.read_ahead.iter().all(|response| {
+                matches!(response, Ok(BlockResponse::Fetch(fetch)) if !fetch.need_await())
+            }) {
+                None
+            } else {
+                plug
+            }
         }))
     }
 
@@ -613,6 +621,9 @@ impl SstableIteratorType for SstableIterator {
 ))]
 mod linux_replay;
 
+#[cfg(all(test, feature = "test", not(madsim)))]
+mod local_io_experiment;
+
 #[cfg(test)]
 mod tests {
     use std::collections::Bound;
@@ -637,6 +648,87 @@ mod tests {
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_default_test_sstable,
         gen_test_sstable_info, gen_test_sstable_with_table_ids, test_key_of, test_value_of,
     };
+
+    #[tokio::test]
+    async fn test_memory_ready_neighbors_do_not_plug_demand() {
+        use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+        use risingwave_object_store::object::{
+            InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
+        };
+
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+
+        for warm_neighbors in [true, false] {
+            let registry = prometheus::Registry::new();
+            let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
+            let object = Arc::new(
+                ObjectStoreImpl::InMem(
+                    InMemObjectStore::for_test()
+                        .monitored(metrics, Arc::new(ObjectStoreConfig::default())),
+                )
+                .with_read_coalescing(),
+            );
+            let mut store = mock_sstable_store_with_object_store(object).await;
+            Arc::get_mut(&mut store)
+                .unwrap()
+                .blockwise_prefetch
+                .max_blocks = 3.try_into().unwrap();
+            let (sst, info) =
+                gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
+            store.clear_block_cache().await.unwrap();
+            if warm_neighbors {
+                for index in [1, 2] {
+                    store
+                        .get(
+                            &sst,
+                            index,
+                            CachePolicy::default(),
+                            &mut StoreLocalStatistic::default(),
+                        )
+                        .await
+                        .unwrap();
+                }
+            }
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch: PrefetchMode::Blockwise,
+                scan_end_user_key: Some(Excluded(
+                    FullKey::decode(&sst.meta.block_metas[3].smallest_key)
+                        .user_key
+                        .copy_into(),
+                )),
+                ..Default::default()
+            });
+            let mut iter = SstableIterator::new(sst, store, options, &info);
+            iter.rewind().await.unwrap();
+            assert_eq!(iter.key(), test_key_of(0).to_ref());
+            assert_eq!(iter.read_ahead.len(), 2);
+            let mut flushes = 0.;
+            for family in registry.gather() {
+                if family.name() != "object_store_read_scheduler_events" {
+                    continue;
+                }
+                for metric in family.get_metric() {
+                    if metric.get_label().iter().any(|label| {
+                        label.name() == "event"
+                            && matches!(
+                                label.value(),
+                                "sealed_batch_single" | "sealed_batch_multiple"
+                            )
+                    }) {
+                        flushes += metric.get_counter().as_ref().unwrap().value();
+                    }
+                }
+            }
+            if warm_neighbors {
+                assert_eq!(flushes, 0., "a sole cold demand must not wait in a plug");
+            } else {
+                assert!(
+                    flushes > 0.,
+                    "cold neighbors must keep their merge opportunity"
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_blockwise_consume_observes_current_readiness() {
@@ -814,7 +906,7 @@ mod tests {
         let physical_reads = registry
             .gather()
             .into_iter()
-            .find(|family| family.get_name() == "object_store_operation_bytes")
+            .find(|family| family.name() == "object_store_operation_bytes")
             .unwrap();
         let read = physical_reads
             .get_metric()
@@ -823,7 +915,7 @@ mod tests {
                 metric
                     .get_label()
                     .iter()
-                    .any(|label| label.get_value() == "read")
+                    .any(|label| label.value() == "read")
             })
             .unwrap()
             .get_histogram();
@@ -852,13 +944,7 @@ mod tests {
             Arc::new(SimpleRecentFilter::new(2, Duration::from_secs(3600)).into());
         let object_store = ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
-            Arc::new(ObjectStoreConfig {
-                read_scheduler: risingwave_common::config::storage::ReadSchedulerConfig {
-                    prefetch_batch_wait_us: 100,
-                    ..Default::default()
-                },
-                ..Default::default()
-            }),
+            Arc::new(ObjectStoreConfig::default()),
         ))
         .with_read_coalescing();
         let store = mock_sstable_store_with_object_store_and_recent_filter(

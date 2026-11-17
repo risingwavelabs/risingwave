@@ -94,6 +94,8 @@ impl StreamingUploader for InMemStreamingUploader {
 #[derive(Default, Clone)]
 pub struct InMemObjectStore {
     objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
+    #[cfg(feature = "test")]
+    read_delay_us: Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[async_trait::async_trait]
@@ -132,6 +134,15 @@ impl ObjectStore for InMemObjectStore {
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
         )));
+        #[cfg(feature = "test")]
+        {
+            let delay = self
+                .read_delay_us
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if delay != 0 {
+                tokio::time::sleep(std::time::Duration::from_micros(delay)).await;
+            }
+        }
         self.get_object(path, range).await
     }
 
@@ -247,12 +258,23 @@ impl InMemObjectStore {
     fn new() -> Self {
         Self {
             objects: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(feature = "test")]
+            read_delay_us: Arc::default(),
         }
     }
 
     /// Create a new in-memory object store for testing, isolated with others.
     pub fn for_test() -> Self {
         Self::new()
+    }
+
+    /// Inject physical backend latency in integration tests, after scheduler admission.
+    #[cfg(feature = "test")]
+    pub fn set_read_delay_for_test(&self, delay: std::time::Duration) {
+        self.read_delay_us.store(
+            delay.as_micros().try_into().unwrap(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     /// Get a reference to the in-memory object store shared in this process.

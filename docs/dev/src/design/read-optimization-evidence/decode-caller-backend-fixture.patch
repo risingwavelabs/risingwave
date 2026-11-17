@@ -1,0 +1,44 @@
+--- a/src/object_store/src/object/mem.rs
++++ b/src/object_store/src/object/mem.rs
+@@ -96,6 +96,8 @@
+     objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
+     #[cfg(feature = "test")]
+     read_delay_us: Arc<std::sync::atomic::AtomicU64>,
++    #[cfg(feature = "test")]
++    read_gate: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+ }
+ 
+ #[async_trait::async_trait]
+@@ -142,6 +144,11 @@
+             if delay != 0 {
+                 tokio::time::sleep(std::time::Duration::from_micros(delay)).await;
+             }
++        }
++        #[cfg(feature = "test")]
++        {
++            let gate = self.read_gate.lock().unwrap().clone();
++            if let Some(gate) = gate { gate.acquire().await.unwrap().forget(); }
+         }
+         self.get_object(path, range).await
+     }
+@@ -260,6 +267,8 @@
+             objects: Arc::new(Mutex::new(HashMap::new())),
+             #[cfg(feature = "test")]
+             read_delay_us: Arc::default(),
++            #[cfg(feature = "test")]
++            read_gate: Arc::default(),
+         }
+     }
+ 
+@@ -269,6 +278,11 @@
+     }
+ 
+     /// Inject physical backend latency in integration tests, after scheduler admission.
++    #[cfg(feature = "test")]
++    pub fn set_read_gate_for_test(&self, gate: Option<Arc<tokio::sync::Semaphore>>) {
++        *self.read_gate.lock().unwrap() = gate;
++    }
++
+     #[cfg(feature = "test")]
+     pub fn set_read_delay_for_test(&self, delay: std::time::Duration) {
+         self.read_delay_us.store(

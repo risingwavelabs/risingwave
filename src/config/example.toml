@@ -506,7 +506,6 @@ use_opendal = true
 [storage.object_store.read_scheduler]
 use_dedicated_io_runtime = false
 dedicated_io_runtime_workers = 2
-prefetch_batch_wait_us = 0
 max_batch_requests = 16
 max_admitted_groups = 64
 max_inflight_reads = 32

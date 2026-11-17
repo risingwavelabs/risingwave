@@ -665,10 +665,6 @@ pub struct ReadSchedulerConfig {
     /// must specify the same count. Applies when dedicated I/O is enabled.
     #[serde(default = "default_dedicated_io_runtime_workers")]
     pub dedicated_io_runtime_workers: NonZeroUsize,
-    /// Maximum intentional wait for compatible reads in a prefetch batch, in microseconds.
-    /// Zero disables waiting after cache registration. Timer wakeups have runtime granularity.
-    #[serde(default)]
-    pub prefetch_batch_wait_us: u64,
     /// Maximum logical reads in one coalesced group.
     #[serde(default = "default_read_scheduler_batch_requests")]
     pub max_batch_requests: NonZeroUsize,

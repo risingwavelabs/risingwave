@@ -1,0 +1,100 @@
+--- a/src/storage/src/hummock/sstable_store.rs
++++ b/src/storage/src/hummock/sstable_store.rs
+@@ -536,7 +536,7 @@
+         block_index: usize,
+         policy: CachePolicy,
+     ) -> HummockResult<BlockResponse> {
+-        self.get_block_response_with_plug(sst, block_index, policy, None)
++        self.get_block_response_with_plug(sst, block_index, policy, None, false)
+             .await
+     }
+ 
+@@ -546,6 +546,7 @@
+         block_index: usize,
+         policy: CachePolicy,
+         plug: Option<&risingwave_object_store::object::ReadPlug>,
++        is_read_ahead: bool,
+     ) -> HummockResult<BlockResponse> {
+         let object_id = sst.id;
+         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+@@ -604,6 +605,11 @@
+                     return Err(HummockError::from(e));
+                 }
+             };
++            // A burst of completed neighbors must not monopolize the cache runtime.
++            // Keep demand heads and point reads on their existing path.
++            if is_read_ahead {
++                tokio::task::yield_now().await;
++            }
+             let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+             Ok(block)
+         }.instrument(span.clone())
+@@ -670,7 +676,7 @@
+         plug: Option<risingwave_object_store::object::ReadPlug>,
+     ) -> HummockResult<BlockHolder> {
+         let response = self
+-            .get_block_response_with_plug(sst, block_index, policy, plug.as_ref())
++            .get_block_response_with_plug(sst, block_index, policy, plug.as_ref(), false)
+             .await;
+         // Producers retain their plug tokens; actual external IO starts its own flush.
+         drop(plug);
+@@ -1367,7 +1373,7 @@
+         let policy = CachePolicy::Fill(foyer::Hint::Normal);
+         let plug = object_store.read_plug(2).unwrap();
+         let response = store
+-            .get_block_response_with_plug(&sst, 0, policy, Some(&plug))
++            .get_block_response_with_plug(&sst, 0, policy, Some(&plug), true)
+             .await
+             .unwrap();
+         let from_disk = response.wait().await.unwrap();
+@@ -1378,7 +1384,7 @@
+         assert!(cache.contains(&key));
+ 
+         let response = store
+-            .get_block_response_with_plug(&sst, 0, policy, Some(&plug))
++            .get_block_response_with_plug(&sst, 0, policy, Some(&plug), true)
+             .await
+             .unwrap();
+         // The spawned producer has not been polled on this current-thread
+@@ -1404,13 +1410,13 @@
+         let disk_get = cache.get(&key);
+         let plug = object_store.read_plug(2).unwrap();
+         let follower = store
+-            .get_block_response_with_plug(&sst, 1, policy, Some(&plug))
++            .get_block_response_with_plug(&sst, 1, policy, Some(&plug), true)
+             .await
+             .unwrap();
+         assert!(matches!(&follower, super::BlockResponse::Fetch(fetch)
+             if fetch.need_await()));
+         let neighbor = store
+-            .get_block_response_with_plug(&sst, 2, policy, Some(&plug))
++            .get_block_response_with_plug(&sst, 2, policy, Some(&plug), true)
+             .await
+             .unwrap();
+         drop(plug);
+@@ -1476,13 +1482,13 @@
+         let plug = object_store.read_plug(2).unwrap();
+         let policy = CachePolicy::Fill(foyer::Hint::Normal);
+         let cold = store
+-            .get_block_response_with_plug(&sst, 0, policy, Some(&plug))
++            .get_block_response_with_plug(&sst, 0, policy, Some(&plug), true)
+             .await
+             .unwrap();
+         assert!(matches!(&cold, BlockResponse::Fetch(fetch)
+             if fetch.need_await()));
+         let shared = store
+-            .get_block_response_with_plug(&sst, 1, policy, Some(&plug))
++            .get_block_response_with_plug(&sst, 1, policy, Some(&plug), true)
+             .await
+             .unwrap();
+         assert!(matches!(&shared, BlockResponse::Fetch(fetch)
+--- a/src/storage/src/hummock/sstable/forward_sstable_iterator.rs
++++ b/src/storage/src/hummock/sstable/forward_sstable_iterator.rs
+@@ -478,6 +478,7 @@
+                             next,
+                             CachePolicy::Fill(foyer::Hint::Low),
+                             plug.as_ref(),
++                            true,
+                         )
+                         .instrument(span.clone())
+                         .await,

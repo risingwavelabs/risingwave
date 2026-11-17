@@ -1,0 +1,13 @@
+--- a/src/object_store/src/object/mod.rs
++++ b/src/object_store/src/object/mod.rs
+@@ -327,8 +327,8 @@
+         object_store_impl_method_body!(self, read(path, range).await)
+     }
+ 
+-    pub fn read_plug(&self, max_reads: usize) -> Option<ReadPlug> {
+-        dispatch_object_store_enum!(self, |store| store.read_plug(max_reads))
++    pub fn read_plug(&self, _max_reads: usize) -> Option<ReadPlug> {
++        None
+     }
+ 
+     pub async fn read_with_plug(

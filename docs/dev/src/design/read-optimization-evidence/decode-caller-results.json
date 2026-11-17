@@ -1,0 +1,4498 @@
+{
+  "runs": [
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.4233333333333333,
+        "p50": 1,
+        "p99": 5
+      },
+      "get_sum": 427,
+      "one_get": 238,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4305.664173333334,
+        "p50": 4338.167,
+        "p99": 4888.7080000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5531.62122,
+        "p50": 5532.834000000001,
+        "p99": 6370.7080000000005
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.4466666666666668,
+        "p50": 1,
+        "p99": 5
+      },
+      "get_sum": 434,
+      "one_get": 236,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4301.779343333334,
+        "p50": 4340.083,
+        "p99": 4968.208
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5353.21736,
+        "p50": 5480.25,
+        "p99": 6451.834
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 8.383333333333333,
+        "p50": 7,
+        "p99": 17
+      },
+      "get_sum": 2515,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 5015.376526666667,
+        "p50": 5079.0,
+        "p99": 5542.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6130.812506666667,
+        "p50": 6171.4580000000005,
+        "p99": 6661.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 4174.876213333333,
+        "p50": 4339.667,
+        "p99": 5375.75
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.693333333333333,
+        "p50": 7,
+        "p99": 17
+      },
+      "get_sum": 2308,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 5109.3815466666665,
+        "p50": 5152.958,
+        "p99": 5574.959
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6187.622223333334,
+        "p50": 6238.375,
+        "p99": 6793.583
+      },
+      "point": {
+        "n": 300,
+        "mean": 4498.048046666667,
+        "p50": 4904.4580000000005,
+        "p99": 5488.25
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-shared0-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.33,
+        "p50": 6,
+        "p99": 17
+      },
+      "get_sum": 2199,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5020.835363333334,
+        "p50": 5093.709,
+        "p99": 5587.5
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6260.80774,
+        "p50": 6273.2919999999995,
+        "p99": 7615.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 4490.24027,
+        "p50": 4484.584,
+        "p99": 5199.959
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-shared0-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.14,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2142,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5138.0297,
+        "p50": 5185.708,
+        "p99": 5555.1669999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6297.819413333334,
+        "p50": 6300.833,
+        "p99": 6932.4169999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4755.674996666667,
+        "p50": 4800.291,
+        "p99": 5208.041
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-shared15-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.043333333333333,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2113,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5048.138876666667,
+        "p50": 5095.625,
+        "p99": 5561.333
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6224.73598,
+        "p50": 6232.625,
+        "p99": 6781.0
+      },
+      "point": {
+        "n": 300,
+        "mean": 4638.6811,
+        "p50": 4753.75,
+        "p99": 5184.459
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-shared15-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.323333333333333,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 2197,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5139.26532,
+        "p50": 5195.042,
+        "p99": 5564.5419999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6267.0519466666665,
+        "p50": 6323.625,
+        "p99": 6804.9169999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4782.673186666667,
+        "p50": 4859.541,
+        "p99": 5190.9169999999995
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.096666666666667,
+        "p50": 6,
+        "p99": 14
+      },
+      "get_sum": 2129,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5028.8020633333335,
+        "p50": 5091.75,
+        "p99": 5519.0
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6201.053736666667,
+        "p50": 6203.083,
+        "p99": 6739.541
+      },
+      "point": {
+        "n": 300,
+        "mean": 4646.703576666667,
+        "p50": 4767.167,
+        "p99": 5177.5830000000005
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.33,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 2199,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5156.84472,
+        "p50": 5189.083,
+        "p99": 5555.709
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6316.10581,
+        "p50": 6335.4580000000005,
+        "p99": 6845.416
+      },
+      "point": {
+        "n": 300,
+        "mean": 4772.797246666667,
+        "p50": 4870.709,
+        "p99": 5211.5
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 105.04281,
+        "p50": 105.0,
+        "p99": 116.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 105.04281,
+        "p50": 105.0,
+        "p99": 116.125
+      },
+      "point": {
+        "n": 300,
+        "mean": 105.04281,
+        "p50": 105.0,
+        "p99": 116.125
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 118.06375333333334,
+        "p50": 117.458,
+        "p99": 135.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 118.06375333333334,
+        "p50": 117.458,
+        "p99": 135.125
+      },
+      "point": {
+        "n": 300,
+        "mean": 118.06375333333334,
+        "p50": 117.458,
+        "p99": 135.125
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-point-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4264.636963333333,
+        "p50": 4331.375,
+        "p99": 4980.667
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4264.636963333333,
+        "p50": 4331.375,
+        "p99": 4980.667
+      },
+      "point": {
+        "n": 300,
+        "mean": 4264.636963333333,
+        "p50": 4331.375,
+        "p99": 4980.667
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-point-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4269.747363333333,
+        "p50": 4270.833,
+        "p99": 5049.416
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4269.747363333333,
+        "p50": 4270.833,
+        "p99": 5049.416
+      },
+      "point": {
+        "n": 300,
+        "mean": 4269.747363333333,
+        "p50": 4270.833,
+        "p99": 5049.416
+      }
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-single_cold-0-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 129.29739,
+        "p50": 128.708,
+        "p99": 146.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 627.6240666666666,
+        "p50": 624.584,
+        "p99": 667.625
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-single_cold-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 143.94484666666668,
+        "p50": 142.417,
+        "p99": 178.292
+      },
+      "scan": {
+        "n": 300,
+        "mean": 635.1407,
+        "p50": 632.625,
+        "p99": 688.459
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-defaults-single_cold-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3822.52741,
+        "p50": 3757.5,
+        "p99": 4559.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5047.518123333333,
+        "p50": 5053.959,
+        "p99": 6025.542
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-defaults-single_cold-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3786.292213333333,
+        "p50": 3772.5,
+        "p99": 4342.2080000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5023.039356666666,
+        "p50": 5080.3330000000005,
+        "p99": 5878.334
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.1,
+        "p50": 1,
+        "p99": 4
+      },
+      "get_sum": 330,
+      "one_get": 287,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4078.10219,
+        "p50": 4093.459,
+        "p99": 4490.9169999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4942.00885,
+        "p50": 4954.375,
+        "p99": 5489.25
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0933333333333333,
+        "p50": 1,
+        "p99": 3
+      },
+      "get_sum": 328,
+      "one_get": 282,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4372.25572,
+        "p50": 4374.084000000001,
+        "p99": 5050.2919999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5594.220726666666,
+        "p50": 5575.333,
+        "p99": 6509.959
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 9.143333333333333,
+        "p50": 9,
+        "p99": 18
+      },
+      "get_sum": 2743,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 5158.7097533333335,
+        "p50": 5250.625,
+        "p99": 5567.709
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6274.06358,
+        "p50": 6338.583,
+        "p99": 6835.041
+      },
+      "point": {
+        "n": 300,
+        "mean": 4284.432533333334,
+        "p50": 4626.625,
+        "p99": 5457.875
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 9.383333333333333,
+        "p50": 9,
+        "p99": 18
+      },
+      "get_sum": 2815,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 5159.810853333333,
+        "p50": 5191.375,
+        "p99": 5642.2080000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6245.457646666667,
+        "p50": 6321.292,
+        "p99": 6744.25
+      },
+      "point": {
+        "n": 300,
+        "mean": 4395.3947333333335,
+        "p50": 4965.5419999999995,
+        "p99": 5626.625
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-shared0-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.333333333333333,
+        "p50": 7,
+        "p99": 16
+      },
+      "get_sum": 2200,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5211.76098,
+        "p50": 5184.375,
+        "p99": 6261.792
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6281.76709,
+        "p50": 6241.667,
+        "p99": 7803.791
+      },
+      "point": {
+        "n": 300,
+        "mean": 4454.47387,
+        "p50": 4246.667,
+        "p99": 5574.709
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-shared0-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.866666666666666,
+        "p50": 7,
+        "p99": 16
+      },
+      "get_sum": 2360,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5158.44455,
+        "p50": 5183.290999999999,
+        "p99": 5523.0419999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6254.35498,
+        "p50": 6290.875,
+        "p99": 6625.5
+      },
+      "point": {
+        "n": 300,
+        "mean": 4718.886343333334,
+        "p50": 4754.917,
+        "p99": 5216.5
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-shared15-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.1866666666666665,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2156,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5163.395163333334,
+        "p50": 5225.291,
+        "p99": 5599.084
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6326.103183333334,
+        "p50": 6375.291,
+        "p99": 6814.75
+      },
+      "point": {
+        "n": 300,
+        "mean": 4776.023343333333,
+        "p50": 4838.583,
+        "p99": 5295.7919999999995
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-shared15-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.496666666666667,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2249,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5153.983173333333,
+        "p50": 5207.916,
+        "p99": 5583.0419999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6291.123316666667,
+        "p50": 6358.5,
+        "p99": 6765.041
+      },
+      "point": {
+        "n": 300,
+        "mean": 4809.1761166666665,
+        "p50": 4856.666,
+        "p99": 5266.709
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.19,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2157,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5157.935846666666,
+        "p50": 5212.9580000000005,
+        "p99": 5581.9169999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6323.71073,
+        "p50": 6385.208,
+        "p99": 6803.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 4679.42279,
+        "p50": 4747.167,
+        "p99": 5220.8330000000005
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.623333333333333,
+        "p50": 7,
+        "p99": 17
+      },
+      "get_sum": 2287,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5163.74152,
+        "p50": 5175.875,
+        "p99": 5776.542
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6210.802933333333,
+        "p50": 6222.25,
+        "p99": 6953.042
+      },
+      "point": {
+        "n": 300,
+        "mean": 4800.358046666666,
+        "p50": 4808.834,
+        "p99": 5397.667
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 112.02314333333334,
+        "p50": 111.166,
+        "p99": 128.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 112.02314333333334,
+        "p50": 111.166,
+        "p99": 128.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 112.02314333333334,
+        "p50": 111.166,
+        "p99": 128.625
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 122.65611,
+        "p50": 121.833,
+        "p99": 144.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 122.65611,
+        "p50": 121.833,
+        "p99": 144.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 122.65611,
+        "p50": 121.833,
+        "p99": 144.625
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-point-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4147.4920833333335,
+        "p50": 4071.0420000000004,
+        "p99": 4801.4169999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4147.4920833333335,
+        "p50": 4071.0420000000004,
+        "p99": 4801.4169999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4147.4920833333335,
+        "p50": 4071.0420000000004,
+        "p99": 4801.4169999999995
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-point-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4376.64947,
+        "p50": 4404.0,
+        "p99": 5226.166
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4376.64947,
+        "p50": 4404.0,
+        "p99": 5226.166
+      },
+      "point": {
+        "n": 300,
+        "mean": 4376.64947,
+        "p50": 4404.0,
+        "p99": 5226.166
+      }
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-single_cold-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 137.97371666666666,
+        "p50": 136.125,
+        "p99": 154.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 630.7413733333333,
+        "p50": 626.5,
+        "p99": 677.1659999999999
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-single_cold-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 151.67473333333334,
+        "p50": 150.292,
+        "p99": 175.292
+      },
+      "scan": {
+        "n": 300,
+        "mean": 643.52444,
+        "p50": 640.959,
+        "p99": 690.333
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-overlay-single_cold-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4199.410133333334,
+        "p50": 4147.375,
+        "p99": 4752.041
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5509.83954,
+        "p50": 5464.0419999999995,
+        "p99": 6423.791
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-overlay-single_cold-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4209.40639,
+        "p50": 4177.625,
+        "p99": 4825.9169999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5473.11458,
+        "p50": 5472.625,
+        "p99": 6292.125
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "same",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-same-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0366666666666666,
+        "p50": 1,
+        "p99": 2
+      },
+      "get_sum": 311,
+      "one_get": 291,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4147.751096666667,
+        "p50": 4158.291,
+        "p99": 4817.333
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5426.886236666666,
+        "p50": 5449.208,
+        "p99": 6363.9580000000005
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "same",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-same-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0366666666666666,
+        "p50": 1,
+        "p99": 2
+      },
+      "get_sum": 311,
+      "one_get": 295,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4190.66334,
+        "p50": 4166.9580000000005,
+        "p99": 4896.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5491.664726666667,
+        "p50": 5528.458,
+        "p99": 6623.584
+      },
+      "point": null
+    },
+    {
+      "trial": 1,
+      "model": "same",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-1-same-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 8.496666666666666,
+        "p50": 8,
+        "p99": 17
+      },
+      "get_sum": 2549,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5073.330293333333,
+        "p50": 5133.75,
+        "p99": 5565.416
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6265.368493333333,
+        "p50": 6318.667,
+        "p99": 6753.25
+      },
+      "point": {
+        "n": 300,
+        "mean": 4561.999863333333,
+        "p50": 4560.25,
+        "p99": 5288.5
+      }
+    },
+    {
+      "trial": 1,
+      "model": "same",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-1-same-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 8.753333333333334,
+        "p50": 8,
+        "p99": 18
+      },
+      "get_sum": 2626,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5082.35372,
+        "p50": 5139.834,
+        "p99": 5620.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6205.1946966666665,
+        "p50": 6256.583,
+        "p99": 6713.417
+      },
+      "point": {
+        "n": 300,
+        "mean": 4505.114706666666,
+        "p50": 4515.458,
+        "p99": 5253.25
+      }
+    },
+    {
+      "trial": 1,
+      "model": "same",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-1-same-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 102.45779333333333,
+        "p50": 102.042,
+        "p99": 117.417
+      },
+      "scan": {
+        "n": 300,
+        "mean": 102.45779333333333,
+        "p50": 102.042,
+        "p99": 117.417
+      },
+      "point": {
+        "n": 300,
+        "mean": 102.45779333333333,
+        "p50": 102.042,
+        "p99": 117.417
+      }
+    },
+    {
+      "trial": 1,
+      "model": "same",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-1-same-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 101.61221666666667,
+        "p50": 101.0,
+        "p99": 115.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 101.61221666666667,
+        "p50": 101.0,
+        "p99": 115.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 101.61221666666667,
+        "p50": 101.0,
+        "p99": 115.625
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.44,
+        "p50": 1,
+        "p99": 5
+      },
+      "get_sum": 432,
+      "one_get": 236,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4316.81001,
+        "p50": 4327.75,
+        "p99": 5063.875
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5560.6025033333335,
+        "p50": 5539.375,
+        "p99": 6553.125
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.39,
+        "p50": 1,
+        "p99": 4
+      },
+      "get_sum": 417,
+      "one_get": 229,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4391.75277,
+        "p50": 4375.875,
+        "p99": 5273.7080000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5540.336393333333,
+        "p50": 5531.083,
+        "p99": 6749.458
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 8.51,
+        "p50": 7,
+        "p99": 18
+      },
+      "get_sum": 2553,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4980.291103333333,
+        "p50": 5034.584,
+        "p99": 5438.290999999999
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6070.71014,
+        "p50": 6100.458,
+        "p99": 6635.791
+      },
+      "point": {
+        "n": 300,
+        "mean": 4211.64252,
+        "p50": 4300.875,
+        "p99": 5333.375
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 8.26,
+        "p50": 8,
+        "p99": 16
+      },
+      "get_sum": 2478,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 5108.7933533333335,
+        "p50": 5161.917,
+        "p99": 5511.584
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6240.5022,
+        "p50": 6277.75,
+        "p99": 6759.041
+      },
+      "point": {
+        "n": 300,
+        "mean": 4365.82947,
+        "p50": 4850.417,
+        "p99": 5464.0
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-shared0-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.3566666666666665,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 2207,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5003.09778,
+        "p50": 5077.542,
+        "p99": 5462.208
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6119.422333333333,
+        "p50": 6157.0419999999995,
+        "p99": 6654.375
+      },
+      "point": {
+        "n": 300,
+        "mean": 4499.86348,
+        "p50": 4539.416,
+        "p99": 5173.333
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-shared0-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.163333333333333,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 2149,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5159.64542,
+        "p50": 5199.5,
+        "p99": 5484.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6301.2266666666665,
+        "p50": 6336.292,
+        "p99": 6712.667
+      },
+      "point": {
+        "n": 300,
+        "mean": 4759.6437633333335,
+        "p50": 4805.125,
+        "p99": 5149.584
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-shared15-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.023333333333333,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2107,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5008.441646666666,
+        "p50": 5072.5,
+        "p99": 5424.667
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6162.675683333333,
+        "p50": 6182.542,
+        "p99": 6741.5419999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4545.505173333333,
+        "p50": 4608.667,
+        "p99": 5199.917
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-shared15-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.1,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2130,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5080.74624,
+        "p50": 5131.833,
+        "p99": 5438.7080000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6161.155133333334,
+        "p50": 6193.084,
+        "p99": 6666.875
+      },
+      "point": {
+        "n": 300,
+        "mean": 4748.146233333333,
+        "p50": 4811.958,
+        "p99": 5151.5
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.09,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2127,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5043.144883333333,
+        "p50": 5110.8330000000005,
+        "p99": 5487.0830000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6237.550693333334,
+        "p50": 6282.542,
+        "p99": 6741.5
+      },
+      "point": {
+        "n": 300,
+        "mean": 4635.191686666667,
+        "p50": 4732.667,
+        "p99": 5180.917
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.53,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2259,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 5152.67929,
+        "p50": 5194.917,
+        "p99": 5491.5830000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 6309.50097,
+        "p50": 6341.875,
+        "p99": 6776.916
+      },
+      "point": {
+        "n": 300,
+        "mean": 4801.10545,
+        "p50": 4854.0,
+        "p99": 5211.7919999999995
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 105.03583,
+        "p50": 105.375,
+        "p99": 117.54100000000001
+      },
+      "scan": {
+        "n": 300,
+        "mean": 105.03583,
+        "p50": 105.375,
+        "p99": 117.54100000000001
+      },
+      "point": {
+        "n": 300,
+        "mean": 105.03583,
+        "p50": 105.375,
+        "p99": 117.54100000000001
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 117.62108666666667,
+        "p50": 116.41699999999999,
+        "p99": 142.042
+      },
+      "scan": {
+        "n": 300,
+        "mean": 117.62108666666667,
+        "p50": 116.41699999999999,
+        "p99": 142.042
+      },
+      "point": {
+        "n": 300,
+        "mean": 117.62108666666667,
+        "p50": 116.41699999999999,
+        "p99": 142.042
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-point-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4313.067483333333,
+        "p50": 4367.709,
+        "p99": 4993.0
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4313.067483333333,
+        "p50": 4367.709,
+        "p99": 4993.0
+      },
+      "point": {
+        "n": 300,
+        "mean": 4313.067483333333,
+        "p50": 4367.709,
+        "p99": 4993.0
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-point-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4280.283336666666,
+        "p50": 4283.708,
+        "p99": 5105.666
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4280.283336666666,
+        "p50": 4283.708,
+        "p99": 5105.666
+      },
+      "point": {
+        "n": 300,
+        "mean": 4280.283336666666,
+        "p50": 4283.708,
+        "p99": 5105.666
+      }
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-single_cold-0-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 129.67485666666667,
+        "p50": 129.54199999999997,
+        "p99": 145.5
+      },
+      "scan": {
+        "n": 300,
+        "mean": 614.6148666666667,
+        "p50": 613.8330000000001,
+        "p99": 658.292
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-single_cold-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 236.74720333333335,
+        "p50": 144.083,
+        "p99": 1952.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 839.57986,
+        "p50": 638.625,
+        "p99": 3537.209
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-defaults-single_cold-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4181.227506666667,
+        "p50": 4136.8330000000005,
+        "p99": 5858.4580000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5352.22637,
+        "p50": 5436.084,
+        "p99": 7356.2080000000005
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-defaults-single_cold-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4182.613723333333,
+        "p50": 4160.5419999999995,
+        "p99": 4774.833
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5464.61237,
+        "p50": 5480.5419999999995,
+        "p99": 6317.0
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0633333333333332,
+        "p50": 1,
+        "p99": 3
+      },
+      "get_sum": 319,
+      "one_get": 290,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4273.59817,
+        "p50": 4254.083,
+        "p99": 5270.3330000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5604.345006666666,
+        "p50": 5643.7919999999995,
+        "p99": 6833.166
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0766666666666667,
+        "p50": 1,
+        "p99": 3
+      },
+      "get_sum": 323,
+      "one_get": 289,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3854.78254,
+        "p50": 3850.875,
+        "p99": 4310.75
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4701.916286666667,
+        "p50": 4599.875,
+        "p99": 5617.833
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 9.133333333333333,
+        "p50": 9,
+        "p99": 18
+      },
+      "get_sum": 2740,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4739.537606666667,
+        "p50": 4774.833,
+        "p99": 5170.833
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5735.365696666667,
+        "p50": 5742.5,
+        "p99": 6213.0
+      },
+      "point": {
+        "n": 300,
+        "mean": 4039.2119433333332,
+        "p50": 4368.584,
+        "p99": 5066.834
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 9.066666666666666,
+        "p50": 9,
+        "p99": 17
+      },
+      "get_sum": 2720,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4927.61097,
+        "p50": 4834.459,
+        "p99": 9803.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5993.861106666666,
+        "p50": 5868.209,
+        "p99": 13520.582999999999
+      },
+      "point": {
+        "n": 300,
+        "mean": 4244.874303333333,
+        "p50": 4635.625,
+        "p99": 10402.25
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-shared0-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.3533333333333335,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2206,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4768.67906,
+        "p50": 4801.5,
+        "p99": 5133.75
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5847.897486666667,
+        "p50": 5874.041,
+        "p99": 6319.875
+      },
+      "point": {
+        "n": 300,
+        "mean": 4059.2009866666667,
+        "p50": 3947.417,
+        "p99": 4795.333
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-shared0-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.253333333333333,
+        "p50": 7,
+        "p99": 14
+      },
+      "get_sum": 2176,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4787.766526666666,
+        "p50": 4803.041,
+        "p99": 5210.083
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5858.93985,
+        "p50": 5878.875,
+        "p99": 6417.5830000000005
+      },
+      "point": {
+        "n": 300,
+        "mean": 4341.224026666667,
+        "p50": 4353.417,
+        "p99": 4854.0
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-shared15-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.256666666666667,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2177,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4770.389003333334,
+        "p50": 4810.541,
+        "p99": 5124.7080000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5783.557883333333,
+        "p50": 5810.417,
+        "p99": 6177.9169999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4366.246363333334,
+        "p50": 4421.084,
+        "p99": 4849.0419999999995
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-shared15-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.7,
+        "p50": 7,
+        "p99": 16
+      },
+      "get_sum": 2310,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4795.1872299999995,
+        "p50": 4811.625,
+        "p99": 5217.709
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5822.506416666667,
+        "p50": 5852.375,
+        "p99": 6308.7919999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4464.823513333334,
+        "p50": 4470.625,
+        "p99": 4977.5
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.463333333333333,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2239,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4721.89167,
+        "p50": 4750.375,
+        "p99": 5230.709
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5652.285983333333,
+        "p50": 5644.6669999999995,
+        "p99": 6320.959
+      },
+      "point": {
+        "n": 300,
+        "mean": 4304.06552,
+        "p50": 4394.416,
+        "p99": 4858.708
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.61,
+        "p50": 7,
+        "p99": 16
+      },
+      "get_sum": 2283,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4798.139426666667,
+        "p50": 4817.75,
+        "p99": 5223.9169999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5835.838726666667,
+        "p50": 5872.5,
+        "p99": 6268.584
+      },
+      "point": {
+        "n": 300,
+        "mean": 4430.741513333333,
+        "p50": 4449.959,
+        "p99": 4978.208
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 107.63458,
+        "p50": 108.708,
+        "p99": 132.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 107.63458,
+        "p50": 108.708,
+        "p99": 132.375
+      },
+      "point": {
+        "n": 300,
+        "mean": 107.63458,
+        "p50": 108.708,
+        "p99": 132.375
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 125.2097,
+        "p50": 124.49999999999999,
+        "p99": 143.708
+      },
+      "scan": {
+        "n": 300,
+        "mean": 125.2097,
+        "p50": 124.49999999999999,
+        "p99": 143.708
+      },
+      "point": {
+        "n": 300,
+        "mean": 125.2097,
+        "p50": 124.49999999999999,
+        "p99": 143.708
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-point-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4377.280233333333,
+        "p50": 4402.375,
+        "p99": 5338.5
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4377.280233333333,
+        "p50": 4402.375,
+        "p99": 5338.5
+      },
+      "point": {
+        "n": 300,
+        "mean": 4377.280233333333,
+        "p50": 4402.375,
+        "p99": 5338.5
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-point-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4355.759446666667,
+        "p50": 4412.834,
+        "p99": 5088.708
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4355.759446666667,
+        "p50": 4412.834,
+        "p99": 5088.708
+      },
+      "point": {
+        "n": 300,
+        "mean": 4355.759446666667,
+        "p50": 4412.834,
+        "p99": 5088.708
+      }
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-single_cold-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 137.91334333333333,
+        "p50": 136.291,
+        "p99": 170.25
+      },
+      "scan": {
+        "n": 300,
+        "mean": 627.1143533333334,
+        "p50": 624.0409999999999,
+        "p99": 674.542
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-single_cold-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 151.06360666666666,
+        "p50": 149.792,
+        "p99": 173.0
+      },
+      "scan": {
+        "n": 300,
+        "mean": 636.8580766666666,
+        "p50": 635.041,
+        "p99": 677.417
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-overlay-single_cold-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4162.311393333333,
+        "p50": 4141.667,
+        "p99": 4800.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5454.516663333333,
+        "p50": 5449.208,
+        "p99": 6265.167
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-overlay-single_cold-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4221.519856666667,
+        "p50": 4177.75,
+        "p99": 4944.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5505.64067,
+        "p50": 5496.25,
+        "p99": 6409.583
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "same",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-same-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0166666666666666,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 305,
+      "one_get": 297,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3752.09332,
+        "p50": 3746.25,
+        "p99": 4673.667
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4934.59371,
+        "p50": 4944.125,
+        "p99": 6175.917
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "same",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-same-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0466666666666666,
+        "p50": 1,
+        "p99": 3
+      },
+      "get_sum": 314,
+      "one_get": 290,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3777.520086666667,
+        "p50": 3763.4159999999997,
+        "p99": 4307.041
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4993.432896666666,
+        "p50": 4969.915999999999,
+        "p99": 5921.2919999999995
+      },
+      "point": null
+    },
+    {
+      "trial": 2,
+      "model": "same",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-2-same-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 8.853333333333333,
+        "p50": 8,
+        "p99": 18
+      },
+      "get_sum": 2656,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4706.805823333333,
+        "p50": 4751.125,
+        "p99": 5199.833
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5821.797223333333,
+        "p50": 5861.75,
+        "p99": 6216.4580000000005
+      },
+      "point": {
+        "n": 300,
+        "mean": 4188.530396666667,
+        "p50": 4180.916,
+        "p99": 4873.8330000000005
+      }
+    },
+    {
+      "trial": 2,
+      "model": "same",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-2-same-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 8.71,
+        "p50": 8,
+        "p99": 18
+      },
+      "get_sum": 2613,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4670.59124,
+        "p50": 4698.958,
+        "p99": 5178.833
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5798.895286666667,
+        "p50": 5839.625,
+        "p99": 6246.0
+      },
+      "point": {
+        "n": 300,
+        "mean": 4131.761666666666,
+        "p50": 4111.208,
+        "p99": 4872.375
+      }
+    },
+    {
+      "trial": 2,
+      "model": "same",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-2-same-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 101.64981666666667,
+        "p50": 100.833,
+        "p99": 117.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 101.64981666666667,
+        "p50": 100.833,
+        "p99": 117.375
+      },
+      "point": {
+        "n": 300,
+        "mean": 101.64981666666667,
+        "p50": 100.833,
+        "p99": 117.375
+      }
+    },
+    {
+      "trial": 2,
+      "model": "same",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-2-same-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 101.61582333333334,
+        "p50": 100.958,
+        "p99": 115.417
+      },
+      "scan": {
+        "n": 300,
+        "mean": 101.61582333333334,
+        "p50": 100.958,
+        "p99": 115.417
+      },
+      "point": {
+        "n": 300,
+        "mean": 101.61582333333334,
+        "p50": 100.958,
+        "p99": 115.417
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.2833333333333334,
+        "p50": 1,
+        "p99": 4
+      },
+      "get_sum": 385,
+      "one_get": 248,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 4001.7581666666665,
+        "p50": 3961.167,
+        "p99": 5256.25
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5152.33124,
+        "p50": 5105.875,
+        "p99": 6820.25
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.2966666666666666,
+        "p50": 1,
+        "p99": 4
+      },
+      "get_sum": 389,
+      "one_get": 248,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3994.04506,
+        "p50": 3979.75,
+        "p99": 5258.9580000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4971.341,
+        "p50": 4978.583,
+        "p99": 6553.709
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 8.553333333333333,
+        "p50": 8,
+        "p99": 18
+      },
+      "get_sum": 2566,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4696.638196666667,
+        "p50": 4667.833,
+        "p99": 6116.333
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5753.28941,
+        "p50": 5690.375,
+        "p99": 7920.625000000001
+      },
+      "point": {
+        "n": 300,
+        "mean": 3990.7285933333333,
+        "p50": 4034.75,
+        "p99": 5155.9580000000005
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.556666666666667,
+        "p50": 7,
+        "p99": 19
+      },
+      "get_sum": 2267,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4784.650383333334,
+        "p50": 4793.75,
+        "p99": 5252.333
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5836.010433333333,
+        "p50": 5831.25,
+        "p99": 6377.792
+      },
+      "point": {
+        "n": 300,
+        "mean": 4194.002806666666,
+        "p50": 4505.666,
+        "p99": 5099.292
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-shared0-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.023333333333333,
+        "p50": 6,
+        "p99": 17
+      },
+      "get_sum": 2107,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4772.3677566666665,
+        "p50": 4720.6669999999995,
+        "p99": 5463.458
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5832.725683333333,
+        "p50": 5769.333,
+        "p99": 6629.75
+      },
+      "point": {
+        "n": 300,
+        "mean": 4209.775163333334,
+        "p50": 4265.75,
+        "p99": 4917.958
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-shared0-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 6.616666666666666,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 1985,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4861.673506666667,
+        "p50": 4812.958,
+        "p99": 5402.125
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5929.770136666667,
+        "p50": 5881.917,
+        "p99": 7729.917
+      },
+      "point": {
+        "n": 300,
+        "mean": 4477.779853333333,
+        "p50": 4506.5419999999995,
+        "p99": 4936.25
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-shared15-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 6.986666666666666,
+        "p50": 6,
+        "p99": 14
+      },
+      "get_sum": 2096,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4701.319313333333,
+        "p50": 4693.958,
+        "p99": 5338.084
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5783.73917,
+        "p50": 5725.375,
+        "p99": 6740.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 4332.602776666667,
+        "p50": 4366.75,
+        "p99": 5479.2080000000005
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-shared15-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.213333333333333,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 2164,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4791.70695,
+        "p50": 4794.458,
+        "p99": 5177.1669999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5899.941673333334,
+        "p50": 5900.042,
+        "p99": 6537.0
+      },
+      "point": {
+        "n": 300,
+        "mean": 4460.76875,
+        "p50": 4478.416,
+        "p99": 4925.334
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.1,
+        "p50": 6,
+        "p99": 16
+      },
+      "get_sum": 2130,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4661.256286666667,
+        "p50": 4718.875,
+        "p99": 5106.083
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5731.6314133333335,
+        "p50": 5741.0,
+        "p99": 6196.709
+      },
+      "point": {
+        "n": 300,
+        "mean": 4292.048183333333,
+        "p50": 4358.917,
+        "p99": 4896.958
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 6.76,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2028,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4830.45054,
+        "p50": 4828.209,
+        "p99": 5247.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5870.760973333333,
+        "p50": 5889.333,
+        "p99": 6336.75
+      },
+      "point": {
+        "n": 300,
+        "mean": 4519.6288933333335,
+        "p50": 4545.5,
+        "p99": 4983.541
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 106.95148999999999,
+        "p50": 103.75,
+        "p99": 188.583
+      },
+      "scan": {
+        "n": 300,
+        "mean": 106.95148999999999,
+        "p50": 103.75,
+        "p99": 188.583
+      },
+      "point": {
+        "n": 300,
+        "mean": 106.95148999999999,
+        "p50": 103.75,
+        "p99": 188.583
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 121.35278666666666,
+        "p50": 117.917,
+        "p99": 170.542
+      },
+      "scan": {
+        "n": 300,
+        "mean": 121.35278666666666,
+        "p50": 117.917,
+        "p99": 170.542
+      },
+      "point": {
+        "n": 300,
+        "mean": 121.35278666666666,
+        "p50": 117.917,
+        "p99": 170.542
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-point-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3689.2793,
+        "p50": 3618.042,
+        "p99": 4835.875
+      },
+      "scan": {
+        "n": 300,
+        "mean": 3689.2793,
+        "p50": 3618.042,
+        "p99": 4835.875
+      },
+      "point": {
+        "n": 300,
+        "mean": 3689.2793,
+        "p50": 3618.042,
+        "p99": 4835.875
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-point-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3806.3045866666666,
+        "p50": 3738.125,
+        "p99": 4912.167
+      },
+      "scan": {
+        "n": 300,
+        "mean": 3806.3045866666666,
+        "p50": 3738.125,
+        "p99": 4912.167
+      },
+      "point": {
+        "n": 300,
+        "mean": 3806.3045866666666,
+        "p50": 3738.125,
+        "p99": 4912.167
+      }
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-single_cold-0-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 138.27652333333333,
+        "p50": 135.25,
+        "p99": 254.16700000000003
+      },
+      "scan": {
+        "n": 300,
+        "mean": 678.9461066666667,
+        "p50": 669.375,
+        "p99": 1092.0
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-single_cold-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 143.50281666666666,
+        "p50": 141.625,
+        "p99": 174.709
+      },
+      "scan": {
+        "n": 300,
+        "mean": 635.6275266666667,
+        "p50": 631.7090000000001,
+        "p99": 703.208
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-defaults-single_cold-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3714.735956666667,
+        "p50": 3693.416,
+        "p99": 4242.209
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4544.26637,
+        "p50": 4520.125,
+        "p99": 5383.084
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "defaults",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-defaults-single_cold-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=10 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=false shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3771.83637,
+        "p50": 3753.333,
+        "p99": 4308.459
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4789.608333333334,
+        "p50": 4801.75,
+        "p99": 5742.790999999999
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0833333333333333,
+        "p50": 1,
+        "p99": 3
+      },
+      "get_sum": 325,
+      "one_get": 286,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3953.33749,
+        "p50": 3859.0,
+        "p99": 6057.959
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5173.698183333333,
+        "p50": 5140.458,
+        "p99": 7292.25
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0466666666666666,
+        "p50": 1,
+        "p99": 3
+      },
+      "get_sum": 314,
+      "one_get": 291,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3987.287893333333,
+        "p50": 3982.6669999999995,
+        "p99": 4868.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5124.333033333333,
+        "p50": 5131.333,
+        "p99": 6178.708
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 9.423333333333334,
+        "p50": 9,
+        "p99": 18
+      },
+      "get_sum": 2827,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4835.38199,
+        "p50": 4794.375,
+        "p99": 7854.584
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5915.778606666667,
+        "p50": 5822.542,
+        "p99": 9552.25
+      },
+      "point": {
+        "n": 300,
+        "mean": 4131.679446666667,
+        "p50": 4392.875,
+        "p99": 5269.0419999999995
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 9.17,
+        "p50": 9,
+        "p99": 18
+      },
+      "get_sum": 2751,
+      "one_get": 0,
+      "bytes": 3988148,
+      "first": {
+        "n": 300,
+        "mean": 4888.786526666667,
+        "p50": 4916.5,
+        "p99": 5702.040999999999
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5930.917366666667,
+        "p50": 5940.958,
+        "p99": 6706.084
+      },
+      "point": {
+        "n": 300,
+        "mean": 4198.6493,
+        "p50": 4684.9580000000005,
+        "p99": 5469.291
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-shared0-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.54,
+        "p50": 7,
+        "p99": 16
+      },
+      "get_sum": 2262,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4729.1202766666665,
+        "p50": 4778.542,
+        "p99": 5056.333
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5776.769576666667,
+        "p50": 5808.667,
+        "p99": 6235.9169999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 3998.568583333333,
+        "p50": 3859.875,
+        "p99": 4727.125
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared0",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-shared0-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(0) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 6.933333333333334,
+        "p50": 6,
+        "p99": 15
+      },
+      "get_sum": 2080,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4824.18932,
+        "p50": 4855.1669999999995,
+        "p99": 5181.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5908.68542,
+        "p50": 5932.916,
+        "p99": 6239.167
+      },
+      "point": {
+        "n": 300,
+        "mean": 4365.609553333334,
+        "p50": 4399.791,
+        "p99": 4850.375
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-shared15-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.28,
+        "p50": 7,
+        "p99": 14
+      },
+      "get_sum": 2184,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4730.121116666666,
+        "p50": 4770.459000000001,
+        "p99": 5112.875
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5842.647663333333,
+        "p50": 5873.167,
+        "p99": 6216.0419999999995
+      },
+      "point": {
+        "n": 300,
+        "mean": 4366.612243333333,
+        "p50": 4439.416,
+        "p99": 4786.167
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared15",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-shared15-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(15) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.113333333333333,
+        "p50": 6,
+        "p99": 14
+      },
+      "get_sum": 2134,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4792.527476666666,
+        "p50": 4811.375,
+        "p99": 5143.75
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5884.19753,
+        "p50": 5927.125,
+        "p99": 6260.875
+      },
+      "point": {
+        "n": 300,
+        "mean": 4471.10196,
+        "p50": 4475.875,
+        "p99": 4875.75
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.3133333333333335,
+        "p50": 7,
+        "p99": 16
+      },
+      "get_sum": 2194,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4740.470586666666,
+        "p50": 4792.75,
+        "p99": 5137.959
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5811.06027,
+        "p50": 5858.334,
+        "p99": 6265.834
+      },
+      "point": {
+        "n": 300,
+        "mean": 4272.644723333333,
+        "p50": 4344.4169999999995,
+        "p99": 4785.9169999999995
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 7.35,
+        "p50": 7,
+        "p99": 15
+      },
+      "get_sum": 2205,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4801.49752,
+        "p50": 4818.916,
+        "p99": 5359.2919999999995
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5894.2642866666665,
+        "p50": 5922.916,
+        "p99": 6435.8330000000005
+      },
+      "point": {
+        "n": 300,
+        "mean": 4438.330953333333,
+        "p50": 4463.625,
+        "p99": 5046.375
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 111.23752333333333,
+        "p50": 110.5,
+        "p99": 124.87500000000001
+      },
+      "scan": {
+        "n": 300,
+        "mean": 111.23752333333333,
+        "p50": 110.5,
+        "p99": 124.87500000000001
+      },
+      "point": {
+        "n": 300,
+        "mean": 111.23752333333333,
+        "p50": 110.5,
+        "p99": 124.87500000000001
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 123.61877333333334,
+        "p50": 123.416,
+        "p99": 134.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 123.61877333333334,
+        "p50": 123.416,
+        "p99": 134.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 123.61877333333334,
+        "p50": 123.416,
+        "p99": 134.625
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-point-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4197.560286666667,
+        "p50": 4269.875,
+        "p99": 4782.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4197.560286666667,
+        "p50": 4269.875,
+        "p99": 4782.375
+      },
+      "point": {
+        "n": 300,
+        "mean": 4197.560286666667,
+        "p50": 4269.875,
+        "p99": 4782.375
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "point",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-point-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 4037.20111,
+        "p50": 4039.458,
+        "p99": 4819.625
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4037.20111,
+        "p50": 4039.458,
+        "p99": 4819.625
+      },
+      "point": {
+        "n": 300,
+        "mean": 4037.20111,
+        "p50": 4039.458,
+        "p99": 4819.625
+      }
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-single_cold-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 136.10539666666668,
+        "p50": 135.125,
+        "p99": 151.083
+      },
+      "scan": {
+        "n": 300,
+        "mean": 626.64969,
+        "p50": 624.3330000000001,
+        "p99": 672.958
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-single_cold-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 150.78429333333332,
+        "p50": 149.5,
+        "p99": 174.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 640.12094,
+        "p50": 638.208,
+        "p99": 681.917
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-overlay-single_cold-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3830.0456966666666,
+        "p50": 3766.708,
+        "p99": 4481.042
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5059.494743333334,
+        "p50": 5074.917,
+        "p99": 6043.792
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "overlay",
+      "case": "single_cold",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-overlay-single_cold-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(1)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 3849.05502,
+        "p50": 3740.8329999999996,
+        "p99": 6149.958
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4969.50698,
+        "p50": 4831.5,
+        "p99": 9378.832999999999
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "same",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-same-cold16-2000-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0166666666666666,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 305,
+      "one_get": 297,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3657.684153333333,
+        "p50": 3670.917,
+        "p99": 4002.5829999999996
+      },
+      "scan": {
+        "n": 300,
+        "mean": 4498.07265,
+        "p50": 4490.75,
+        "p99": 5038.1669999999995
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "same",
+      "case": "cold16",
+      "delay": 2000,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-same-cold16-2000-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1.0066666666666666,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 302,
+      "one_get": 299,
+      "bytes": 981698,
+      "first": {
+        "n": 300,
+        "mean": 3779.3094666666666,
+        "p50": 3771.9590000000003,
+        "p99": 4345.8330000000005
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5031.924323333334,
+        "p50": 5020.1669999999995,
+        "p99": 5994.667
+      },
+      "point": null
+    },
+    {
+      "trial": 3,
+      "model": "same",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "base",
+      "log": "decode-caller-run-3-same-mixed_points-2000-shared8-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 8.41,
+        "p50": 8,
+        "p99": 17
+      },
+      "get_sum": 2523,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4729.1338866666665,
+        "p50": 4778.0419999999995,
+        "p99": 5207.667
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5859.80973,
+        "p50": 5922.5,
+        "p99": 6279.208
+      },
+      "point": {
+        "n": 300,
+        "mean": 4191.28551,
+        "p50": 4181.792,
+        "p99": 4857.709
+      }
+    },
+    {
+      "trial": 3,
+      "model": "same",
+      "case": "mixed_points",
+      "delay": 2000,
+      "shared": "shared8",
+      "arm": "caller",
+      "log": "decode-caller-run-3-same-mixed_points-2000-shared8-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=2000 dedicated_io=true shared_index=Some(8) caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 8.37,
+        "p50": 8,
+        "p99": 17
+      },
+      "get_sum": 2511,
+      "one_get": 0,
+      "bytes": 3926792,
+      "first": {
+        "n": 300,
+        "mean": 4785.981246666666,
+        "p50": 4669.833,
+        "p99": 9874.375
+      },
+      "scan": {
+        "n": 300,
+        "mean": 5828.910116666667,
+        "p50": 5638.125,
+        "p99": 15830.375
+      },
+      "point": {
+        "n": 300,
+        "mean": 4228.568223333334,
+        "p50": 4086.4170000000004,
+        "p99": 8026.165999999999
+      }
+    },
+    {
+      "trial": 3,
+      "model": "same",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "base",
+      "log": "decode-caller-run-3-same-point-0-independent-base.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 102.58347666666667,
+        "p50": 101.875,
+        "p99": 119.25
+      },
+      "scan": {
+        "n": 300,
+        "mean": 102.58347666666667,
+        "p50": 101.875,
+        "p99": 119.25
+      },
+      "point": {
+        "n": 300,
+        "mean": 102.58347666666667,
+        "p50": 101.875,
+        "p99": 119.25
+      }
+    },
+    {
+      "trial": 3,
+      "model": "same",
+      "case": "point",
+      "delay": 0,
+      "shared": "independent",
+      "arm": "caller",
+      "log": "decode-caller-run-3-same-point-0-independent-caller.log",
+      "model_line": "MODEL caller_workers=8 node_workers=10 separate_tasks=true delay_us=0 dedicated_io=true shared_index=None caller_id=Id(2) foyer_id=Id(2)",
+      "gets": {
+        "n": 300,
+        "mean": 1,
+        "p50": 1,
+        "p99": 1
+      },
+      "get_sum": 300,
+      "one_get": 300,
+      "bytes": 61356,
+      "first": {
+        "n": 300,
+        "mean": 101.89903666666666,
+        "p50": 101.125,
+        "p99": 117.333
+      },
+      "scan": {
+        "n": 300,
+        "mean": 101.89903666666666,
+        "p50": 101.125,
+        "p99": 117.333
+      },
+      "point": {
+        "n": 300,
+        "mean": 101.89903666666666,
+        "p50": 101.125,
+        "p99": 117.333
+      }
+    }
+  ],
+  "binaries": {
+    "base": {
+      "binary_sha256": "42ff0c624a0d43a0635e52352e672f0fc9382b8dce1bbaba4eb13eca7a232ca9",
+      "source_sha256": {
+        "src/storage/src/hummock/sstable_store.rs": "30b67609d60a4dd323a46000f1ce4589a1030676a9663606438ed5c4fa07aafb",
+        "src/storage/src/hummock/sstable_store/plug_experiment.rs": "74161de5a7d5abd9bd5458de36a4d20849ed791b1b6198c61285e85e7ea91e7b",
+        "src/object_store/src/object/mem.rs": "ebfd776be72e460deafa1eee31105d7ddd27ed9061f805b7d9482dc9a2c77cfc"
+      }
+    },
+    "caller": {
+      "binary_sha256": "9e4c61930a8305023ecfc644353028a4840b43edf87cb8a01b954de175f78d2a",
+      "source_sha256": {
+        "src/storage/src/hummock/sstable_store.rs": "48210f366bbbfd901b18f453468b697d556ef11c69170a139f5f803b9d1785f4",
+        "src/storage/src/hummock/sstable_store/plug_experiment.rs": "74161de5a7d5abd9bd5458de36a4d20849ed791b1b6198c61285e85e7ea91e7b",
+        "src/object_store/src/object/mem.rs": "ebfd776be72e460deafa1eee31105d7ddd27ed9061f805b7d9482dc9a2c77cfc"
+      }
+    }
+  },
+  "decision": "Rejected: additional cross-runtime decode handoffs regress isolated and shared point latency; execution sources restored.",
+  "validation": {
+    "base-store": "passed",
+    "base-iterator": "passed",
+    "caller-store": "passed",
+    "caller-iterator": "passed",
+    "final-store": "passed",
+    "final-iterator": "passed",
+    "final-scheduler": "passed",
+    "check": "passed",
+    "source_hashes": {
+      "src/object_store/src/object/mem.rs": "0491560f499cc80a766dee3f4d6f6ac8b105d14e04871b75662bcb1f52f6d3e3",
+      "src/storage/src/hummock/sstable_store.rs": "30b67609d60a4dd323a46000f1ce4589a1030676a9663606438ed5c4fa07aafb",
+      "src/storage/src/hummock/sstable_store/plug_experiment.rs": "9e79156a480808bb927c85726212e3fd82167c73ec5be21280498acd4b7ca2ef"
+    }
+  },
+  "scope": {
+    "defaults": "No file cache; Foyer and scheduler use cache/node initialization runtime (10 workers locally); caller has Tokio-default 10 workers. Coalescing remains enabled for this experiment.",
+    "overlay": "No file cache; Foyer on node runtime (10); caller on 8 workers as q18-read-path.toml actor setting; scheduler dedicated runtime has 2 workers.",
+    "same": "Cache and caller on the same 8-worker runtime; scheduler dedicated runtime has 2 workers. Identity fast-path control.",
+    "limitation": "Runtime topology reproduces relevant RW construction semantics using the SST fixture; not a full compute-server/SQL/S3/disk-cache deployment. macOS ARM64 debug, in-memory backend with 0 or 2000us Tokio timer. No concurrent compile/profiler/TRACE during measurements.",
+    "shared_fixture": "Test-only backend completion gate holds all reads until point has registered against an already registered scan producer; then released before waiting for point. Asserts need_await and exactly 64 outer producers. The exploratory ungated fixture hit a registration-timing assertion on baseline; those samples are excluded.",
+    "sampling": "3 alternating-order rounds, 20 warmups and 300 measured samples per arm/case/round. Each cold16 round has 300 16-block windows. Displayed p50/p99 are medians of per-round percentiles, not pooled percentiles."
+  }
+}

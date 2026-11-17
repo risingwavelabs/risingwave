@@ -26,5 +26,4 @@ max_inflight_reads = 32
 max_batch_requests = 16
 max_read_bytes = 1048576
 max_gap_bytes = 0
-prefetch_batch_wait_us = 100
 reuse_inflight_reads = true

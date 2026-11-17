@@ -43,7 +43,6 @@ pub struct ObjectStoreMetrics {
     pub(super) read_scheduler_reserved: IntGaugeVec,
     pub(super) read_scheduler_waiting: IntGaugeVec,
     pub(super) read_scheduler_admission_duration: HistogramVec,
-    pub(super) read_scheduler_batch_wait: HistogramVec,
     pub(super) read_requests: GenericCounterVec<AtomicU64>,
     pub(super) read_request_duration: HistogramVec,
     pub(super) read_request_bytes: HistogramVec,
@@ -104,7 +103,7 @@ impl ObjectStoreMetrics {
         .unwrap();
         let read_scheduler_waiting = register_int_gauge_vec_with_registry!(
             "object_store_read_scheduler_waiting",
-            "Logical reads waiting for scheduler admission in caller futures",
+            "Logical reads waiting for scheduler admission, including collected window reads",
             &["media_type"],
             registry
         )
@@ -114,16 +113,6 @@ impl ObjectStoreMetrics {
                 "object_store_read_scheduler_admission_duration_seconds",
                 "Time waiting for admission, including cancelled waits",
                 exponential_buckets(0.000_01, 2.0, 22).unwrap()
-            ),
-            &["media_type"],
-            registry
-        )
-        .unwrap();
-        let read_scheduler_batch_wait = register_histogram_vec_with_registry!(
-            histogram_opts!(
-                "object_store_read_scheduler_batch_wait_seconds",
-                "Time from external read arrival to release of its prefetch batch group",
-                exponential_buckets(0.000_01, 2.0, 18).unwrap()
             ),
             &["media_type"],
             registry
@@ -271,7 +260,6 @@ impl ObjectStoreMetrics {
             read_scheduler_reserved,
             read_scheduler_waiting,
             read_scheduler_admission_duration,
-            read_scheduler_batch_wait,
             read_requests,
             read_request_duration,
             read_request_bytes,

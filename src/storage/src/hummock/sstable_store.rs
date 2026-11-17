@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::{
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
-    ReadBatch,
+    ReadPlug,
 };
 use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
@@ -536,16 +536,16 @@ impl SstableStore {
         block_index: usize,
         policy: CachePolicy,
     ) -> HummockResult<BlockResponse> {
-        self.get_block_response_with_batch(sst, block_index, policy, None)
+        self.get_block_response_with_plug(sst, block_index, policy, None)
             .await
     }
 
-    pub(crate) async fn get_block_response_with_batch(
+    pub(crate) async fn get_block_response_with_plug(
         &self,
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
-        batch: Option<&risingwave_object_store::object::ReadBatch>,
+        plug: Option<&risingwave_object_store::object::ReadPlug>,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
@@ -571,11 +571,11 @@ impl SstableStore {
         };
         // Presence is only a batching hint. A cached or concurrently fetched
         // block must still go through Foyer's atomic get-or-fetch registration.
-        let batch = batch.filter(|_| {
+        let plug = plug.filter(|_| {
             matches!(policy, CachePolicy::Fill(_))
                 && !(self.block_cache.is_hybrid() && self.block_cache.contains(&idx))
         });
-        let member = batch.map(ReadBatch::member);
+        let token = plug.map(ReadPlug::token);
 
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
@@ -589,7 +589,7 @@ impl SstableStore {
             async move {
             outer_fetch.inc();
             let block_data = match store
-                .read_with_batch(&data_path, fetch_range.clone(), member)
+                .read_with_plug(&data_path, fetch_range.clone(), token)
                 .instrument_await("get_block_response".verbose())
                 .await
             {
@@ -616,10 +616,9 @@ impl SstableStore {
                     fetch_block().map(|res| res.map(|block| (block, properties)))
                 });
                 if fetch.need_await() {
-                    // A disk-cache follower may still provide the external fallback.
-                    if let Some(batch) = batch {
-                        batch.expect(range);
-                    }
+                    // A pending cache response need not produce an external read.
+                    // Batch only actual reads; Foyer keeps ownership of shared
+                    // producers and any fallback supplied by this registration.
                     self.read_metrics.block_cache_pending.inc();
                 } else {
                     self.read_metrics.block_cache_memory_hit.inc();
@@ -658,23 +657,23 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        self.get_with_read_batch(sst, block_index, policy, stats, None)
+        self.get_with_read_plug(sst, block_index, policy, stats, None)
             .await
     }
 
-    pub(crate) async fn get_with_read_batch(
+    pub(crate) async fn get_with_read_plug(
         &self,
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
-        batch: Option<risingwave_object_store::object::ReadBatch>,
+        plug: Option<risingwave_object_store::object::ReadPlug>,
     ) -> HummockResult<BlockHolder> {
         let response = self
-            .get_block_response_with_batch(sst, block_index, policy, batch.as_ref())
+            .get_block_response_with_plug(sst, block_index, policy, plug.as_ref())
             .await;
-        // Release the registered reads before waiting on the demand block.
-        drop(batch);
+        // Producers retain their plug tokens; actual external IO starts its own flush.
+        drop(plug);
         let block_response = response?;
         let block_holder = block_response.wait().await?;
         stats.cache_data_block_total += 1;
@@ -1325,13 +1324,7 @@ mod tests {
         let object_store = Arc::new(
             ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(
                 Arc::new(ObjectStoreMetrics::unused()),
-                Arc::new(ObjectStoreConfig {
-                    read_scheduler: risingwave_common::config::storage::ReadSchedulerConfig {
-                        prefetch_batch_wait_us: 100,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+                Arc::new(ObjectStoreConfig::default()),
             ))
             .with_read_coalescing(),
         );
@@ -1372,9 +1365,9 @@ mod tests {
         assert!(!cache.memory().contains(&key));
 
         let policy = CachePolicy::Fill(foyer::Hint::Normal);
-        let batch = object_store.read_batch(2).unwrap();
+        let plug = object_store.read_plug(2).unwrap();
         let response = store
-            .get_block_response_with_batch(&sst, 0, policy, Some(&batch))
+            .get_block_response_with_plug(&sst, 0, policy, Some(&plug))
             .await
             .unwrap();
         let from_disk = response.wait().await.unwrap();
@@ -1385,7 +1378,7 @@ mod tests {
         assert!(cache.contains(&key));
 
         let response = store
-            .get_block_response_with_batch(&sst, 0, policy, Some(&batch))
+            .get_block_response_with_plug(&sst, 0, policy, Some(&plug))
             .await
             .unwrap();
         // The spawned producer has not been polled on this current-thread
@@ -1394,13 +1387,125 @@ mod tests {
         assert!(!cache.contains(&key));
         let from_remote = tokio::time::timeout(std::time::Duration::from_secs(5), response.wait())
             .await
-            .expect("a stale positive hint must still read without waiting for the batch to close")
+            .expect("a stale positive hint must still read without waiting for the plug to close")
             .unwrap();
         assert!(matches!(from_remote.entry(), BlockEntry::HybridCache(entry)
             if entry.source() == foyer::Source::Outer));
-        drop(batch);
+        drop(plug);
         drop(from_remote);
+
+        // A Wait registration can still supply the fallback for a disk-only get.
+        // Ready-only batching must not remove its external reader.
+        let key = SstableBlockIndex {
+            sst_id: sst.id,
+            block_idx: 1,
+        };
+        assert!(!cache.contains(&key));
+        let disk_get = cache.get(&key);
+        let plug = object_store.read_plug(2).unwrap();
+        let follower = store
+            .get_block_response_with_plug(&sst, 1, policy, Some(&plug))
+            .await
+            .unwrap();
+        assert!(matches!(&follower, super::BlockResponse::Fetch(fetch)
+            if fetch.need_await()));
+        let neighbor = store
+            .get_block_response_with_plug(&sst, 2, policy, Some(&plug))
+            .await
+            .unwrap();
+        drop(plug);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            assert_eq!(
+                disk_get.await.unwrap().unwrap().source(),
+                foyer::Source::Outer
+            );
+            let follower = follower.wait().await.unwrap();
+            assert!(matches!(follower.entry(), BlockEntry::HybridCache(entry)
+                if entry.source() == foyer::Source::Outer));
+            neighbor.wait().await.unwrap();
+        })
+        .await
+        .expect("a disk-get waiter must retain its external fallback");
         cache.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_block_fetch_does_not_hold_cold_neighbor_batch() {
+        use std::time::Duration;
+
+        use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+        use risingwave_object_store::object::{
+            InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
+        };
+
+        use super::{Block, BlockEntry, BlockResponse, SstableBlockIndex};
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+
+        // Count only this store's GETs when storage tests run concurrently.
+        let metrics = Arc::new(ObjectStoreMetrics::new(&prometheus::Registry::new()));
+        let object_store = Arc::new(
+            ObjectStoreImpl::InMem(
+                InMemObjectStore::for_test()
+                    .monitored(metrics.clone(), Arc::new(ObjectStoreConfig::default())),
+            )
+            .with_read_coalescing(),
+        );
+        let store = mock_sstable_store_with_object_store(object_store.clone()).await;
+        let (sst, _) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 11, store.clone()).await;
+        let cache = store.block_cache();
+        let shared_key = SstableBlockIndex {
+            sst_id: sst.id,
+            block_idx: 1,
+        };
+        let (range, uncompressed_size) = sst.calculate_block_info(1);
+        let path = store.get_sst_data_path(sst.id);
+        let (release, gate) = tokio::sync::oneshot::channel::<()>();
+        let remote = object_store.clone();
+        let leader = cache.get_or_fetch(&shared_key, || async move {
+            gate.await.unwrap();
+            let bytes = remote.read(&path, range).await?;
+            Ok::<_, crate::hummock::HummockError>(Box::new(Block::decode(
+                bytes,
+                uncompressed_size,
+            )?))
+        });
+        assert!(leader.need_await());
+        let reads = metrics.operation_size.with_label_values(&["read"]);
+        let before = reads.get_sample_count();
+        let plug = object_store.read_plug(2).unwrap();
+        let policy = CachePolicy::Fill(foyer::Hint::Normal);
+        let cold = store
+            .get_block_response_with_plug(&sst, 0, policy, Some(&plug))
+            .await
+            .unwrap();
+        assert!(matches!(&cold, BlockResponse::Fetch(fetch)
+            if fetch.need_await()));
+        let shared = store
+            .get_block_response_with_plug(&sst, 1, policy, Some(&plug))
+            .await
+            .unwrap();
+        assert!(matches!(&shared, BlockResponse::Fetch(fetch)
+            if fetch.need_await()));
+        drop(leader);
+        drop(plug);
+        let cold = tokio::time::timeout(Duration::from_secs(1), cold.wait())
+            .await
+            .expect(
+                "a shared neighbor must not keep the cold read waiting for a nonexistent candidate",
+            )
+            .unwrap();
+        assert!(matches!(cold.entry(), BlockEntry::HybridCache(entry)
+            if entry.source() == foyer::Source::Outer));
+        assert_eq!(reads.get_sample_count() - before, 1);
+        release.send(()).unwrap();
+        let shared = tokio::time::timeout(Duration::from_secs(1), shared.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(shared.entry(), BlockEntry::HybridCache(entry)
+            if entry.source() == foyer::Source::Outer));
+        assert_eq!(reads.get_sample_count() - before, 2);
     }
 
     #[tokio::test]
@@ -1508,3 +1613,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "test", not(madsim)))]
+mod plug_experiment;

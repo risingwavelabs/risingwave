@@ -1,0 +1,50 @@
+--- a/src/storage/src/hummock/sstable_store/plug_experiment.rs
++++ b/src/storage/src/hummock/sstable_store/plug_experiment.rs
+@@ -25,6 +25,8 @@
+ use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable, test_key_of};
+ use crate::hummock::{HummockValue, SstableIterator, TableHolder};
+ use crate::store::PrefetchMode;
++
++static HEAD_REGISTERED: std::sync::LazyLock<tokio::sync::Notify> = std::sync::LazyLock::new(tokio::sync::Notify::new);
+ 
+ const MIB: usize = 1 << 20;
+ const PRESSURE_CAP: usize = MIB / 2;
+@@ -72,7 +74,13 @@
+         &table.1,
+     );
+     let start = Instant::now();
+-    iter.rewind().await.unwrap();
++    if table.0.id.as_raw_id() == 1 {
++        tokio::task::yield_now().await;
++        let mut rewind = Box::pin(iter.rewind());
++        assert!(futures::poll!(&mut rewind).is_pending());
++        HEAD_REGISTERED.notify_one();
++        rewind.await.unwrap();
++    } else { iter.rewind().await.unwrap(); }
+     let first = us(start);
+     let mut rows = 0;
+     while iter.is_valid() && iter.key() < stop_key {
+@@ -248,10 +256,13 @@
+                     }
+                     "mixed_points" => {
+                         let point_store = store.clone();
+-                        let point_table = tables[4].clone();
++                        let point_table = tables[0].clone();
+                         let point = async move {
++                            HEAD_REGISTERED.notified().await;
+                             let start = Instant::now();
+-                            let block = point_store.get(&point_table.0, 0, CachePolicy::default(), &mut StoreLocalStatistic::default()).await.unwrap();
++                            let response = point_store.get_block_response(&point_table.0, 0, CachePolicy::default()).await.unwrap();
++                            assert!(matches!(&response, BlockResponse::Fetch(fetch) if fetch.need_await()), "shared point must register before producer completion");
++                            let block = response.wait().await.unwrap();
+                             let end = Instant::now();
+                             check_block(block, &point_table, 0);
+                             end.duration_since(start).as_secs_f64()*1e6
+@@ -279,6 +290,7 @@
+                 if case == "early_stop" { tokio::time::sleep(Duration::from_millis(10)).await; }
+                 drain(&registry).await;
+                 let actual_outer = store.read_metrics.block_cache_outer_fetch.get() - outer;
++                if case == "mixed_points" { assert_eq!(actual_outer, 64, "shared point must not create another producer"); }
+                 if arm != "R" && case == "cold16" { assert_eq!(actual_outer, 16); }
+                 if arm != "R" && case == "single_cold" { assert_eq!(actual_outer, 1); }
+                 if trial >= 20 {

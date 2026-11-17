@@ -1,0 +1,32 @@
+--- a/src/storage/src/hummock/sstable_store.rs
++++ b/src/storage/src/hummock/sstable_store.rs
+@@ -580,6 +580,11 @@
+         self.recent_filter
+             .extend([(object_id, usize::MAX), (object_id, block_index)]);
+ 
++        // Keep one decoded result per Foyer producer, while running CPU work on
++        // the requesting runtime. Non-filling reads retain their existing path.
++        let decode_runtime = matches!(policy, CachePolicy::Fill(_))
++            .then(tokio::runtime::Handle::current);
++
+         // future: fetch block if hybrid cache miss
+         let span = tracing::debug_span!(target: "state_store_read_batch", "block_read",
+             object_id = %object_id, block = block_index, start = range.start, end = range.end);
+@@ -604,7 +609,16 @@
+                     return Err(HummockError::from(e));
+                 }
+             };
+-            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
++            let block = match decode_runtime {
++                Some(runtime) if runtime.id() != tokio::runtime::Handle::current().id() => {
++                    runtime
++                        .spawn(async move { Block::decode(block_data, uncompressed_capacity) })
++                        .await
++                        .map_err(|error| HummockError::other(format!("block decode task failed: {error}")))??
++                }
++                _ => Block::decode(block_data, uncompressed_capacity)?,
++            };
++            let block = Box::new(block);
+             Ok(block)
+         }.instrument(span.clone())
+         };

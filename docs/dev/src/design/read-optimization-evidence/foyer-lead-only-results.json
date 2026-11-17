@@ -1,0 +1,229 @@
+{
+  "date": "2026-11-16",
+  "policy": "Only Lead registrations add expected batch candidates; Wait retains fallback and batch member.",
+  "base_commit": "3842b4d83fb6c401429c8faf618d1230821345e9",
+  "foyer_revision": "0d624ea20adc70f5f517c27b202d0a794d6daabb",
+  "environment": "macOS ARM64; nightly-2026-06-21; dev profile; real Foyer and InMemObjectStore",
+  "source_sha256": {
+    "src/storage/src/hummock/sstable_store.rs": "e8a5be8c79709fcf819c6ef49a7f403f5bcffd8b1e396504f5c9de865f899f72"
+  },
+  "validation": {
+    "scheduler_tests": {
+      "passed": 21,
+      "failed": 0
+    },
+    "storage_tests": [
+      "shared_block_fetch_does_not_hold_cold_neighbor_batch",
+      "disk_cache_presence_is_only_a_batching_hint"
+    ],
+    "storage_tests_passed": 2,
+    "storage_tests_failed": 0
+  },
+  "scope": "Storage tests run the actual SstableStore method and SST block decoding. The timing probe uses the matching public-API registration helper; it is not an end-to-end or S3 performance test. Archived baseline and this run were sequential, not an interleaved benchmark.",
+  "results": [
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 44.9,
+        "p95": 62.0,
+        "p99": 67.1
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 47.2,
+        "p95": 50.3,
+        "p99": 53.0
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 36.4,
+        "p95": 41.9,
+        "p99": 50.5
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 2.1,
+        "p95": 2.4,
+        "p99": 3.1
+      },
+      "caller_us": {
+        "p50": 42.8,
+        "p95": 47.5,
+        "p99": 49.9
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 33.7,
+        "p95": 36.2,
+        "p99": 40.6
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 5.8,
+        "p95": 8.7,
+        "p99": 17.2
+      },
+      "caller_us": {
+        "p50": 107.8,
+        "p95": 173.8,
+        "p99": 207.2
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 44.3,
+        "p95": 54.7,
+        "p99": 59.8
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 51.4,
+        "p95": 55.0,
+        "p99": 56.2
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 40.7,
+        "p95": 48.8,
+        "p99": 52.5
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 3.0,
+        "p95": 3.4,
+        "p99": 3.9
+      },
+      "caller_us": {
+        "p50": 51.9,
+        "p95": 56.7,
+        "p99": 59.4
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 41.5,
+        "p95": 51.7,
+        "p99": 77.5
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 3.0,
+        "p95": 3.6,
+        "p99": 4.0
+      },
+      "caller_us": {
+        "p50": 52.8,
+        "p95": 58.7,
+        "p99": 66.2
+      }
+    }
+  ]
+}

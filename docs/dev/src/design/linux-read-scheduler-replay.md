@@ -20,8 +20,9 @@ CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=unpacked cargo test --locked --release \
 The ignored test checks every scanned key/value, point block keys, and row
 counts. It reports the actual Tokio worker count, visible CPU count,
 point p99, scan time, backend bytes and completed GET count. G is 128,
-P is 32, and the scan uses N16/B16 with a 1 MiB limit and 100 µs post-seal
-window. Depth samples report how often G128 has waiters and how often
+P is 32, and the scan uses N16/B16 with a 1 MiB limit. The current plug
+flushes after one yield from its first actual outer read (or earlier at capacity);
+the former 100 µs candidate wait is no longer configured. Depth samples report how often G128 has waiters and how often
 32 scheduled physical reads are active. Saturation is an observation.
 
 All TSV timestamps are relative to one monotonic clock. Sort numerically by

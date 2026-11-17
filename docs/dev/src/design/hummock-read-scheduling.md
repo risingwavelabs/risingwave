@@ -11,30 +11,57 @@ lists the startup controls, metric names, and measured runs.
 
 | Layer | Input and decision | Output and ownership |
 | --- | --- | --- |
-| SST iterator | Select a window within the scan end, `max_blocks`, and `max_bytes`. Count each block by the larger of its compressed and decoded size. | Register lookahead with Foyer and retain the neighbor handles until consumption or discard. Close the submission batch after registering the demand block. |
+| SST iterator | Select a window within the scan end, `max_blocks`, and `max_bytes`. Count each block by the larger of its compressed and decoded size. | Register neighbors first, then demand with the same window token. Retain neighbor responses until consumption or discard. Dropping the registration handle does not flush the plug. |
 | Foyer | Resolve each block from cache or share the fetch with other readers. | Only an outer fetch can submit a range. The store attaches the window token to external fetches. Foyer still owns cache lookup, single-flight and publication. |
-| Object-store scheduler | Release ready ranges at registration close. Optionally wait briefly for compatible ranges in the same window, then try to join each group into a pending group of the same object. Take one credit for each new group. | Wait for physical capacity, dispatch the group with the oldest admitted request, and return the requested slices. |
+| Object-store scheduler | Flush a short plug started by the first actual outer read, then try to join each group into a pending group of the same object. Take one credit for each new group. | Wait for physical capacity, dispatch the group with the oldest admitted request, and return the requested slices. |
 
 A 16-block window can yield fewer outer reads because Foyer handles hits
 and shared fetches. With a zero gap limit, a cache hit between two cold
 ranges leaves a hole that the scheduler cannot merge across. Foyer
 producers can reach the scheduler at different times, so even adjacent
 blocks can use separate GETs if the first group has already dispatched.
-By default the batch releases the reads available at registration close.
-With `prefetch_batch_wait_us` enabled, the scheduler partitions candidate
-ranges by its existing gap, byte and member limits. A group releases when
-all its candidates arrive, the deadline from its first external read
-expires, or admission pressure is observed at seal or arrival. A held
-group takes neither G nor P. A request that arrives after release takes
-the ordinary path. Groups that need a new credit wait independently.
-Each batch is bounded by its iterator window. A demand reader sharing
-a prefetched fetch through Foyer also shares that fetch's wait.
-When the disk cache is enabled, the iterator's block registrations use
-Foyer's `contains` as a submission hint. A block that may already be
-cached goes through the ordinary fetch path. A stale hint can still
-produce an external read through the same Foyer registration. Confirmed
-memory hits are also excluded from the candidates. Disk hits and shared
-fetches can leave candidates unresolved until the deadline.
+The first actual outer read starts the window's plug. Registration can finish
+before any producer reaches the scheduler; dropping the plug handle does not flush.
+The Hummock path does not register expected ranges from cache responses. A pending Foyer response
+can be a shared fetch or a disk hit, neither of which promises a new outer
+read for this window. Foyer retains every registration's fallback and owns
+its selection; RW does not need to observe a leader/waiter role.
+
+Late outer reads use ordinary admission. They can still merge with pending
+groups until a physical task selects the group, or reuse a covering active
+GET when enabled. This avoids waiting for nonexistent candidates, but does
+not guarantee that cold neighbors arriving at different times share a GET.
+Groups that need a new credit wait independently.
+
+When the disk cache is enabled, `contains` remains only a submission hint:
+a possible cache hit uses the ordinary fetch path, and a stale hint can still
+produce an external read through the same atomic Foyer registration.
+
+The plug has three states represented by one optional vector: idle (empty),
+collecting (nonempty), and closed (None). The first read schedules one flush;
+that task yields once, then closes the plug. With dedicated IO enabled, this
+runs on that runtime; otherwise it is spawned on the current producer runtime. New arrivals
+never restart or extend the flush. Reaching the smaller of the window/member
+limits, or the logical-byte limit, closes it immediately. A one-member window
+therefore needs no flush task. Cache-only windows schedule no task at all.
+
+Closing takes the collected vector exactly once under the staging mutex and
+submits outside the lock. A cancelled flush task closes the plug and drops its
+response senders, including cancellation before its first poll. The plug cannot
+reopen. A retained plug handle or token cannot hold it open. G and P are only
+taken after collection. Ordinary point reads do not create a plug, but a Foyer
+follower can still depend on a prefetch producer whose actual read is plugged.
+
+There is no expected-candidate list, timer, or pressure heuristic. A yield is a
+scheduling opportunity, not a time bound or a guarantee that another runtime
+has advanced. An incomplete window containing one cold read pays the extra
+handoff/yield; local measurements quantify this cost in the testing record.
+Late arrivals keep using pending merging and covered in-flight reuse.
+The old `prefetch_batch_wait_us` setting and its wait/release metrics were removed.
+Historical candidate-based and Lead-only measurements remain in the testing record.
+
+The Foyer dependency is restored to the existing recovery-optimization fork
+at `02d6b5e`. No IO-scheduler-specific Foyer API or patch is required.
 
 ## Executor entry points
 
@@ -70,10 +97,34 @@ With coalescing enabled, the scheduler defaults to 64 admitted groups,
 16 members per group, 32 physical reads, and a 256 KiB maximum range.
 Blockwise defaults to three blocks and 256 KiB per iterator window.
 `use_dedicated_io_runtime` optionally moves the dispatcher, scheduled
-physical reads and their fallback to a process-shared runtime. It is off
-by default; `dedicated_io_runtime_workers` defaults to two when enabled.
-Foyer, deferred admission and prefetch batch timers keep their existing
-runtime ownership.
+physical reads, range-error fallback, and deferred admission to a
+process-shared runtime. It is off by default;
+`dedicated_io_runtime_workers` defaults to two when enabled. Foyer
+producers keep their existing runtime ownership.
+
+## Implementation boundaries
+
+The scheduler has three implementation units under
+`src/object_store/src/object/`:
+
+- `read_scheduler/batch.rs` collects external reads for one prefetch window.
+  The first actual read starts a one-yield flush; count/byte limits flush early.
+  Registration lifetime does not delay or truncate the plug. Collection takes
+  neither a group credit nor a physical permit; late reads use ordinary admission.
+- `read_scheduler.rs` owns admission and the pending queue. Compatible
+  requests can join a pending group at full G, including requests already
+  waiting for a credit. Absorbing a waiter also cancels its semaphore acquire.
+- `read_scheduler/execution.rs` owns dispatch reservations, backend reads,
+  in-flight reuse, cancellation, and result delivery. Reserving P does not
+  remove a group from the pending queue: the spawned task selects it when
+  it first runs. After selection, merging stops; execution can still trim
+  cancelled end members before fixing the GET range. In-flight followers
+  can only reuse ranges that GET already covers.
+
+The regression tests remain in the `read_scheduler::tests` module, with
+source in `read_scheduler/tests.rs`. Preserve the handoff and cancellation
+tests when changing these boundaries: moving selection earlier or waking
+waiters to retry instead of absorbing them can split an otherwise mergeable GET.
 
 ## Admission and resource lifetime
 
@@ -111,9 +162,13 @@ all its waiters leave. If interior members cancel, the remaining read
 can cross their bytes, which are counted as overread.
 
 Iterator limits cover one window. Foyer owns its producers, including
-ones waiting for scheduler admission. The admitted group limit bounds
-scheduler-owned requests. Use the waiting gauge alongside group and
-physical depths to diagnose pressure outside the queue.
+ones waiting for scheduler admission. G bounds admitted groups, not all
+logical requests: staged batch members and callers waiting for G are
+outside that budget. Each admitted group has a member limit, and in-flight
+reuse permits an additional bounded set of followers as described above.
+There is no separate process-wide preparation budget. Historical request-count
+admission limits are therefore not interchangeable with G. Use the waiting
+gauge alongside group and physical depths to diagnose pressure outside the queue.
 
 ## Historical Q18 preparation experiments
 
@@ -153,3 +208,32 @@ The [Q18 repeat](./read-optimization-testing.md#q18-q64-io-distribution-repeat)
 records the I/O distributions and their measurement boundaries.
 The [checkpoint artifacts](./read-optimization-evidence/q18-checkpoint.md) retain the
 aggregate data, query, and worker configuration.
+
+## Current policy and simplification boundaries
+
+The retained production policy uses fixed blockwise windows, registers neighbors
+before demand, and retains the first-actual-IO plug. The no-plug, rolling-refill
+and demand-first experiments were not adopted. Their retained fixture and backend
+latency injection are test-feature code, not production policy switches.
+
+`ReadPlug` has no drop-driven sealing behavior. Its `ReadPlugToken` is a shared window
+handle captured by fallback futures. A window can close before registration has
+finished on another runtime. Such late reads fall back to ordinary admission.
+The group count limit is distinct from physical concurrency: G bounds admitted
+groups through completion, while P bounds reserved/scheduled backend reads.
+Staged plug members and G waiters are outside G, so G is not a total outstanding
+logical-request or memory cap.
+
+The disk-cache `contains` check is still a routing hint: a positive hint omits
+the plug token, but Foyer remains authoritative. A stale positive miss therefore
+uses ordinary admission. Since only actual outer reads enter the plug, this
+check is not required to prevent waiting for hits. Removing it would change
+batch participation and should not be described as a behavior-preserving cleanup.
+
+The unused `sealed_batch_empty` event has been removed. The single/multiple flush
+events retain their existing Prometheus labels (`sealed_batch_single` and
+`sealed_batch_multiple`) for query compatibility. `ReadPlug` and `ReadPlugToken`
+name the window handle and the token captured by each external-read future.
+The cancellation guards, whole-group G admission, mergeable G waiters, pending
+merge until physical selection, and range-error fallback preserve substantive
+lifecycle/resource behavior. Removing them requires more than a naming cleanup.

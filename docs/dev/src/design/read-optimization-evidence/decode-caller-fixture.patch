@@ -1,0 +1,148 @@
+--- a/src/storage/src/hummock/sstable_store/plug_experiment.rs
++++ b/src/storage/src/hummock/sstable_store/plug_experiment.rs
+@@ -25,6 +25,10 @@
+ use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable, test_key_of};
+ use crate::hummock::{HummockValue, SstableIterator, TableHolder};
+ use crate::store::PrefetchMode;
++
++static SHARED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++
++static HEAD_REGISTERED: std::sync::LazyLock<tokio::sync::Notify> = std::sync::LazyLock::new(tokio::sync::Notify::new);
+ 
+ const MIB: usize = 1 << 20;
+ const PRESSURE_CAP: usize = MIB / 2;
+@@ -72,7 +76,13 @@
+         &table.1,
+     );
+     let start = Instant::now();
+-    iter.rewind().await.unwrap();
++    if *SHARED.get().unwrap() && table.0.id.as_raw_id() == 1 {
++        tokio::task::yield_now().await;
++        let mut rewind = Box::pin(iter.rewind());
++        assert!(futures::poll!(&mut rewind).is_pending());
++        HEAD_REGISTERED.notify_one();
++        rewind.await.unwrap();
++    } else { iter.rewind().await.unwrap(); }
+     let first = us(start);
+     let mut rows = 0;
+     while iter.is_valid() && iter.key() < stop_key {
+@@ -143,27 +153,37 @@
+     let cross = std::env::var("RW_PLUG_CROSS").map_or(true, |v| v == "1");
+     let samples: usize = std::env::var("RW_PLUG_SAMPLES").map_or(1000, |v| v.parse().unwrap());
+     assert!(samples > 0);
+-    let remote = tokio::runtime::Builder::new_multi_thread()
+-        .worker_threads(2)
+-        .enable_all()
+-        .build()
+-        .unwrap();
+-    let workers: usize = std::env::var("RW_PLUG_WORKERS").map_or(8, |v| v.parse().unwrap());
++    let shared_index = std::env::var("RW_SHARED_INDEX").ok().map(|v| v.parse::<usize>().unwrap());
++    SHARED.set(shared_index.is_some()).unwrap();
++    // Match the no-file-cache production path: build the cache on the node
++    // initialization runtime, without overriding Foyer's default spawner.
++    let mut node_builder = tokio::runtime::Builder::new_multi_thread();
++    node_builder.thread_name("rw-node-test");
++    if let Ok(workers) = std::env::var("RW_NODE_WORKERS") {
++        node_builder.worker_threads(workers.parse().unwrap());
++    }
++    let node_runtime = node_builder.enable_all().build().unwrap();
++    let remote = node_runtime.handle().clone();
++    let dedicated_io = std::env::var("RW_IO_DEDICATED").is_ok_and(|v| v == "1");
++    let workers: usize = std::env::var("RW_PLUG_WORKERS").map_or(0, |v| v.parse().unwrap());
+     let mut caller_builder = if workers == 1 {
+         tokio::runtime::Builder::new_current_thread()
+     } else {
+         let mut builder = tokio::runtime::Builder::new_multi_thread();
+-        builder.worker_threads(workers);
++        if workers != 0 { builder.worker_threads(workers); }
++        builder.thread_name("rw-caller-test");
+         builder
+     };
+     let caller = caller_builder.enable_all().build().unwrap();
+-    caller.block_on(async {
++    let run = caller.spawn(async move {
+         let registry = prometheus::Registry::new();
+         let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
+         let backend = InMemObjectStore::for_test();
+-        let object = Arc::new(ObjectStoreImpl::InMem(backend.clone().monitored(metrics.clone(), Arc::new(ObjectStoreConfig {
++        let object = {
++        let _node_context = cross.then(|| remote.enter());
++        Arc::new(ObjectStoreImpl::InMem(backend.clone().monitored(metrics.clone(), Arc::new(ObjectStoreConfig {
+             read_scheduler: ReadSchedulerConfig {
+-                use_dedicated_io_runtime: true,
++                use_dedicated_io_runtime: dedicated_io,
+                 dedicated_io_runtime_workers: 2.try_into().unwrap(),
+                 max_admitted_groups: 128.try_into().unwrap(),
+                 max_inflight_reads: 32.try_into().unwrap(),
+@@ -172,7 +192,7 @@
+                 max_gap_bytes: 0,
+                 reuse_inflight_reads: true,
+             }, ..Default::default()
+-        })) ).with_read_coalescing());
++        })) ).with_read_coalescing()) };
+         assert_eq!(object.read_plug(16).is_none(), arm == "B", "B needs the isolated no-plug binary");
+         let mut store = if cross { remote.spawn(mock_sstable_store_with_object_store(object)).await.unwrap() }
+             else { mock_sstable_store_with_object_store(object).await };
+@@ -182,7 +202,7 @@
+         inner.prefetch_buffer_capacity = PRESSURE_CAP;
+         inner.read_metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Info));
+         // Verify the runtime actually used by Foyer, not just where we construct a future.
+-        let expected = if cross { remote.handle().id() } else { tokio::runtime::Handle::current().id() };
++        let expected = if cross { remote.id() } else { tokio::runtime::Handle::current().id() };
+         store.block_cache.get_or_fetch(&SstableBlockIndex { sst_id: 999.into(), block_idx: 0 }, || async move {
+             assert_eq!(tokio::runtime::Handle::current().id(), expected);
+             Err::<(Box<Block>, foyer::HybridCacheProperties), _>(std::io::Error::other("runtime probe"))
+@@ -202,7 +222,7 @@
+         backend.set_read_delay_for_test(Duration::from_micros(delay));
+         let separate_tasks = std::env::var("RW_PLUG_TASKS").map_or(true, |v| v == "separate");
+         let mode = if arm == "R" { PrefetchMode::Range } else { PrefetchMode::Blockwise };
+-        println!("MODEL workers={workers} separate_tasks={separate_tasks} delay_us={delay}");
++        println!("MODEL caller_workers={} node_workers={} separate_tasks={separate_tasks} delay_us={delay} dedicated_io={dedicated_io} shared_index={shared_index:?} caller_id={:?} foyer_id={expected:?}", tokio::runtime::Handle::current().metrics().num_workers(), remote.metrics().num_workers(), tokio::runtime::Handle::current().id());
+         let physical = metrics.operation_size.with_label_values(&["read"]);
+         for case in ["cold16", "source_free", "source_pressure", "point", "single_cold", "mixed_points", "early_stop"] {
+             if let Ok(filter) = std::env::var("RW_PLUG_CASE") { if case != filter { continue; } }
+@@ -230,6 +250,8 @@
+                 let bytes = physical.get_sample_sum();
+                 let outer = store.read_metrics.block_cache_outer_fetch.get();
+                 let discarded = store.read_metrics.prefetch_discarded.get();
++                let gate = shared_index.map(|_| Arc::new(tokio::sync::Semaphore::new(0)));
++                backend.set_read_gate_for_test(gate.clone());
+                 let start = Instant::now();
+                 let (first, total, point) = match case {
+                     "point" => {
+@@ -248,12 +270,17 @@
+                     }
+                     "mixed_points" => {
+                         let point_store = store.clone();
+-                        let point_table = tables[4].clone();
++                        let point_table = tables[if shared_index.is_some() { 0 } else { 4 }].clone();
++                        let point_index = shared_index.unwrap_or(0);
+                         let point = async move {
++                            if shared_index.is_some() { HEAD_REGISTERED.notified().await; }
+                             let start = Instant::now();
+-                            let block = point_store.get(&point_table.0, 0, CachePolicy::default(), &mut StoreLocalStatistic::default()).await.unwrap();
++                            let response = point_store.get_block_response(&point_table.0, point_index, CachePolicy::default()).await.unwrap();
++                            if shared_index.is_some() { assert!(matches!(&response, BlockResponse::Fetch(fetch) if fetch.need_await()), "shared point must register before producer completion"); }
++                            if let Some(gate) = &gate { gate.add_permits(tokio::sync::Semaphore::MAX_PERMITS); }
++                            let block = response.wait().await.unwrap();
+                             let end = Instant::now();
+-                            check_block(block, &point_table, 0);
++                            check_block(block, &point_table, point_index);
+                             end.duration_since(start).as_secs_f64()*1e6
+                         };
+                         let (scans, point) = if separate_tasks {
+@@ -279,6 +306,7 @@
+                 if case == "early_stop" { tokio::time::sleep(Duration::from_millis(10)).await; }
+                 drain(&registry).await;
+                 let actual_outer = store.read_metrics.block_cache_outer_fetch.get() - outer;
++                if case == "mixed_points" { assert_eq!(actual_outer, if shared_index.is_some() { 64 } else { 65 }, "point sharing must preserve producer count"); }
+                 if arm != "R" && case == "cold16" { assert_eq!(actual_outer, 16); }
+                 if arm != "R" && case == "single_cold" { assert_eq!(actual_outer, 1); }
+                 if trial >= 20 {
+@@ -296,4 +324,5 @@
+         }
+         store.block_cache.close().await.unwrap();
+     });
+-}
++    caller.block_on(run).unwrap();
++}

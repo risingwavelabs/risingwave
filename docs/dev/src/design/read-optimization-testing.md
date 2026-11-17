@@ -26,7 +26,6 @@ enable_hummock_read_coalescing = true
 [storage.object_store.read_scheduler]
 use_dedicated_io_runtime = false
 dedicated_io_runtime_workers = 2
-prefetch_batch_wait_us = 0
 max_batch_requests = 16
 max_admitted_groups = 64
 max_inflight_reads = 32
@@ -41,7 +40,7 @@ point_get_concurrency = 1
 ```
 
 The counts and byte budgets must be positive, except that `max_gap_bytes`
-and `prefetch_batch_wait_us` accept zero. The `blockwise_prefetch`, `read_batch`,
+accepts zero. The `blockwise_prefetch`, `read_batch`,
 and `read_scheduler` sections reject unknown fields. Keep `point_get_concurrency` at 1 for
 streaming-only experiments. A value of 1 for `max_blocks` disables speculative
 neighbors, while still permitting demand reads.
@@ -56,20 +55,22 @@ neighbors, while still permitting demand reads.
 | `max_bytes` | Window sum of max(compressed, decoded) block bytes. An oversized demand block reads alone. This is not a CN-wide memory cap. | `limit="bytes"`, window bytes, RSS and discarded handles. |
 | `max_batch_requests` | Maximum members in one group. | Dispatched group sizes. |
 | `max_admitted_groups` | Groups retained from queue admission through completion. Compatible reads can join a pending group at capacity. | Group depth, waiting producers and admission latency. |
-| `use_dedicated_io_runtime` | Opt in to a process-shared runtime for the dispatcher, scheduled backend reads, range-error fallback, batch timeouts and deferred admission. Foyer producers stay on their existing runtime. Disabled and madsim runs keep the existing runtime. This option is disabled by default. | Physical reservations, active reads and reservation-to-start latency. |
+| `use_dedicated_io_runtime` | Opt in to a process-shared runtime for the dispatcher, scheduled backend reads, range-error fallback, one-yield plug flushes and deferred admission. Foyer producers stay on their existing runtime. Disabled and madsim runs keep the existing runtime. This option is disabled by default. | Physical reservations, active reads and reservation-to-start latency. |
 | `dedicated_io_runtime_workers` | Worker threads in the shared runtime, when enabled. All schedulers in the process that opt in must agree. | Compare with the same streaming workers, G and P. |
 | `max_inflight_reads` | Concurrent scheduled physical reads, including retry loops and range-error fallback children. One merged GET uses one slot. | Scheduled physical in-flight gauge and enqueue-to-dispatch latency. Oversized/unbounded direct reads are excluded. |
 | `max_read_bytes` | Maximum eligible input and merged range span. | `route="oversized"`, actual operation bytes and latency. |
 | `max_gap_bytes` | Maximum gap between merged ranges from the same object. Zero still permits adjacent and overlapping ranges. | GET count, read bytes and overread. |
-| `prefetch_batch_wait_us` | Maximum intentional wait for compatible late readers in a prefetch batch. Zero releases ready candidates at registration close. | `object_store_read_scheduler_batch_wait_seconds` and the release reason counters. |
 | `reuse_inflight_reads` | Allow fully covered reads to share a scheduled GET, including readers waiting for group admission. | `inflight_reused`, GET count and latency. |
 | `read_batch.enabled` | Opt-in point MultiGet for missing state in HashAgg and Materialize. | `state_store_get_batch_keys`, `state_store_get_batch_duration`, and `state_store_get_batch_outcomes`. |
 | `read_batch.meta_reuse` | Reuse Foyer SST metadata handles within one MultiGet or the initial iterator seeks of one HashJoin chunk. | Compare `meta_total` and `meta_batch_ready` for the same table and workload. |
 
-Blockwise submits lookahead through Foyer. Each outer read within the scheduler
-range limit first tries to merge into a pending group. Reads that need a new
-group can wait for admission before the scheduler retains a request descriptor.
-An isolated request can dispatch as soon as there is physical capacity.
+Blockwise submits lookahead through Foyer. Actual outer reads can first collect
+in a window plug; closed-plug and ordinary reads use normal admission. Admission
+can reuse a covering flight or merge into a compatible pending group. Reads that
+need a new group retain descriptors in the scheduler's waiting map while their
+submitting futures await G; compatible waiters can be absorbed before obtaining
+G. G does not bound these waiters or reads staged in plugs. An ordinary isolated
+request can dispatch as soon as G and P are available.
 Oversized and unbounded reads go directly to the backend. A dropped iterator
 handle does not necessarily cancel its Foyer producer. Dispatcher failure
 returns an error and wakes admission waiters.
@@ -91,8 +92,9 @@ For a new SF10 Q18 run, use the [read-path test overlay](./read-optimization-evi
 on a dedicated test cluster. It enables ordinary source Snapshot Backfill,
 Locality Backfill and prefix Blockwise, read coalescing, in-flight reuse,
 MultiGet and SST metadata reuse. It retains G128/P32, N16/B16, 1 MiB, zero
-gap, 100 µs and two dedicated I/O workers from the tested Mac SF10 read-path
-profile. The ordinary source scan now uses the typed startup config rather
+gap and two dedicated I/O workers from the recorded Mac SF10 read-path
+profile. The former 100 µs candidate timer has been removed; the current plug
+flushes after one yield from the first actual outer read. The ordinary source scan now uses the typed startup config rather
 than a process environment flag. Changelog scanning is independent and
 remains off in this overlay. The overlay captures read-path settings; cluster
 topology, seed and SQL conditions are documented with the archived runs.
@@ -121,7 +123,6 @@ before reconciling counts. Counts from different layers are not interchangeable.
 | `object_store_read_scheduler_group_size` | Logical members per dispatched group. Sum minus count is *planned* consolidation, not exact net GET savings under cancellation/fallback. |
 | `object_store_read_scheduler_queue_duration_seconds` | Logical admission to initial physical dispatch, including time waiting for physical capacity. Excludes retry/fallback after that initial dispatch. |
 | `object_store_read_scheduler_waiting` | Caller futures waiting for admission; excludes admitted requests. Returns to zero on admission, cancellation or worker failure. |
-| `object_store_read_scheduler_batch_wait_seconds` | Time from external read arrival to release of its prefetch batch group. Compare with admission, dispatch and GET latency. |
 | `object_store_read_scheduler_admission_duration_seconds` | Admission acquisition duration, including immediately admitted requests and cancelled/failed waits. Logical read latency includes this interval. |
 | `object_store_read_scheduler_queued` | Admitted logical requests awaiting their initial physical dispatch; belongs to pending groups. |
 | `object_store_read_scheduler_in_flight` | Scheduled physical reads, including retry loops and fallback children; excludes direct reads. Bounded by `max_inflight_reads`. |
@@ -129,7 +130,7 @@ before reconciling counts. Counts from different layers are not interchangeable.
 | `object_store_read_scheduler_groups{stage}` | `admitted` holds a group credit, `queued` is not yet selected, and `ready` excludes groups already claimed by a dispatch reservation. |
 | `object_store_read_scheduler_reserved` | Group reads holding a physical permit before the first backend poll. These are not yet in `object_store_read_scheduler_in_flight`. |
 | `object_store_read_scheduler_physical_duration_seconds{stage}` | Backend read time including retries (`group` or `fallback`), physical permit wait for fallback (`fallback_wait`), or time from dispatch reservation to backend start (`reservation_to_start`). |
-| `object_store_read_scheduler_events{event}` | Group outcomes, queued and pre-dispatch cancellations, successful merged members saved, gap groups, range fallback and prefetch group releases (`batch_ready`, `batch_deadline`, `batch_pressure`). |
+| `object_store_read_scheduler_events{event}` | Group outcomes, queued and pre-dispatch cancellations, successful merged members saved, gap groups, range fallback and nonempty plug flush sizes (`sealed_batch_single`, `sealed_batch_multiple`). |
 | `object_store_read_scheduler_overread_bytes` | Gap bytes returned by successful merged reads, including gaps left by cancelled members. |
 | `state_store_sst_store_block_request_counts{table_id,type}` | Cache query and miss counts. For point MultiGet, `meta_total` counts metadata lookups through Foyer, `meta_batch_ready` counts ready handles reused within the call, and `meta_batch_budget_reject` counts metadata returned by Foyer without retaining a handle due to the per-call budget. |
 | `state_store_blockwise_prefetch_window_blocks{limit}` | Window size including demand, clipped by range/blocks/bytes. A window of one produces no lookahead. |
@@ -1538,3 +1539,1052 @@ completely, entered in one packet each, and issued one successful GET each.
 The sole admission split followed a deadline in a three-block window.
 The [request identity trace](./read-optimization-evidence/q18-window-identity.md)
 records the counts, matching rules, and request ranges.
+
+## Local Foyer/batch boundary probe (2026-11-16)
+
+This probe uses Foyer revision `0d624ea20adc70f5f517c27b202d0a794d6daabb`
+and the object-store library based on `3842b4d83fb6`, with the local scheduler
+module split and test-import fix. It uses real memory and Psync disk caches,
+an in-memory object backend, a current-thread caller runtime, and optionally
+two dedicated I/O workers. G64/P32/B16 and the 256 KiB range limit are unchanged.
+The public-API registration helper mirrors `SstableStore`'s presence hint and
+`need_await` logic; it does not execute SST decoding or the iterator itself.
+
+Correctness assertions passed for adjacent cold-range merging, memory hits,
+mixed hot/cold registration, disk hits, and stale positive disk-presence hints.
+A waiter behind a disk-only `get` successfully supplied its external fallback.
+Dropping the lead consumer while another fetch waited preserved the producer;
+each cold key still generated exactly one backend GET. These observations
+support keeping Foyer's atomic get-or-fetch and fallback ownership intact.
+A `Wait` registration cannot in general be treated as incapable of supplying
+an external read.
+
+Two controlled cases each ran 100 iterations per setting on macOS ARM64 in
+the dev profile, without TRACE or a profiler:
+
+- `shared_missing`: the neighboring key already has a Foyer producer outside
+  the window. Its response is gated until the other cold read completes.
+  The window's follower does not supply another outer read, so a nonzero
+  collection window reaches its deadline. Every setting issued 200 GETs.
+- `ready_neighbors`: both cold neighbors register before the batch closes
+  and their producers run without an artificial gate. Every setting issued
+  100 GETs. Nonzero collection settings released on arrivals without waiting
+  for the timer in the observed run.
+
+| Case | Configured wait | Caller runtime batch wait p50 / p99 | Dedicated runtime batch wait p50 / p99 |
+| --- | ---: | ---: | ---: |
+| Shared missing neighbor | 0 us | 0 / 0 us | 0 / 0 us |
+| Shared missing neighbor | 100 us | 1,156.0 / 2,311.7 us | 1,153.5 / 2,309.4 us |
+| Shared missing neighbor | 1,000 us | 2,303.6 / 2,386.1 us | 2,297.5 / 2,378.4 us |
+| Ready neighbors | 100 us | 3.2 / 11.6 us | 4.3 / 12.3 us |
+| Ready neighbors | 1,000 us | 3.2 / 8.9 us | 6.9 / 17.6 us |
+
+Batch wait comes from the scheduler histogram sum delta. For ready neighbors,
+each observation averages the two reads; for the shared case it measures the
+one held cold read. At zero wait the collector does not record a batch wait.
+The JSON also records caller elapsed times, all configurations, source hashes,
+sample order, and quantile definitions. Timing is reported, not asserted.
+
+The deadline path uses Tokio `sleep_until`, whose timer has millisecond
+granularity. A 100 us setting therefore must not be interpreted as a maximum
+100 us delay, even with dedicated workers. This experiment demonstrates a
+cost when a candidate does not produce an outer read for this batch. It does
+not establish how frequently this happens in SF10, nor measure S3 throughput
+or justify changing defaults. Arrival-ready batches do not inherently incur
+the same millisecond delay. The earlier fixed-SST preparation experiment above
+also remains evidence that waiting can be beneficial when neighbors arrive.
+
+With the normal repository toolchain and native libraries configured, run:
+
+```sh
+python3 docs/dev/src/design/read-optimization-evidence/run-foyer-batch-probe.py
+```
+
+The [runner](./read-optimization-evidence/run-foyer-batch-probe.py) builds the
+locked object-store library and links the [probe](./read-optimization-evidence/foyer-batch-probe.rs)
+against those exact Cargo artifacts without changing manifests or the lockfile.
+See [recorded results](./read-optimization-evidence/foyer-batch-probe-results.json).
+
+### Lead-only expected candidates follow-up
+
+The RW registration path now calls `batch.expect` only for Foyer `Lead`
+registrations. All applicable registrations retain their fallback future and
+batch member; `Wait` still counts as a pending cache lookup. Foyer's dependency,
+single-flight ownership, and fallback selection are unchanged. A waiter that
+later supplies an external read may still join an open batch or enter the
+ordinary scheduler path. The policy can lose a late merge opportunity but
+avoids holding other reads for a shared producer outside their window.
+
+The following actual storage tests compiled and passed on macOS ARM64:
+
+- `shared_block_fetch_does_not_hold_cold_neighbor_batch`: a cold `Lead` read
+  completes within a one-second guard despite a 60-second collection deadline
+  and a gated adjacent shared fetch. Dropping the original consumer preserves
+  the shared producer. The two cold blocks issue exactly two GETs.
+- `disk_cache_presence_is_only_a_batching_hint`: the existing disk-hit and
+  stale-positive-hint checks still pass. The extended test registers a `Wait`
+  behind a disk-only `get`; it supplies the external fallback after the miss
+  while an adjacent cold block also completes.
+
+All 21 object-store scheduler tests also passed. Reproduce with:
+
+```sh
+cargo test --locked -p risingwave_storage --lib shared_block_fetch_does_not_hold_cold_neighbor_batch -- --nocapture
+cargo test --locked -p risingwave_storage --lib disk_cache_presence_is_only_a_batching_hint -- --nocapture
+cargo test --locked -p risingwave_object_store --lib read_scheduler::tests -- --nocapture
+python3 docs/dev/src/design/read-optimization-evidence/run-foyer-batch-probe.py --wait-leaders-only
+```
+
+The probe's default retains the historical policy for comparison. Its Lead-only
+mode passed the same Foyer boundary checks and ran 100 iterations per setting
+for both controlled scenarios. With a configured 100 us wait, the shared-missing
+case recorded no batch wait or deadline release, versus roughly 1.15 ms median
+batch wait in the archived baseline. Caller latency medians were 36.4 us on the
+caller runtime and 40.7 us with dedicated I/O. GETs remained 200 per 100 iterations.
+Ready neighbors still issued 100 GETs per 100 iterations. The same GET counts
+held for the 0 us and 1,000 us settings.
+
+These are sequential local dev experiments, not an interleaved throughput
+benchmark. They establish the intended release behavior and preserve the tested
+sharing/fallback cases; they do not establish an SF10 speedup or guarantee
+unchanged GET counts for delayed waiter-supplied fallbacks. No default G, P,
+window, or timer setting changed. Full values and the storage-source hash are
+in the [Lead-only results](./read-optimization-evidence/foyer-lead-only-results.json).
+
+### IO lifecycle review follow-up (2026-11-16)
+
+Reviewed iterator registration and consumption, the pinned Foyer producer/follower
+handoff, batch sealing and timeout, G admission and waiter absorption, P dispatch,
+in-flight reuse, cancellation, range fallback, and backend length/error handling.
+Reference implementation checks covered Linux v6.12 `block/blk-merge.c`
+(`blk_attempt_bio_merge`, plug merging), `block/blk-mq.c` (plug flush and request
+completion), and Seastar `src/core/io_queue.cc` (queued cancellation, dispatch,
+and completion accounting). These are lifecycle references, not evidence that
+object-store futures have the same cancellation semantics as kernel IO.
+
+1. **RW: pressure incorrectly crossed scheduler instances.** Batch release used
+   the exported `read_scheduler_waiting` gauge. Its labels are only media type,
+   so independent schedulers sharing the metrics registry also shared the
+   pressure signal, despite owning separate G/P budgets. A paused-time regression
+   creates two schedulers with G=2: one unrelated staged read plus one local
+   staged read incorrectly forces the local batch out before its neighbor
+   arrives. The original code failed with only one local G permit remaining
+   instead of two. The fix keeps an RAII-owned per-scheduler waiting counter;
+   exported metrics continue to aggregate. This changes pressure attribution,
+   not the threshold or scheduling policy. Regression:
+   `batch_pressure_is_local_to_its_scheduler`.
+
+2. **Pinned Foyer: inflight closure did not reach its producer.** At revision
+   `0d624ea20adc70f5f517c27b202d0a794d6daabb`, `InflightManager::enqueue`
+   allocated separate `Arc<AtomicBool>` values for the inflight entry and
+   `Enqueue::Lead`. `take` marked one closed; `RawFetch` checked the other.
+   A real public-API probe starts/gates a fetch, explicitly inserts another value,
+   observes the waiting reader receive that insertion, then releases the old
+   producer. Both before-first-poll and already-started cases resumed the obsolete
+   producer and replaced the inserted value. The same probe using an isolated
+   copy with one shared Arc reports zero obsolete resumes and retains the
+   insertion. Two regression tests also check that dropping a reader still
+   preserves a producer needed by a shared follower. Closure is checked on the
+   producer's next poll; this small fix does not add a cancellation wakeup or
+   promise atomic last-writer ordering against all concurrent insertions.
+
+   RW has an applicable insertion path in Range prefetch's
+   `SstableStore::prefetch_blocks`. For immutable SST blocks the established
+   concern is redundant fetch/decode/cache replacement; the synthetic unequal
+   values demonstrate the dependency defect, not observed SST corruption.
+   The fix and tests live in an isolated Foyer review copy and a separate patch.
+   RW's Cargo manifest, lockfile, and cached dependency source are unchanged.
+
+The earlier Lead-only expected-candidate fix remains in place. These findings do
+not require moving cache ownership into the scheduler, adding fairness classes,
+or waiting for more candidates. No SF10 benefit or Linux replay result is claimed.
+
+The grouped storage run also exposed a test-isolation error in the previously
+added shared-neighbor regression: `ObjectStoreMetrics::unused()` clones global
+metrics, so its exact GET assertion counted concurrent tests' reads. The fixture
+now uses a private registry. The initial grouped run was 10 passed / 1 failed;
+the corrected grouped run is 11 passed / 0 failed. This was a regression-test
+bug, not evidence of an extra GET in that store.
+
+Final local validation (macOS ARM64, pinned RW toolchain):
+
+- `cargo test --locked -p risingwave_object_store --lib read_scheduler::tests`:
+  22 passed, including the new pressure regression.
+- `cargo test --locked -p risingwave_storage --lib hummock::sstable_store::tests`:
+  11 passed with the private-registry fixture.
+- `cargo test --locked -p risingwave_storage --lib hummock::sstable::forward_sstable_iterator::tests`:
+  12 passed after the pressure fix.
+- Isolated Foyer integration target `inflight_close`: 2 passed. This is focused
+  regression coverage, not a run of Foyer's entire workspace test suite.
+- `rustfmt --check`, `git diff --check`, and reverse-apply checks for both focused
+  patches passed. No dependency revision was changed in RW.
+
+### Remove the scheduler-specific Foyer role API (2026-11-16)
+
+The existing Li0k recovery fork is intentional and is retained. Comparing its
+`02d6b5e` revision with `0d624ea` shows five changed files, 55 insertions and
+5 deletions, consisting of the registration-role enum, stored leader flag,
+public accessors/re-exports and role assertions in tests. No cache/recovery
+algorithm changed in that delta. RW now restores `02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5`;
+the five Foyer package source entries are the only lockfile changes.
+
+The earlier Lead-only policy used that added role solely to predict batch
+candidates. It was not needed for Foyer sharing or fallback. The replacement
+is deliberately ready-only: SstableStore retains the fallback and batch token
+but does not call `ReadBatch::expect` for cache responses. Actual outer reads
+can collect before registration closes, join pending groups through the existing
+physical-task handoff, or reuse covering in-flight reads when enabled. No new
+RW cache-ownership map, timer, yield, or parallel fetch layer was added.
+
+This removes speculative candidate waits, including disk hits that a Lead
+registration cannot predict. A neighbor arriving after the first GET starts
+can require another GET; the change does not promise the same merge rate for
+staggered arrivals. `prefetch_batch_wait_us` remains a lower-level explicit-
+candidate experiment setting, but no longer adds a wait in the current Hummock
+path. Its earlier measurements, including Lead-only results, remain historical.
+
+Public-boundary probe, 100 pairs per case, configured wait=100us, macOS ARM64:
+
+| Runtime | Policy | Shared-neighbor batch wait p50 | Shared-neighbor GETs | Ready-neighbor GETs |
+| --- | --- | --- | --- | --- |
+| Caller | All-pending candidates (diagnostic baseline) | 1157.0us | 200 | 100 |
+| Caller | Current ready-only | 0us | 200 | 100 |
+| Dedicated, 2 workers | All-pending candidates (diagnostic baseline) | 1166.3us | 200 | 100 |
+| Dedicated, 2 workers | Current ready-only | 0us | 200 | 100 |
+
+The probe uses the restored fork for both policies. The baseline is the old
+all-pending policy, not Lead-only: the restored dependency has no role API.
+Current ready-only also records zero batch waiting with wait=0/1000us and
+100 GETs per 100 ready pairs in these runs. Source hashes and all percentiles
+are recorded in `read-optimization-evidence/foyer-ready-only-results.json`.
+No conclusion about SF10 throughput or staggered-production merge rates follows
+from these small fixtures.
+
+Final validation on the restored dependency: scheduler 22/22, SstableStore
+11/11, forward iterator 12/12. Real Foyer disk hits, stale positive hints,
+disk-only-get fallback, and a shared gated producer all pass. Exact GET counts
+and actual SST contents still validate sharing without inspecting role(). The
+probe's default is current ready-only; `--legacy-candidates` selects the paired
+baseline. The old `--wait-leaders-only` argument is rejected rather than silently
+running a different policy. The isolated close-flag patch remains unapplied and
+is not needed by these tests. No Foyer source edit or new fork commit was made.
+
+### Remove unused candidate waiting and pressure release (2026-11-16)
+
+Historical intermediate state; registration-close behavior is superseded by the
+first-IO plug follow-up below.
+
+The original reviewed RW HEAD (`3842b4d83fb6`) already contained the pressure
+heuristic in `ReadBatchInner::release_reason`: stop collecting if the exported
+waiting gauge reached G or if no G permit was immediately available. It was
+an escape from optional candidate waiting, not enforcement of G/P capacity.
+The older 2026-11-11 preparation experiments explain why such waiting was added:
+asynchronous cache producers could otherwise miss each other's merge window.
+The fixed-SST comparison above did find a benefit from a 1ms preparation window.
+That evidence is retained; it does not establish a benefit for the pressure
+heuristic or justify keeping an uncalled production state machine.
+
+After the role-API rollback, no production call registered an expected candidate.
+Only scheduler tests and the diagnostic baseline called `ReadBatch::expect`.
+The ready-only Hummock path therefore did not use candidate grouping, deadlines,
+or pressure-based release. These mechanisms are now removed together rather
+than retaining a private counter solely for an unused policy:
+
+- `ReadBatch` has collecting/closed states only, represented by an optional
+  vector of actual external reads. Closing registration submits that vector.
+- Late arrivals use ordinary admission. Window bounds, pending-group merging,
+  covering-flight reuse, G admission and P dispatch/fallback limits are retained.
+- Candidate lists, per-group timers, expected-range API, arrival timestamps,
+  pressure counters and `batch_ready/deadline/pressure` events were removed.
+  The batch-wait histogram was removed too; the probe no longer reports a
+  missing histogram as a measured zero wait. `waiting` is monitoring only.
+- `prefetch_batch_wait_us` was removed from the schema, checked-in profile and
+  Linux replay fixture. Config parsing rejects unknown keys, so external configs
+  that still set it must remove it. `./risedev generate-example-config` regenerated
+  the example and documentation, and a separate freshness test passed.
+- The current diagnostic runs ready-only. Historical candidate comparisons and
+  source hashes remain in the earlier evidence files; the current binary rejects
+  the removed diagnostic modes rather than emulating a retired policy.
+
+`batch.rs` shrank from 298 to 96 lines. Three candidate/pressure tests were
+replaced by two tests for partial-window seal/late admission and bounded
+registration/cancelled members. The dedicated-runtime test now verifies seal
+progress with a parked caller, retaining its deferred admission, cancellation,
+fallback and shutdown checks.
+
+Local validation: scheduler 21/21, SstableStore 11/11, forward iterator 12/12,
+and generated-config freshness 1/1. The public Foyer boundary probe passes
+memory/disk hits, stale hints and disk-only-get fallback. With both caller and
+dedicated runtimes, 100 ready-neighbor pairs issue 100 GETs; the gated shared-
+neighbor scenario issues the expected 200 GETs with one producer per key.
+These are local macOS ARM64 checks, not new SF10 or Linux replay measurements.
+The Foyer dependency remains the pre-scheduler `02d6b5e` recovery fork.
+
+### First-IO plug: merge/latency tradeoff (2026-11-16)
+
+This supersedes registration-close flushing in the preceding cleanup. Only RW
+changes: Foyer remains the `02d6b5e` recovery fork. The first actual external read
+starts a flush task on the scheduler runtime; after one yield it takes the
+collected reads exactly once. Count/byte thresholds flush immediately. Dropping
+the registration owner does not close the plug. No candidate prediction, timer,
+pressure heuristic or configuration knob was added. One-member windows submit
+immediately; ordinary point reads never enter a plug.
+
+The public Foyer probe now covers same-runtime and separate two-worker Foyer
+producers, with RW dedicated IO both off and on. A final identity assertion checks
+the actual producer runtime. Two-read scenarios use an eight-member window to
+represent remaining members being cache hits/shared fetches. The second producer
+is ready immediately, or yields one/eight times before its outer read. The mixed
+scenario additionally registers an independent point read (range 4..5, without a
+plug). Its latency is recorded by a separate task, not after awaiting prefetch.
+Demand-first completion is also recorded independently of total pair completion.
+
+Measurements use real pinned Foyer and an immediate in-memory backend on macOS
+ARM64, with unoptimized workspace libraries. Five alternating before/after
+trials each discard 50 warmups and retain 500 samples per scenario. The table
+reports the median of five per-trial GET counts and percentiles, not a pooled
+percentile. Baseline is the immediately preceding local ready-only code, not the
+original remote branch. Full raw trial results and binary hashes are in
+[`plug-flush-results.json`](read-optimization-evidence/plug-flush-results.json).
+
+| Scenario | Dedicated IO | Separate Foyer runtime | GETs / 500, before → after | p50 µs, before → after | p99 µs, before → after |
+| --- | --- | --- | --- | --- | --- |
+| point | false | false | 500 → 500 | 31.17 → 32.88 | 39.54 → 44.50 |
+| single_cold_window | false | false | 500 → 500 | 31.92 → 46.67 | 39.83 → 59.96 |
+| single_slot | false | false | 500 → 500 | 30.75 → 31.96 | 38.62 → 40.12 |
+| pair_ready | false | false | 500 → 500 | 38.33 → 51.67 | 47.21 → 65.25 |
+| pair_yield1 | false | false | 1000 → 500 | 62.25 → 54.29 | 75.88 → 65.58 |
+| pair_yield8 | false | false | 1000 → 1000 | 154.25 → 156.92 | 175.38 → 181.62 |
+| pair_yield1_with_point | false | false | 1500 → 1000 | 78.88 → 72.46 | 97.38 → 87.79 |
+| point | false | true | 500 → 500 | 38.00 → 40.25 | 50.33 → 53.00 |
+| single_cold_window | false | true | 500 → 500 | 34.88 → 46.17 | 48.33 → 63.75 |
+| single_slot | false | true | 500 → 500 | 33.88 → 34.04 | 49.58 → 50.88 |
+| pair_ready | false | true | 500 → 500 | 47.83 → 54.38 | 56.54 → 70.00 |
+| pair_yield1 | false | true | 538 → 518 | 51.38 → 63.12 | 71.50 → 74.46 |
+| pair_yield8 | false | true | 999 → 986 | 93.96 → 104.33 | 152.00 → 173.04 |
+| pair_yield1_with_point | false | true | 1410 → 1007 | 71.54 → 66.04 | 83.92 → 82.29 |
+| point | true | false | 500 → 500 | 38.67 → 38.75 | 52.04 → 51.08 |
+| single_cold_window | true | false | 500 → 500 | 39.88 → 48.04 | 50.25 → 62.17 |
+| single_slot | true | false | 500 → 500 | 39.71 → 39.96 | 51.08 → 51.46 |
+| pair_ready | true | false | 500 → 500 | 54.96 → 55.08 | 63.42 → 71.00 |
+| pair_yield1 | true | false | 999 → 973 | 69.29 → 68.04 | 80.58 → 79.42 |
+| pair_yield8 | true | false | 1000 → 1000 | 147.04 → 154.12 | 172.79 → 175.92 |
+| pair_yield1_with_point | true | false | 1499 → 1020 | 69.62 → 74.92 | 83.79 → 85.96 |
+| point | true | true | 500 → 500 | 40.21 → 40.71 | 48.58 → 50.50 |
+| single_cold_window | true | true | 500 → 500 | 40.17 → 41.79 | 50.25 → 59.75 |
+| single_slot | true | true | 500 → 500 | 40.29 → 41.79 | 48.83 → 49.12 |
+| pair_ready | true | true | 500 → 500 | 47.12 → 48.46 | 57.00 → 65.17 |
+| pair_yield1 | true | true | 532 → 536 | 53.08 → 51.96 | 70.33 → 73.25 |
+| pair_yield8 | true | true | 998 → 838 | 82.92 → 78.29 | 164.00 → 172.54 |
+| pair_yield1_with_point | true | true | 1363 → 1008 | 64.75 → 68.79 | 85.54 → 87.00 |
+
+The one-yield handoff merges the same-runtime one-yield pair (1000 → 500 GETs),
+but does not universally improve cross-runtime merging: with dedicated IO and
+separate Foyer, the one-yield case is 532 → 536 GETs, while the eight-yield case
+is 998 → 838. Additional independent point work changes the scheduling order
+and can give the neighbors more opportunity to join. These are measured runtime
+interleavings, not a guarantee that any given pair will merge.
+
+Pair completion and demand-first latency must not be conflated. In the
+same-runtime one-yield case, total-pair p50 improves 62.25 → 54.29 µs, while
+first-demand p50 worsens 33.08 → 53.96 µs (p99 41.38 → 65.08 µs). With separate
+Foyer plus dedicated IO, the eight-yield case improves total-pair p50
+82.92 → 78.29 µs but worsens first-demand p50 43.50 → 50.04 µs. Reducing GETs can
+therefore improve batch completion while delaying the first needed block.
+
+Ordinary point p50 shifts by 0.08–2.25 µs across topologies; its code path adds no
+plug wait. Mixed-point p50/p99 improve in these trials. Known one-member windows
+avoid the task/yield. However, an incomplete window with only one cold read pays
+1.62–14.75 µs extra p50 and 9.50–20.13 µs extra p99. Ready pairs in incomplete
+windows can also pay this cost without reducing GETs. This is a real tradeoff,
+not a zero-regression result, and debug-build microseconds do not predict SF10.
+
+A simpler spawn-only variant was also measured (three trials). It lowers the
+same-runtime single-cold p50 to 33.33 µs, but loses the staggered-pair benefit
+(1000 GETs) and the same-runtime mixed-point benefit (1500 total GETs). The
+implementation retains one yield, without tuning a timer or adding an adaptive
+policy. A yield is neither a wall-clock deadline nor a cross-runtime barrier.
+
+A new shutdown test exposed a lifecycle bug in the first implementation: dropping
+the flush runtime before the task's first poll left another runtime's reader
+waiting while its member retained the staged sender. A small RAII guard, created
+before spawning, now closes the plug and drops senders if the task is cancelled.
+The regression failed before this fix and passed after it. Concurrent count/byte
+closure is tested for exactly-once submission. Collection also leaves G free for
+an independent point read under G=P=1.
+
+The dedicated-runtime test previously assumed two raw `stage` calls always joined
+the same window. Autonomous flush makes a late `None` legal (the production caller
+already falls back to ordinary admission). Its deferred-admission/fallback checks
+now submit explicitly collected groups; its parked-caller plug progress check
+remains. Local final validation: scheduler 24/24, SstableStore 11/11, iterator
+12/12, plus real Foyer memory/disk/stale-hint/shared-fallback/runtime-identity
+checks. Foyer dependency sources and lockfile are unchanged by this plug change.
+No SF10, Linux replay, real device/backend, or saturated-runtime claim is made.
+
+### Iterator workload experiment: batching versus latency (2026-11-16)
+
+This follow-up tested alternatives to the first-IO plug against actual RW call
+sites. **No experimental production policy was retained.** The original plug and
+fixed-window behavior remain; the opt-in fixture and results are retained.
+
+Call-path audit:
+
+- HashJoin (`src/stream/src/executor/join/hash_join.rs`), temporal join and some
+  over-window callers request prefix-scan blockwise prefetch. Hummock version
+  resolution applies the startup enable switch and the scan's hard upper bound.
+- Snapshot Backfill, Locality Backfill and changelog have separate switches.
+  Backfill without blockwise enabled still uses Range prefetch.
+- Point reads retain `PrefetchMode::Disabled` in SST read options. They share
+  the underlying Foyer/object-store path with scans.
+- Compaction block streams use `get_stream_for_blocks` / `streaming_read`.
+  Oversized/unbounded reads can bypass scheduled bounded-range reads. This is
+  not a global test of every RW IO path.
+
+The fixture in
+`src/storage/src/hummock/sstable/forward_sstable_iterator/local_io_experiment.rs`
+uses real SST files, `rewind` / row-by-row `next`, exact key/value checks, Foyer,
+decode and the scheduler. It covers a two-block hard bound, 32-block scans,
+500µs of CPU work with a cooperative yield per block, early consumer termination,
+four scans on distinct SSTs competing with point gets on a fifth SST, and an
+unchanged Range control. Both Foyer and IO runtime placements are varied.
+G=4, P=2, lookahead=8 blocks/64KiB, target SST block size=4KiB. A **test-feature
+only** InMem backend delay injects a 2ms Tokio sleep after physical dispatch.
+Foyer has no disk engine in this fixture; disk-hit/fallback correctness remains
+covered by existing tests. This tests the storage leaf path, not whole-executor
+or LSM/MVCC performance.
+
+Each invocation discards one warmup and measures five trials. Baseline,
+rolling-with-plug and demand-first-with-plug received two more runs in reversed
+order. The final cleaned-up demand-first candidate received separate before/after
+and after/before runs. Full results, topology, source hashes and statistical
+limitations are in
+[`iterator-io-results.json`](read-optimization-evidence/iterator-io-results.json).
+
+Six policies were compared: baseline, no plug, no plug plus demand-first,
+no plug plus demand-first and half-window refill, rolling refill with the original
+plug, and demand-first within the same plug. No Foyer changes were made.
+
+Observations:
+
+1. Removing artificial waiting is not sufficient to reduce first-read latency.
+   In the initial dedicated-IO/caller-Foyer long-work run, GETs grew 31→75 and
+   first-read p50 grew 4.86→8.20ms. Neighbors were still registered before demand;
+   extra split GETs can consume scarce physical capacity.
+2. Rolling refill helps isolated long scans but hurts other relevant workloads.
+   With dedicated IO and separate Foyer, median-of-three run summaries show:
+   long-work scan p50 36.56→27.39ms, GETs 20→35; mixed-load point p50
+   4.54→8.99ms, mixed GETs 132→180. Early-stop bytes grew 161945→242685
+   (about 50%), and discarded speculative handles 10→30. These are five-trial
+   totals; the peak handle count stayed at seven, so the change is additional
+   total speculative IO, not a larger retained-window budget.
+3. Demand-first registration is not IO priority. Initial results looked better,
+   but the final candidate's paired runs were not uniformly better. In the
+   dedicated-IO/separate-Foyer long-work case, first p50 was 4.29→4.17ms but
+   scan p50 36.94→37.60ms, with 20 GETs on both sides. Mixed scan first p50
+   was 4.60→6.04ms while point p50 was roughly 4.60→4.54ms. Registration order
+   cannot guarantee producer execution, credit acquisition or completion order.
+
+Consequently all experimental production changes were restored. The unadopted
+candidate patch is archived outside the repository in the review outputs. The
+retained fixture is executable with:
+
+```sh
+cargo test --locked -p risingwave_storage --lib --features test   iterator_io_experiment -- --ignored --nocapture --test-threads=1
+```
+
+The candidate passed 43 object-store tests (two local TCP tests required a sandbox
+exception and then passed), 12 iterator tests, 11 SstableStore tests and the
+backfill-mode routing test. After restoring the original policy, iterator and
+SstableStore tests were rerun. A separate 30-scan warm-cache check issued no
+GETs: baseline p50 1924.9µs, final candidate 1923.3µs. The candidate seek future
+was reduced from 1168 to 1040 bytes by keeping new-window state in the existing
+boxed future; baseline was 1000 bytes. None of that candidate is active now.
+
+All timings are local macOS ARM64 unoptimized-build measurements. Timer
+quantization, small tail samples and runtime scheduling variability limit their
+interpretation. No S3, Linux replay, disk-cache traffic or SF10 benefit is claimed.
+The experiment rejects a universal default change; it does not establish that
+the retained plug is optimal.
+
+
+## Plug naming and inactive metric cleanup (2026-11-16)
+
+Removed the unobserved `sealed_batch_empty` event. Nonempty flush counters retain
+`sealed_batch_single` and `sealed_batch_multiple` labels for existing queries.
+Renamed the window handle/token to `ReadPlug`/`ReadPlugToken`, with `token()`,
+`read_plug()` and `read_with_plug()` at the object-store boundary; Hummock call
+sites and the executable Foyer probe use the same terminology. Dropping either
+handle still does not flush. Historical experiment sections retain their original
+API names.
+
+The first-read yield, count/byte closure thresholds, late-read admission,
+registration order, cache hint, G/P limits and cancellation paths are unchanged.
+No Foyer dependency or configuration changed in this cleanup.
+
+Validation on macOS ARM64, using the locked workspace toolchain:
+
+- Scheduler unit tests: 24 passed, including concurrent closure, runtime shutdown,
+  cancellation, merging and credit management. Single/multiple flush counts are
+  checked by the existing plug tests.
+- SstableStore tests (`--features test`): 11 passed.
+- Forward iterator tests (`--features test`): 12 passed.
+- Public Foyer/object-store probe: compiled and exited successfully, including
+  memory/disk hits, stale hints, shared fallback and interleaved/cross-runtime IO.
+- Rust formatting and `git diff --check`: passed.
+
+This is a naming/observability cleanup, not a new performance experiment. No
+Linux replay, SF10 run or production-latency improvement is claimed.
+
+
+## Q18 merge attribution and next comparison design (2026-11-17)
+
+The remote branch was verified at `3842b4d83fb6`. Its archived Q18 datasets are
+explicitly SF1; the SF10 overlay is not accompanied by an identified SF10 result
+archive. Do not relabel the SF1 evidence as SF10. This review runs no new benchmark.
+
+The identity trace separates three mechanisms:
+
+- Source visibility: 40,471 of 41,124 small StreamScan GETs have an adjacent read
+  submitted after the earlier GET completed. SST bounds and the Range fallback
+  path identify buffer pressure as the dominant non-tail explanation, without
+  per-request buffer-occupancy samples. Snapshot Blockwise routing addresses this
+  mechanism when enabled; it already exists in the original branch. A short plug
+  cannot merge requests that the iterator has not issued.
+- Late visibility: the earlier Locality trace has 244 split adjacent cold pairs;
+  243 have late dequeue and 75 have provably late admission. No confirmed cached
+  gaps were found in the matched windows. Pending merging helps only before
+  physical selection; cross-runtime arrivals may still miss the plug.
+- Complete windows: the later Q64 trace has 770 complete cold 16-read windows,
+  all in one packet and one GET. The current one-yield plug does not guarantee
+  retaining this cohort's merge rate. Removing nonexistent-candidate waits is a
+  latency simplification, not proof of a whole-window coalescing improvement.
+
+The next small comparison should use the current Foyer and scheduler in all arms:
+R = Range; B = fixed-window Blockwise with only plug creation bypassed in a test
+copy; P = current fixed-window Blockwise with the plug. R versus B diagnoses
+request production, and B versus P isolates the plug. Do not disable the scheduler
+in B, introduce production toggles, or compare different Foyer revisions in this
+mechanism experiment.
+
+Use identical SSTs, approximately 64 KiB blocks with actual encoded/decoded sizes
+recorded, N16/B16, a 1 MiB limit, G128/P32, zero gap and two dedicated IO workers.
+Exercise (1) four scans with Range buffer pressure held by a live stream/tracker,
+(2) cold windows with natural and controlled cross-runtime arrivals, and
+(3) partial-cold/shared windows plus independent point reads and an early stop.
+A zero capacity alone does not force the `usage > capacity` fallback. Four scans
+alone also do not prove physical saturation.
+
+Rotate arm order for five rounds after warmup. Verify keys/values and drained
+requests. Record actual outer reads, logical scheduled reads, GETs/bytes, group
+sizes, first-block and point latency, scan time and retained memory/RSS. Report
+p99 only with sufficient independent samples (at least 1,000 per round here).
+Keep request TRACE off for timing and use a separate small diagnostic for arrival,
+flush and selection ordering. A lower GET count without acceptable first-read,
+point-read and memory cost is not a successful optimization.
+
+An eventual original-branch/current Q18 comparison is a separate whole-solution
+A/B with frozen binaries, matching cold seeds and effective read-path settings.
+The old candidate timer and Foyer role patch differ and must be recorded. Split
+source and post-source phases; do not reuse the SF1 source-row cutoff for SF10.
+
+
+## Executed 16-block R/B/P comparison (2026-11-17)
+
+This is a local mechanism experiment, not an SF10 or historical-binary A/B.
+The current implementation and Foyer recovery fork `02d6b5e` were used throughout.
+R uses Range prefetch; B uses Blockwise with only `ObjectStoreImpl::read_plug`
+bypassed in an isolated diagnostic build; P uses the current first-IO plug.
+The bypass is not retained in production. Each arm ran in a fresh process in five
+rotating rounds, without request TRACE, profiling or concurrent compilation.
+
+The ignored `sstable_store::plug_experiment::plug_window_io_experiment` uses six
+real SSTs, validates scanned keys/values, and checks drained scheduler gauges.
+All 16-block cold P/B samples assert exactly 16 actual outer fetches. The first
+16 blocks occupy 981,698 encoded bytes, with uncompressed sizes also below the
+1 MiB window bound. G128/P32, N16/B16, zero gap and in-flight reuse are fixed.
+In these original five rounds the caller is current-thread; Foyer has two
+separate workers, and dedicated IO has two workers. The mixed case polls four
+scans and the point in one parent task, including synchronous scan validation. The backend is in-memory with a synthetic 2 ms Tokio delay.
+This is an unoptimized macOS ARM64 build, with no S3/device bandwidth model.
+
+Each round records 100 cold-window, long-scan and early-stop samples, and 1,000
+single-cold, point and mixed-point samples after 20 warmups. Tables below use
+medians of five run-level percentiles; counts can be summed across rounds.
+
+| Real SST result | B: no plug | P: current plug |
+| --- | ---: | ---: |
+| GETs for 500 cold 16-block windows | 1,747 | 918 |
+| Windows using exactly one GET | 98/500 | 303/500 |
+| Cold-window first-block p50 | 3.762 ms | 3.755 ms |
+| Single-cold window first-block p50 / p99 | 3.760 / 4.374 ms | 3.787 / 4.384 ms |
+| Isolated point p50 / p99 | 4.164 / 4.759 ms | 4.167 / 4.803 ms |
+| Point under four scans, p50 / p99 | 4.365 / 7.186 ms | 4.857 / 7.175 ms |
+
+The plug reduces cold-window GETs by 47.5%, but 197/500 windows still split.
+The historical SF1 770/770 complete-window cohort is not a matched control, and
+this result cannot establish no regression relative to that older strategy.
+There is a consistent small single-cold p50 cost (19–31 microseconds per paired
+round), and mixed-point p50 increases in all five rounds (355–741 microseconds).
+Do not describe this as a zero-latency-regression result. The original experiment did not attribute the mixed-point cost to a particular
+stage. The diagnostic follow-up below narrows that boundary.
+
+With a live Range stream retaining more than the deliberately small 512 KiB
+prefetch buffer, four scans of 64 blocks use exactly 256 GETs in R. Median
+per-round GET averages are 60.46 in B and 48.60 in P. The respective scan-time
+statistics are approximately 271/22.54/22.69 ms (maximum per-scan duration in
+each trial). All read 15,707,188 bytes. This reproduces request-visibility loss
+in the Range fallback; it is not an estimate of a production speedup. The
+unpressured R case means no externally held stream: its concurrent scans can
+still contend with each other for that buffer.
+
+Stopping after five blocks reads the same 3,926,792 bytes across R/B/P in this
+fixture. Discarded response counts are not a measurement of wasted physical
+bytes. Whole-process peak RSS medians are about 99.9/103.4/103.6 MiB, dominated
+by fixture/cache/allocator state; this does not establish production memory use.
+Four scans do not by themselves establish P32 saturation.
+
+A separate public-Foyer boundary probe uses exact 64 KiB ranges and an immediate
+backend, without SST decode. It ran five rounds of 1,000 samples per arm, scenario
+and Foyer placement, after 50 warmups. IO stays dedicated in both placements;
+`cross=false` means Foyer shares the caller, not that IO shares its runtime.
+Natural, simultaneously released and staggered producers, single-cold windows,
+shared missing neighbors, shared point followers and independent points passed.
+A gated shared point is asserted pending before its existing producer is released.
+
+With separate Foyer workers, natural cold-window mean GETs are 3.35→2.51
+(median of run means), and the one-GET fraction is 12.3%→35.0%. Single-cold
+first-read p50/p99 is 52.17/62.25→54.79/73.54 microseconds. Shared-point p99 is
+177.12→186.46 microseconds, whereas the independent-point case improves in this
+small probe. This confirms the overhead without a millisecond timer floor and
+shows that isolated-point results cannot stand in for shared/mixed traffic.
+Releasing late neighbors only after the head completed never restores one GET,
+as expected: a selected/finished physical range cannot expand.
+
+Retained policy: fixed windows, one-yield first-IO plug, existing capacity flush
+and pending merge; no timer, prediction, pressure heuristic or Foyer patch was
+added. Product opt-in defaults are unchanged. Production cleanup collapses a redundant nested flush guard. The subsequent
+warm-neighbor fast path is described below. Experiments are explicit ignored
+tests or standalone evidence tools. The performance tradeoff remains unresolved for
+latency-sensitive mixed loads; no broader default enablement follows.
+
+Reproduce P (R uses `RW_PLUG_ARM=R`):
+
+```sh
+RW_PLUG_ARM=P RW_PLUG_WORKERS=1 RW_PLUG_TASKS=coupled \
+RW_PLUG_SAMPLES=1000 cargo test --locked \
+  -p risingwave_storage --lib --features test plug_window_io_experiment \
+  -- --ignored --nocapture --test-threads=1
+RW_PLUG_ARM=P RW_PLUG_SAMPLES=1000 python3 \
+  docs/dev/src/design/read-optimization-evidence/run-foyer-batch-probe.py --window16
+```
+
+The standalone probe can select B with `RW_PLUG_ARM=B` in the same binary.
+The real iterator's B arm instead requires the archived diagnostic-only patch in
+an isolated build; the fixture asserts that the chosen binary actually bypasses
+plug creation. [Structured results and identities](read-optimization-evidence/plug-window-results.json).
+A stale Cargo artifact caught by that assertion and an unavailable system RSS
+utility were excluded setup attempts; final processes used `getrusage`.
+
+
+### Latency follow-up and warm-neighbor fast path (2026-11-17)
+
+The retained iterator fixture now defaults to eight caller workers and separate
+scan/point tasks. `RW_PLUG_WORKERS=1 RW_PLUG_TASKS=coupled` reproduces the original
+caller model above. `RW_PLUG_CASE` selects a scenario and `RW_PLUG_DELAY_US=0`
+removes the synthetic timer. These controls are confined to an ignored test.
+Changing the model does not invalidate or erase the original single-thread result.
+
+Three diagnostic rounds of 1,000 mixed points per arm separated the workload
+models. Median run-level point p50 values, in milliseconds:
+
+| Caller model / backend | B: no plug | P: plug |
+| --- | ---: | ---: |
+| One thread, coupled task / 2 ms timer | 4.452 | 4.830 |
+| One thread, separate tasks / 2 ms timer | 4.148 | 4.717 |
+| Eight workers, separate tasks / 2 ms timer | 4.916 | 4.684 |
+| Eight workers, separate tasks / immediate | 1.307 | 0.896 |
+
+Separate tasks alone do not remove the single-thread penalty. Eight workers also
+change arrival/completion interleaving; this is not a production thread-count
+recommendation or proof that mixed-load latency is solved.
+
+Temporary timestamps, removed after measurement, divided the point path into
+fetch admission, backend work, result delivery, decode and caller resumption.
+In two further single-thread/coupled runs, the mean backend-complete to Foyer
+fetch-resume interval grew from approximately 649 to 882 microseconds (B to P).
+Fetch-start to backend-entry instead fell from about 45 to 37 microseconds;
+backend timer/wakeup was about 3.47 versus 3.48 ms, and point decode about
+64 versus 66 microseconds. The configured 2 ms sleep is not a precise 2 ms IO
+service time. Stage means are additive; stage percentiles are not.
+
+The increased interval includes scheduler response delivery and Foyer task
+rescheduling. A burst of completed scan blocks competing for execution is a
+plausible explanation, not a measured separation of those two components.
+RW currently decodes blocks synchronously after the object read resumes in the
+Foyer producer. Point requests themselves carry no prefetch plug. These results
+do not justify adding a timer, priorities, or a scheduler-specific Foyer API.
+
+A small RW-only fast path is retained: after registering neighbors, if every
+retained Foyer response is an immediate memory hit (`!need_await()`), the demand
+read receives no plug. Those owned hit responses cannot later issue outer IO.
+Any pending response (including shared/disk work) or error keeps the existing
+plug. This uses the existing Foyer API, does not poll/wait for candidates and
+short-circuits at the first pending neighbor in a fully cold window. Foyer still
+owns sharing, disk lookup and fallback. The new regression test fails before the
+change, passes afterwards, and also checks that a cold window still flushes.
+
+Clean paired binaries differ only in this fast path. Three alternating rounds
+use 2,000 single-cold samples per backend, 200 cold-window samples, and 1,000
+point/mixed samples per arm after 20 warmups. No diagnostic timestamps, TRACE,
+profiling or concurrent compilation are present. Foyer and IO each retain two
+separate workers. Cold/single-cold use one caller thread; points use eight workers
+and separate tasks. Values below are median run-level p50/p99 unless counts:
+
+| Case | Before | After |
+| --- | ---: | ---: |
+| Single cold, immediate backend | 133.54 / 155.08 us | 131.75 / 151.75 us |
+| Single cold, 2 ms timer | 3.779 / 4.406 ms | 3.735 / 4.342 ms |
+| GETs for 600 fully cold 16-block windows | 1,100 | 988 |
+| Exactly one GET in those windows | 367/600 | 400/600 |
+| Cold-window head | 3.756 / 4.591 ms | 3.745 / 4.512 ms |
+| Isolated point | 4.119 / 4.668 ms | 3.948 / 4.673 ms |
+| Point with four cold scans | 4.680 / 6.158 ms | 4.719 / 6.171 ms |
+
+The immediate-backend single-cold gain is small (about 1.8 us at p50).
+The 2 ms case has a paired p50 change from about -46 to +87 us, so the aggregate
+must not be advertised as a stable 43 us saving. The cold and point paths do not
+activate the new branch; their variation is not evidence of an algorithmic
+improvement. There is no observed cold-window merge degradation, but neither
+zero latency regression in all workloads nor 16-to-1 merging is guaranteed.
+
+[Latency results, stages and binary identities](read-optimization-evidence/plug-latency-results.json)
+retain per-run statistics. Original R/B/P results remain separately identified.
+Foyer remains at recovery fork `02d6b5e`, with no scheduler-specific patch.
+
+Final validation: 13 iterator tests and 11 SstableStore tests pass after the fast
+path; the object-store suite passed all 43 tests earlier in this round and its
+scheduling behavior was unchanged afterwards. Storage `cargo check`, object-store
+and storage Clippy, formatting, and diff whitespace checks passed. Diagnostic
+timestamps and the B bypass are absent from the retained source.
+
+
+### Scheduler send/receive attribution (2026-11-17)
+
+Two additional diagnostic timestamps bracket the point result channel: immediately
+before the scheduler's `oneshot::Sender::send`, and immediately after the receiver
+returns inside `MonitoredObjectStore::read_with_plug`. The point uses its own SST,
+so it cannot merge with the scan requests. A reset per trial and exactly-one-marker
+assertions verify the single-response path; every expected timestamp must exist.
+The nine stage durations sum to the point latency in every sample (verified to
+within 1e-5 microseconds). No Foyer source or dependency was changed.
+
+Three alternating B/P rounds ran 1,000 measured points after 20 warmups for each
+caller model. B bypasses only public plug creation in an isolated binary; P uses
+the retained plug and warm-neighbor fast path. Foyer and IO each have two workers,
+the backend uses a synthetic 2 ms timer, and four independent SST scans compete
+with one independent-SST point. Timestamp collection is not request TRACE. No
+compilation or profiling ran alongside timings. This remains an unoptimized
+macOS ARM64 mechanism experiment, not a production latency measurement.
+
+Stage values below are means over equal-size runs; end-to-end values are medians
+of run-level p50 values. Do not subtract percentiles to attribute stage costs.
+
+| Caller model | Backend done to send, B / P | Send to receive, B / P | Point p50, B / P |
+| --- | ---: | ---: | ---: |
+| One thread, coupled task | 7.48 / 6.80 us | 645.85 / 967.95 us | 4.169 / 4.860 ms |
+| One thread, separate tasks | 7.32 / 6.86 us | 657.14 / 866.97 us | 4.241 / 4.582 ms |
+| Eight workers, separate tasks | 3.97 / 3.87 us | 964.60 / 912.84 us | 4.879 / 4.657 ms |
+
+The single-thread increase is after result sending, not in scheduler completion
+processing before sending. The receive-to-object-read-return wrapper is under
+1 us on average. In the coupled model, send-to-receive increases by about 322 us;
+end-to-end mean increases by 226 us because other stages partly offset it. The
+point's own decode changes only from about 64 to 68 us. The measured waiting
+boundary is the Foyer-hosted producer resuming/polling its channel, including
+runtime scheduling/cooperative-budget effects; this does not establish a Foyer
+correctness defect. RW decodes other completed scan blocks synchronously in
+those producer tasks, so competing completion/decode work is a plausible source
+of executor contention. CPU residency within that interval was not profiled.
+
+A control used the exact same binaries with eight Foyer workers, one caller
+thread, and separate caller tasks (three further B/P rounds). Send-to-receive
+falls to 193/333 us, but decode-done-to-caller-return grows to 565/957 us; this
+last interval includes Foyer result/cache publication and caller scheduling.
+Point p50 becomes 3.824/5.013 ms. Increasing runtime workers shifts contention
+and is not a validated end-to-end fix. No worker count, timer, priority rule or
+production decode-placement policy was changed.
+
+The path review covered source policy resolution, iterator window bounds and
+consumption, Foyer registration/fallback, plug flush ownership, G admission and
+P dispatch, active-read reuse, range-error fallback, retry wrappers, delivery and
+cancellation. One separate correctness/resource-lifetime bug was confirmed in
+Range prefetch: `prefetch_blocks` spawned its object read and then awaited the
+join handle. Cancelling prefetch dropped that handle without aborting the child.
+The buffer tracker was released while the physical read, G/P permits, and retry
+loop could remain live. This path is not exercised by the Blockwise mixed-point
+diagnostic and is not an explanation for those latency numbers.
+
+An isolated candidate fix awaits the owned Range object-read future directly. It removes the
+unnecessary task and cancellation-error branch; dropping prefetch now drops its
+logical receiver. Existing scheduler cancellation preserves a physical read if
+another reader still needs it. Foyer-owned shared producers are unchanged.
+The candidate regression `test_cancelled_range_prefetch_releases_backend_read`
+failed on the old implementation and passed with that fix. It covers direct reads and scheduled
+reads with in-flight reuse both off and on, verifies the backend has started,
+then checks tracker/backend release and successful subsequent demand at G1/P1.
+The existing scheduler shared-reader cancellation test also passes.
+
+Candidate validation before separating scope: 12 SstableStore, 13 iterator,
+and 24 scheduler tests passed;
+storage `cargo check` and Clippy pass. A clean, uninstrumented seven-case P smoke
+(100 point/single/mixed samples and 10 samples for each other case, plus warmups)
+checked values, outer-fetch counts and drained resources with the candidate fix. That smoke
+is a correctness check, not an additional performance A/B. No new correctness
+failure was found in the reviewed Blockwise/plug path. Linux release, real object
+storage, SF10 and production saturation still require separate validation.
+
+[Structured stage results and binary/source identities](read-optimization-evidence/plug-delivery-results.json)
+record all 24 diagnostic runs. Diagnostic hooks and bypasses were removed from
+the retained source. The following optional patches are evidence only, for an
+isolated checkout of this code; do not apply them to a production build:
+
+```sh
+git apply docs/dev/src/design/read-optimization-evidence/plug-delivery-diagnostic.patch
+RW_PLUG_ARM=P RW_PLUG_WORKERS=1 RW_PLUG_TASKS=coupled \
+RW_PLUG_FOYER_WORKERS=2 RW_PLUG_DELAY_US=2000 RW_PLUG_CASE=mixed_points \
+RW_PLUG_SAMPLES=1000 cargo test --locked -p risingwave_storage --lib \
+  --features test plug_window_io_experiment -- --ignored --nocapture --test-threads=1
+```
+
+For B, additionally apply `plug-delivery-no-plug-control.patch` and rebuild with
+`RW_PLUG_ARM=B`; the fixture rejects a mislabeled binary. Use separate frozen
+binaries and alternating processes for paired timing. For independent tasks,
+set `RW_PLUG_TASKS=separate`; caller models use `RW_PLUG_WORKERS=1` or `8`.
+Only the separate-task/one-caller control sets `RW_PLUG_FOYER_WORKERS=8`.
+
+
+Scope decision: Range prefetch is the legacy path, distinct from the Blockwise
+mixed-point experiment. The Range cancellation candidate and its new regression
+test were removed from the main working tree at the user's request to keep the
+changes separate. The bug and successful isolated validation above remain recorded;
+they are not a claim that the retained code fixes Range cancellation. The standalone
+patch is archived with the review outputs. No Range routing, lifetime, or behavior
+change from this turn remains. When coalescing is already enabled, legacy Range
+reads can use the common scheduler if their bounds/size are eligible; this is an
+existing shared object-read entry, not use of Blockwise's plug.
+
+After separating the Range candidate, all 11 retained SstableStore tests pass
+again. The retained execution sources match their state at the start of this
+delivery-attribution turn; only evidence/documentation from this turn remains.
+
+
+### Local decode-contention ablation and rejected yield candidates (2026-11-17)
+
+Decision: **neither candidate is retained**. The decode contention is confirmed
+in this local workload, but cooperative yielding redistributes waiting between
+independent and shared readers. Foyer, Range, and the execution sources are
+unchanged from the start of this experiment. Earlier warm-neighbor/plug changes
+remain as before; no new production scheduling rule was added here.
+
+The existing send/receive instrumentation was extended with scan decode start,
+end and thread IDs. An ablation still performs all reads and delivers all results,
+but substitutes clones of blocks decoded before timing for the four scans.
+The independent point still decodes normally. Scanned keys/values remain checked;
+the ablation deliberately omits scan decode/checksum work and is not a production
+optimization. Normal and ablated cases use the same frozen B/P binaries selected
+by a diagnostic environment setting. Each model/arm/mode ran three alternating
+rounds of 1,000 samples after 20 warmups (24 processes). B disables public plug
+creation; P is the turn-start implementation.
+
+All mixed samples assert 65 outer reads and fixed byte totals. The decoder
+records exactly 64 scan blocks on at most two Foyer threads. The nine stage
+intervals sum to point latency per sample; overlap cannot exceed the interval
+length per worker. First-three-sample raw thread/interval data and all run-level
+statistics are retained in the structured evidence.
+
+With P, one caller thread/coupled tasks, send-to-receive mean drops from 908 to
+35 us when scan decode is removed; with eight caller workers/separate tasks it
+drops from 928 to 57 us. Decode calls overlap about 93% of the two-worker capacity
+within that wait (sum of decoder interval intersections divided by twice total
+wait). This is wall-time overlap, not a CPU profile. The 64 real decodes consume
+about 4.3 ms summed wall time per trial, versus 33–53 us for predecoded clones.
+The ablation supplies causal evidence that decode competition drives the observed
+receive delay, rather than a scheduler send delay or a Foyer sharing defect.
+
+End-to-end latency still depends on the caller. In the eight-worker P model,
+point p50/p99 improves from 5.041/6.690 to 4.556/4.982 ms. In the single-thread
+coupled model, p50 instead increases from 5.151 to 6.035 ms: decode-end to caller
+return grows from 365 to 1,604 us. That last stage also includes Foyer cache/result
+publication and notification; synchronous scan consumption/validation in the
+caller makes faster data availability insufficient to guarantee lower point
+latency. Do not optimize only the receive-wait metric.
+
+Two small RW-only candidates were then tested without diagnostic timestamps:
+
+- Window yield: after successful IO, yield once before decoding a request that
+  carried a plug token. This includes the window's demand head. It improves mixed
+  independent points, but shared-head p99 increases in all three single-thread
+  rounds by 51–358 us. This version was rejected.
+- Neighbor yield: the iterator explicitly marks only registered neighbors as
+  read-ahead; those producers yield once before decode, while demand heads and
+  point-created producers retain their original path. This uses one internal
+  boolean, not a Foyer role API or cache-priority inference. It was also rejected
+  after testing points that share a neighbor rather than the head.
+
+The neighbor candidate's primary matrix uses three alternating rounds, 1,000
+samples per scenario/arm (and 1,000 full-cold windows per round), plus warmups.
+Single-cold/cold-window callers have one thread; standalone points have eight
+workers. Mixed and shared-head cases cover both caller models. Foyer and IO have
+two separate workers, G128/P32, 16-block/1 MiB windows, zero gap and active reuse.
+There are no new runtime workers, timers, priorities, queues, or Foyer patches.
+Values are medians of run-level p50/p99, except summed GET counts:
+
+| Case | Turn-start baseline | Neighbor-yield candidate |
+| --- | ---: | ---: |
+| Single cold, immediate backend | 131.67 / 154.00 us | 131.54 / 149.33 us |
+| Single cold, 2 ms timer | 3.751 / 4.339 ms | 3.754 / 4.360 ms |
+| Independent point, immediate backend | 106.88 / 123.50 us | 106.17 / 122.29 us |
+| Independent point, 2 ms timer | 4.032 / 4.643 ms | 4.092 / 4.698 ms |
+| Mixed independent point, one caller thread | 4.702 / 7.069 ms | 3.804 / 6.124 ms |
+| Mixed independent point, eight caller workers | 4.692 / 6.127 ms | 4.000 / 5.139 ms |
+| Shared head, one caller thread | 3.647 / 6.918 ms | 3.629 / 5.527 ms |
+| Shared head, eight caller workers | 3.800 / 5.876 ms | 3.765 / 4.501 ms |
+| GETs for 3,000 fully cold cross-runtime windows | 5,224 | 5,136 |
+| Exactly one GET in those windows | 1,918/3,000 | 1,991/3,000 |
+| Cold-window first block | 3.753 / 4.671 ms | 3.735 / 4.349 ms |
+
+The isolated-point timer differences warranted a follow-up using three rounds
+of 2,000 samples per arm: p50/p99 is 4.082/4.639 versus 4.084/4.632 ms. Together
+with the immediate-backend control this does not show a stable added point cost;
+it also does not establish strict statistical equivalence in all workloads.
+There is no observed cold-window merge degradation; small GET-count changes do
+not establish an algorithmic merge improvement.
+
+Shared-point testing gates the point until the first scan rewind has registered
+its window, asserts the point is pending, and asserts exactly 64 outer reads
+(no extra producer for the shared point). A further three paired rounds of 1,000
+samples use eight caller workers and share blocks 8 or 15 (zero-based):
+
+| Shared block | Baseline p50 / p99 | Neighbor-yield p50 / p99 |
+| --- | ---: | ---: |
+| 8 | 4.499 / 5.930 ms | 4.718 / 5.959 ms |
+| 15 | 4.979 / 5.959 ms | 4.768 / 5.962 ms |
+
+Block 8 regresses by 187–254 us at p50 in all three paired rounds. A point can
+share a producer originally registered as a prefetch neighbor; treating that
+producer as deferrable also defers its foreground followers. No data loss or
+single-flight correctness failure was observed. This is a latency counterexample
+to the simple yielding policy, not a reason to alter Foyer or add reader-priority
+state. Both candidates were removed rather than retained as another policy.
+
+Final restoration checks compare all touched execution files byte-for-byte with
+the turn-start snapshots. The original Range body and Foyer dependency are
+unchanged. All 11 SstableStore, 13 iterator and 24 scheduler tests pass on the
+restored baseline, as do storage `cargo check`, Clippy and formatting. The local
+causal result does not require Linux; production performance is not inferred
+from the unoptimized macOS/synthetic-timer numbers.
+
+[Results, overlap samples and source/binary identities](read-optimization-evidence/plug-decode-results.json)
+contain all cohorts, including the rejected first candidate. The following
+patches are **unapplied experimental evidence**, for a separate checkout only:
+
+- `plug-decode-diagnostic.patch`: timestamp/interval and predecoded ablation.
+- `plug-decode-window-yield-rejected.patch`: rejected whole-window policy.
+- `plug-decode-neighbor-yield-rejected.patch`: rejected neighbor-only policy.
+- `plug-decode-shared-head.patch`: gated shared-head fixture.
+- `plug-decode-shared-neighbor.patch`: shared fixture selecting `RW_SHARED_INDEX`.
+
+To reproduce attribution, apply the diagnostic patch to this retained baseline,
+then use the explicit ignored test with `RW_PLUG_ARM=P`, `RW_DECODE_MODE=normal`
+or `skip`, `RW_PLUG_CASE=mixed_points`, `RW_PLUG_SAMPLES=1000`,
+`RW_PLUG_FOYER_WORKERS=2`, and `RW_PLUG_DELAY_US=2000`. Caller models use
+`RW_PLUG_WORKERS=1 RW_PLUG_TASKS=coupled` or
+`RW_PLUG_WORKERS=8 RW_PLUG_TASKS=separate`. B additionally needs the existing
+`plug-delivery-no-plug-control.patch` and a separately built binary. Candidate
+comparisons instead start without diagnostic instrumentation and apply exactly
+one rejected-policy patch. For shared tests also apply one shared-fixture patch;
+the neighbor fixture requires `RW_SHARED_INDEX=8` or `15`. Do not apply both
+shared fixtures or both candidate policies together. Freeze binaries and rotate
+process order; do not compile while timing.
+
+
+## Caller-runtime decode comparison (2026-11-17)
+
+The minimal caller-runtime decode candidate was **rejected**. It only moved external
+`CachePolicy::Fill` block decoding to the captured caller handle when runtime IDs
+differed, leaving one decoded result per Foyer producer. Same-runtime, NotFill,
+Disable, and Range execution remained unchanged. Neither this policy nor the
+fixture hooks are applied to the retained execution sources.
+
+This comparison corrects the scope of the preceding two-worker Foyer experiment.
+With file cache disabled, Foyer captures the runtime that builds the cache; it does
+not automatically use each reader's runtime. RW constructs the state store during
+node initialization and runs batch/streaming callers on their own runtimes. The
+fixture therefore built both the scheduler and cache in a node runtime with Tokio's
+local default of 10 workers. It tested (1) a default-sized 10-worker caller and no
+dedicated scheduler runtime; (2) the branch overlay's 8-worker caller and dedicated
+2-worker scheduler; and (3) a same-runtime 8-worker control. There was no dedicated
+Foyer two-worker runtime. Coalescing, G128/P32, and 16-block/1-MiB windows stayed
+fixed, so “defaults” describes runtime topology, not all product switches.
+
+The real SST/iterator/cache/scheduler fixture does not start a full compute server,
+SQL execution, disk cache, or S3. It uses macOS ARM64 debug and immediate or 2-ms
+Tokio-delayed in-memory reads. Three alternating-order rounds have 20 warmups and
+300 samples per arm/case; cold16 has 300 complete windows per round. Calls run on
+caller worker tasks. No builds, TRACE, or profilers run during measurement.
+
+An initial ungated shared-point assertion failed on the baseline because the
+producer finished before the point registered. Those exploratory samples were
+excluded. A test-only backend completion gate now holds reads until the point
+registers; each shared case asserts pending status and exactly 64 outer producers.
+Independent mixed points assert 65; single-cold/point assert 1; cold16 asserts 16.
+Shared points cover zero-based blocks 0, 8, and 15. Values and keys are validated.
+
+Results below are medians of per-round p50 values, in microseconds:
+
+| Runtime topology | Scenario | Baseline | Caller decode |
+| --- | --- | ---: | ---: |
+| Default-sized | Single cold, immediate backend | 129.54 | 142.42 |
+| Default-sized | Isolated point, immediate backend | 105.00 | 117.46 |
+| Default-sized | Shared head point, delayed backend | 4484.58 | 4800.29 |
+| Default-sized | Shared block 8 point | 4732.67 | 4854.00 |
+| Default-sized | Independent mixed point | 4300.88 | 4850.42 |
+| Default-sized | Mixed scan completion, independent point | 6100.46 | 6238.38 |
+| Branch overlay | Single cold, immediate backend | 136.12 | 149.79 |
+| Branch overlay | Isolated point, immediate backend | 110.50 | 123.42 |
+| Branch overlay | Shared head point | 3947.42 | 4399.79 |
+| Branch overlay | Shared block 8 point | 4394.42 | 4463.62 |
+| Branch overlay | Independent mixed point | 4392.88 | 4684.96 |
+| Branch overlay | Mixed scan completion, independent point | 5822.54 | 5940.96 |
+| Same-runtime control | Isolated point, immediate backend | 101.88 | 101.00 |
+
+Every paired round regressed cross-runtime immediate point p50 by 10.67–15.79 us.
+Shared-head p50 regressed by 240.79–315.71 us with default-sized runtimes and
+406.00–539.92 us with the branch overlay. Shared middle-block p50 also regressed
+in all paired cross-runtime rounds. Scan completion had no consistent benefit;
+timer-backed absolute timings vary, including on the same-runtime control.
+Full-cold GET totals across 900 windows per arm were 1244 -> 1240 (default-sized),
+974 -> 965 (overlay), and 921 -> 927 (same-runtime). These counts show no meaningful
+merge improvement or consistent regression, and do not establish exact equivalence.
+
+This rejects unconditional decode migration under these local conditions; it does
+not establish a production bottleneck or invalidate the narrower earlier ablation.
+No Foyer/Range/dependency/config change was retained. Both comparison binaries
+passed 11 store and 13 iterator tests; restored execution sources passed 48 related
+tests and `cargo check` and matched the pre-experiment bytes.
+
+Compact per-round evidence and identities are in
+`read-optimization-evidence/decode-caller-results.json`. The sibling
+`decode-caller-candidate.patch`, `decode-caller-fixture.patch`, and
+`decode-caller-backend-fixture.patch` are unapplied archival patches. To reproduce,
+build the baseline with only the two fixture patches, freeze its test binary, then
+build a second binary with the candidate patch. Run `plug_window_io_experiment`
+with `--ignored --nocapture --test-threads=1` and `RW_PLUG_ARM=P`,
+`RW_PLUG_TASKS=separate`, `RW_PLUG_CROSS=1`, and `RW_PLUG_SAMPLES=300`
+(`3000` for cold16, which divides by 10). For default-sized topology unset
+`RW_NODE_WORKERS` and `TOKIO_WORKER_THREADS`, use `RW_PLUG_WORKERS=0` and
+`RW_IO_DEDICATED=0`; for the overlay use workers=8 and IO=1; same-runtime uses
+workers=8, IO=1, CROSS=0. Select `RW_PLUG_CASE=single_cold|point|cold16|mixed_points`,
+`RW_PLUG_DELAY_US=0|2000`, and optionally `RW_SHARED_INDEX=0|8|15` for mixed points.
+Unset the shared index for independent cases. Alternate binary order between rounds.

@@ -53,7 +53,7 @@ use read_scheduler::ReadScheduler;
 #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
 #[doc(hidden)]
 pub use read_scheduler::replay;
-pub use read_scheduler::{ReadBatch, ReadBatchMember};
+pub use read_scheduler::{ReadPlug, ReadPlugToken};
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -327,17 +327,17 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, read(path, range).await)
     }
 
-    pub fn read_batch(&self, max_reads: usize) -> Option<ReadBatch> {
-        dispatch_object_store_enum!(self, |store| store.read_batch(max_reads))
+    pub fn read_plug(&self, max_reads: usize) -> Option<ReadPlug> {
+        dispatch_object_store_enum!(self, |store| store.read_plug(max_reads))
     }
 
-    pub async fn read_with_batch(
+    pub async fn read_with_plug(
         &self,
         path: &str,
         range: impl ObjectRangeBounds,
-        batch: Option<ReadBatchMember>,
+        plug_token: Option<ReadPlugToken>,
     ) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read_with_batch(path, range, batch).await)
+        object_store_impl_method_body!(self, read_with_plug(path, range, plug_token).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -709,20 +709,20 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        self.read_with_batch(path, range, None).await
+        self.read_with_plug(path, range, None).await
     }
 
-    fn read_batch(&self, max_reads: usize) -> Option<ReadBatch> {
+    fn read_plug(&self, max_reads: usize) -> Option<ReadPlug> {
         self.read_scheduler
             .as_ref()
-            .map(|scheduler| ReadBatch::new(scheduler.clone(), max_reads))
+            .map(|scheduler| ReadPlug::new(scheduler.clone(), max_reads))
     }
 
-    async fn read_with_batch(
+    async fn read_with_plug(
         &self,
         path: &str,
         range: impl ObjectRangeBounds,
-        batch: Option<ReadBatchMember>,
+        plug_token: Option<ReadPlugToken>,
     ) -> ObjectResult<Bytes> {
         use std::ops::Bound::{Excluded, Included};
 
@@ -767,10 +767,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
         let result = match scheduled {
             Some((scheduler, range)) => {
-                let submitted = match batch
-                    .as_ref()
-                    .and_then(|batch| batch.stage(scheduler, path, range.clone(), trace_id))
-                {
+                let submitted = match plug_token.as_ref().and_then(|plug_token| {
+                    plug_token.stage(scheduler, path, range.clone(), trace_id)
+                }) {
                     Some(response) => Ok(response),
                     None => scheduler.submit(path, range, trace_id).await,
                 };
@@ -781,8 +780,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             }
             None => self.read_direct(path, range).await,
         };
-        // The batch timer holds a Weak reference. The waiting read keeps its group alive.
-        drop(batch);
+        // Release the plug token when its logical read finishes.
+        drop(plug_token);
         if let Some(request_id) = trace_id {
             let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
             tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,

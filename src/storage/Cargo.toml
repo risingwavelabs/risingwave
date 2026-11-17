@@ -10,7 +10,7 @@ repository = { workspace = true }
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
-test = ["risingwave_hummock_sdk/test"]
+test = ["risingwave_hummock_sdk/test", "risingwave_object_store/test"]
 failpoints = ["fail/failpoints"]
 hm-trace = []
 read-scheduler-replay = ["risingwave_object_store/read-scheduler-replay"]

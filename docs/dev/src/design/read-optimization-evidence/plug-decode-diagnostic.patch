@@ -1,0 +1,268 @@
+--- a/src/object_store/src/object/mem.rs
++++ b/src/object_store/src/object/mem.rs
+@@ -135,6 +135,8 @@
+             "mem read error"
+         )));
+         #[cfg(feature = "test")]
++        if path.ends_with("/5.data") { POINT_READ.lock().unwrap()[0] = Some(std::time::Instant::now()); }
++        #[cfg(feature = "test")]
+         {
+             let delay = self
+                 .read_delay_us
+@@ -143,7 +145,12 @@
+                 tokio::time::sleep(std::time::Duration::from_micros(delay)).await;
+             }
+         }
+-        self.get_object(path, range).await
++        #[cfg(feature = "test")]
++        if path.ends_with("/5.data") { POINT_READ.lock().unwrap()[1] = Some(std::time::Instant::now()); }
++        let result = self.get_object(path, range).await;
++        #[cfg(feature = "test")]
++        if path.ends_with("/5.data") { POINT_READ.lock().unwrap()[2] = Some(std::time::Instant::now()); }
++        result
+     }
+ 
+     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+@@ -251,10 +258,31 @@
+     }
+ }
+ 
++#[cfg(feature = "test")]
++static POINT_READ: std::sync::Mutex<[Option<std::time::Instant>; 5]> = std::sync::Mutex::new([None; 5]);
++
+ static SHARED: LazyLock<spin::Mutex<InMemObjectStore>> =
+     LazyLock::new(|| spin::Mutex::new(InMemObjectStore::new()));
+ 
+ impl InMemObjectStore {
++    #[cfg(feature = "test")]
++    pub(crate) fn mark_point_delivery_for_test(path: &str, stage: usize) {
++        if path.ends_with("/5.data") {
++            let mut marks = POINT_READ.lock().unwrap();
++            assert!(marks[stage].is_none(), "point must have exactly one send/receive per trial");
++            marks[stage] = Some(std::time::Instant::now());
++        }
++    }
++    #[cfg(feature = "test")]
++    pub fn reset_point_timing_for_test(&self) {
++        *POINT_READ.lock().unwrap() = [None; 5];
++    }
++
++    #[cfg(feature = "test")]
++    pub fn point_timing_for_test(&self) -> [std::time::Instant; 5] {
++        POINT_READ.lock().unwrap().map(Option::unwrap)
++    }
++
+     fn new() -> Self {
+         Self {
+             objects: Arc::new(Mutex::new(HashMap::new())),
+--- a/src/object_store/src/object/mod.rs
++++ b/src/object_store/src/object/mod.rs
+@@ -774,7 +774,12 @@
+                     None => scheduler.submit(path, range, trace_id).await,
+                 };
+                 match submitted {
+-                    Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
++                    Ok(response) => {
++                        let result = response.await.unwrap_or_else(|error| Err(error.into()));
++                        #[cfg(feature = "test")]
++                        InMemObjectStore::mark_point_delivery_for_test(path, 4);
++                        result
++                    },
+                     Err(error) => Err(error),
+                 }
+             }
+--- a/src/object_store/src/object/read_scheduler/execution.rs
++++ b/src/object_store/src/object/read_scheduler/execution.rs
+@@ -448,7 +448,10 @@
+             }
+         }
+         if self.requests.len() == 1 {
+-            let _ = self.requests.pop().unwrap().response.send(result);
++            let request = self.requests.pop().unwrap();
++            #[cfg(feature = "test")]
++            crate::object::InMemObjectStore::mark_point_delivery_for_test(&request.path, 3);
++            let _ = request.response.send(result);
+             return;
+         }
+         if result.as_ref().is_err_and(|err| err.is_read_range_error()) {
+--- a/src/storage/src/hummock/sstable_store.rs
++++ b/src/storage/src/hummock/sstable_store.rs
+@@ -587,6 +587,8 @@
+         let fetch_block = || {
+             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
+             async move {
++            #[cfg(all(test, feature = "test", not(madsim)))]
++            plug_experiment::mark_point(object_id, 0);
+             outer_fetch.inc();
+             let block_data = match store
+                 .read_with_plug(&data_path, fetch_range.clone(), token)
+@@ -604,7 +606,14 @@
+                     return Err(HummockError::from(e));
+                 }
+             };
++            #[cfg(all(test, feature = "test", not(madsim)))]
++            plug_experiment::mark_point(object_id, 1);
++            #[cfg(all(test, feature = "test", not(madsim)))]
++            let block = plug_experiment::decode_probe(object_id, block_index, block_data, uncompressed_capacity)?;
++            #[cfg(not(all(test, feature = "test", not(madsim))))]
+             let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
++            #[cfg(all(test, feature = "test", not(madsim)))]
++            plug_experiment::mark_point(object_id, 2);
+             Ok(block)
+         }.instrument(span.clone())
+         };
+--- a/src/storage/src/hummock/sstable_store/plug_experiment.rs
++++ b/src/storage/src/hummock/sstable_store/plug_experiment.rs
+@@ -25,6 +25,40 @@
+ use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable, test_key_of};
+ use crate::hummock::{HummockValue, SstableIterator, TableHolder};
+ use crate::store::PrefetchMode;
++
++static POINT_STAGES: std::sync::Mutex<[Option<Instant>; 3]> = std::sync::Mutex::new([None; 3]);
++pub(super) fn mark_point(id: HummockSstableObjectId, stage: usize) {
++    if id.as_raw_id() == 5 { POINT_STAGES.lock().unwrap()[stage] = Some(Instant::now()); if stage == 1 { *POINT_RECEIVE_THREAD.lock().unwrap() = Some(std::thread::current().id()); } }
++}
++
++static PREDECODED: std::sync::OnceLock<std::collections::HashMap<(u64, usize), Block>> = std::sync::OnceLock::new();
++static SKIP_SCAN_DECODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++static DECODE_EVENTS: std::sync::Mutex<Vec<(u64, usize, std::thread::ThreadId, Instant, Instant)>> = std::sync::Mutex::new(Vec::new());
++static POINT_RECEIVE_THREAD: std::sync::Mutex<Option<std::thread::ThreadId>> = std::sync::Mutex::new(None);
++pub(super) fn decode_probe(id: HummockSstableObjectId, index: usize, data: bytes::Bytes, capacity: usize) -> HummockResult<Box<Block>> {
++    let start = Instant::now();
++    let block = if (1..=4).contains(&id.as_raw_id()) && *SKIP_SCAN_DECODE.get().unwrap() {
++        Box::new(PREDECODED.get().unwrap()[&(id.as_raw_id(), index)].clone())
++    } else { Box::new(Block::decode(data, capacity)?) };
++    let end = Instant::now();
++    DECODE_EVENTS.lock().unwrap().push((id.as_raw_id(), index, std::thread::current().id(), start, end));
++    Ok(block)
++}
++fn summarize_decodes(io: [Instant; 5]) -> ([f64; 6], Vec<(u64, usize, String, f64, f64)>) {
++    let events = DECODE_EVENTS.lock().unwrap();
++    let receiver = POINT_RECEIVE_THREAD.lock().unwrap().unwrap();
++    let overlap = |start: Instant, end: Instant| end.min(io[4]).saturating_duration_since(start.max(io[3])).as_secs_f64()*1e6;
++    let scans: Vec<_> = events.iter().filter(|(id,_,_,_,_)| (1..=4).contains(id)).collect();
++    assert_eq!(scans.len(), 64);
++    let threads: std::collections::HashSet<_> = scans.iter().map(|x| x.2).collect();
++    let total: f64 = scans.iter().map(|x| x.4.duration_since(x.3).as_secs_f64()*1e6).sum();
++    let receiver_overlap: f64 = scans.iter().filter(|x| x.2 == receiver).map(|x| overlap(x.3,x.4)).sum();
++    let all_overlap: f64 = scans.iter().map(|x| overlap(x.3,x.4)).sum();
++    let raw = scans.iter().map(|x| (x.0,x.1,format!("{:?}",x.2),
++        if x.3 >= io[3] { x.3.duration_since(io[3]).as_secs_f64()*1e6 } else { -io[3].duration_since(x.3).as_secs_f64()*1e6 },
++        if x.4 >= io[3] { x.4.duration_since(io[3]).as_secs_f64()*1e6 } else { -io[3].duration_since(x.4).as_secs_f64()*1e6 })).collect();
++    ([total,receiver_overlap,all_overlap,io[4].duration_since(io[3]).as_secs_f64()*1e6,scans.len() as f64,threads.len() as f64],raw)
++}
+ 
+ const MIB: usize = 1 << 20;
+ const PRESSURE_CAP: usize = MIB / 2;
+@@ -144,18 +178,13 @@
+     let samples: usize = std::env::var("RW_PLUG_SAMPLES").map_or(1000, |v| v.parse().unwrap());
+     assert!(samples > 0);
+     let remote = tokio::runtime::Builder::new_multi_thread()
+-        .worker_threads(2)
++        .worker_threads(std::env::var("RW_PLUG_FOYER_WORKERS").map_or(2, |v| v.parse().unwrap()))
+         .enable_all()
+         .build()
+         .unwrap();
+-    let workers: usize = std::env::var("RW_PLUG_WORKERS").map_or(8, |v| v.parse().unwrap());
+-    let mut caller_builder = if workers == 1 {
+-        tokio::runtime::Builder::new_current_thread()
+-    } else {
+-        let mut builder = tokio::runtime::Builder::new_multi_thread();
+-        builder.worker_threads(workers);
+-        builder
+-    };
++    let workers: usize = std::env::var("RW_PLUG_WORKERS").map_or(1, |v| v.parse().unwrap());
++    let mut caller_builder = if workers == 1 { tokio::runtime::Builder::new_current_thread() }
++        else { let mut builder = tokio::runtime::Builder::new_multi_thread(); builder.worker_threads(workers); builder };
+     let caller = caller_builder.enable_all().build().unwrap();
+     caller.block_on(async {
+         let registry = prometheus::Registry::new();
+@@ -195,17 +224,31 @@
+             assert!(table.0.meta.block_metas[..16].iter().map(|m| m.len.max(m.uncompressed_size) as usize).sum::<usize>() <= MIB);
+             tables.push(table);
+         }
++        let skip = std::env::var("RW_DECODE_MODE").is_ok_and(|v| v == "skip");
++        SKIP_SCAN_DECODE.set(skip).unwrap();
++        let mut predecoded = std::collections::HashMap::new();
++        for table in &tables[..4] {
++            for index in 0..16 {
++                let (range, capacity) = table.0.calculate_block_info(index);
++                let bytes = store.store().read(&store.get_sst_data_path(table.0.id), range).await.unwrap();
++                predecoded.insert((table.0.id.as_raw_id(), index), Block::decode(bytes, capacity).unwrap());
++            }
++        }
++        PREDECODED.set(predecoded).unwrap();
++        DECODE_EVENTS.lock().unwrap().reserve(65);
++        println!("DECODE_MODEL skip={skip}");
+         println!("FIXTURE arm={arm} cross={cross} G=128 P=32 N=16 B=16 cap={MIB} encoded={:?} decoded={:?}",
+             tables[0].0.meta.block_metas[..16].iter().map(|m| m.len).collect::<Vec<_>>(),
+             tables[0].0.meta.block_metas[..16].iter().map(|m| m.uncompressed_size).collect::<Vec<_>>());
+         let delay: u64 = std::env::var("RW_PLUG_DELAY_US").map_or(2000, |v| v.parse().unwrap());
+         backend.set_read_delay_for_test(Duration::from_micros(delay));
+-        let separate_tasks = std::env::var("RW_PLUG_TASKS").map_or(true, |v| v == "separate");
++        let separate_tasks = std::env::var("RW_PLUG_TASKS").is_ok_and(|v| v == "separate");
+         let mode = if arm == "R" { PrefetchMode::Range } else { PrefetchMode::Blockwise };
+-        println!("MODEL workers={workers} separate_tasks={separate_tasks} delay_us={delay}");
+         let physical = metrics.operation_size.with_label_values(&["read"]);
+         for case in ["cold16", "source_free", "source_pressure", "point", "single_cold", "mixed_points", "early_stop"] {
+             if let Ok(filter) = std::env::var("RW_PLUG_CASE") { if case != filter { continue; } }
++            let mut stages = Vec::new();
++            let mut decode_stats = Vec::new();
+             store.clear_block_cache().await.unwrap();
+             if case == "single_cold" {
+                 for idx in 1..16 {
+@@ -230,6 +273,7 @@
+                 let bytes = physical.get_sample_sum();
+                 let outer = store.read_metrics.block_cache_outer_fetch.get();
+                 let discarded = store.read_metrics.prefetch_discarded.get();
++                DECODE_EVENTS.lock().unwrap().clear();
+                 let start = Instant::now();
+                 let (first, total, point) = match case {
+                     "point" => {
+@@ -249,14 +293,22 @@
+                     "mixed_points" => {
+                         let point_store = store.clone();
+                         let point_table = tables[4].clone();
++                        let point_backend = backend.clone();
+                         let point = async move {
++                            *POINT_STAGES.lock().unwrap() = [None; 3];
++                            point_backend.reset_point_timing_for_test();
+                             let start = Instant::now();
+                             let block = point_store.get(&point_table.0, 0, CachePolicy::default(), &mut StoreLocalStatistic::default()).await.unwrap();
+                             let end = Instant::now();
++                            let marks = *POINT_STAGES.lock().unwrap();
++                            let marks = marks.map(Option::unwrap);
++                            let io = point_backend.point_timing_for_test();
++                            let stamps = [start, marks[0], io[0], io[1], io[2], io[3], io[4], marks[1], marks[2], end];
++                            let stages: [f64; 9] = std::array::from_fn(|i| stamps[i+1].duration_since(stamps[i]).as_secs_f64()*1e6);
+                             check_block(block, &point_table, 0);
+-                            end.duration_since(start).as_secs_f64()*1e6
++                            (end.duration_since(start).as_secs_f64()*1e6, stages)
+                         };
+-                        let (scans, point) = if separate_tasks {
++                        let (scans, (point, parts)) = if separate_tasks {
+                             let scans = tables[..4].iter().cloned().map(|table| {
+                                 let store = store.clone();
+                                 tokio::spawn(async move { scan(store, &table, mode, 16, 16).await })
+@@ -268,6 +320,12 @@
+                             let scans = join_all(tables[..4].iter().map(|t| scan(store.clone(), t, mode, 16, 16)));
+                             tokio::join!(scans, point)
+                         };
++                        if trial >= 20 {
++                            stages.push(parts);
++                            let (decode,raw) = summarize_decodes(backend.point_timing_for_test());
++                            decode_stats.push(decode);
++                            if trial < 23 { println!("DECODE_RAW {raw:?}"); }
++                        }
+                         (scans.iter().map(|x| x.0).fold(0., f64::max), scans.iter().map(|x| x.1).fold(0., f64::max), Some(point))
+                     }
+                     _ => {
+@@ -290,6 +348,8 @@
+                     data.discarded.push(store.read_metrics.prefetch_discarded.get() - discarded);
+                 }
+             }
++            println!("DECODE values={decode_stats:?}");
++            println!("STAGES workers={workers} tasks={separate_tasks} delay_us={delay} values={stages:?}");
+             drop(held);
+             assert_eq!(store.get_prefetch_memory_usage(), 0);
+             println!("DATA {{\"arm\":\"{arm}\",\"cross\":{cross},\"case\":\"{case}\",\"gets\":{:?},\"bytes\":{:?},\"outer\":{:?},\"first_us\":{:?},\"total_us\":{:?},\"point_us\":{:?},\"discarded\":{:?}}}", data.gets, data.bytes, data.outer, data.first, data.total, data.points, data.discarded);

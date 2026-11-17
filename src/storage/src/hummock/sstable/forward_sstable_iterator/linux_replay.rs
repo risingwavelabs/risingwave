@@ -82,7 +82,6 @@ fn linux_read_scheduler_replay() {
         config.read_scheduler.max_batch_requests = 16.try_into().unwrap();
         config.read_scheduler.max_read_bytes = (1usize << 20).try_into().unwrap();
         config.read_scheduler.max_gap_bytes = 0;
-        config.read_scheduler.prefetch_batch_wait_us = 100;
         config.read_scheduler.reuse_inflight_reads = true;
         let remote =
             build_remote_object_store(&url, object_metrics.clone(), "scheduler replay", Arc::new(config))

@@ -1,0 +1,21 @@
+--- a/src/storage/src/hummock/sstable_store.rs
++++ b/src/storage/src/hummock/sstable_store.rs
+@@ -587,6 +587,7 @@
+         let fetch_block = || {
+             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
+             async move {
++            let yield_before_decode = token.is_some();
+             outer_fetch.inc();
+             let block_data = match store
+                 .read_with_plug(&data_path, fetch_range.clone(), token)
+@@ -604,6 +605,10 @@
+                     return Err(HummockError::from(e));
+                 }
+             };
++            // Let other completed reads resume before decoding this window member.
++            if yield_before_decode {
++                tokio::task::yield_now().await;
++            }
+             let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+             Ok(block)
+         }.instrument(span.clone())

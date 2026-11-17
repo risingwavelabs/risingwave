@@ -1,0 +1,247 @@
+{
+  "date": "2026-11-16",
+  "base_commit": "3842b4d83fb6c401429c8faf618d1230821345e9",
+  "source_note": "Local module-boundary refactor and test import visibility fix applied; no scheduling algorithm changes.",
+  "foyer_commit": "0d624ea20adc70f5f517c27b202d0a794d6daabb",
+  "platform": {
+    "os": "Darwin",
+    "release": "27.0.0",
+    "arch": "arm64"
+  },
+  "rustc": "rustc 1.98.0-nightly (8b6558a02 2026-06-20)",
+  "profile": "dev",
+  "backend": "InMemObjectStore",
+  "caller_runtime": "Tokio current_thread",
+  "dedicated_workers": 2,
+  "limits": {
+    "G": 64,
+    "P": 32,
+    "B": 16,
+    "max_read_bytes": 262144
+  },
+  "sample_order": "caller runtime OFF then ON; configured wait 0,100,1000; shared_missing then ready_neighbors",
+  "scope": "Real pinned Foyer, including Psync disk cache, and production object-store API. Registration helper mirrors SstableStore; this is not a full SST iterator, MinIO, S3, Linux replay, or SF10 benchmark.",
+  "correctness": [
+    "cold neighbors merge into one GET",
+    "memory hit emits no GET before batch closes",
+    "mixed hot/cold excludes confirmed memory hit from candidates",
+    "disk hit emits no GET",
+    "stale positive disk hint still falls back before batch closes",
+    "disk-get waiter supplies external fallback",
+    "dropping lead consumer preserves a shared fetch; exactly one GET per cold key"
+  ],
+  "quantiles": "Sorted 100 observations: indices 49,94,98. ready_neighbors batch wait is the per-iteration mean of both reads; shared_missing records only the held cold read. caller latency ends at cold read completion (shared_missing) or both reads (ready_neighbors). Timing is diagnostic, not asserted.",
+  "source_sha256": {
+    "src/object_store/src/object/read_scheduler.rs": "76a60d6276f99f05cfe7c0df6231a0fa2b8d7d5be922b7aa62131b4cdadf953a",
+    "src/object_store/src/object/read_scheduler/batch.rs": "6b36abd36eb5b37cf3901c5ba559b7d5a002d01e9db7d9fbd3739e30e53850b1",
+    "src/object_store/src/object/read_scheduler/execution.rs": "4eab2fc3b9986af3565e62a1310999c334319b9b686e15f356caaa7395219c6b",
+    "src/object_store/src/object/read_scheduler/tests.rs": "5653dbfad8b36c858cc8397732c18d65a1cde77a937d5decf20f76c77cf123a7"
+  },
+  "probe_sha256": "888e47281a826aa0019cd4d2cd285817768dc3834bfdaf80e1a93d484122f7b1",
+  "results": [
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 46.5,
+        "p95": 65.8,
+        "p99": 78.8
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 49.5,
+        "p95": 57.8,
+        "p99": 91.8
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 1156.0,
+        "p95": 2280.2,
+        "p99": 2311.7
+      },
+      "caller_us": {
+        "p50": 1235.8,
+        "p95": 2361.5,
+        "p99": 2513.5
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 3.2,
+        "p95": 9.1,
+        "p99": 11.6
+      },
+      "caller_us": {
+        "p50": 67.7,
+        "p95": 199.1,
+        "p99": 252.2
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 2303.6,
+        "p95": 2355.3,
+        "p99": 2386.1
+      },
+      "caller_us": {
+        "p50": 2484.1,
+        "p95": 2664.8,
+        "p99": 2953.5
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": false,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 3.2,
+        "p95": 7.6,
+        "p99": 8.9
+      },
+      "caller_us": {
+        "p50": 64.8,
+        "p95": 128.5,
+        "p99": 161.9
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 42.0,
+        "p95": 68.3,
+        "p99": 187.6
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 0,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "caller_us": {
+        "p50": 50.8,
+        "p95": 67.9,
+        "p99": 145.2
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 1153.5,
+        "p95": 2282.8,
+        "p99": 2309.4
+      },
+      "caller_us": {
+        "p50": 1232.7,
+        "p95": 2384.0,
+        "p99": 2439.1
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 100,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 4.3,
+        "p95": 10.0,
+        "p99": 12.3
+      },
+      "caller_us": {
+        "p50": 73.6,
+        "p95": 164.5,
+        "p99": 223.3
+      }
+    },
+    {
+      "scenario": "shared_missing",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 200,
+      "batch_wait_us": {
+        "p50": 2297.5,
+        "p95": 2345.9,
+        "p99": 2378.4
+      },
+      "caller_us": {
+        "p50": 2392.2,
+        "p95": 2573.4,
+        "p99": 2767.0
+      }
+    },
+    {
+      "scenario": "ready_neighbors",
+      "configured_wait_us": 1000,
+      "dedicated_io_runtime": true,
+      "samples": 100,
+      "physical_gets": 100,
+      "batch_wait_us": {
+        "p50": 6.9,
+        "p95": 12.6,
+        "p99": 17.6
+      },
+      "caller_us": {
+        "p50": 94.6,
+        "p95": 197.7,
+        "p99": 280.7
+      }
+    }
+  ]
+}

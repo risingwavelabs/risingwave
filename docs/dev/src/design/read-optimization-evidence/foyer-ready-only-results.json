@@ -1,0 +1,448 @@
+{
+  "foyer_revision": "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5",
+  "platform": "macOS ARM64",
+  "validation": {
+    "scheduler": 22,
+    "sstable_store": 11,
+    "forward_iterator": 12
+  },
+  "sources": {
+    "Cargo.lock": "cde0c041d2c2354003fdad470f418669d528ced9e89670d00de327d3d49c66bb",
+    "src/storage/src/hummock/sstable_store.rs": "131c2416d48226993d6d5901a8393a7cfd76000ffa95ad09e628899ef6bcc6b3",
+    "docs/dev/src/design/read-optimization-evidence/foyer-batch-probe.rs": "a5505af26378ddb86751c12bb899cd16c616c5282442f68061b56ea9bbaa15a1"
+  },
+  "measurements": [
+    {
+      "policy": "ready_only",
+      "scenario": "shared_missing",
+      "wait_us": 0,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        47.5,
+        63.2,
+        72.5
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "ready_neighbors",
+      "wait_us": 0,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        46.0,
+        50.5,
+        52.3
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "shared_missing",
+      "wait_us": 100,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        36.0,
+        39.8,
+        70.8
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "ready_neighbors",
+      "wait_us": 100,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        41.8,
+        45.8,
+        53.8
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "shared_missing",
+      "wait_us": 1000,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        34.6,
+        37.0,
+        42.8
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "ready_neighbors",
+      "wait_us": 1000,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        40.3,
+        43.2,
+        48.0
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "shared_missing",
+      "wait_us": 0,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        47.0,
+        55.4,
+        77.5
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "ready_neighbors",
+      "wait_us": 0,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        43.5,
+        48.1,
+        54.2
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "shared_missing",
+      "wait_us": 100,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        37.3,
+        41.8,
+        71.2
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "ready_neighbors",
+      "wait_us": 100,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        43.2,
+        47.9,
+        58.8
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "shared_missing",
+      "wait_us": 1000,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        38.3,
+        52.4,
+        73.5
+      ]
+    },
+    {
+      "policy": "ready_only",
+      "scenario": "ready_neighbors",
+      "wait_us": 1000,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        43.3,
+        45.6,
+        47.8
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "shared_missing",
+      "wait_us": 0,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        47.5,
+        62.8,
+        73.5
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "ready_neighbors",
+      "wait_us": 0,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        46.0,
+        52.7,
+        58.7
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "shared_missing",
+      "wait_us": 100,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        1157.0,
+        2285.0,
+        2287.8
+      ],
+      "caller_us_p50_p95_p99": [
+        1239.3,
+        2364.4,
+        2371.4
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "ready_neighbors",
+      "wait_us": 100,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        3.6,
+        4.9,
+        5.6
+      ],
+      "caller_us_p50_p95_p99": [
+        65.1,
+        85.3,
+        91.5
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "shared_missing",
+      "wait_us": 1000,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        2288.2,
+        2318.7,
+        2342.7
+      ],
+      "caller_us_p50_p95_p99": [
+        2413.9,
+        2538.0,
+        2572.5
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "ready_neighbors",
+      "wait_us": 1000,
+      "dedicated": false,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        5.6,
+        8.9,
+        11.3
+      ],
+      "caller_us_p50_p95_p99": [
+        95.7,
+        142.3,
+        172.6
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "shared_missing",
+      "wait_us": 0,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        56.3,
+        71.9,
+        84.3
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "ready_neighbors",
+      "wait_us": 0,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "caller_us_p50_p95_p99": [
+        52.3,
+        59.0,
+        75.1
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "shared_missing",
+      "wait_us": 100,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        1166.3,
+        2292.4,
+        2299.7
+      ],
+      "caller_us_p50_p95_p99": [
+        1251.1,
+        2375.7,
+        2398.6
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "ready_neighbors",
+      "wait_us": 100,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        5.2,
+        6.9,
+        7.5
+      ],
+      "caller_us_p50_p95_p99": [
+        75.8,
+        93.2,
+        103.5
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "shared_missing",
+      "wait_us": 1000,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 200,
+      "batch_wait_us_p50_p95_p99": [
+        2306.9,
+        2346.7,
+        2370.4
+      ],
+      "caller_us_p50_p95_p99": [
+        2433.7,
+        2583.8,
+        2757.9
+      ]
+    },
+    {
+      "policy": "legacy_all_pending",
+      "scenario": "ready_neighbors",
+      "wait_us": 1000,
+      "dedicated": true,
+      "iterations": 100,
+      "gets": 100,
+      "batch_wait_us_p50_p95_p99": [
+        6.5,
+        9.6,
+        10.9
+      ],
+      "caller_us_p50_p95_p99": [
+        92.6,
+        150.0,
+        171.9
+      ]
+    }
+  ]
+}
