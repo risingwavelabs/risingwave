@@ -32,3 +32,50 @@ select (select x from t) x, 1 one;
 
 statement ok
 drop table t;
+
+# Without a cast, `=` compares the int primary key with the bigint column directly.
+statement ok
+create table t_pk (pk int primary key, v int);
+
+statement ok
+insert into t_pk values (1, 10), (2, 20), (3, 30);
+
+statement ok
+create table t_outer (a bigint);
+
+statement ok
+insert into t_outer values (1), (3), (4);
+
+query II
+select a, (select v from t_pk where t_pk.pk = t_outer.a) from t_outer order by a;
+----
+1 10
+3 30
+4 NULL
+
+query I
+select a from t_outer where (select v from t_pk where t_pk.pk = t_outer.a) = 30;
+----
+3
+
+statement ok
+create table t_pk_bigint (pk bigint primary key, v int);
+
+statement ok
+insert into t_pk_bigint values (1, 100), (3, 300), (5000000000, 500);
+
+query II
+select pk, (select v from t_pk_bigint where t_pk_bigint.pk = t_pk.pk) from t_pk order by pk;
+----
+1 100
+2 NULL
+3 300
+
+statement ok
+drop table t_pk_bigint;
+
+statement ok
+drop table t_outer;
+
+statement ok
+drop table t_pk;
