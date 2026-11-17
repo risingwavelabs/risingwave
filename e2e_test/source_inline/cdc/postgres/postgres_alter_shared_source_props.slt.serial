@@ -73,12 +73,12 @@ WITH pg_props_plans AS (
 )
 SELECT count(*), bool_and(
     cdc_desc->'connectProperties'->>'password' IS NULL
-    AND (cdc_desc->'secretRefs'->'password'->>'secretId')::int =
-        (SELECT id FROM rw_catalog.rw_secrets WHERE name = 'pg_props_old')
+    AND (cdc_desc->'secretRefs'->'password'->>'secretId')::int = s.id
     AND cdc_desc->'connectProperties'->>'schema.name' = 'rw_cdc_props'
     AND cdc_desc->'connectProperties'->>'table.name' = 'orders'
     AND cdc_desc->'connectProperties'->>'database.name' = '${PGDATABASE:postgres}'
-) FROM pg_props_plans;
+) FROM pg_props_plans
+JOIN rw_catalog.rw_secrets s ON s.name = 'pg_props_old';
 ----
 2 t
 
@@ -97,9 +97,9 @@ WITH pg_props_plans AS (
       AND 'STREAM_CDC_SCAN' = ANY(f.flags)
 )
 SELECT count(*), bool_and(
-    (cdc_desc->'secretRefs'->'password'->>'secretId')::int =
-        (SELECT id FROM rw_catalog.rw_secrets WHERE name = 'pg_props_new')
-) FROM pg_props_plans;
+    (cdc_desc->'secretRefs'->'password'->>'secretId')::int = s.id
+) FROM pg_props_plans
+JOIN rw_catalog.rw_secrets s ON s.name = 'pg_props_new';
 ----
 2 t
 
