@@ -3480,9 +3480,9 @@ does not require also setting a legacy boolean. Ordinary point gets are unchange
 These settings require a compute-process restart.
 
 Blockwise and ColdRanges share `max_blocks`/`max_bytes`; Range retains its existing
-`storage.max_prefetch_block_number` and memory-budget behavior. ColdRanges requires
-cache-fill policy and an eligible multi-block window; otherwise it uses demand
-reads. No Foyer or old Range algorithm changes were made. The optional ColdRanges
+`storage.max_prefetch_block_number` and memory-budget behavior. At this stage,
+ColdRanges required cache-fill policy and an eligible multi-block window;
+NotFill/Disable support was added in the cache-policy follow-up below. No Foyer or old Range algorithm changes were made. The optional ColdRanges
 state is now boxed so disabled iterators retain only one pointer, and its await is
 included in existing `SeekAwait::Prefetch` profiling.
 
@@ -3577,3 +3577,280 @@ and `cold_ranges`, leave per-path mode overrides unset, restart compute processe
 and repeat the same workload from the same cache state. Keep disk-cache settings
 and all other read-optimization settings fixed. This configuration does not itself
 clear caches or create a cold workload.
+
+### ColdRanges prefetch memory admission fix (2026-11-17)
+
+Review found that ColdRanges checked the shared counter before a separate
+unconditional increment, allowing concurrent windows to exceed the configured
+prefetch budget. It also charged only max(compressed, decoded) per block, although
+raw range buffers coexist with decoded blocks. The decoded restart-point vector
+is a separate allocation not represented by the block's raw byte length.
+
+The fix leaves window selection (`max_blocks`, `max_bytes`), range segmentation,
+IO routing, decoding placement, and cache policy unchanged. Before any cache
+lookup or private read task is created, ColdRanges now attempts one atomic,
+non-waiting reservation against `prefetch_buffer_capacity_mb`. Admission requires
+`current + reservation <= capacity` with checked arithmetic. Zero capacity,
+insufficient remaining capacity, and arithmetic overflow cannot admit a window.
+Failure returns to the existing demand path, without waiting for another iterator
+to release its window.
+
+Reservation covers every selected block, including hits and disk hints: compressed
+bytes plus a conservative decoded block weight, block keys, both window queue slot
+arrays, and the window/tracker structure. The decoded estimate includes the Block
+object, payload, hitmap, and a restart-point bound derived from the raw block's
+u32-offset encoding. This intentionally overestimates actual restart counts;
+metadata does not expose their count before IO. Both queues are preallocated to
+the selected window length. The window's byte-selection budget still uses its
+existing max(compressed, decoded) definition, so this fix does not silently shorten
+otherwise admissible windows.
+
+Reservations remain attached to the whole window and its private IO tasks.
+Returning data to Foyer does not release them early. Cancellation requests abort
+private reads; their Arc-held reservation is released when the task actually exits,
+including abort-before-first-poll. Existing Foyer-owned shared producers are not
+cancelled by this mechanism.
+
+This is a bound on estimated ColdRanges reservations, not process RSS. Foyer and
+object-store/client internal allocations, allocator rounding, decoder scratch
+space, and potentially larger shared scheduler backing buffers are not an exact
+part of this estimate. Normal demand reads and the block cache have their own
+memory lifecycle. Old Range remains unchanged and still uses legacy soft
+admission: its usage is observed by ColdRanges, but concurrent legacy Range
+reservations can independently exceed the shared counter's capacity. Do not claim
+a strict cross-strategy budget when mixing both implementations.
+
+A separate configuration wiring bug was fixed: `extract_storage_memory_config`,
+used by compactor/replay, read `shared_buffer_capacity_mb` as the prefetch budget
+and ignored the actual prefetch option. It now reads `prefetch_buffer_capacity_mb`.
+CN's separate memory configuration path already read the correct field. Defaults
+with neither override set are unchanged.
+
+New metric: `state_store_cold_range_prefetch_budget_denied` counts windows refused
+by admission. Under the same global budget, the more conservative charge can
+reduce concurrent prefetch windows and increase demand fallbacks; monitor this
+counter rather than attributing those requests to cache-gap segmentation.
+
+Validation: storage test target compiled; 47 targeted tests passed (block stream 4,
+block decoding 7, cold ranges 8, SST store 11, iterator 13, routing 2, options 2).
+All 15 common configuration tests also passed, including generated config/docs.
+New cases cover exact/insufficient/zero capacity, integer overflow, concurrent
+reservations held across threads, eight actual scans competing for two windows,
+zero-budget iterator seeks through demand reads, cancellation before first poll,
+and compressed/uncompressed block estimates with different restart intervals.
+With exactly enough reservation, 16 fully cold blocks still produce one logical
+range and one physical GET. Existing hot-gap concurrency, disk-hit/stale-hint,
+corrupt/truncated-read fallback, seek, and cancellation tests passed.
+
+No Foyer, object-store scheduler, old Range implementation, or decode scheduling
+changes were made. `git diff --check` and metrics inventory validation passed.
+This round does not claim an end-to-end latency or RSS benchmark result.
+
+### ColdRanges cache-policy completion (2026-11-17)
+
+ColdRanges now accepts Fill, NotFill, and Disable using the same bounded window,
+atomic memory admission, eager private IO submission, and caller-side decode.
+Fill retains the existing cache insertion and priority behavior. NotFill reuses
+memory/disk hits but holds remotely fetched blocks as owned values without
+inserting them into Foyer. Stale disk hints fall back through the ordinary NotFill
+get path and do not refill the cache. Disable bypasses all memory/index/cache-get
+lookups and reads the bounded window as one contiguous range, retaining owned
+blocks. The existing disable_block_cache failpoint still bypasses prefetch and
+uses ordinary demand reads, preserving its prior behavior.
+
+Storage test compilation passed with no new warnings. All 49 targeted tests passed:
+block stream 4, block decoding 7, cold ranges 10, SST store 11, iterator 13,
+routing 2, and options 2. Cases cover memory/disk hot gaps for all three policies,
+owned-vs-cache entry identity, Fill priorities, absence of new cache entries for
+NotFill/Disable, no disk-hit promotion under Disable, stale-hint NotFill fallback,
+all-hot reads after object deletion, and pre-consumption IO submission/cancellation.
+For a seven-block window with block 3 hot, Fill/NotFill read two cold segments
+(six blocks), while Disable reads one segment (all seven). For 16 fully cold
+blocks, all three policies still produce one physical GET when budget permits.
+Zero/insufficient budget, full scan and repeated seek, scan upper bounds, truncated
+reads and corrupt speculative neighbors are also covered for the new policies.
+No scheduler, Foyer, old Range algorithm, or decode runtime changes were made.
+No performance or end-to-end Q18 claims are made by these correctness tests.
+
+Follow-up code review against the user's Q18 observations confirmed three remaining
+issues, not fixed by cache-policy completion:
+
+- Singleton cold runs created by splitting a larger window still use direct range
+  reads. Only an originally singleton window takes the ordinary demand path. Under
+  Fill this bypasses Foyer fetch ownership; multi-block direct reads likewise do not
+  participate in per-block single-flight. Scheduler in-flight reuse requires full
+  coverage and cannot attach a later larger range to a smaller active read.
+- ColdRanges seek boxes its refill/consume future before ruling out a singleton
+  scan bound. Short prefix initialization can pay an unnecessary allocation.
+- Consuming a cold run decodes and (under Fill) inserts the entire run before
+  returning its first block. This is the retained old-Range-style behavior; its
+  Q18 latency contribution has not been isolated.
+
+The user's table-38 figures (42,462 cold segments representing 42,463 blocks) make
+post-split singleton handling a priority. Segment counts are logical submissions,
+not proof that every segment caused a separate or duplicate physical GET. Any fix
+must preserve eager submission of later runs and respect NotFill/Disable rather
+than unconditionally routing them through Foyer get_or_fetch.
+
+### ColdRanges singleton sharing and demand decode (2026-11-18)
+
+This supersedes the singleton and eager-decode behavior described in the previous
+review. No Foyer dependency, scheduler implementation, old Range implementation,
+or runtime assignment changes were made.
+
+After cache-gap splitting, singleton **Fill** segments now register an ordinary
+`get_block_response` while constructing the window. Its Fill branch registers
+Foyer ownership without awaiting IO, so all cold segments still start before any
+row consumption. Consuming a singleton waits for that shared response; dropping
+an iterator does not abort a producer needed by a point-read waiter. NotFill and
+Disable retain their non-filling direct reads. Multi-block direct reads still do
+not claim per-block ownership: an existing A request cannot cover a later direct
+A+B range. This change fixes singleton sharing, not general overlap deduplication.
+
+Before boxing the ColdRanges future, the iterator releases an exhausted window
+and checks whether at least two blocks fit the scan bound, block limit and byte
+limit. A nonempty existing window still supplies its final block even when only
+one block remains before the bound.
+
+Multi-block reads now retain one raw `Bytes` buffer plus a block cursor. Each
+`next` decodes/copies only its current block on the caller runtime. Fill inserts
+that consumed block with the existing priority rule; NotFill/Disable return an
+owned block. Unconsumed blocks are not decoded or inserted by the direct-read
+path. Singleton shared producers still decode/fill normally in Foyer. All direct
+IO is still submitted eagerly; this is incremental block delivery after a whole
+range read, not streaming an unfinished HTTP response. Corruption in a later
+block is reported when that block is consumed, without refetching a valid head.
+
+The raw run can live longer, and later blocks become visible in Foyer later.
+Consequently this does not improve sharing with intervening point reads of an
+unconsumed block, and may widen that existing direct-range sharing gap. Keep the
+conservative whole-window reservation until the window is dropped, including
+while retaining its raw bytes. Private pending reads retain their reservation
+through cancellation. Foyer-owned shared producers have ordinary cache-fetch
+lifetime rather than iterator-owned cancellation. No claim of a global RSS bound
+or additional total-decode throughput is made.
+
+Metrics now separate `state_store_cold_range_prefetch_single_blocks` (shared
+singleton registrations, not physical GETs) from `cold_range_prefetch_read_bytes`
+(direct range submissions). Window runs and internal-gap metrics still include
+singleton segments. Singletons use ordinary block total/miss statistics rather
+than direct-prefetch block counts.
+
+Validation: the storage test target compiled; all 53 targeted tests passed (block
+stream 4, block decoding 7, cold ranges 14, SST store 11, iterator 13, routing 2,
+options 2). The final buffered-neighbor error extension was compiled and rerun
+successfully through the actual iterator. Added tests cover a split singleton
+joining an existing gated Foyer producer, eager cold/hot/cold submission, point
+waiter survival after dropping the window, lazy decode/fill for all three cache
+policies, delayed corruption reporting and reservation release. Existing tests
+cover 16 fully cold blocks in one GET, disk hits/stale hints, full scans, seeks,
+scan bounds, budget rejection and cancellation. Metrics inventory and diff
+whitespace validation passed.
+
+An ignored `cold_range_delivery_probe` compares the previous eager decode with
+incremental decode using the same local debug build and in-memory backend:
+16 contiguous blocks of about 32 KiB, Fill, no disk cache or scheduler, five
+warmups and 30 measured repetitions per case. Both versions assert one physical
+GET per window. The probe waits until IO completes to isolate delivery CPU while
+also recording elapsed time including IO. The delay is a Tokio test timer, not a
+network model; timer quantization limits end-to-end conclusions.
+
+| Delay | Consumed blocks | First block before / after (us) | IO-ready to first before / after (us) | Total before / after (us) |
+| --- | --- | --- | --- | --- |
+| 0 ms | 1 | 528 / 56 | 500 / 31 | 530 / 56 |
+| 0 ms | 16 | 506 / 60 | 479 / 32 | 509 / 533 |
+| 2 ms | 1 | 2993 / 2998 | 450 / 35 | 2996 / 2998 |
+| 2 ms | 16 | 2992 / 2531 | 445 / 43 | 2995 / 2984 |
+
+These are medians from a small diagnostic, not a Q18 or production benchmark.
+First-block delivery CPU decreases substantially; complete-scan CPU is not
+removed (the zero-delay full scan was about 5% slower in this sample). With IO
+included, first-block improvement is not uniform. The defensible gain is reduced
+work before first delivery and avoidance of decoding/filling unused neighbors.
+
+Evidence: `read-optimization-evidence/cold-range-lazy-validation.json`,
+`cold-range-lazy-source-identities.json`, and `cold-range-lazy-logs.json.gz`.
+
+### Observing overlap without adding sharing (2026-11-18)
+
+Scheduler single-flight remains enabled by `reuse_inflight_reads`: a new read
+fully covered by an active same-object GET can join it, subject to follower
+capacity. It neither stitches a partially overlapping request out of multiple
+GETs nor retains completed results for later readers. This round adds diagnostics
+only, with no new sharing, timer, admission rule, Foyer change, or old Range
+algorithm change.
+
+Two observations distinguish the remaining cases:
+
+| Observation | Count | Bytes |
+| --- | --- | --- |
+| New physical group dispatch partially overlaps an older same-object flight that cannot cover it | `object_store_read_scheduler_events{event="partial_overlap_dispatch"}` | `object_store_read_scheduler_partial_overlap_bytes` |
+| External block fallback finds its bytes already returned but not yet decoded/published in a live ColdRanges window | `state_store_cold_range_buffered_overlap_reads{cache_policy="fill\|not_fill\|disable"}` | `state_store_cold_range_buffered_overlap_bytes` with the same label |
+
+The scheduler computes intersections using existing active-flight metadata, after
+trying complete-coverage reuse, and increments only when the physical group read
+is polled. A dispatch is counted once; intersections with several old flights are
+unioned so the same byte is not counted several times within that dispatch.
+Different object paths and adjacent non-overlapping ranges are excluded. An old
+range that fully covers the new one is excluded from this partial-overlap metric,
+even if reuse is unavailable because of follower capacity. Only the sharing-enabled
+group path supplies active flights: the metric is not a complete overlap census
+when the scheduler/reuse option is disabled, and does not instrument standalone
+fallback retries. The snapshot is taken at flight registration, not by tracing
+network transfers. Counts include attempted reads that later fail. Repeated
+subsequent dispatches can count the same file bytes again.
+
+For SST reads, same object path means the same SST object. Scheduler metrics are
+generic and can also include vector/other object reads on that CN. They deliberately
+have no SST/path/table label. For a mixed workload, do not attribute the aggregate
+exclusively to SSTs without additional tracing.
+
+The second observation uses only metadata `(sst_id, remaining byte interval)`.
+A successful, correctly sized ColdRanges read registers it inside the IO task,
+so even a completed task whose result the iterator has not received is visible.
+Consumption advances the interval after decode and optional Fill insertion;
+dropping the buffered result/window unregisters it. No Bytes or futures are held
+by the index, no response is served from it, and no read waits for it. Metadata
+has a conservative per-run allowance in the existing prefetch budget. Lifecycle
+updates use one short metadata mutex; consumption updates its offset atomically.
+
+Only polled ordinary-block external fallbacks check that index. This includes
+short-prefix/demand reads and singleton Fill producers, not only SQL point gets.
+Memory/disk hits and Foyer followers do not independently increment it. Several
+windows retaining the same block still yield one count per external fallback.
+Fill, NotFill and Disable are separated because the latter two can intentionally
+re-read without filling cache. This is an observation of a reuse opportunity,
+not proof of a physical duplicate GET: scheduler reuse, subsequent cancellation,
+and failed reads can change physical IO. It also does not count a later direct
+ColdRanges request against another completed window. Both metrics are concurrent
+snapshots, and a read can appear in both categories; do not add them together as
+a total of duplicated GETs or bytes.
+
+For a run shorter than one hour, select the relevant CN/job/instance series and
+use the matching run interval (examples aggregate all selected instances):
+
+```promql
+sum(increase(object_store_read_scheduler_events{event="partial_overlap_dispatch"}[1h]))
+sum(increase(object_store_read_scheduler_partial_overlap_bytes[1h]))
+sum by (cache_policy) (increase(state_store_cold_range_buffered_overlap_reads[1h]))
+sum by (cache_policy) (increase(state_store_cold_range_buffered_overlap_bytes[1h]))
+```
+
+No new enable switch is needed. Counters with no observations may have no exported
+series; missing series can be displayed as zero. Compare these counts/bytes with
+physical group reads and external block fetches, respectively, over the same run.
+A low first count argues against general partial-flight stitching; a high second
+Fill count motivates evaluating shared completed-range bytes. Neither counter on
+its own establishes an end-to-end speedup from changing ownership.
+
+Validation: storage and object-store test targets compiled; 73 related tests
+passed (scheduler 26, ColdRanges and observation index 17, SST store 11, iterator
+13, block stream 4, routing 2). New tests cover full-coverage reuse exclusion,
+partial byte-union accounting, different objects, flight completion, observation
+before iterator consumption, Foyer follower/cache-hit exclusion, all cache
+policies, consumed-block exclusion and dropping an unconsumed completed task.
+Metrics inventory and `git diff --check` passed. No workload frequency or latency
+result is claimed before running the instrumented build on the user's workload.
+Evidence: `read-optimization-evidence/cold-range-overlap-metrics-validation.json`,
+`cold-range-overlap-metrics-source-identities.json`, and
+`cold-range-overlap-metrics-logs.json.gz`.

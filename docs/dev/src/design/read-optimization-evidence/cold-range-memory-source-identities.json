@@ -1,0 +1,8 @@
+{
+  "src/common/src/config/storage.rs": "c5ce30583a8a0304b74c224f256307e04aa3a0395bee7f2b7684081e2d45ded8",
+  "src/storage/src/hummock/block_stream.rs": "b995f3acc8fdebabc0ac899ff61e88b471b5b18bf7b618a1c5be03dfd810f102",
+  "src/storage/src/hummock/sstable/block.rs": "1027f3c0504ac52ddc19c4b15776180959fb09ab70fc14721ec9381f6d5c0f16",
+  "src/storage/src/hummock/sstable_store/cold_range.rs": "a169145319c117f0490b8d7a53ffa655dcc8c6a59c4680d3c8cd8bb7ef08b19c",
+  "src/storage/src/monitor/hummock_state_store_metrics.rs": "cd1dc7faff45d2c24636f9402b9faae99836afd2fe4748087d0540f36608fe50",
+  "src/storage/src/opts.rs": "ba6cc675189b33f8d69a37099d333c8be59f0c892968238bf2409737b1f6cbe3"
+}

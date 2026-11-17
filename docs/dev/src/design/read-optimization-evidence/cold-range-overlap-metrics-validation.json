@@ -1,0 +1,33 @@
+{
+  "tests": [
+    {
+      "case": "object::read_scheduler::tests",
+      "passed": 26
+    },
+    {
+      "case": "hummock::sstable_store::cold_range",
+      "passed": 17
+    },
+    {
+      "case": "hummock::sstable_store::tests",
+      "passed": 11
+    },
+    {
+      "case": "hummock::sstable::forward_sstable_iterator::tests",
+      "passed": 13
+    },
+    {
+      "case": "hummock::block_stream::tests",
+      "passed": 4
+    },
+    {
+      "case": "test_explicit_scan_prefetch_modes",
+      "passed": 1
+    },
+    {
+      "case": "test_backfill_prefetch_modes_are_independent",
+      "passed": 1
+    }
+  ],
+  "passed": 73
+}

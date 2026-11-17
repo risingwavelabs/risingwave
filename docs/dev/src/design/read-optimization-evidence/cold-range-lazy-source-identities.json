@@ -1,0 +1,15 @@
+{
+  "head": "6c1ab582177236100bb178b939e64191051acc5f",
+  "baseline": "Local memory/cache-policy fixes plus the same delivery probe, before singleton and lazy-decode edits; not remote HEAD",
+  "before_cold_range_sha256": "d165ece883b5061e3ac478a971c1acc6559eafff70035525bfd66a82e1a5bf1b",
+  "current_rust_sources": {
+    "src/common/src/config/storage.rs": "c5ce30583a8a0304b74c224f256307e04aa3a0395bee7f2b7684081e2d45ded8",
+    "src/storage/src/hummock/block_stream.rs": "b995f3acc8fdebabc0ac899ff61e88b471b5b18bf7b618a1c5be03dfd810f102",
+    "src/storage/src/hummock/sstable/block.rs": "1027f3c0504ac52ddc19c4b15776180959fb09ab70fc14721ec9381f6d5c0f16",
+    "src/storage/src/hummock/sstable/forward_sstable_iterator.rs": "847c630eb5397985e5c9ccba922c737f60f830ed0ede2dc3ee99e475101f89bb",
+    "src/storage/src/hummock/sstable_store.rs": "681e37b64c76f5007796256c5d94baef9b5cd246a5e6deb1db876d955ec276e9",
+    "src/storage/src/hummock/sstable_store/cold_range.rs": "477998fe51c3f94212db40874cf992bcf5082e10b5a34a4ed16dd63f5455ae83",
+    "src/storage/src/monitor/hummock_state_store_metrics.rs": "ec2572ae8ceeb9b513391f350f23b2fcb258022c40a1519b539bb3e7260ad487",
+    "src/storage/src/opts.rs": "ba6cc675189b33f8d69a37099d333c8be59f0c892968238bf2409737b1f6cbe3"
+  }
+}

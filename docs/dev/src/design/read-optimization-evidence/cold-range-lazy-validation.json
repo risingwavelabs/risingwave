@@ -1,0 +1,39 @@
+{
+  "targeted_tests": [
+    {
+      "case": "hummock::block_stream::tests",
+      "passed": 4
+    },
+    {
+      "case": "hummock::sstable::block::tests",
+      "passed": 7
+    },
+    {
+      "case": "hummock::sstable_store::cold_range::tests",
+      "passed": 14
+    },
+    {
+      "case": "hummock::sstable_store::tests",
+      "passed": 11
+    },
+    {
+      "case": "hummock::sstable::forward_sstable_iterator::tests",
+      "passed": 13
+    },
+    {
+      "case": "test_explicit_scan_prefetch_modes",
+      "passed": 1
+    },
+    {
+      "case": "test_backfill_prefetch_modes_are_independent",
+      "passed": 1
+    },
+    {
+      "case": "opts::tests",
+      "passed": 2
+    }
+  ],
+  "targeted_passed": 53,
+  "final_buffered_error_test_passed": true,
+  "probe_before_and_after_passed": true
+}

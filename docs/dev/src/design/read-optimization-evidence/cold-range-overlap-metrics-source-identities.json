@@ -1,0 +1,18 @@
+{
+  "head": "6c1ab582177236100bb178b939e64191051acc5f",
+  "sources": {
+    "src/common/src/config/storage.rs": "c5ce30583a8a0304b74c224f256307e04aa3a0395bee7f2b7684081e2d45ded8",
+    "src/object_store/src/object/object_metrics.rs": "fdd6086e2f44fff63ccc7479923d8f45735a0b1022b34c21c28ca8694367d8f8",
+    "src/object_store/src/object/read_scheduler.rs": "b33d09edc3821a1c7560a98f1a7de96a9f4f8e4f87371dc76a05b8357c57b12b",
+    "src/object_store/src/object/read_scheduler/execution.rs": "47861e3d59e4566c8e2fdce0c18edc72e88a31536c35631df3a6dd21c4cae5d7",
+    "src/object_store/src/object/read_scheduler/tests.rs": "1f0269052474d05f162ce7c43da7a3cc61355d5cc28b6e8aa04af481ed57b7fc",
+    "src/storage/src/hummock/block_stream.rs": "b995f3acc8fdebabc0ac899ff61e88b471b5b18bf7b618a1c5be03dfd810f102",
+    "src/storage/src/hummock/sstable/block.rs": "1027f3c0504ac52ddc19c4b15776180959fb09ab70fc14721ec9381f6d5c0f16",
+    "src/storage/src/hummock/sstable/forward_sstable_iterator.rs": "847c630eb5397985e5c9ccba922c737f60f830ed0ede2dc3ee99e475101f89bb",
+    "src/storage/src/hummock/sstable_store.rs": "a777aa146eeda579be112d7444c3db278183dae6c7b8d0b218bb2dc77893013d",
+    "src/storage/src/hummock/sstable_store/cold_range.rs": "840de628f05388331c563a0cd2e15dc328485c840b7d05b0e543dac9fff54ae1",
+    "src/storage/src/monitor/hummock_state_store_metrics.rs": "3f15b606249698323d3e9af2bbe4597dbdc8a7907c93128bbea94290dfd40d57",
+    "src/storage/src/opts.rs": "ba6cc675189b33f8d69a37099d333c8be59f0c892968238bf2409737b1f6cbe3",
+    "src/storage/src/hummock/sstable_store/cold_range_observation.rs": "9f2426fabd544f25050d06ba066ec9f99a33eddd076e767e78e146ebd9cc1bdf"
+  }
+}
