@@ -386,7 +386,7 @@ pub(crate) fn sanity_check_for_table_on_cdc_source(
 /// Never infer this from the first relation event: it may include DDL performed while offline.
 pub(crate) async fn bind_cdc_table_projection(
     options: &WithOptionsSecResolved,
-    columns: &[ColumnCatalog],
+    column_defs: &[ColumnDef],
     has_wildcard: bool,
 ) -> Result<Option<CdcTableProjection>> {
     if options.get(UPSTREAM_SOURCE_KEY).map(String::as_str) != Some(POSTGRES_CDC_CONNECTOR)
@@ -402,23 +402,37 @@ pub(crate) async fn bind_cdc_table_projection(
         let (properties, secret_refs) = options.clone().into_parts();
         let config = ExternalTableConfig::try_from_btreemap(properties, secret_refs)
             .context("failed to extract external table config")?;
-        PostgresExternalTable::discover_column_names(
+        let upstream_column_names = PostgresExternalTable::discover_column_names(
             &config.pg_connection_config()?,
             &config.schema,
             &config.table,
         )
-        .await?
-        .into_iter()
-        .filter(|name| {
-            !columns
-                .iter()
-                .any(|column| !column.is_generated() && column.name() == name)
-        })
-        .collect()
+        .await?;
+        excluded_cdc_column_names(upstream_column_names, column_defs)
     };
     Ok(Some(CdcTableProjection {
         excluded_column_names,
     }))
+}
+
+fn excluded_cdc_column_names(
+    upstream_column_names: Vec<String>,
+    column_defs: &[ColumnDef],
+) -> Vec<String> {
+    // Generated expressions have not been bound into ColumnCatalog yet. Inspect the SQL
+    // options so a generated column does not select an upstream column with the same name.
+    upstream_column_names
+        .into_iter()
+        .filter(|name| {
+            !column_defs.iter().any(|column| {
+                column.name.real_value() == *name
+                    && !column
+                        .options
+                        .iter()
+                        .any(|option| matches!(option.option, ColumnOption::GeneratedColumns(_)))
+            })
+        })
+        .collect()
 }
 
 /// Derive the schema of a CDC table from its upstream external table.
@@ -479,6 +493,44 @@ pub(crate) fn bind_cdc_table_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cdc_projection_excludes_upstream_generated_column_names() {
+        use risingwave_sqlparser::ast::Statement;
+        use risingwave_sqlparser::parser::Parser;
+
+        for (sql, expected) in [
+            (
+                "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR, email VARCHAR AS (name))",
+                vec!["email", "Email"],
+            ),
+            (
+                "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR, email VARCHAR)",
+                vec!["Email"],
+            ),
+            (
+                "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR, \"Email\" VARCHAR, email VARCHAR AS (name))",
+                vec!["email"],
+            ),
+        ] {
+            let Statement::CreateTable { columns, .. } =
+                Parser::parse_sql(sql).unwrap().pop().unwrap()
+            else {
+                unreachable!()
+            };
+            assert_eq!(
+                excluded_cdc_column_names(
+                    ["id", "name", "email", "Email"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                    &columns,
+                ),
+                expected,
+                "{sql}",
+            );
+        }
+    }
 
     fn test_schema_table_name() -> SchemaTableName {
         SchemaTableName {

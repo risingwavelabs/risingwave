@@ -30,6 +30,20 @@ statement ok
 CREATE TABLE cdc_full_projection (*)
 FROM s_cdc_subset_projection TABLE 'public.cdc_subset_projection';
 
+# The generated email must not select the upstream email with the same name.
+statement ok
+CREATE TABLE cdc_generated_projection (
+    id integer PRIMARY KEY,
+    name varchar,
+    email varchar AS (name)
+)
+FROM s_cdc_subset_projection TABLE 'public.cdc_subset_projection';
+
+query ITT retry 30 backoff 1s
+SELECT * FROM cdc_generated_projection ORDER BY id;
+----
+1 snapshot snapshot
+
 query IT retry 30 backoff 1s
 SELECT * FROM cdc_subset_projection ORDER BY id;
 ----
@@ -50,6 +64,12 @@ SELECT * FROM cdc_subset_projection ORDER BY id;
 1 snapshot
 2 streaming
 
+query ITT retry 30 backoff 1s
+SELECT * FROM cdc_generated_projection ORDER BY id;
+----
+1 snapshot snapshot
+2 streaming streaming
+
 statement ok
 FLUSH;
 
@@ -66,6 +86,16 @@ SELECT * FROM cdc_subset_projection ORDER BY id;
 1 snapshot
 2 streaming
 3 recovered
+
+query ITT retry 30 backoff 1s
+SELECT * FROM cdc_generated_projection ORDER BY id;
+----
+1 snapshot snapshot
+2 streaming streaming
+3 recovered recovered
+
+statement ok
+DROP TABLE cdc_generated_projection;
 
 # A genuinely new column must still be added, without exposing the old omitted column.
 system ok

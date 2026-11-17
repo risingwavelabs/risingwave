@@ -1151,7 +1151,7 @@ pub(super) async fn handle_create_table_plan(
             reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let cdc_table_projection =
-                bind_cdc_table_projection(&cdc_with_options, &columns, wildcard_idx.is_some())
+                bind_cdc_table_projection(&cdc_with_options, &column_defs, wildcard_idx.is_some())
                     .await?;
 
             let context: OptimizerContextRef =
