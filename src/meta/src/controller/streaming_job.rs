@@ -2970,7 +2970,9 @@ impl CatalogController {
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
         skip_alter_on_fly_check: bool,
     ) -> MetaResult<WithOptionsSecResolved> {
-        let inner = self.inner.read().await;
+        // Fragment mutations hold a read guard while reading and rewriting entire nodes.
+        // Exclude them until commit so they cannot restore stale connector properties.
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let (source, _obj) = Source::find_by_id(source_id)
@@ -3412,7 +3414,9 @@ impl CatalogController {
         Vec<(SourceId, HashMap<String, String>)>, // Source ID and their complete properties
         Vec<(SinkId, HashMap<String, String>)>,   // Sink ID and their complete properties
     )> {
-        let inner = self.inner.read().await;
+        // Serialize dependent fragment refreshes with fragment mutations on every
+        // metadata backend, just like a direct source property update.
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         // Find all dependent sources and sinks first
@@ -4202,6 +4206,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
 
 /// Refresh embedded CDC descriptors in the same transaction as the shared source.
 /// Inspect CDC fragments directly so this also covers jobs still being created.
+/// Callers must hold the catalog write guard through transaction commit.
 async fn update_cdc_table_props_fragments(
     txn: &DatabaseTransaction,
     source_id: SourceId,
@@ -4336,6 +4341,7 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
+    use futures::FutureExt;
     use risingwave_connector::WithOptionsSecResolved;
     use risingwave_pb::plan_common::ExternalTableDesc;
     use risingwave_pb::secret::PbSecretRef;
@@ -4349,6 +4355,48 @@ mod tests {
         Parser, PbNodeBody, SinkId, merge_with_options, update_cdc_table_node_props,
         update_sink_node_props,
     };
+    use crate::controller::catalog::CatalogController;
+    use crate::manager::MetaSrvEnv;
+
+    #[tokio::test]
+    async fn test_connector_updates_exclude_fragment_mutations() {
+        let controller = CatalogController::new(MetaSrvEnv::for_test().await)
+            .await
+            .unwrap();
+        let updates = [
+            controller
+                .update_source_props_by_source_id(
+                    999999.into(),
+                    BTreeMap::new(),
+                    BTreeMap::new(),
+                    true,
+                )
+                .map(|result| result.map(|_| ()))
+                .boxed(),
+            controller
+                .update_connection_and_dependent_objects_props(
+                    999999.into(),
+                    BTreeMap::new(),
+                    BTreeMap::new(),
+                )
+                .map(|result| result.map(|_| ()))
+                .boxed(),
+        ];
+
+        for mut update in updates {
+            // Both fragment mutation APIs keep this read guard through commit.
+            let fragment_mutation_guard = controller.inner.read().await;
+            assert!(futures::poll!(update.as_mut()).is_pending());
+            // A queued exclusive update also blocks new fragment mutations. Checking
+            // this avoids relying on timing or the database's transaction isolation.
+            assert!(controller.inner.try_read().is_err());
+            drop(fragment_mutation_guard);
+
+            // Once the fragment mutation releases its guard, the update can reach
+            // catalog validation. These IDs deliberately have no catalog entries.
+            update.await.expect_err("the catalog object does not exist");
+        }
+    }
 
     #[test]
     fn test_update_cdc_table_props_preserves_table_identity_and_replaces_secrets() {
