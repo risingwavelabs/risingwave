@@ -3,9 +3,6 @@
 control substitution on
 
 statement ok
-DROP VIEW IF EXISTS pg_props_plans;
-
-statement ok
 DROP SOURCE IF EXISTS pg_props_source CASCADE;
 
 statement ok
@@ -62,24 +59,18 @@ SELECT (SELECT count(*) FROM pg_props_serial), (SELECT count(*) FROM pg_props_pa
 ----
 20 20
 
-# Read the persisted descriptors, not the shared source's catalog properties.
-# Keep the JSONPath root literal instead of treating it as an environment variable.
-control substitution off
-
-statement ok
-CREATE VIEW pg_props_plans AS
-SELECT jsonb_path_query_first(f.node, '$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
-FROM rw_catalog.rw_fragment_infos f
-JOIN rw_catalog.rw_relations r ON r.id = f.table_id
-WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
-  AND 'STREAM_CDC_SCAN' = ANY(f.flags);
-
-control substitution on
-
 statement ok
 ALTER SOURCE pg_props_source CONNECTOR WITH (password = SECRET pg_props_old);
 
+# Read persisted descriptors directly; escape the JSONPath root for SLT substitution.
 query IB
+WITH pg_props_plans AS (
+    SELECT jsonb_path_query_first(f.node, '\$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
+    FROM rw_catalog.rw_fragment_infos f
+    JOIN rw_catalog.rw_relations r ON r.id = f.table_id
+    WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
+      AND 'STREAM_CDC_SCAN' = ANY(f.flags)
+)
 SELECT count(*), bool_and(
     cdc_desc->'connectProperties'->>'password' IS NULL
     AND (cdc_desc->'secretRefs'->'password'->>'secretId')::int =
@@ -98,6 +89,13 @@ statement ok
 DROP SECRET pg_props_old;
 
 query IB
+WITH pg_props_plans AS (
+    SELECT jsonb_path_query_first(f.node, '\$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
+    FROM rw_catalog.rw_fragment_infos f
+    JOIN rw_catalog.rw_relations r ON r.id = f.table_id
+    WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
+      AND 'STREAM_CDC_SCAN' = ANY(f.flags)
+)
 SELECT count(*), bool_and(
     (cdc_desc->'secretRefs'->'password'->>'secretId')::int =
         (SELECT id FROM rw_catalog.rw_secrets WHERE name = 'pg_props_new')
@@ -124,15 +122,19 @@ statement ok
 DROP SECRET pg_props_new;
 
 query IB
+WITH pg_props_plans AS (
+    SELECT jsonb_path_query_first(f.node, '\$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
+    FROM rw_catalog.rw_fragment_infos f
+    JOIN rw_catalog.rw_relations r ON r.id = f.table_id
+    WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
+      AND 'STREAM_CDC_SCAN' = ANY(f.flags)
+)
 SELECT count(*), bool_and(
     cdc_desc->'secretRefs'->'password' IS NULL
     AND cdc_desc->'connectProperties'->>'password' = '${PGPASSWORD:}'
 ) FROM pg_props_plans;
 ----
 2 t
-
-statement ok
-DROP VIEW pg_props_plans;
 
 statement ok
 DROP SOURCE pg_props_source CASCADE;
