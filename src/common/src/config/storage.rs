@@ -1164,7 +1164,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     let prefetch_buffer_capacity_mb =
         s.storage
-            .shared_buffer_capacity_mb
+            .prefetch_buffer_capacity_mb
             .unwrap_or(match &block_cache_eviction_config {
                 EvictionConfig::Lru(lru) => {
                     ((1.0 - lru.high_priority_pool_ratio) * block_cache_capacity_mb as f64) as usize

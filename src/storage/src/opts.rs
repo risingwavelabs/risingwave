@@ -404,6 +404,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_prefetch_budget_is_independent_of_shared_buffer() {
+        let mut config = RwConfig::default();
+        let default_prefetch = extract_storage_memory_config(&config).prefetch_buffer_capacity_mb;
+        for shared_buffer in [64, 512] {
+            for prefetch in [None, Some(0), Some(17)] {
+                config.storage.shared_buffer_capacity_mb = Some(shared_buffer);
+                config.storage.prefetch_buffer_capacity_mb = prefetch;
+                let memory = extract_storage_memory_config(&config);
+                let params = system_params_for_test();
+                let opts = StorageOpts::from((&config, &params.into(), &memory));
+                assert_eq!(opts.shared_buffer_capacity_mb, shared_buffer);
+                assert_eq!(
+                    opts.prefetch_buffer_capacity_mb,
+                    prefetch.unwrap_or(default_prefetch)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_file_cache_submit_queue_size_threshold() {
         let mut config = RwConfig::default();
         config
