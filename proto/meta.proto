@@ -960,6 +960,8 @@ message WarmUpTableCacheRequest {
   uint32 table_id = 1;
   // Maximum number of vnodes scanned concurrently on each compute node.
   uint32 concurrency = 2;
+  // SQL user asserted by the trusted frontend. Missing identity is rejected.
+  optional uint32 user_id = 3;
 }
 
 message WarmUpTableCacheResponse {

@@ -357,6 +357,7 @@ impl Strong {
             | ExprType::PgIsInRecovery
             | ExprType::PgTableIsVisible
             | ExprType::RwRecoveryStatus
+            | ExprType::RwWarmup
             | ExprType::RwClusterId
             | ExprType::RwFragmentVnodes
             | ExprType::RwActorVnodes

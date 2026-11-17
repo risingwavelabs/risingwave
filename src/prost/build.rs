@@ -749,6 +749,7 @@ for_all_wrapped_id_fields! (
         }
         WarmUpTableCacheRequest {
             table_id: TableId,
+            user_id: UserId,
         }
         WorkerReschedule {
             worker_actor_diff: WorkerId,

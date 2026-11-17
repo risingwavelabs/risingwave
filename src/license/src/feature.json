@@ -132,6 +132,11 @@
             "description": "Delivering data to Iceberg with a primary key index.",
             "type": "string",
             "const": "IcebergSinkWithPkIndex"
+        },
+        {
+            "description": "Warm up table caches on streaming compute nodes.",
+            "type": "string",
+            "const": "TableCacheWarmUp"
         }
     ]
 }

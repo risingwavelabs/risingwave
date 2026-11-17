@@ -1,0 +1,135 @@
+# ALTER SYSTEM keeps this file in the serial DDL lane.
+statement ok
+SET batch_expr_strict_mode = true;
+
+statement ok
+CREATE TABLE warmup_test (v int);
+
+statement ok
+INSERT INTO warmup_test VALUES (1), (2);
+
+statement ok
+CREATE INDEX warmup_idx ON warmup_test(v);
+
+statement ok
+CREATE MATERIALIZED VIEW warmup_agg AS SELECT v, count(*) AS cnt FROM warmup_test GROUP BY v;
+
+statement ok
+FLUSH;
+
+# A catalog-derived table ID is evaluated at runtime, even with distributed mode requested.
+statement ok
+SET query_mode = distributed;
+
+query T
+SELECT rw_warmup(id) >= 2 FROM rw_catalog.rw_tables WHERE name = 'warmup_test';
+----
+t
+
+statement ok
+SET query_mode = auto;
+
+query T
+SELECT rw_warmup(NULL) IS NULL;
+----
+t
+
+query I
+SELECT CASE WHEN false THEN rw_warmup(-1) ELSE 7 END;
+----
+7
+
+query error must be a positive table ID
+SELECT rw_warmup(-1);
+
+query error must be a positive table ID
+SELECT rw_warmup(0);
+
+query error table id not found
+SELECT rw_warmup(2147483647);
+
+statement error rw_warmup is only supported in batch queries
+CREATE MATERIALIZED VIEW warmup_invalid AS SELECT rw_warmup(v) FROM warmup_test;
+
+statement ok
+CREATE USER warmup_user WITH PASSWORD 'password';
+
+statement ok
+GRANT ALL ON TABLE warmup_test TO warmup_user;
+
+statement ok
+GRANT SELECT ON MATERIALIZED VIEW warmup_agg TO warmup_user;
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE \"$SLT_DB\" TO warmup_user"'
+
+# Grants do not confer ownership of base tables, index tables, or internal tables.
+skipif madsim
+system ok
+bash e2e_test/ddl/rw_warmup_privileges.sh deny
+
+statement ok
+ALTER TABLE warmup_test OWNER TO warmup_user;
+
+statement ok
+ALTER MATERIALIZED VIEW warmup_agg OWNER TO warmup_user;
+
+# Ownership transfer includes associated index and internal-table catalogs.
+skipif madsim
+system ok
+bash e2e_test/ddl/rw_warmup_privileges.sh allow
+
+# Superusers can also warm up a table belonging to another user.
+query T
+SELECT rw_warmup(id) >= 2 FROM rw_catalog.rw_tables WHERE name = 'warmup_test';
+----
+t
+
+query T
+SELECT rw_warmup(id) >= 0 FROM rw_catalog.rw_indexes WHERE name = 'warmup_idx';
+----
+t
+
+query T
+SELECT bool_and(rw_warmup(id) >= 0) FROM rw_catalog.rw_internal_tables
+WHERE job_id = (SELECT id FROM rw_catalog.rw_materialized_views WHERE name = 'warmup_agg');
+----
+t
+
+statement ok
+ALTER SYSTEM SET license_key TO '';
+
+query T retry 5 backoff 1s
+SELECT available FROM rw_catalog.rw_features WHERE name = 'TableCacheWarmUp';
+----
+f
+
+query error feature TableCacheWarmUp is not available based on your license
+SELECT rw_warmup(id) FROM rw_catalog.rw_tables WHERE name = 'warmup_test';
+
+# Binding must not execute the operation or check its runtime license gate.
+query I
+SELECT CASE WHEN false THEN rw_warmup(1) ELSE 7 END;
+----
+7
+
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;
+
+query T retry 5 backoff 1s
+SELECT available FROM rw_catalog.rw_features WHERE name = 'TableCacheWarmUp';
+----
+t
+
+statement ok
+DROP MATERIALIZED VIEW warmup_agg;
+
+statement ok
+DROP TABLE warmup_test;
+
+statement ok
+DROP USER warmup_user;
+
+statement ok
+SET batch_expr_strict_mode = DEFAULT;
