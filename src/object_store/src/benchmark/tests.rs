@@ -168,13 +168,7 @@ async fn all_profiles_clean_only_owned_objects() {
             30
         );
     }
-    let remaining: Vec<_> = store
-        .list("", None, None)
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
+    let remaining: Vec<_> = store.list("").await.unwrap().try_collect().await.unwrap();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].key, "production/object");
     assert!(!report.backpressure_verified);
@@ -286,7 +280,7 @@ async fn kept_data_and_pre_cancelled_run() {
     assert!(report.succeeded());
     assert_eq!(
         store
-            .list("risectl-bench/kept/", None, None)
+            .list("risectl-bench/kept/")
             .await
             .unwrap()
             .try_collect::<Vec<_>>()
@@ -325,7 +319,7 @@ async fn kept_data_and_pre_cancelled_run() {
     assert_eq!(report.cleanup_status, "completed");
     assert!(
         store
-            .list("risectl-bench/cancelled/", None, None)
+            .list("risectl-bench/cancelled/")
             .await
             .unwrap()
             .try_collect::<Vec<_>>()
@@ -660,7 +654,7 @@ async fn real_s3_profiles() {
     assert!(report.succeeded(), "{report:#?}");
     assert!(
         store
-            .list(&prefix, None, None)
+            .list(&prefix)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()
@@ -742,7 +736,7 @@ async fn basic_caps_measurement_reuses_keys_and_replenishes_deletes() {
     assert_eq!(deleted.items, 12); // Two five-object rounds and one two-object batch.
     assert!(deleted.wall_elapsed_ms >= deleted.elapsed_ms + deleted.setup_elapsed_ms);
     let remaining = store
-        .list("risectl-bench/budget/", None, None)
+        .list("risectl-bench/budget/")
         .await
         .unwrap()
         .try_collect::<Vec<_>>()

@@ -72,6 +72,7 @@ public class DbzChangeEventConsumer
             String heartbeatTopicPrefix,
             String transactionTopic,
             String schemaChangeTopic,
+            boolean isBackfillSource,
             BlockingQueue<GetEventStreamResponse> queue) {
         this.connector = connector;
         this.sourceId = sourceId;
@@ -85,11 +86,12 @@ public class DbzChangeEventConsumer
         // to source parser, we use a customized JSON converter to avoid outputting the `schema`
         // field.
         var payloadConverter = new DbzJsonConverter();
-        final HashMap<String, Object> configs = new HashMap<>(2);
+        final HashMap<String, Object> configs = new HashMap<>(3);
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
         // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
         configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
+        configs.put(JsonConverterConfig.REPLACE_NULL_WITH_DEFAULT_CONFIG, !isBackfillSource);
         payloadConverter.configure(configs);
         this.payloadConverter = payloadConverter;
 

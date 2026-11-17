@@ -213,7 +213,7 @@ pub(super) async fn metadata(
             async move {
                 Outcome::from_result(
                     async {
-                        let mut stream = s.list(&prefix, None, None).await?;
+                        let mut stream = s.list(&prefix).await?;
                         let mut count = 0;
                         while stream.try_next().await?.is_some() {
                             count += 1;
@@ -417,7 +417,7 @@ pub(super) async fn preflight(
                     );
                 }
                 let listed = store
-                    .list(&prefix, None, None)
+                    .list(&prefix)
                     .await
                     .context("preflight LIST")?
                     .try_collect::<Vec<_>>()
@@ -431,12 +431,7 @@ pub(super) async fn preflight(
                     .await
                     .context("preflight DELETE")?;
                 ensure!(
-                    store
-                        .list(&prefix, None, None)
-                        .await?
-                        .try_next()
-                        .await?
-                        .is_none(),
+                    store.list(&prefix).await?.try_next().await?.is_none(),
                     "preflight object is still listed after DELETE"
                 );
                 Ok(Sample {

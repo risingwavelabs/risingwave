@@ -799,11 +799,9 @@ impl SstableStore {
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
-        start_after: Option<String>,
-        limit: Option<usize>,
     ) -> HummockResult<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
+        let raw_iter = self.store.list(&list_path).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", SST_OBJECT_SUFFIX))),
             Err(_) => future::ready(true),
