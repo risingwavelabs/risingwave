@@ -14,11 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::{JobId, PartialGraphId, SinkId};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
@@ -56,6 +58,8 @@ use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{RefreshStage, SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
+
+const DRAIN_OLD_SINK_COMMITS_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 fn resolve_since_timestamp_log_store_epoch(
     table_id: TableId,
@@ -298,8 +302,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument("post_collect_command({command})")]
-    async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        Box::pin(command.post_collect(self)).await
+    async fn post_collect_command(
+        &self,
+        command: PostCollectCommand,
+        epoch: EpochPair,
+    ) -> MetaResult<()> {
+        Box::pin(command.post_collect(self, epoch)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -630,12 +638,57 @@ impl GlobalBarrierWorkerContextImpl {
     }
 }
 
+async fn drain_old_sink_coordinator(
+    barrier_manager_context: &GlobalBarrierWorkerContextImpl,
+    old_sink_id: SinkId,
+    target_epoch: u64,
+) -> MetaResult<()> {
+    let wait_result = tokio::time::timeout(
+        DRAIN_OLD_SINK_COMMITS_TIMEOUT,
+        barrier_manager_context
+            .sink_manager
+            .drain_and_stop_coordinator(old_sink_id, target_epoch),
+    )
+    .await;
+    let pending_epoch_count = barrier_manager_context
+        .metadata_manager
+        .catalog_controller
+        .count_pending_sink_epochs(old_sink_id)
+        .await?;
+
+    match wait_result {
+        Ok(Ok(())) if pending_epoch_count == 0 => Ok(()),
+        Ok(Ok(())) => Err(anyhow::anyhow!(
+            "pending exactly-once sink epochs remain before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+            old_sink_id,
+            target_epoch,
+            pending_epoch_count,
+        )
+        .into()),
+        Ok(Err(err)) => Err(err
+            .context(format!(
+                "failed to drain old sink commits before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+                old_sink_id, target_epoch, pending_epoch_count,
+            ))
+            .into()),
+        Err(_) => Err(anyhow::anyhow!(
+            "timed out draining old sink commits before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}, timeout={:?}",
+            old_sink_id,
+            target_epoch,
+            pending_epoch_count,
+            DRAIN_OLD_SINK_COMMITS_TIMEOUT,
+        )
+        .into()),
+    }
+}
+
 impl PostCollectCommand {
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(
         self,
         barrier_manager_context: &GlobalBarrierWorkerContextImpl,
+        epoch: EpochPair,
     ) -> MetaResult<()> {
         match self {
             PostCollectCommand::Command(_) => {}
@@ -829,6 +882,15 @@ impl PostCollectCommand {
                     } else {
                         None
                     };
+
+                if let Some(old_sink_id) = replace_sink {
+                    // Deleting the old sink object cascades `pending_sink_state`. This barrier is
+                    // the cutover and has been committed to Hummock, so let the old sink's
+                    // coordinator commit its pending epochs up to `epoch.prev` and stop, then
+                    // assert the durable state before deleting the old sink object.
+                    drain_old_sink_coordinator(barrier_manager_context, old_sink_id, epoch.prev)
+                        .await?;
+                }
 
                 let old_state_table_ids = barrier_manager_context
                     .metadata_manager
