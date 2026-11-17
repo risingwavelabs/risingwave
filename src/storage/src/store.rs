@@ -502,14 +502,29 @@ pub enum PrefetchMode {
     Range,
     /// Request a small window through the block cache, leaving I/O merging to the scheduler.
     Blockwise,
+    /// Opt-in prototype: concurrently read contiguous cache misses in a bounded window.
+    ColdRanges,
     /// Use the storage instance's ordinary Snapshot Backfill source policy.
     SnapshotBackfill,
     /// Use the storage instance's Locality Backfill policy. Resolved before building SST iterators.
     LocalityBackfill,
 }
 
-/// Controls prefetch for range scans. Range prefetch retains blocks outside the evictable cache;
-/// blockwise prefetch leaves speculative blocks owned by the cache.
+impl From<risingwave_common::config::storage::ReadPrefetchMode> for PrefetchMode {
+    fn from(mode: risingwave_common::config::storage::ReadPrefetchMode) -> Self {
+        use risingwave_common::config::storage::ReadPrefetchMode;
+        match mode {
+            ReadPrefetchMode::Disabled => Self::Disabled,
+            ReadPrefetchMode::Range => Self::Range,
+            ReadPrefetchMode::Blockwise => Self::Blockwise,
+            ReadPrefetchMode::ColdRanges => Self::ColdRanges,
+        }
+    }
+}
+
+/// Controls prefetch for range scans. Range buffers decoded blocks; Blockwise holds
+/// per-block cache responses; ColdRanges holds cache entries/lookups and pending
+/// range reads. Each retains lookahead until consumption or iterator release.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     pub mode: PrefetchMode,

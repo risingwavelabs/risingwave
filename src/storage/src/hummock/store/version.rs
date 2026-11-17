@@ -1153,14 +1153,10 @@ impl HummockVersionReader {
         sst_read_options.scan_end_user_key = Some(user_key_range.1.map(|key| key.cloned()));
         let prefetch_config = &self.sstable_store.blockwise_prefetch;
         sst_read_options.prefetch = match read_options.prefetch_options.mode {
-            PrefetchMode::Blockwise if !prefetch_config.enabled => PrefetchMode::Disabled,
-            PrefetchMode::SnapshotBackfill if prefetch_config.snapshot_backfill_enabled => {
-                PrefetchMode::Blockwise
-            }
-            PrefetchMode::LocalityBackfill if prefetch_config.locality_backfill_enabled => {
-                PrefetchMode::Blockwise
-            }
-            PrefetchMode::SnapshotBackfill | PrefetchMode::LocalityBackfill => PrefetchMode::Range,
+            PrefetchMode::Blockwise => prefetch_config.prefix_mode().into(),
+            PrefetchMode::Range => prefetch_config.range_scan_mode().into(),
+            PrefetchMode::SnapshotBackfill => prefetch_config.snapshot_backfill_mode().into(),
+            PrefetchMode::LocalityBackfill => prefetch_config.locality_backfill_mode().into(),
             mode => mode,
         };
         let sst_read_options = Arc::new(sst_read_options);
@@ -1351,20 +1347,20 @@ impl HummockVersionReader {
                 );
             }
         }
-        let changelog_prefetch = self.sstable_store.blockwise_prefetch.changelog_enabled;
+        let changelog_prefetch: PrefetchMode = self
+            .sstable_store
+            .blockwise_prefetch
+            .changelog_mode()
+            .into();
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
             read_table_id: Some(options.table_id),
-            scan_end_user_key: changelog_prefetch.then(|| {
+            scan_end_user_key: (changelog_prefetch != PrefetchMode::Disabled).then(|| {
                 bound_table_key_range(options.table_id, &key_range)
                     .1
                     .map(|key| key.cloned())
             }),
-            prefetch: if changelog_prefetch {
-                crate::store::PrefetchMode::Blockwise
-            } else {
-                crate::store::PrefetchMode::Disabled
-            },
+            prefetch: changelog_prefetch,
         });
 
         async fn make_iter(
@@ -1515,6 +1511,11 @@ impl HummockVersionReader {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "test", not(madsim)))]
+    mod locality_plug_experiment;
+    #[cfg(all(feature = "test", not(madsim)))]
+    mod locality_scoped_experiment;
+
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::sync::Arc;
 
@@ -1816,19 +1817,140 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_explicit_scan_prefetch_modes() {
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        use risingwave_common::config::storage::ReadPrefetchMode;
+
+        use crate::hummock::test_utils::{gen_default_test_sstable, test_key_of};
+        use crate::store::PrefetchOptions;
+
+        for (path, unified) in
+            (0..4).flat_map(|path| [false, true].map(move |unified| (path, unified)))
+        {
+            for mode in [
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Range,
+                ReadPrefetchMode::Blockwise,
+                ReadPrefetchMode::ColdRanges,
+            ] {
+                let mut store = mock_sstable_store().await;
+                let inner = Arc::get_mut(&mut store).unwrap();
+                let config = &mut inner.blockwise_prefetch;
+                config.mode = Some(if unified {
+                    mode
+                } else {
+                    ReadPrefetchMode::ColdRanges
+                });
+                // Explicit modes must override the old switches in either direction.
+                config.enabled = mode == ReadPrefetchMode::Disabled;
+                config.snapshot_backfill_enabled = mode == ReadPrefetchMode::Disabled;
+                config.locality_backfill_enabled = mode == ReadPrefetchMode::Disabled;
+                let prefetch_options = match path {
+                    0 => {
+                        config.prefix_mode = (!unified).then_some(mode);
+                        PrefetchOptions::prefetch_for_prefix_scan()
+                    }
+                    1 => {
+                        config.range_scan_mode = (!unified).then_some(mode);
+                        PrefetchOptions::prefetch_for_small_range_scan()
+                    }
+                    2 => {
+                        config.snapshot_backfill_mode = (!unified).then_some(mode);
+                        PrefetchOptions::prefetch_for_snapshot_backfill()
+                    }
+                    _ => {
+                        config.locality_backfill_mode = (!unified).then_some(mode);
+                        PrefetchOptions::prefetch_for_locality_backfill()
+                    }
+                };
+                config.max_blocks = 3.try_into().unwrap();
+                inner.read_metrics = Arc::new(HummockStateStoreMetrics::new(
+                    &Registry::new(),
+                    MetricLevel::Info,
+                ));
+                let (sst, info) =
+                    gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone())
+                        .await;
+                store.clear_block_cache().await.unwrap();
+                let first = test_key_of(0);
+                let table_id = first.user_key.table_id;
+                let end = FullKey::decode(&sst.meta.block_metas[2].smallest_key)
+                    .user_key
+                    .table_key
+                    .copy_into();
+                let reader = HummockVersionReader::new(store.clone(), store.read_metrics.clone());
+                let iter = reader
+                    .iter(
+                        (Unbounded, Excluded(end)),
+                        first.epoch_with_gap.pure_epoch(),
+                        table_id,
+                        TableOption::default(),
+                        ReadOptions {
+                            prefetch_options,
+                            ..Default::default()
+                        },
+                        (vec![], vec![], build_version_from_sstable(table_id, info)),
+                    )
+                    .await
+                    .unwrap();
+                let metrics = &store.read_metrics;
+                assert_eq!(
+                    metrics.prefetch_registered_ready.get()
+                        + metrics.prefetch_registered_pending.get(),
+                    u64::from(mode == ReadPrefetchMode::Blockwise),
+                    "path {path}, mode {mode:?}"
+                );
+                assert_eq!(
+                    metrics.cold_range_prefetch_window_runs.get_sample_count(),
+                    u64::from(mode == ReadPrefetchMode::ColdRanges),
+                    "path {path}, mode {mode:?}"
+                );
+                if mode == ReadPrefetchMode::ColdRanges {
+                    // The upper bound clips the selected three-block budget to two blocks.
+                    assert_eq!(
+                        metrics.cold_range_prefetch_read_bytes.get_sample_sum(),
+                        sst.meta.block_metas[..2]
+                            .iter()
+                            .map(|meta| meta.len as f64)
+                            .sum::<f64>()
+                    );
+                }
+                assert_eq!(
+                    store.get_prefetch_memory_usage() > 0,
+                    matches!(mode, ReadPrefetchMode::Range | ReadPrefetchMode::ColdRanges)
+                );
+                drop(iter);
+                assert_eq!(store.get_prefetch_memory_usage(), 0);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_backfill_prefetch_modes_are_independent() {
         use std::ops::Bound::{Excluded, Unbounded};
 
         use crate::hummock::test_utils::{gen_default_test_sstable, test_key_of};
         use crate::store::PrefetchOptions;
 
-        for (source, blockwise) in [(true, false), (false, false), (true, true), (false, true)] {
+        for (source, blockwise, cold_ranges) in [
+            (true, false, false),
+            (false, false, false),
+            (true, true, false),
+            (false, true, false),
+            (true, false, true),
+            (false, false, true),
+            (true, true, true),
+            (false, true, true),
+        ] {
             let mut store = mock_sstable_store().await;
             let inner = Arc::get_mut(&mut store).unwrap();
             // Enable the other backfill policy in each off case. The prefix
             // policy stays off in all cases, including both Blockwise cases.
             inner.blockwise_prefetch.snapshot_backfill_enabled = source == blockwise;
             inner.blockwise_prefetch.locality_backfill_enabled = source != blockwise;
+            inner.blockwise_prefetch.locality_backfill_mode = cold_ranges
+                .then_some(risingwave_common::config::storage::ReadPrefetchMode::ColdRanges);
             let prefetch_options = if source {
                 PrefetchOptions::prefetch_for_snapshot_backfill()
             } else {
@@ -1870,8 +1992,17 @@ mod tests {
             // The upper bound permits one neighbor even though the window has room for two.
             let registered = store.read_metrics.prefetch_registered_ready.get()
                 + store.read_metrics.prefetch_registered_pending.get();
-            assert_eq!(registered, u64::from(blockwise));
-            assert_eq!(store.get_prefetch_memory_usage() > 0, !blockwise);
+            let uses_cold_ranges = !source && cold_ranges;
+            let uses_blockwise = blockwise && !uses_cold_ranges;
+            assert_eq!(registered, u64::from(uses_blockwise));
+            assert_eq!(
+                store
+                    .read_metrics
+                    .cold_range_prefetch_window_runs
+                    .get_sample_count(),
+                u64::from(uses_cold_ranges)
+            );
+            assert_eq!(store.get_prefetch_memory_usage() > 0, !uses_blockwise);
             drop(iter);
             assert_eq!(store.get_prefetch_memory_usage(), 0);
         }

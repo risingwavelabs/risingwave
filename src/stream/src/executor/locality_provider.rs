@@ -1545,3 +1545,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, not(madsim)))]
+mod read_pattern_experiment;

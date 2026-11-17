@@ -28,6 +28,7 @@ use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::{PrefetchBlockStream, PrefetchLookup};
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable_store::ColdRangePrefetch;
 use crate::hummock::store::iter_init_profile::SeekAwait;
 use crate::hummock::{BlockEntry, BlockIterator, BlockResponse, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -51,6 +52,7 @@ pub struct SstableIterator {
     cur_idx: usize,
 
     preload_stream: Option<Box<PrefetchBlockStream>>,
+    cold_ranges: Option<Box<ColdRangePrefetch>>,
     /// Reference to the sst
     pub sst: TableHolder,
     preload_end_block_idx: usize,
@@ -174,6 +176,7 @@ impl SstableIterator {
             block_iter: None,
             cur_idx: 0,
             preload_stream: None,
+            cold_ranges: None,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
@@ -187,6 +190,7 @@ impl SstableIterator {
     }
 
     fn discard_read_ahead(&mut self) {
+        self.cold_ranges = None;
         if !self.read_ahead.is_empty() {
             self.sstable_store
                 .read_metrics
@@ -284,6 +288,19 @@ impl SstableIterator {
                 }
                 Err(e) => {
                     tracing::warn!(error = %e.as_report(), "failed to prefetch data, fall back to block get");
+                }
+            }
+        }
+        if self.options.prefetch == PrefetchMode::ColdRanges {
+            let start = profile_seek.then(Instant::now);
+            let result = Box::pin(self.read_cold_range_block(idx)).await;
+            SeekAwait::Prefetch.record(start);
+            match result {
+                Ok(block) => prefetched_block = block,
+                Err(error) => {
+                    // As with Range, a failed speculative neighbor must not fail a valid head.
+                    self.cold_ranges = None;
+                    tracing::warn!(error = %error.as_report(), "cold-range prefetch failed, fall back to block get");
                 }
             }
         }
@@ -387,6 +404,49 @@ impl SstableIterator {
         self.cur_idx = idx;
 
         Ok(())
+    }
+
+    async fn read_cold_range_block(
+        &mut self,
+        idx: usize,
+    ) -> HummockResult<Option<crate::hummock::BlockHolder>> {
+        if let Some(window) = self.cold_ranges.as_mut()
+            && let Some(block) = window
+                .next(
+                    &self.sstable_store,
+                    &self.sst,
+                    self.options.cache_policy,
+                    &mut self.stats,
+                )
+                .await?
+        {
+            return Ok(Some(block));
+        }
+        // Release the preceding window's reservation before requesting another one.
+        self.cold_ranges = None;
+        self.cold_ranges = self
+            .sstable_store
+            .prefetch_cold_ranges(
+                &self.sst,
+                idx,
+                self.block_end_idx_exclusive,
+                self.options.cache_policy,
+                &mut self.stats,
+            )
+            .map(Box::new);
+        match self.cold_ranges.as_mut() {
+            Some(window) => {
+                window
+                    .next(
+                        &self.sstable_store,
+                        &self.sst,
+                        self.options.cache_policy,
+                        &mut self.stats,
+                    )
+                    .await
+            }
+            None => Ok(None),
+        }
     }
 
     // Keep construction of the large Range refill future off the common seek stack too.
@@ -1307,87 +1367,89 @@ mod tests {
 
     #[tokio::test]
     async fn test_prefetch_table_read() {
-        let sstable_store = mock_sstable_store().await;
-        // when upload data is successful, but upload meta is fail and delete is fail
-        let kv_iter =
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let sst_info = gen_test_sstable_info(
-            default_builder_opt_for_test(),
-            0,
-            kv_iter,
-            sstable_store.clone(),
-        )
-        .await;
+        for mode in [PrefetchMode::Range, PrefetchMode::ColdRanges] {
+            let sstable_store = mock_sstable_store().await;
+            // when upload data is successful, but upload meta is fail and delete is fail
+            let kv_iter =
+                (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
+            let sst_info = gen_test_sstable_info(
+                default_builder_opt_for_test(),
+                0,
+                kv_iter,
+                sstable_store.clone(),
+            )
+            .await;
 
-        let end_key = test_key_of(TEST_KEYS_COUNT);
-        let uk = UserKey::new(
-            end_key.user_key.table_id,
-            TableKey(Bytes::from(end_key.user_key.table_key.0)),
-        );
-        let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Fill(Hint::Normal),
-            read_table_id: None,
-            scan_end_user_key: Some(Bound::Included(uk.clone())),
-            prefetch: crate::store::PrefetchMode::Range,
-        });
-        let mut stats = StoreLocalStatistic::default();
-        let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
-            sstable_store.clone(),
-            options.clone(),
-            &sst_info,
-        );
-        let mut cnt = 1000;
-        sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
-        while sstable_iter.is_valid() {
-            let key = sstable_iter.key();
-            let value = sstable_iter.value();
-            assert_eq!(
-                key,
-                test_key_of(cnt).to_ref(),
-                "fail at {}, get key :{:?}",
-                cnt,
-                String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap()
+            let end_key = test_key_of(TEST_KEYS_COUNT);
+            let uk = UserKey::new(
+                end_key.user_key.table_id,
+                TableKey(Bytes::from(end_key.user_key.table_key.0)),
             );
-            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
-            cnt += 1;
-            sstable_iter.next().await.unwrap();
-        }
-        assert_eq!(cnt, TEST_KEYS_COUNT);
-        let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
-            sstable_store,
-            options.clone(),
-            &sst_info,
-        );
-
-        // Cache hits produce a singleton prefetch stream. Seeking past its end must
-        // fetch the requested block instead of repeatedly polling the exhausted stream.
-        assert!(
-            sstable_iter.calculate_block_idx_by_key(test_key_of(TEST_KEYS_COUNT / 2).to_ref())
-                > sstable_iter.calculate_block_idx_by_key(test_key_of(1000).to_ref()) + 1
-        );
-        for idx in [1000, TEST_KEYS_COUNT / 2, TEST_KEYS_COUNT - 1] {
-            sstable_iter.seek(test_key_of(idx).to_ref()).await.unwrap();
-            assert!(sstable_iter.is_valid());
-            assert_eq!(sstable_iter.key(), test_key_of(idx).to_ref());
-            assert_bytes_eq!(
-                sstable_iter.value().into_user_value().unwrap(),
-                test_value_of(idx)
+            let options = Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::Fill(Hint::Normal),
+                read_table_id: None,
+                scan_end_user_key: Some(Bound::Included(uk.clone())),
+                prefetch: mode,
+            });
+            let mut stats = StoreLocalStatistic::default();
+            let mut sstable_iter = SstableIterator::create(
+                sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+                sstable_store.clone(),
+                options.clone(),
+                &sst_info,
             );
-        }
+            let mut cnt = 1000;
+            sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
+            while sstable_iter.is_valid() {
+                let key = sstable_iter.key();
+                let value = sstable_iter.value();
+                assert_eq!(
+                    key,
+                    test_key_of(cnt).to_ref(),
+                    "fail at {}, get key :{:?}",
+                    cnt,
+                    String::from_utf8(key.user_key.table_key.key_part().to_vec()).unwrap()
+                );
+                assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
+                cnt += 1;
+                sstable_iter.next().await.unwrap();
+            }
+            assert_eq!(cnt, TEST_KEYS_COUNT);
+            let mut sstable_iter = SstableIterator::create(
+                sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+                sstable_store,
+                options.clone(),
+                &sst_info,
+            );
 
-        let mut cnt = 1000;
-        sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
-        while sstable_iter.is_valid() {
-            let key = sstable_iter.key();
-            let value = sstable_iter.value();
-            assert_eq!(key, test_key_of(cnt).to_ref());
-            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
-            cnt += 1;
-            sstable_iter.next().await.unwrap();
+            // Cache hits produce a singleton prefetch stream. Seeking past its end must
+            // fetch the requested block instead of repeatedly polling the exhausted stream.
+            assert!(
+                sstable_iter.calculate_block_idx_by_key(test_key_of(TEST_KEYS_COUNT / 2).to_ref())
+                    > sstable_iter.calculate_block_idx_by_key(test_key_of(1000).to_ref()) + 1
+            );
+            for idx in [1000, TEST_KEYS_COUNT / 2, TEST_KEYS_COUNT - 1] {
+                sstable_iter.seek(test_key_of(idx).to_ref()).await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert_eq!(sstable_iter.key(), test_key_of(idx).to_ref());
+                assert_bytes_eq!(
+                    sstable_iter.value().into_user_value().unwrap(),
+                    test_value_of(idx)
+                );
+            }
+
+            let mut cnt = 1000;
+            sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
+            while sstable_iter.is_valid() {
+                let key = sstable_iter.key();
+                let value = sstable_iter.value();
+                assert_eq!(key, test_key_of(cnt).to_ref());
+                assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
+                cnt += 1;
+                sstable_iter.next().await.unwrap();
+            }
+            assert_eq!(cnt, TEST_KEYS_COUNT);
         }
-        assert_eq!(cnt, TEST_KEYS_COUNT);
     }
 
     #[tokio::test]

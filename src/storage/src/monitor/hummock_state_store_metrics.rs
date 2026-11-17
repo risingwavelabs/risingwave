@@ -19,7 +19,8 @@ use prometheus::{
     Gauge, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
     Registry, exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry,
+    register_int_counter_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -64,6 +65,11 @@ pub struct HummockStateStoreMetrics {
     pub block_cache_read_events: IntCounterVec,
     pub blockwise_prefetch_bytes: IntCounterVec,
     pub blockwise_prefetch_wait_duration: Histogram,
+    pub cold_range_prefetch_window_runs: Histogram,
+    pub cold_range_prefetch_read_bytes: Histogram,
+    pub cold_range_prefetch_gap_bytes: Histogram,
+    pub cold_range_prefetch_gap_blocks: Histogram,
+    pub cold_range_prefetch_hint_misses: IntCounter,
 
     pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
     pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
@@ -166,6 +172,40 @@ impl HummockStateStoreMetrics {
             "state_store_blockwise_prefetch_bytes", "Compressed block bytes represented by registered, consumed or discarded handles; not physical IO bytes", &["event"], registry).unwrap();
         let blockwise_prefetch_wait_duration = register_histogram_with_registry!(
             "state_store_blockwise_prefetch_wait_duration_seconds", "Time waiting on a prefetched block when the iterator consumes its handle, including cancelled waits", exponential_buckets(0.000001, 2.0, 25).unwrap(), registry).unwrap();
+        let cold_range_prefetch_window_runs = register_histogram_with_registry!(
+            "state_store_cold_range_prefetch_window_runs",
+            "Logical cold reads submitted per planned window, including zero for fully cached windows; not physical GETs",
+            vec![0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0],
+            registry
+        )
+        .unwrap();
+        let cold_range_prefetch_read_bytes = register_histogram_with_registry!(
+            "state_store_cold_range_prefetch_read_bytes",
+            "Bytes per submitted logical cold-range read, including reads later cancelled; not physical GET bytes",
+            exponential_buckets(1024.0, 2.0, 20).unwrap(),
+            registry
+        )
+        .unwrap();
+        let cold_range_prefetch_gap_bytes = register_histogram_with_registry!(
+            "state_store_cold_range_prefetch_gap_bytes",
+            "Compressed bytes of each contiguous cache-hit or disk-index-hint gap between two cold runs in one window; excludes leading/trailing hits and window boundaries",
+            exponential_buckets(1024.0, 2.0, 20).unwrap(),
+            registry
+        )
+        .unwrap();
+        let cold_range_prefetch_gap_blocks = register_histogram_with_registry!(
+            "state_store_cold_range_prefetch_gap_blocks",
+            "Blocks per internal cache gap counted by cold_range_prefetch_gap_bytes; consecutive hits form one gap",
+            exponential_buckets(1.0, 2.0, 12).unwrap(),
+            registry
+        )
+        .unwrap();
+        let cold_range_prefetch_hint_misses = register_int_counter_with_registry!(
+            "state_store_cold_range_prefetch_hint_misses",
+            "Positive disk index hints whose cache-only lookup returned no entry and required a demand fallback",
+            registry
+        )
+        .unwrap();
         let block_cache_read_events = register_int_counter_vec_with_registry!(
             "state_store_block_cache_read_events", "Fill request registration and actual outer producer starts; pending includes disk cache and shared in-flight reads", &["event"], registry).unwrap();
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
@@ -748,6 +788,11 @@ impl HummockStateStoreMetrics {
             blockwise_prefetch_events,
             blockwise_prefetch_window_blocks,
             blockwise_prefetch_window_bytes,
+            cold_range_prefetch_window_runs,
+            cold_range_prefetch_read_bytes,
+            cold_range_prefetch_gap_bytes,
+            cold_range_prefetch_gap_blocks,
+            cold_range_prefetch_hint_misses,
             block_cache_read_events,
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,

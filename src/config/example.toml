@@ -372,10 +372,16 @@ algorithm = "Lru"
 algorithm = "Lru"
 
 [storage.blockwise_prefetch]
+mode = ""
 enabled = false
 changelog_enabled = false
 snapshot_backfill_enabled = false
 locality_backfill_enabled = false
+prefix_mode = ""
+changelog_mode = ""
+range_scan_mode = ""
+snapshot_backfill_mode = ""
+locality_backfill_mode = ""
 max_blocks = 3
 max_bytes = 262144
 

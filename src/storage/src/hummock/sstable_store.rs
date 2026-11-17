@@ -56,6 +56,9 @@ use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
+mod cold_range;
+pub(crate) use cold_range::ColdRangePrefetch;
+
 macro_rules! impl_vector_index_meta_file {
     ($($type_name:ident),+) => {
         pub enum HummockVectorIndexMetaFile {
@@ -1102,6 +1105,8 @@ mod tests {
             (false, PrefetchMode::Range),
             (true, PrefetchMode::Blockwise),
             (false, PrefetchMode::Blockwise),
+            (true, PrefetchMode::ColdRanges),
+            (false, PrefetchMode::ColdRanges),
         ] {
             let sstable_store = mock_sstable_store().await;
             let (sstable, info) =
@@ -1129,7 +1134,7 @@ mod tests {
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions {
                     prefetch: mode,
-                    cache_policy: if mode == PrefetchMode::Blockwise {
+                    cache_policy: if matches!(mode, PrefetchMode::Blockwise | PrefetchMode::ColdRanges) {
                         CachePolicy::default()
                     } else {
                         CachePolicy::Disable
@@ -1145,7 +1150,7 @@ mod tests {
             iter.collect_local_statistic(&mut stats);
             assert_eq!(
                 stats.cache_data_prefetch_count,
-                u64::from(mode == PrefetchMode::Range)
+                u64::from(matches!(mode, PrefetchMode::Range | PrefetchMode::ColdRanges))
             );
             assert_eq!(stats.cache_data_block_total, 1);
             // If the single-block read also fails, the error must still reach the caller.
