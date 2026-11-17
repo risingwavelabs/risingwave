@@ -37,7 +37,7 @@ impl CatalogController {
         database_id: DatabaseId,
         name: &str,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         check_database_name_duplicate(name, &txn).await?;
 
@@ -57,6 +57,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::Database(ObjectModel(database, obj, None).into()),
             )
@@ -69,7 +70,7 @@ impl CatalogController {
         schema_id: SchemaId,
         name: &str,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let obj = Object::find_by_id(schema_id)
@@ -88,6 +89,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::Schema(ObjectModel(schema, obj, None).into()),
             )
@@ -112,7 +114,7 @@ impl CatalogController {
                 .await;
         }
 
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
@@ -140,6 +142,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
@@ -157,7 +160,7 @@ impl CatalogController {
         object_id: ObjectId,
         dst_object_id: ObjectId,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let dst_name: String = match object_type {
             ObjectType::Table => Table::find_by_id(dst_object_id.as_table_id())
@@ -233,6 +236,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
@@ -249,7 +253,7 @@ impl CatalogController {
         pb_source: PbSource,
     ) -> MetaResult<NotificationVersion> {
         let source_id: SourceId = pb_source.id;
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let original_version: i64 = Source::find_by_id(source_id)
@@ -271,6 +275,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend_relation_info(
+                &mut inner,
                 NotificationOperation::Update,
                 PbObjectInfo::Source(pb_source),
             )
@@ -284,7 +289,7 @@ impl CatalogController {
         object_id: ObjectId,
         new_owner: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         ensure_user_id(new_owner, &txn).await?;
 
@@ -311,6 +316,7 @@ impl CatalogController {
 
                 let version = self
                     .notify_frontend(
+                        &mut inner,
                         NotificationOperation::Update,
                         NotificationInfo::Database(ObjectModel(db, obj, None).into()),
                     )
@@ -327,6 +333,7 @@ impl CatalogController {
 
                 let version = self
                     .notify_frontend(
+                        &mut inner,
                         NotificationOperation::Update,
                         NotificationInfo::Schema(ObjectModel(schema, obj, None).into()),
                     )
@@ -609,6 +616,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: objects
@@ -630,7 +638,7 @@ impl CatalogController {
         object_id: ObjectId,
         new_schema: SchemaId,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         ensure_object_id(ObjectType::Schema, new_schema, &txn).await?;
 
@@ -722,7 +730,7 @@ impl CatalogController {
 
         txn.commit().await?;
         let version = self
-            .notify_frontend(NotificationOperation::Update, notification)
+            .notify_frontend(&mut inner, NotificationOperation::Update, notification)
             .await;
         Ok(version)
     }
@@ -732,7 +740,7 @@ impl CatalogController {
         pb_secret: PbSecret,
         secret_plain_payload: Vec<u8>,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -750,12 +758,16 @@ impl CatalogController {
         secret_plain.value.clone_from(&secret_plain_payload);
 
         LocalSecretManager::global().update_secret(secret_plain.id, secret_plain_payload);
-        self.env
-            .notification_manager()
-            .notify_compute_without_version(Operation::Update, Info::Secret(secret_plain.clone()));
+        self.env.notification_manager().notify_part(
+            &mut *inner,
+            SubscribeType::Compute,
+            Operation::Update,
+            Info::Secret(secret_plain.clone()),
+        );
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::Secret(secret_plain),
             )
@@ -831,7 +843,7 @@ impl CatalogController {
         database_id: DatabaseId,
         param: AlterDatabaseParam,
     ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let mut database = database::ActiveModel {
@@ -865,6 +877,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::Database(ObjectModel(database.clone(), obj, None).into()),
             )
@@ -877,7 +890,7 @@ impl CatalogController {
         database_id: DatabaseId,
         resource_group: Option<String>,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let database =
@@ -900,6 +913,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::Database(ObjectModel(database, obj, None).into()),
             )
@@ -913,7 +927,7 @@ impl CatalogController {
         retention_seconds: u64,
         definition: String,
     ) -> MetaResult<(NotificationVersion, PbSubscription)> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let obj = Object::find_by_id(subscription_id)
@@ -936,6 +950,7 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: vec![PbObject {
@@ -961,7 +976,7 @@ impl CatalogController {
                 .iter()
                 .any(|key| key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH);
 
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let config_override: Option<String> = StreamingJob::find_by_id(job_id)
@@ -1017,17 +1032,10 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-        drop(inner);
 
         if updates_cache_refill_policy {
-            let policies = self.table_cache_refill_policies_snapshot().await?;
-            self.env.notification_manager().notify_hummock(
-                NotificationOperation::Update,
-                NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                    table_cache_refill_policies: Some(policies),
-                    ..Default::default()
-                }),
-            );
+            let policies = inner.table_cache_refill_policies_snapshot().await?;
+            self.notify_hummock_table_cache_refill_policies(&mut inner, policies);
         }
 
         Ok(IGNORED_NOTIFICATION_VERSION)

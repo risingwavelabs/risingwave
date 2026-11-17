@@ -76,8 +76,9 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    JoinType, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, JoinType, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -1017,7 +1018,7 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
 
         let txn = inner.db.begin().await?;
 
@@ -1101,7 +1102,7 @@ impl CatalogController {
             .notification_manager()
             .notify_serving_fragment_mapping_update(inserted_fragment_ids);
 
-        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&mut inner, job_id)
             .await?;
 
         Ok(())
@@ -1306,7 +1307,11 @@ impl CatalogController {
             // We also have notified the frontend about these objects,
             // so we need to notify the frontend to delete them here.
             let _version = self
-                .notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
+                .notify_frontend(
+                    &mut inner,
+                    Operation::Delete,
+                    build_object_group_for_delete(objs),
+                )
                 .await;
         }
         let aborted_sink_ids = objects_to_abort
@@ -1600,7 +1605,7 @@ impl CatalogController {
             updated_user_info,
         )) = replace_sink_post_collect
         else {
-            if let Some(version) = notifications.publish().await {
+            if let Some(version) = notifications.publish(&mut *inner).await {
                 tracing::debug!(job_id = %job_id, version, "notified frontend of creating streaming job");
             }
             return Ok(None);
@@ -1609,7 +1614,6 @@ impl CatalogController {
         inner
             .dropped_tables
             .extend(dropped_tables.into_iter().map(|table| (table.id, table)));
-        drop(inner);
 
         self.env
             .notification_manager()
@@ -1634,7 +1638,7 @@ impl CatalogController {
 
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the replacement notification batch contains the replacement sink");
         tracing::debug!(job_id = %job_id, version, "notified frontend of replacement streaming job");
@@ -1799,7 +1803,7 @@ impl CatalogController {
         // notify users about the default privileges
         Self::add_users_update_notifications(&mut notifications, updated_user_info);
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the streaming job notification batch contains the streaming job");
 
@@ -2023,7 +2027,7 @@ impl CatalogController {
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
         auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
@@ -2066,7 +2070,7 @@ impl CatalogController {
             );
         }
         let version = notifications
-            .publish()
+            .publish(&mut *inner)
             .await
             .expect("the replacement notification batch contains the updated object");
 
@@ -2583,7 +2587,7 @@ impl CatalogController {
         source_id: SourceId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
-        let inner = self.inner.read().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         {
@@ -2714,6 +2718,7 @@ impl CatalogController {
         let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap(), None).into());
         let _version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: vec![PbObject {
@@ -2968,7 +2973,7 @@ impl CatalogController {
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
         skip_alter_on_fly_check: bool,
     ) -> MetaResult<WithOptionsSecResolved> {
-        let inner = self.inner.read().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let (source, _obj) = Source::find_by_id(source_id)
@@ -3194,6 +3199,7 @@ impl CatalogController {
 
         let _version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_objs,
@@ -3210,7 +3216,7 @@ impl CatalogController {
         sink_id: SinkId,
         props: BTreeMap<String, String>,
     ) -> MetaResult<HashMap<String, String>> {
-        let inner = self.inner.read().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let (sink, _obj) = Sink::find_by_id(sink_id)
@@ -3261,6 +3267,7 @@ impl CatalogController {
 
         let _version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
@@ -3282,7 +3289,7 @@ impl CatalogController {
     ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
             ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
-        let inner = self.inner.read().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let (sink, _obj) = Sink::find_by_id(sink_id)
@@ -3384,6 +3391,7 @@ impl CatalogController {
         ];
         let _version = self
             .notify_frontend(
+                &mut inner,
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
@@ -3393,6 +3401,69 @@ impl CatalogController {
             .await;
 
         Ok((props.into_iter().collect(), sink_id))
+    }
+
+    /// The connection's params and options after applying the alteration, with the secrets it
+    /// starts and stops depending on.
+    async fn connection_options_after_alter(
+        db: &impl ConnectionTrait,
+        connection_id: ConnectionId,
+        alter_props: &BTreeMap<String, String>,
+        alter_secret_refs: &BTreeMap<String, PbSecretRef>,
+        prop_keys: &[String],
+    ) -> MetaResult<(
+        risingwave_pb::catalog::ConnectionParams,
+        WithOptionsSecResolved,
+        Vec<SecretId>,
+        Vec<SecretId>,
+    )> {
+        let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(db)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+        let connection_pb = connection_catalog.params.to_protobuf();
+
+        // Map the connection type enum to the string name expected by the validation function
+        let connection_type_str =
+            pb_connection_type_to_connection_type(&connection_pb.connection_type())
+                .ok_or_else(|| MetaError::invalid_parameter("Unspecified connection type"))?;
+
+        // Validate that props can be altered
+        risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
+            connection_type_str, prop_keys,
+        )?;
+
+        let mut connection_options_with_secret = WithOptionsSecResolved::new(
+            connection_pb.properties.into_iter().collect(),
+            connection_pb.secret_refs.into_iter().collect(),
+        );
+
+        let (to_add_secret_dep, to_remove_secret_dep) = connection_options_with_secret
+            .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+        let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
+            connection_type: connection_pb.connection_type,
+            properties: connection_options_with_secret
+                .as_plaintext()
+                .clone()
+                .into_iter()
+                .collect(),
+            secret_refs: connection_options_with_secret
+                .as_secret()
+                .clone()
+                .into_iter()
+                .collect(),
+        };
+
+        Ok((
+            updated_connection_params,
+            connection_options_with_secret,
+            to_add_secret_dep,
+            to_remove_secret_dep,
+        ))
     }
 
     /// Update connection properties and all dependent sources/sinks in a single transaction
@@ -3406,7 +3477,31 @@ impl CatalogController {
         Vec<(SourceId, HashMap<String, String>)>, // Source ID and their complete properties
         Vec<(SinkId, HashMap<String, String>)>,   // Sink ID and their complete properties
     )> {
-        let inner = self.inner.read().await;
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        // Validate without holding any lock, because it reaches the external system.
+        let (validated_params, ..) = Self::connection_options_after_alter(
+            &self.inner.read().await.db,
+            connection_id,
+            &alter_props,
+            &alter_secret_refs,
+            &prop_keys,
+        )
+        .await?;
+        validate_connection(&PbConnection {
+            id: connection_id as _,
+            info: Some(risingwave_pb::catalog::connection::Info::ConnectionParams(
+                validated_params.clone(),
+            )),
+            ..Default::default()
+        })
+        .await?;
+
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         // Find all dependent sources and sinks first
@@ -3426,39 +3521,24 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
-            .find_also_related(Object)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| {
-                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
-            })?;
-
-        // Validate that props can be altered
-        let prop_keys: Vec<String> = alter_props
-            .keys()
-            .chain(alter_secret_refs.keys())
-            .cloned()
-            .collect();
-
-        // Map the connection type enum to the string name expected by the validation function
-        let connection_type_str = pb_connection_type_to_connection_type(
-            &connection_catalog.params.to_protobuf().connection_type(),
+        let (
+            updated_connection_params,
+            connection_options_with_secret,
+            to_add_secret_dep,
+            to_remove_secret_dep,
+        ) = Self::connection_options_after_alter(
+            &txn,
+            connection_id,
+            &alter_props,
+            &alter_secret_refs,
+            &prop_keys,
         )
-        .ok_or_else(|| MetaError::invalid_parameter("Unspecified connection type"))?;
-
-        risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
-            connection_type_str, &prop_keys,
-        )?;
-
-        let connection_pb = connection_catalog.params.to_protobuf();
-        let mut connection_options_with_secret = WithOptionsSecResolved::new(
-            connection_pb.properties.into_iter().collect(),
-            connection_pb.secret_refs.into_iter().collect(),
-        );
-
-        let (to_add_secret_dep, to_remove_secret_dep) = connection_options_with_secret
-            .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+        .await?;
+        if updated_connection_params != validated_params {
+            return Err(MetaError::invalid_parameter(
+                "the connection was altered concurrently, please retry",
+            ));
+        }
 
         tracing::debug!(
             "applying new properties to connection and dependents: connection_id={}, sources={:?}, sinks={:?}",
@@ -3466,31 +3546,6 @@ impl CatalogController {
             dependent_sources,
             dependent_sinks
         );
-
-        // Validate connection
-        {
-            let conn_params_pb = risingwave_pb::catalog::ConnectionParams {
-                connection_type: connection_pb.connection_type,
-                properties: connection_options_with_secret
-                    .as_plaintext()
-                    .clone()
-                    .into_iter()
-                    .collect(),
-                secret_refs: connection_options_with_secret
-                    .as_secret()
-                    .clone()
-                    .into_iter()
-                    .collect(),
-            };
-            let connection = PbConnection {
-                id: connection_id as _,
-                info: Some(risingwave_pb::catalog::connection::Info::ConnectionParams(
-                    conn_params_pb,
-                )),
-                ..Default::default()
-            };
-            validate_connection(&connection).await?;
-        }
 
         // Update connection secret dependencies
         if !to_add_secret_dep.is_empty() {
@@ -3516,19 +3571,6 @@ impl CatalogController {
         }
 
         // Update the connection with new properties
-        let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
-            connection_type: connection_pb.connection_type,
-            properties: connection_options_with_secret
-                .as_plaintext()
-                .clone()
-                .into_iter()
-                .collect(),
-            secret_refs: connection_options_with_secret
-                .as_secret()
-                .clone()
-                .into_iter()
-                .collect(),
-        };
         let active_connection_model = connection::ActiveModel {
             connection_id: Set(connection_id),
             params: Set(ConnectionParams::from(&updated_connection_params)),
@@ -3818,6 +3860,7 @@ impl CatalogController {
         if !updated_objects.is_empty() {
             let _version = self
                 .notify_frontend(
+                    &mut inner,
                     NotificationOperation::Update,
                     NotificationInfo::ObjectGroup(PbObjectGroup {
                         objects: updated_objects,

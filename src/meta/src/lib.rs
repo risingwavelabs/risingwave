@@ -42,7 +42,6 @@ mod notification;
 pub mod rpc;
 pub mod serving;
 pub mod stream;
-pub mod table_refill;
 pub mod telemetry;
 
 pub use error::{MetaError, MetaResult};
