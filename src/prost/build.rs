@@ -260,6 +260,9 @@ for_all_wrapped_id_fields! (
             src_object_id: ObjectId,
             dst_object_id: ObjectId,
         }
+        AutoSchemaChangeResult {
+            table_id: TableId,
+        }
         CompactIcebergTableRequest {
             sink_id: SinkId,
         }

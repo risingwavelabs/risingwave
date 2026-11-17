@@ -828,12 +828,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn auto_schema_change(&self, schema_change: SchemaChangeEnvelope) -> Result<()> {
+    pub async fn auto_schema_change(
+        &self,
+        schema_change: SchemaChangeEnvelope,
+    ) -> Result<AutoSchemaChangeResponse> {
         let request = AutoSchemaChangeRequest {
             schema_change: Some(schema_change),
         };
-        let _ = self.inner.auto_schema_change(request).await?;
-        Ok(())
+        self.inner.auto_schema_change(request).await
     }
 
     /// Block until the pk-index sink `sink_id`'s database has committed through `epoch`, returning

@@ -27,6 +27,7 @@ use risingwave_connector::source::{
     CreateSplitReaderResult, SourceContext, SourceCtrlOpts, SourceReaderEvent, SplitId, SplitImpl,
     SplitMetaData, StreamChunkWithState,
 };
+use risingwave_pb::ddl_service::auto_schema_change_result::Outcome as SchemaChangeOutcome;
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
@@ -108,21 +109,37 @@ impl StreamReaderBuilder {
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
                 while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_ids = schema_change.table_ids();
-                    tracing::debug!(
-                        target: "auto_schema_change",
-                        "recv a schema change event for tables: {:?}", table_ids);
                     // TODO: retry on rpc error
                     if let Some(ref meta_client) = meta_client {
                         match meta_client
                             .auto_schema_change(schema_change.to_protobuf())
                             .await
                         {
-                            Ok(_) => {
-                                // A successful RPC can be a no-op. Meta logs actual table replacements.
-                                tracing::debug!(
-                                    target: "auto_schema_change",
-                                    "schema change request completed for tables: {:?}", table_ids);
+                            Ok(response) => {
+                                for result in response.results {
+                                    match result.outcome() {
+                                        SchemaChangeOutcome::Noop => tracing::debug!(
+                                            target: "auto_schema_change",
+                                            cdc_table_id = result.cdc_table_id,
+                                            table_id = ?result.table_id,
+                                            "schema change skipped: no catalog change"),
+                                        SchemaChangeOutcome::Applied => tracing::info!(
+                                            target: "auto_schema_change",
+                                            cdc_table_id = result.cdc_table_id,
+                                            table_id = ?result.table_id,
+                                            "schema change success"),
+                                        SchemaChangeOutcome::Failed => tracing::error!(
+                                            target: "auto_schema_change",
+                                            cdc_table_id = result.cdc_table_id,
+                                            table_id = ?result.table_id,
+                                            "schema change failed; see Meta logs for details"),
+                                        SchemaChangeOutcome::Unspecified => tracing::warn!(
+                                            target: "auto_schema_change",
+                                            cdc_table_id = result.cdc_table_id,
+                                            table_id = ?result.table_id,
+                                            "schema change outcome is unknown"),
+                                    }
+                                }
                                 let _ = finish_tx.send(());
                             }
                             Err(e) => {
