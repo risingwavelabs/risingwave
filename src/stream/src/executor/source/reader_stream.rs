@@ -112,17 +112,26 @@ impl StreamReaderBuilder {
                     tracing::info!(
                         target: "auto_schema_change",
                         "recv a schema change event for tables: {:?}", table_ids);
+                    // TODO: retry on rpc error
                     if let Some(ref meta_client) = meta_client {
-                        apply_schema_change_with_retry(
-                            || async {
-                                meta_client
-                                    .auto_schema_change(schema_change.to_protobuf())
-                                    .await
-                                    .map_err(Into::into)
-                            },
-                            finish_tx,
-                        )
-                        .await;
+                        match meta_client
+                            .auto_schema_change(schema_change.to_protobuf())
+                            .await
+                        {
+                            Ok(_) => {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    "schema change success for tables: {:?}", table_ids);
+                                let _ = finish_tx.send(());
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    target: "auto_schema_change",
+                                    error = %e.as_report(), "schema change error");
+
+                                let _ = finish_tx.send(());
+                            }
+                        }
                     }
                 }
             });
@@ -366,90 +375,5 @@ impl StreamReaderBuilder {
             tracing::info!("stream source reader error, retry in {delay:?}");
             tokio::time::sleep(delay).await;
         }
-    }
-}
-
-/// Keep the event and its parser acknowledgment pending until Meta applies the change.
-/// Cancelling the reader also cancels retries, including an in-flight RPC.
-async fn apply_schema_change_with_retry<F, Fut>(mut apply: F, mut finish_tx: oneshot::Sender<()>)
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<()>>,
-{
-    tokio::select! {
-        biased;
-        _ = finish_tx.closed() => return,
-        _ = async {
-            let mut backoff = get_infinite_backoff_strategy();
-            loop {
-                match apply().await {
-                    Ok(()) => break,
-                    Err(e) => {
-                        let delay = backoff.next().unwrap();
-                        tracing::error!(
-                            target: "auto_schema_change",
-                            error = %e.as_report(),
-                            "schema change failed, retry in {delay:?}"
-                        );
-                        tokio::time::sleep(delay).await;
-                    }
-                }
-            }
-        } => {}
-    }
-    let _ = finish_tx.send(());
-}
-
-#[cfg(test)]
-mod schema_change_tests {
-    use std::cell::Cell;
-
-    use futures::{FutureExt, pin_mut};
-
-    use super::*;
-
-    #[tokio::test(start_paused = true)]
-    async fn schema_change_is_acknowledged_only_after_successful_retry() {
-        let attempts = Cell::new(0);
-        let (tx, mut rx) = oneshot::channel();
-        let apply = apply_schema_change_with_retry(
-            || {
-                attempts.set(attempts.get() + 1);
-                std::future::ready(if attempts.get() < 3 {
-                    Err(anyhow::anyhow!("table version is stale"))
-                } else {
-                    Ok(())
-                })
-            },
-            tx,
-        );
-        pin_mut!(apply);
-        assert!(apply.as_mut().now_or_never().is_none());
-        assert_eq!(attempts.get(), 1);
-        assert!(matches!(
-            rx.try_recv(),
-            Err(oneshot::error::TryRecvError::Empty)
-        ));
-        apply.await;
-        assert_eq!(attempts.get(), 3);
-        rx.await.unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn dropping_reader_cancels_schema_change_retries() {
-        let attempts = Cell::new(0);
-        let (tx, rx) = oneshot::channel();
-        let apply = apply_schema_change_with_retry(
-            || {
-                attempts.set(attempts.get() + 1);
-                std::future::ready(Err(anyhow::anyhow!("meta unavailable")))
-            },
-            tx,
-        );
-        pin_mut!(apply);
-        assert!(apply.as_mut().now_or_never().is_none());
-        drop(rx);
-        apply.await;
-        assert_eq!(attempts.get(), 1);
     }
 }

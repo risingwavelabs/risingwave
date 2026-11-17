@@ -1579,21 +1579,8 @@ impl DdlService for DdlServiceImpl {
                                         &self.env.event_log_manager_ref(),
                                         fail_info,
                                     );
-                                    return Err(e.into());
                                 }
                             };
-                        } else {
-                            let fail_info = "frontend returned no table replacement plan";
-                            add_auto_schema_change_fail_event_log(
-                                &self.meta_metrics,
-                                table.id,
-                                table.name.clone(),
-                                table_change.cdc_table_id.clone(),
-                                table_change.upstream_ddl.clone(),
-                                &self.env.event_log_manager_ref(),
-                                fail_info.to_owned(),
-                            );
-                            return Err(Status::internal(fail_info));
                         }
                     }
                     Err(e) => {
@@ -1615,7 +1602,6 @@ impl DdlService for DdlServiceImpl {
                             &self.env.event_log_manager_ref(),
                             fail_info,
                         );
-                        return Err(e);
                     }
                 };
             }

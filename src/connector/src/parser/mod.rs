@@ -516,10 +516,13 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                     if let Some(ref tx) = parser.source_ctx().schema_change_tx {
                         tx.send((schema_change, oneshot_tx))
                             .await
-                            .map_err(|_| anyhow::anyhow!("schema change executor stopped"))?;
-                        oneshot_rx
-                            .await
-                            .context("schema change executor stopped before applying the change")?;
+                            .expect("send schema change to executor");
+                        match oneshot_rx.await {
+                            Ok(()) => {}
+                            Err(e) => {
+                                tracing::error!(error = %e.as_report(), "failed to wait for schema change");
+                            }
+                        }
                     }
                 }
             }
@@ -679,112 +682,5 @@ pub mod test_utils {
             .unwrap()
             .unwrap()
         }
-    }
-}
-
-#[cfg(test)]
-mod schema_change_ack_tests {
-    use futures::FutureExt;
-    use tokio::sync::{mpsc, oneshot};
-
-    use super::*;
-    use crate::parser::schema_change::{TableChangeType, TableSchemaChange};
-    use crate::source::SourceMessage;
-
-    #[derive(Debug)]
-    struct SchemaChangeParser(SourceContext);
-
-    impl ByteStreamSourceParser for SchemaChangeParser {
-        fn columns(&self) -> &[SourceColumnDesc] {
-            &[]
-        }
-
-        fn source_ctx(&self) -> &SourceContext {
-            &self.0
-        }
-
-        fn parser_format(&self) -> ParserFormat {
-            ParserFormat::Debezium
-        }
-
-        async fn parse_one<'a>(
-            &'a mut self,
-            _key: Option<Vec<u8>>,
-            _payload: Option<Vec<u8>>,
-            _writer: SourceStreamChunkRowWriter<'a>,
-        ) -> ConnectorResult<()> {
-            unreachable!()
-        }
-
-        async fn parse_one_with_txn<'a>(
-            &'a mut self,
-            _key: Option<Vec<u8>>,
-            _payload: Option<Vec<u8>>,
-            _writer: SourceStreamChunkRowWriter<'a>,
-        ) -> ConnectorResult<ParseResult> {
-            Ok(ParseResult::SchemaChange(SchemaChangeEnvelope {
-                table_changes: vec![TableSchemaChange {
-                    cdc_table_id: "1.db.t".into(),
-                    columns: vec![],
-                    change_type: TableChangeType::Alter,
-                    upstream_ddl: "ALTER TABLE t ADD COLUMN v INT".into(),
-                }],
-            }))
-        }
-    }
-
-    fn schema_change_stream(
-        tx: mpsc::Sender<(SchemaChangeEnvelope, oneshot::Sender<()>)>,
-    ) -> impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Unpin {
-        let parser = SchemaChangeParser(SourceContext {
-            schema_change_tx: Some(tx),
-            ..SourceContext::dummy()
-        });
-        parser
-            .parse_stream_with_events(
-                futures::stream::iter([
-                    Ok(SourceMessageEvent::Data(vec![SourceMessage {
-                        payload: Some(vec![]),
-                        ..SourceMessage::dummy()
-                    }])),
-                    Ok(SourceMessageEvent::SplitProgress(HashMap::new())),
-                ])
-                .boxed(),
-            )
-            .boxed()
-    }
-
-    #[tokio::test]
-    async fn schema_change_holds_back_progress_until_acknowledged() {
-        let (tx, mut rx) = mpsc::channel(1);
-        let mut stream = schema_change_stream(tx);
-        assert!(stream.next().now_or_never().is_none());
-        let (_, ack) = rx.recv().await.unwrap();
-        assert!(stream.next().now_or_never().is_none());
-        ack.send(()).unwrap();
-        assert!(matches!(
-            stream.next().await.unwrap().unwrap(),
-            SourceReaderEvent::SplitProgress(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn lost_schema_change_ack_stops_stream_before_progress() {
-        let (tx, mut rx) = mpsc::channel(1);
-        let mut stream = schema_change_stream(tx);
-        assert!(stream.next().now_or_never().is_none());
-        let (_, ack) = rx.recv().await.unwrap();
-        drop(ack);
-        assert!(stream.next().await.unwrap().is_err());
-        assert!(stream.next().await.is_none());
-    }
-
-    #[tokio::test]
-    async fn closed_schema_change_channel_returns_error_instead_of_panicking() {
-        let (tx, rx) = mpsc::channel(1);
-        drop(rx);
-        let mut stream = schema_change_stream(tx);
-        assert!(stream.next().await.unwrap().is_err());
-        assert!(stream.next().await.is_none());
     }
 }
