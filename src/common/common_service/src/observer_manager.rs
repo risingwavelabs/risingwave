@@ -119,7 +119,10 @@ where
             }
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) | Info::SessionParam(_) => true,
-            Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
+            // It carries the whole limit table, so applying it after the snapshot in queue order
+            // ends at the latest limits.
+            Info::HummockWriteLimits(_) => true,
+            Info::Snapshot(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
             Info::ClusterResource(_) => true,

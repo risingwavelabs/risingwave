@@ -16,7 +16,7 @@ mod barrier_control;
 mod status;
 
 use std::cmp::max;
-use std::collections::{HashMap, HashSet, hash_map};
+use std::collections::{HashMap, HashSet, VecDeque, hash_map};
 use std::mem::take;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::time::Duration;
@@ -34,7 +34,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::super::state::RenderResult;
 use super::IndependentCheckpointJobControl;
@@ -57,10 +57,16 @@ use crate::barrier::{
     TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::manager::MetaOpts;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
+
+fn snapshot_backfill_max_pending_barrier_num(opts: &MetaOpts) -> usize {
+    opts.in_flight_barrier_nums
+        .saturating_mul(opts.snapshot_backfill_barrier_amplification_factor.max(1))
+}
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -84,6 +90,7 @@ pub(crate) struct CreatingStreamingJobControl {
     max_committed_epoch: Option<u64>,
     status: CreatingStreamingJobStatus,
     max_lagged_barrier_num: usize,
+    max_pending_barrier_num: usize,
 
     upstream_lag: LabelGuardedIntGauge,
 }
@@ -190,6 +197,8 @@ impl CreatingStreamingJobControl {
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
+        let opts = &partial_graph_manager.control_stream_manager().env.opts;
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
 
         let IndependentCheckpointJobControl::CreatingStreamingJob(job) = entry.insert(
             IndependentCheckpointJobControl::CreatingStreamingJob(Self {
@@ -200,6 +209,7 @@ impl CreatingStreamingJobControl {
                 snapshot_epoch,
                 status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
                 max_lagged_barrier_num,
+                max_pending_barrier_num,
                 upstream_lag: GLOBAL_META_METRICS
                     .snapshot_backfill_lag
                     .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -389,13 +399,16 @@ impl CreatingStreamingJobControl {
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
-        let mut barriers_to_inject = Self::resolve_upstream_log_epochs(
+        let mut pending_barriers: VecDeque<_> = Self::resolve_upstream_log_epochs(
             &info.snapshot_backfill_upstream_tables,
             upstream_table_log_epochs,
             committed_epoch,
             upstream_barrier_info,
-        )?;
-        let mut first_barrier = barriers_to_inject.remove(0);
+        )?
+        .into();
+        let mut first_barrier = pending_barriers
+            .pop_front()
+            .expect("resolved upstream log epochs should not be empty");
         assert!(first_barrier.kind.is_checkpoint());
         first_barrier.kind = BarrierKind::Initial;
 
@@ -404,12 +417,12 @@ impl CreatingStreamingJobControl {
                 tracking_job: TrackingJob::recovered(job_id, &info.fragment_infos),
                 log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
                     InflightStreamingJobInfo::snapshot_backfill_actor_ids(&info.fragment_infos),
-                    barriers_to_inject
-                        .last()
+                    pending_barriers
+                        .back()
                         .map(|info| info.prev_epoch() - committed_epoch)
                         .unwrap_or(0),
                 ),
-                barriers_to_inject: Some(barriers_to_inject),
+                pending_barriers,
                 info,
             },
             first_barrier,
@@ -516,6 +529,8 @@ impl CreatingStreamingJobControl {
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
+        let opts = &partial_graph_recoverer.control_stream_manager().env.opts;
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
@@ -537,6 +552,7 @@ impl CreatingStreamingJobControl {
             max_committed_epoch: Some(committed_epoch),
             status,
             max_lagged_barrier_num,
+            max_pending_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -684,10 +700,31 @@ impl CreatingStreamingJobControl {
             None => (None, vec![]),
         };
         {
-            for (barrier_to_inject, mutation) in self
-                .status
-                .on_new_upstream_epoch(barrier_info, mutation.take())
-            {
+            let barriers_with_mutation = self.status.on_new_upstream_epoch(
+                partial_graph_manager,
+                self.partial_graph_id,
+                self.max_pending_barrier_num,
+                barrier_info,
+                mutation.take(),
+            );
+            if barriers_with_mutation.is_empty() && !notifiers.is_empty() {
+                // No barrier is injected in this round: the job is consuming the log store and
+                // its partial graph has reached the pending-barrier limit, or the job is finishing
+                // or resetting. The only command that reaches a creating job is throttle, which
+                // affects the snapshot executor only while it reads the snapshot, so the mutation
+                // can be dropped and the command completed right away. This matches main, where
+                // the log-store phase never forwards the throttle mutation and the notifier stays
+                // with the database barrier.
+                warn!(
+                    job_id = %self.job_id,
+                    "throttle has no effect on a snapshot backfill job after the snapshot phase, completing the command without injecting a barrier"
+                );
+                for mut notifier in notifiers.drain(..) {
+                    notifier.notify_started();
+                    notifier.notify_collected();
+                }
+            }
+            for (barrier_to_inject, mutation) in barriers_with_mutation {
                 Self::inject_barrier(
                     self.partial_graph_id,
                     partial_graph_manager,
@@ -722,10 +759,10 @@ impl CreatingStreamingJobControl {
     fn is_ready_to_merge(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
-            barriers_to_inject,
+            pending_barriers,
             ..
         } = &self.status
-            && barriers_to_inject.is_none()
+            && pending_barriers.is_empty()
             && log_store_progress_tracker.is_finished()
         {
             true
@@ -929,5 +966,28 @@ impl CreatingStreamingJobControl {
                 unreachable!()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_snapshot_backfill_max_pending_barrier_num() {
+        let mut opts = MetaOpts::test(false);
+        opts.in_flight_barrier_nums = 10;
+
+        opts.snapshot_backfill_barrier_amplification_factor = 0;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
+
+        opts.snapshot_backfill_barrier_amplification_factor = 1;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
+
+        opts.snapshot_backfill_barrier_amplification_factor = 10;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 100);
+
+        opts.in_flight_barrier_nums = usize::MAX;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), usize::MAX);
     }
 }

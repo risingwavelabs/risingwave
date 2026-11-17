@@ -36,6 +36,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 use super::TableCommittedEpochNotifiers;
+use super::gc::change_log_retention::RetainedChangeLogBatch;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::model::ext::to_table_change_log_meta_store_model;
 use crate::manager::{MetaOpts, NotificationManager};
@@ -61,6 +62,7 @@ pub(super) struct HummockVersionTransaction<'a> {
     orig_version: &'a mut Arc<HummockVersion>,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
     orig_table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
+    change_log_retention: &'a super::gc::change_log_retention::ChangeLogObjectRetention,
     notification_manager: &'a NotificationManager,
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     meta_metrics: &'a MetaMetrics,
@@ -76,6 +78,7 @@ impl<'a> HummockVersionTransaction<'a> {
         version: &'a mut Arc<HummockVersion>,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
         table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
+        change_log_retention: &'a super::gc::change_log_retention::ChangeLogObjectRetention,
         notification_manager: &'a NotificationManager,
         table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
         meta_metrics: &'a MetaMetrics,
@@ -86,6 +89,7 @@ impl<'a> HummockVersionTransaction<'a> {
             orig_version: version,
             orig_deltas: deltas,
             orig_table_change_log: table_change_log,
+            change_log_retention,
             pre_applied_version: None,
             disable_apply_to_txn: false,
             notification_manager,
@@ -260,8 +264,14 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                     &delta.change_log_delta,
                 );
             }
-            self.orig_table_change_log
-                .retain(|table_id, _| !gc_change_log_deltas.contains(table_id));
+            for table_id in gc_change_log_deltas {
+                if let Some(change_log) = self.orig_table_change_log.remove(&table_id) {
+                    // Move the whole changelog into retention. GC enumerates its object
+                    // IDs later, outside the tracker mutex and this versioning write lock.
+                    self.change_log_retention
+                        .retain_batch(RetainedChangeLogBatch::ChangeLog(Arc::new(change_log)));
+                }
+            }
 
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
