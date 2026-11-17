@@ -43,11 +43,11 @@ pub mod snowflake;
 pub const __ROW_ID: &str = "__row_id";
 pub const __OP: &str = "__op";
 
-/// Sort by epoch, writer-local sequence, then actor. Updates to the same key are
-/// routed to the same actor within an epoch; the actor suffix disambiguates writers.
-/// The widths cover u64/u64/u32 and match Redshift's legacy ID normalization.
+/// Encode epoch, writer-local sequence, and actor for numeric comparison in SQL.
+/// Updates to the same key are routed to the same actor within an epoch; the actor
+/// suffix disambiguates writers without relying on string ordering.
 fn cdc_row_id(epoch: u64, row_count: usize, actor_id: ActorId) -> String {
-    format!("{epoch:020}_{row_count:020}_{:010}", actor_id.as_raw_id())
+    format!("{epoch}_{row_count}_{}", actor_id.as_raw_id())
 }
 
 pub struct AugmentedRow {
@@ -382,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cdc_row_id_ordering() {
+    fn test_cdc_row_id_components() {
         let tuples = [
             (99, usize::MAX, u32::MAX),
             (100, 9, u32::MAX),
@@ -390,12 +390,15 @@ mod tests {
             (100, 10, 10),
             (u64::MAX, usize::MAX, u32::MAX),
         ];
-        let ids: Vec<_> = tuples
-            .into_iter()
-            .map(|(epoch, count, actor)| cdc_row_id(epoch, count, actor.into()))
-            .collect();
-        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
-        assert!(ids.iter().all(|id| id.len() == 52));
+        for (epoch, count, actor) in tuples {
+            let id = cdc_row_id(epoch, count, actor.into());
+            let parts: Vec<_> = id.split('_').collect();
+            assert_eq!(
+                parts,
+                [epoch.to_string(), count.to_string(), actor.to_string()]
+            );
+        }
+        assert_eq!(cdc_row_id(100, 10, 9.into()), "100_10_9");
     }
 
     #[test]
@@ -412,12 +415,15 @@ mod tests {
             // Re-entering the same epoch must not reuse IDs.
             writer.reset_epoch(99);
         }
-        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            ids,
+            (1..=12).map(|i| format!("99_{i}_9")).collect::<Vec<_>>()
+        );
         let other = other_writer.augmented_row(row, Op::Insert).unwrap();
         assert_ne!(ids[0], other[__ROW_ID].as_str().unwrap());
         writer.reset_epoch(100);
         let next = writer.augmented_row(row, Op::Delete).unwrap();
-        assert!(ids.last().unwrap().as_str() < next[__ROW_ID].as_str().unwrap());
+        assert_eq!(next[__ROW_ID], "100_1_9");
         assert_eq!(writer.current_row_count, 1);
     }
 
@@ -440,12 +446,15 @@ mod tests {
             ids.extend(chunk_row_ids(&augmented));
             writer.reset_epoch(99);
         }
-        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            ids,
+            [0, 2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15].map(|i| format!("99_{i}_9"))
+        );
         let other = chunk_row_ids(&other_writer.augmented_chunk(chunk.clone()).unwrap());
         assert_ne!(ids[0], other[0]);
         writer.reset_epoch(100);
         let next = chunk_row_ids(&writer.augmented_chunk(chunk.clone()).unwrap());
-        assert!(ids.last().unwrap() < &next[0]);
+        assert_eq!(next[0], "100_0_9");
         assert_eq!(writer.current_row_count, chunk.capacity());
     }
 

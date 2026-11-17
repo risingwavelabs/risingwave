@@ -913,24 +913,36 @@ fn build_create_merge_into_task_sql(
         .collect::<Vec<String>>()
         .join(", ");
 
-    // Normalize both legacy epoch_counter IDs and padded epoch_counter_actor IDs.
-    // SPLIT_PART returns an empty string for a missing actor, which LPAD maps to
-    // zero. Use the same key for the watermark, deduplication, and cleanup so an
-    // upgrade can drain existing CDC rows without comparing different formats.
+    // Compare epoch_counter_actor components numerically, treating the missing
+    // actor in legacy epoch_counter IDs as zero. DECIMAL(20, 0) covers the full
+    // u64 range of epochs and counters, which does not fit in a signed BIGINT.
     // Legacy IDs that already collide cannot recover their missing actor IDs.
     let row_id = format!("{cdc_table_name}.{__ROW_ID}");
-    let row_id_key = format!(
-        "(LPAD(SPLIT_PART({row_id}, '_', 1), 20, '0') || '_' || \
-         LPAD(SPLIT_PART({row_id}, '_', 2), 20, '0') || '_' || \
-         LPAD(SPLIT_PART({row_id}, '_', 3), 10, '0'))"
+    let row_epoch = format!("CAST(SPLIT_PART({row_id}, '_', 1) AS DECIMAL(20, 0))");
+    let row_count = format!("CAST(SPLIT_PART({row_id}, '_', 2) AS DECIMAL(20, 0))");
+    let row_actor =
+        format!("CAST(COALESCE(NULLIF(SPLIT_PART({row_id}, '_', 3), ''), '0') AS BIGINT)");
+    let row_id_ordering = format!("{row_epoch} DESC, {row_count} DESC, {row_actor} DESC");
+    // Select one complete tuple for the watermark, then use the same numeric
+    // comparison in both target mutations and CDC cleanup.
+    let within_watermark = format!(
+        "({row_epoch} < max_id_table.max_epoch \
+         OR ({row_epoch} = max_id_table.max_epoch AND {row_count} < max_id_table.max_row_count) \
+         OR ({row_epoch} = max_id_table.max_epoch AND {row_count} = max_id_table.max_row_count \
+         AND {row_actor} <= max_id_table.max_actor_id))"
     );
 
     vec![
         format!(
             r#"
             CREATE TEMP TABLE max_id_table AS
-            SELECT COALESCE(MAX({row_id_key}), '0') AS max_row_id
-            FROM {cdc_table_name};
+            SELECT {row_epoch} AS max_epoch,
+                   {row_count} AS max_row_count,
+                   {row_actor} AS max_actor_id
+            FROM {cdc_table_name}
+            WHERE {row_id} IS NOT NULL
+            ORDER BY max_epoch DESC, max_row_count DESC, max_actor_id DESC
+            LIMIT 1;
             "#,
             cdc_table_name = cdc_table_name,
         ),
@@ -942,10 +954,10 @@ fn build_create_merge_into_task_sql(
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
-                        ORDER BY {row_id_key} DESC
+                        ORDER BY {row_id_ordering}
                     ) AS dedupe_id
                     FROM {cdc_table_name}, max_id_table
-                    WHERE {row_id_key} <= max_id_table.max_row_id
+                    WHERE {within_watermark}
                 ) AS subquery
                 WHERE dedupe_id = 1 AND {redshift_sink_op} IN (2, 4)
             ) AS source
@@ -965,10 +977,10 @@ fn build_create_merge_into_task_sql(
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
-                        ORDER BY {row_id_key} DESC
+                        ORDER BY {row_id_ordering}
                     ) AS dedupe_id
                     FROM {cdc_table_name}, max_id_table
-                    WHERE {row_id_key} <= max_id_table.max_row_id
+                    WHERE {within_watermark}
                 ) AS subquery
                 WHERE dedupe_id = 1 AND {redshift_sink_op} IN (1, 3)
             ) AS source
@@ -991,7 +1003,7 @@ fn build_create_merge_into_task_sql(
             r#"
             DELETE FROM {cdc_table_name}
             USING max_id_table
-            WHERE {row_id_key} <= max_id_table.max_row_id;
+            WHERE {within_watermark};
             "#,
             cdc_table_name = cdc_table_name,
         ),
@@ -1050,17 +1062,29 @@ mod tests {
             &vec!["id".to_owned()],
             &vec!["id".to_owned(), "value".to_owned()],
         );
-        let key = "(LPAD(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 1), 20, '0') || '_' || \
-                   LPAD(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 2), 20, '0') || '_' || \
-                   LPAD(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 3), 10, '0'))";
+        let epoch = "CAST(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 1) AS DECIMAL(20, 0))";
+        let count = "CAST(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 2) AS DECIMAL(20, 0))";
+        let actor = "CAST(COALESCE(NULLIF(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 3), ''), '0') AS BIGINT)";
         assert_eq!(sql.len(), 5);
-        assert!(sql[0].contains(&format!("MAX({key})")));
+        assert!(sql[0].contains(&format!("SELECT {epoch} AS max_epoch,")));
+        assert!(sql[0].contains(&format!("{count} AS max_row_count,")));
+        assert!(sql[0].contains(&format!("{actor} AS max_actor_id")));
+        assert!(sql[0].contains("ORDER BY max_epoch DESC, max_row_count DESC, max_actor_id DESC"));
+        assert!(sql[0].contains("LIMIT 1;"));
         for statement in &sql[1..=2] {
-            assert!(statement.contains(&format!("ORDER BY {key} DESC")));
+            assert!(statement.contains(&format!(
+                "ORDER BY {epoch} DESC, {count} DESC, {actor} DESC"
+            )));
         }
-        // The delete, merge, and CDC cleanup must all use the same watermark.
+        // The delete, merge, and CDC cleanup must all compare the entire tuple.
+        let predicate = format!(
+            "WHERE ({epoch} < max_id_table.max_epoch \
+             OR ({epoch} = max_id_table.max_epoch AND {count} < max_id_table.max_row_count) \
+             OR ({epoch} = max_id_table.max_epoch AND {count} = max_id_table.max_row_count \
+             AND {actor} <= max_id_table.max_actor_id))"
+        );
         for statement in &sql[1..=3] {
-            assert!(statement.contains(&format!("WHERE {key} <= max_id_table.max_row_id")));
+            assert!(statement.contains(&predicate));
         }
     }
 
