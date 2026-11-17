@@ -924,7 +924,23 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         .into_stream::<K>()
     }
 
+    /// Serializes a pk range. A start bound that excludes the largest key leaves nothing to scan,
+    /// which becomes the empty range `[key, key)`.
+    fn serialize_pk_bounds(
+        &self,
+        pk_prefix: impl Row,
+        range_bounds: &impl RangeBounds<OwnedRow>,
+    ) -> (Bound<Bytes>, Bound<Bytes>) {
+        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
+        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
+        match start_key {
+            Excluded(key) => (Included(key.clone()), Excluded(key)),
+            start_key => (start_key, end_key),
+        }
+    }
+
     // TODO: directly use `prefixed_range`.
+    /// A start bound is only `Excluded` when no key comes after it. See [`Self::serialize_pk_bounds`].
     fn serialize_pk_bound(
         &self,
         pk_prefix: impl Row,
@@ -950,12 +966,13 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                 if is_start_bound {
                     // Storage doesn't support excluded begin key yet, so transform it to
-                    // included.
-                    // We always serialize a u8 for null of datum which is not equal to '\xff',
-                    // so we can assert that the next_key would never be empty.
+                    // included. There is no next key if a descending key encodes as all 0xff.
                     let next_serialized_key = next_key(&serialized_key);
-                    assert!(!next_serialized_key.is_empty());
-                    Included(Bytes::from(next_serialized_key))
+                    if next_serialized_key.is_empty() {
+                        Excluded(serialized_key)
+                    } else {
+                        Included(Bytes::from(next_serialized_key))
+                    }
                 } else {
                     Excluded(serialized_key)
                 }
@@ -983,8 +1000,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         ordered: bool,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
-        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
-        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
+        let (start_key, end_key) = self.serialize_pk_bounds(&pk_prefix, &range_bounds);
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
             .map(|index| self.pk_indices[index])
@@ -1180,13 +1196,11 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         }
         .convert_to_range_bounds(self);
 
-        let start_key = if let Some(start_pk) = start_pk {
-            self.start_bound_from_pk(Some(start_pk))
-        } else {
-            self.serialize_pk_bound(pk_prefix, normalized_range_bounds.start_bound(), true)
+        let (start_key, end_key) = self.serialize_pk_bounds(pk_prefix, &normalized_range_bounds);
+        let start_key = match start_pk {
+            Some(start_pk) => self.start_bound_from_pk(Some(start_pk)),
+            None => start_key,
         };
-        let end_key =
-            self.serialize_pk_bound(pk_prefix, normalized_range_bounds.end_bound(), false);
 
         let prefix_hint =
             if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint <= pk_prefix.len() {
@@ -1268,8 +1282,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         pk_prefix: impl Row,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send> {
-        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
-        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
+        let (start_key, end_key) = self.serialize_pk_bounds(&pk_prefix, &range_bounds);
         let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
         build_vnode_stream(
             |vnode| {
@@ -1495,7 +1508,12 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInnerIterLogInner<S, SD> {
             .await?;
         let iter = store
             .iter_log(
-                (start_epoch, end_epoch.get_epoch()),
+                (
+                    start_epoch,
+                    end_epoch
+                        .get_epoch()
+                        .expect("change-log reads require an explicit epoch"),
+                ),
                 table_key_range,
                 read_options,
             )

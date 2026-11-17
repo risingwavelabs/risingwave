@@ -201,8 +201,9 @@
       └─BatchScan { table: t, columns: [t.id, t.value], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3, t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr10055, $expr1, Upper(t.value) as $expr10057, t._row_id] }
+      └─StreamProject { exprs: [t.id, t.value, t._row_id, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
+        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: create_udf_and_tables
   sql: |
     create function first_elem(arr jsonb, ts double precision) returns jsonb language javascript as $$
@@ -274,3 +275,50 @@
     └─StreamProject { exprs: [ArrayAccess($expr1, 1:Int32) as $expr2, ArrayAccess($expr1, 2:Int32) as $expr3, t.id] }
       └─StreamProject { exprs: [ArrayTransform(t.a, (t.a * 2:Int32)) as $expr1, t.id] }
         └─StreamTableScan { table: t, columns: [t.a, t.id], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+- name: async projection with literals does not need a separate synchronous layer
+  before:
+  - create_append_only_table
+  sql: |
+    select id, pg_sleep(id::double precision) as waited, 'tag' as tag, null::int as empty
+    from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, waited, tag, empty, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.id, PgSleep(t.id::Float64) as $expr1, 'tag':Varchar, null:Int32, t._row_id] }
+      └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: separate synchronous computation from nested async projection
+  before:
+  - create_append_only_table
+  sql: |
+    select id, id + 1 as next_id,
+           coalesce(pg_sleep(id::double precision), 1) as waited,
+           length(value) as len
+    from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, next_id, waited, len, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.id, (t.id + 1:Int32) as $expr10040, $expr1, Length(t.value) as $expr10042, t._row_id] }
+      └─StreamProject { exprs: [t.id, t.value, t._row_id, Coalesce(PgSleep(t.id::Float64), 1:Int32) as $expr1] }
+        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: async CASE remains conditional when splitting projection
+  before:
+  - create_append_only_table
+  sql: |
+    select id, upper(value) as upper_value,
+           case when id > 0 then pg_sleep(id::double precision) else id end as guarded
+    from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, upper_value, guarded, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.id, Upper(t.value) as $expr10027, $expr1, t._row_id] }
+      └─StreamProject { exprs: [t.id, t.value, t._row_id, Case((t.id > 0:Int32), PgSleep(t.id::Float64), t.id) as $expr1] }
+        └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: async lambda is classified together with its enclosing expression
+  before:
+  - create_append_only_table
+  sql: |
+    select id + 1 as next_id,
+           array_transform(array[id], |v| coalesce(pg_sleep(v::double precision), v)) as waited
+    from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [next_id, waited, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [(t.id + 1:Int32) as $expr10027, $expr1, t._row_id] }
+      └─StreamProject { exprs: [t.id, t._row_id, ArrayTransform(Array(t.id), Coalesce(PgSleep(t.id::Float64), t.id)) as $expr1] }
+        └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

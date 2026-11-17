@@ -18,6 +18,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
+use crate::catalog::RelationKind;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 
@@ -50,7 +51,15 @@ pub async fn handle_drop_subscription(
                             ))
                             .into())
                     } else {
-                        Err(e.into())
+                        Err(catalog_reader
+                            .wrong_kind_for_drop(
+                                db_name,
+                                schema_path,
+                                &subscription_name,
+                                RelationKind::Subscription,
+                            )
+                            .unwrap_or(e)
+                            .into())
                     };
                 }
             };

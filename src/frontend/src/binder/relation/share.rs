@@ -30,6 +30,7 @@ pub enum BoundShareInput {
         relation: Relation,
         /// Key column indices in the source schema
         key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
     },
 }
 impl BoundShareInput {

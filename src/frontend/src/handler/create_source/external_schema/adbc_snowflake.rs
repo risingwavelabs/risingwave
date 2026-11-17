@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use risingwave_common::array::arrow::from_arrow58_field;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::source::adbc_snowflake::AdbcSnowflakeArrowConvert;
 
 use crate::WithOptionsSecResolved;
 
@@ -30,7 +30,6 @@ pub async fn extract_adbc_snowflake_columns(
         let arrow_schema = properties.get_arrow_schema()?;
 
         // Convert Arrow schema to RisingWave columns
-        let converter = AdbcSnowflakeArrowConvert;
         let columns: Vec<ColumnCatalog> = arrow_schema
             .fields()
             .iter()
@@ -39,7 +38,7 @@ pub async fn extract_adbc_snowflake_columns(
                 let column_desc = ColumnDesc::named(
                     field.name(),
                     ColumnId::new((i + 1).try_into().unwrap()),
-                    converter.type_from_field(field).unwrap(),
+                    from_arrow58_field(field).unwrap(),
                 );
                 ColumnCatalog {
                     column_desc,

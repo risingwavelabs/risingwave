@@ -147,6 +147,13 @@ drop database db_barrier_custom;
 statement ok
 alter system set license_key to '';
 
+# License updates are propagated to frontend nodes asynchronously. Wait until
+# this frontend has observed the free license before checking feature access.
+query B retry 5 backoff 1s
+select available from rw_catalog.rw_features where name = 'ResourceGroup';
+----
+f
+
 statement error
 create database test with resource_group = 'test';
 ----
@@ -160,3 +167,9 @@ Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '..
 
 statement ok
 alter system set license_key to default;
+
+# Restore the default license before the next test file starts.
+query B retry 5 backoff 1s
+select available from rw_catalog.rw_features where name = 'ResourceGroup';
+----
+t

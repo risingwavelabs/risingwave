@@ -91,21 +91,16 @@ impl ObjectIdManager {
                 continue;
             }
             // Fetch new ids.
+            // Release the fetch role and wake followers even if the leader is cancelled.
+            let mut notify_guard = scopeguard::guard(false, |success| self.notify_waiters(success));
             sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
             async move {
-                let new_sst_ids = match self
+                let new_sst_ids = self
                     .hummock_meta_client
                     .get_new_object_ids(self.remote_fetch_number)
                     .await
-                    .map_err(HummockError::meta_error)
-                {
-                    Ok(new_sst_ids) => new_sst_ids,
-                    Err(err) => {
-                        self.notify_waiters(false);
-                        return Err(err);
-                    }
-                };
+                    .map_err(HummockError::meta_error)?;
                 sync_point!("MAP_NEXT_SST_OBJECT_ID.AFTER_FETCH");
                 sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE");
                 // Update local cache.
@@ -122,7 +117,7 @@ impl ObjectIdManager {
                         Ok(())
                     }
                 };
-                self.notify_waiters(result.is_ok());
+                *notify_guard = result.is_ok();
                 result
             }
             .await?;

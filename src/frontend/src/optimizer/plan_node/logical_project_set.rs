@@ -346,7 +346,7 @@ impl PredicatePushdown for LogicalProjectSet {
                 .for_each(|(i, e)| remain_mask.set(i + 1, e.is_impure() || e.has_table_function()));
             remain_mask
         };
-        let (remained_cond, pushed_cond) = predicate.split_disjoint(&remain_mask);
+        let (remained_cond, pushed_cond) = predicate.split_pushable(&remain_mask);
         let pushed_cond = pushed_cond.rewrite_expr(&mut subst);
 
         gen_filter_and_pushdown(self, remained_cond, pushed_cond, ctx)

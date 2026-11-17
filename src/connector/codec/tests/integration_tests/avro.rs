@@ -606,7 +606,6 @@ fn test_union() {
             map_handling: None,
             data_encoding: TestDataEncoding::HexBinary,
         },
-        // FIXME: why the struct type doesn't have field_descs? https://github.com/risingwavelabs/risingwave/issues/17128
         expect![[r#"
             failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro named type used in Union type: Record(RecordSchema { name: Name { name: "Email", namespace: None }, aliases: None, doc: None, fields: [RecordField { name: "inner", doc: None, aliases: None, default: None, schema: String, order: Ascending, position: 0, custom_attributes: {} }], lookup: {"inner": 0}, attributes: {} })
             Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632"#]],

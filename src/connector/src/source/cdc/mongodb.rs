@@ -19,9 +19,9 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Mongodb,
-    check_alter_with_options_inner, check_common_with_options, check_format_encode_inner,
-    check_include_column_inner,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, Mongodb, check_alter_with_options_inner, check_common_with_options,
+    check_format_encode_inner, check_include_column_inner,
 };
 
 // ------- Runtime flags -------
@@ -71,3 +71,7 @@ impl CdcSourceDdlValidator for Mongodb {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Mongodb {}

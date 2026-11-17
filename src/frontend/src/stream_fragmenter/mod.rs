@@ -182,6 +182,7 @@ pub fn build_graph_with_strategy(
 
     let mut state = BuildFragmentGraphState::default();
     let mut stream_node = plan_node.to_stream_prost(&mut state)?;
+    wire_iceberg_update_lists(&mut stream_node)?;
     reject_variant_in_internal_storage_key(&mut stream_node)?;
     generate_fragment_graph(&mut state, stream_node)?;
     if state.has_source_backfill && state.has_snapshot_backfill {
@@ -268,6 +269,58 @@ pub fn build_graph_with_strategy(
         max_parallelism,
         backfill_order,
     })
+}
+
+/// Pair each update List with its own Fetch before exchanges split them into fragments.
+/// Source IDs are not job IDs: two scans of the same source must not share completion state.
+fn wire_iceberg_update_lists(node: &mut StreamNode) -> Result<()> {
+    for input in &mut node.input {
+        wire_iceberg_update_lists(input)?;
+    }
+    let Some(NodeBody::StreamFsFetch(fetch)) = &node.node_body else {
+        return Ok(());
+    };
+    let Some(fetch) = &fetch.node_inner else {
+        return Ok(());
+    };
+    if !fetch.with_properties.is_iceberg_update_source() {
+        return Ok(());
+    }
+    let table = fetch
+        .state_table
+        .as_ref()
+        .context("missing Iceberg Fetch state table")?;
+    // Only a reference: meta fills the descriptor from the Fetch table catalog.
+    let desc = risingwave_pb::plan_common::StorageTableDesc {
+        table_id: table.id,
+        ..Default::default()
+    };
+    let mut matched = 0;
+    for input in &mut node.input {
+        risingwave_common::util::stream_graph_visitor::visit_stream_node_mut(input, |body| {
+            if let NodeBody::Source(source) = body
+                && let Some(source) = &mut source.source_inner
+                && source.source_id == fetch.source_id
+                && source.with_properties.is_iceberg_update_source()
+                && source
+                    .downstream_columns
+                    .as_ref()
+                    .is_some_and(|columns| columns.columns == fetch.columns)
+                && source.iceberg_fetch_state_table.is_none()
+            {
+                source.iceberg_fetch_state_table = Some(desc.clone());
+                matched += 1;
+            }
+        });
+    }
+    if matched != 1 {
+        return Err(NotSupported(
+            "Iceberg update Fetch requires exactly one dedicated matching List".to_owned(),
+            "Shared List state is not supported".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Rejects `VARIANT` (including nested) in the storage pk of any internal state table. Internal
@@ -714,12 +767,92 @@ fn build_fragment(
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::StructType;
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::catalog::PbTable;
     use risingwave_pb::common::PbColumnOrder;
     use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
     use risingwave_pb::stream_plan::TopNNode;
 
     use super::*;
+
+    #[test]
+    fn iceberg_update_lists_use_per_fetch_tables_not_source_ids() -> Result<()> {
+        use risingwave_pb::stream_plan::{
+            Columns, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
+        };
+        let props = std::collections::BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("streaming_updates".to_owned(), "true".to_owned()),
+        ]);
+        let pair = |table_id: u32| StreamNode {
+            node_body: Some(NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
+                node_inner: Some(StreamFsFetch {
+                    source_id: 9.into(),
+                    with_properties: props.clone(),
+                    state_table: Some(PbTable {
+                        id: table_id.into(),
+                        columns: vec![PbColumnCatalog {
+                            column_desc: Some(PbColumnDesc {
+                                name: "task".to_owned(),
+                                column_type: Some(DataType::Varchar.to_protobuf()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }],
+                        pk: vec![PbColumnOrder {
+                            column_index: 0,
+                            order_type: None,
+                        }],
+                        distribution_key: vec![0],
+                        value_indices: vec![0],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+            }))),
+            input: vec![StreamNode {
+                node_body: Some(NodeBody::Source(Box::new(SourceNode {
+                    source_inner: Some(StreamSource {
+                        source_id: 9.into(),
+                        with_properties: props.clone(),
+                        downstream_columns: Some(Columns { columns: vec![] }),
+                        ..Default::default()
+                    }),
+                }))),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut root = StreamNode {
+            input: vec![pair(10), pair(11)],
+            ..Default::default()
+        };
+        wire_iceberg_update_lists(&mut root)?;
+        for (node, id) in root.input.iter().zip_eq_fast([10u32, 11]) {
+            let Some(NodeBody::Source(source)) = &node.input[0].node_body else {
+                panic!("missing List")
+            };
+            // Only the reference is planned; meta derives the rest from the Fetch catalog.
+            assert_eq!(
+                source
+                    .source_inner
+                    .as_ref()
+                    .unwrap()
+                    .iceberg_fetch_state_table,
+                Some(risingwave_pb::plan_common::StorageTableDesc {
+                    table_id: id.into(),
+                    ..Default::default()
+                })
+            );
+        }
+        let mut no_list = pair(12);
+        no_list.input.clear();
+        assert!(wire_iceberg_update_lists(&mut no_list).is_err());
+        let mut shared_list = pair(13);
+        shared_list.input.push(shared_list.input[0].clone());
+        assert!(wire_iceberg_update_lists(&mut shared_list).is_err());
+        Ok(())
+    }
 
     /// A `TopN` node is the simplest body carrying exactly one internal table.
     fn top_n_with_pk_column(data_type: DataType) -> StreamNode {

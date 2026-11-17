@@ -219,9 +219,9 @@ pub async fn gen_sink_plan(
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
 
     let context = if let Some(explain_options) = explain_options {
-        OptimizerContext::new(handler_args.clone(), explain_options)
+        OptimizerContext::new(handler_args.clone(), explain_options)?
     } else {
-        OptimizerContext::from_handler_args(handler_args.clone())
+        OptimizerContext::from_handler_args(handler_args.clone())?
     };
     let is_auto_schema_change = resolved_with_options
         .get(AUTO_SCHEMA_CHANGE_KEY)
@@ -601,13 +601,17 @@ pub async fn get_partition_compute_info(
 }
 
 async fn get_partition_compute_info_for_iceberg(
-    _iceberg_config: &IcebergConfig,
+    iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
+    if iceberg_config.enable_pk_index {
+        Feature::IcebergSinkWithPkIndex.check_available()?;
+    }
+
     // TODO: check table if exists
-    if _iceberg_config.create_table_if_not_exists {
+    if iceberg_config.create_table_if_not_exists {
         return Ok(None);
     }
-    let table = _iceberg_config.load_table().await?;
+    let table = iceberg_config.load_table().await?;
     let partition_spec = table.metadata().default_partition_spec();
     if partition_spec.is_unpartitioned() {
         return Ok(None);

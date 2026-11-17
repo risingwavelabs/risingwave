@@ -13,25 +13,23 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::iter;
 use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use prometheus::core::Atomic;
 use risingwave_common::array::{Array, DataChunk, RowRef};
-use risingwave_common::bitmap::{Bitmap, BitmapBuilder, FilterByBitmap};
+use risingwave_common::bitmap::{Bitmap, FilterByBitmap};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::row::{Row, RowExt, repeat_n};
-use risingwave_common::types::{DataType, Datum, DefaultOrd};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::Message;
@@ -222,28 +220,150 @@ impl<K> EquiJoinParams<K> {
     }
 }
 
-/// State variables used in left outer/semi/anti join and full outer join.
-#[derive(Default)]
-struct LeftNonEquiJoinState {
-    /// The number of columns in probe side.
-    probe_column_count: usize,
-    /// The offset of the first output row in **current** chunk for each probe side row that has
-    /// been processed.
-    first_output_row_id: Vec<usize>,
-    /// Whether the probe row being processed currently has output rows in **next** output chunk.
-    has_more_output_rows: bool,
-    /// Whether the probe row being processed currently has matched non-NULL build rows in **last**
-    /// output chunk.
-    found_matched: bool,
+/// What a join type outputs for probe or build rows, besides matched pairs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowOutput {
+    /// Nothing.
+    Omit,
+    /// Each matched row, once (semi join).
+    Matched,
+    /// Each unmatched row (anti join).
+    Unmatched,
+    /// Each unmatched row, padded with NULLs for the other side (outer join).
+    UnmatchedWithNulls,
 }
 
-/// State variables used in right outer/semi/anti join and full outer join.
+impl RowOutput {
+    fn emits(self, matched: bool) -> bool {
+        match self {
+            RowOutput::Omit => false,
+            RowOutput::Matched => matched,
+            RowOutput::Unmatched | RowOutput::UnmatchedWithNulls => !matched,
+        }
+    }
+}
+
+/// What a join type outputs. See [`HashJoinExecutor::do_probe`].
+#[derive(Clone, Copy)]
+struct JoinOutput {
+    /// Whether to output each matched pair of a probe row and a build row.
+    pairs: bool,
+    probe_rows: RowOutput,
+    build_rows: RowOutput,
+}
+
+impl JoinOutput {
+    fn new(join_type: JoinType) -> Self {
+        use RowOutput::*;
+        let (pairs, probe_rows, build_rows) = match join_type {
+            JoinType::Inner | JoinType::AsOfInner => (true, Omit, Omit),
+            JoinType::LeftOuter | JoinType::AsOfLeftOuter => (true, UnmatchedWithNulls, Omit),
+            JoinType::LeftSemi => (false, Matched, Omit),
+            JoinType::LeftAnti => (false, Unmatched, Omit),
+            JoinType::RightOuter => (true, Omit, UnmatchedWithNulls),
+            JoinType::RightSemi => (false, Omit, Matched),
+            JoinType::RightAnti => (false, Omit, Unmatched),
+            JoinType::FullOuter => (true, UnmatchedWithNulls, UnmatchedWithNulls),
+        };
+        Self {
+            pairs,
+            probe_rows,
+            build_rows,
+        }
+    }
+
+    /// Whether all candidates of a probe row are needed. If not, only whether the probe row
+    /// matched matters, and its remaining candidates are skipped once it has.
+    fn needs_every_candidate(self) -> bool {
+        self.pairs || self.build_rows != RowOutput::Omit
+    }
+
+    /// Data types of the rows output for probe or build rows.
+    fn row_data_types(
+        self,
+        probe_data_types: &[DataType],
+        build_data_types: &[DataType],
+        full_data_types: &[DataType],
+    ) -> Vec<DataType> {
+        use RowOutput::*;
+        match (self.probe_rows, self.build_rows) {
+            (Matched | Unmatched, _) => probe_data_types.to_vec(),
+            (_, Matched | Unmatched) => build_data_types.to_vec(),
+            _ => full_data_types.to_vec(),
+        }
+    }
+}
+
+/// Whether each probe row of the current probe chunk and each build row has matched. Each side
+/// is only tracked if the join outputs rows of that side.
+struct MatchState {
+    probe: Option<Vec<bool>>,
+    build: Option<ChunkedData<bool>>,
+}
+
+impl MatchState {
+    fn mark(&mut self, probe_row_id: usize, build_row_id: RowId) {
+        self.mark_probe(probe_row_id);
+        if let Some(build) = &mut self.build {
+            build[build_row_id] = true;
+        }
+    }
+
+    fn mark_probe(&mut self, probe_row_id: usize) {
+        if let Some(probe) = &mut self.probe {
+            probe[probe_row_id] = true;
+        }
+    }
+
+    fn probe_matched(&self, probe_row_id: usize) -> bool {
+        self.probe.as_ref().is_some_and(|probe| probe[probe_row_id])
+    }
+}
+
+/// The probe and build row ids of the candidate pairs buffered for evaluating the non-equi
+/// condition, in the order of the buffered rows. Only the ids of the sides whose match state is
+/// tracked are kept.
 #[derive(Default)]
-struct RightNonEquiJoinState {
-    /// Corresponding build row id for each row in **current** output chunk.
-    build_row_ids: Vec<RowId>,
-    /// Whether a build row has been matched.
-    build_row_matched: ChunkedData<bool>,
+struct PairRowIds {
+    probe: Vec<usize>,
+    build: Vec<RowId>,
+}
+
+impl PairRowIds {
+    fn push(&mut self, matched: &MatchState, probe_row_id: usize, build_row_id: RowId) {
+        if matched.probe.is_some() {
+            self.probe.push(probe_row_id);
+        }
+        if matched.build.is_some() {
+            self.build.push(build_row_id);
+        }
+    }
+
+    /// Evaluates `cond` on `pairs`, the buffered candidate pairs, and marks the rows of each pair
+    /// that satisfies it as matched. Returns the matched pairs if the join outputs them.
+    async fn evaluate(
+        &mut self,
+        mut pairs: DataChunk,
+        cond: &BoxedExpression,
+        matched: &mut MatchState,
+        output_pairs: bool,
+    ) -> Result<Option<DataChunk>> {
+        let satisfied: Bitmap = cond.eval(&pairs).await?.as_bool().iter().collect();
+        for pair in satisfied.iter_ones() {
+            if let Some(probe) = &mut matched.probe {
+                probe[self.probe[pair]] = true;
+            }
+            if let Some(build) = &mut matched.build {
+                build[self.build[pair]] = true;
+            }
+        }
+        self.probe.clear();
+        self.build.clear();
+        Ok(output_pairs.then(|| {
+            pairs.set_visibility(satisfied);
+            pairs
+        }))
+    }
 }
 
 pub struct JoinSpillManager {
@@ -708,1237 +828,292 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 self.asof_desc,
             );
 
-            if let Some(cond) = self.cond.as_ref()
-                && !params.is_asof_join()
-            {
-                let stream = match self.join_type {
-                    JoinType::Inner => Self::do_inner_join_with_non_equi_condition(params, cond),
-                    JoinType::LeftOuter => {
-                        Self::do_left_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftSemi => {
-                        Self::do_left_semi_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftAnti => {
-                        Self::do_left_anti_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::RightOuter => {
-                        Self::do_right_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::RightSemi => {
-                        Self::do_right_semi_anti_join_with_non_equi_condition::<false>(params, cond)
-                    }
-                    JoinType::RightAnti => {
-                        Self::do_right_semi_anti_join_with_non_equi_condition::<true>(params, cond)
-                    }
-                    JoinType::FullOuter => {
-                        Self::do_full_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::AsOfInner | JoinType::AsOfLeftOuter => {
-                        unreachable!("AsOf join should not reach here")
-                    }
-                };
-                // For non-equi join, we need an output chunk builder to align the output chunks.
-                let mut output_chunk_builder =
-                    DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-                #[for_await]
-                for chunk in stream {
-                    for output_chunk in
-                        output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
-                    {
-                        yield output_chunk
-                    }
-                }
-                if let Some(output_chunk) = output_chunk_builder.consume_all() {
-                    yield output_chunk
-                }
-            } else {
-                let stream = match self.join_type {
-                    JoinType::Inner | JoinType::AsOfInner => Self::do_inner_join(params),
-                    JoinType::LeftOuter | JoinType::AsOfLeftOuter => {
-                        Self::do_left_outer_join(params)
-                    }
-                    JoinType::LeftSemi => Self::do_left_semi_anti_join::<false>(params),
-                    JoinType::LeftAnti => Self::do_left_semi_anti_join::<true>(params),
-                    JoinType::RightOuter => Self::do_right_outer_join(params),
-                    JoinType::RightSemi => Self::do_right_semi_anti_join::<false>(params),
-                    JoinType::RightAnti => Self::do_right_semi_anti_join::<true>(params),
-                    JoinType::FullOuter => Self::do_full_outer_join(params),
-                };
-                #[for_await]
-                for chunk in stream {
-                    yield chunk?.project(&self.output_indices)
-                }
+            #[for_await]
+            for chunk in Self::probe_and_project(
+                params,
+                self.join_type,
+                self.cond.as_deref(),
+                &self.output_indices,
+                self.schema.data_types(),
+            ) {
+                yield chunk?
             }
             // Build data can be reused throughout the join. The private context releases its
             // remaining charges when this invocation exits.
         }
     }
 
+    /// Probes the hash table, projects the output to `output_indices`, and yields chunks of
+    /// `params.chunk_size` rows.
+    ///
+    /// AS OF joins apply their condition through `asof_desc`, so `cond` is ignored for them.
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_inner_join(
+    pub(super) async fn probe_and_project<'a>(
+        params: EquiJoinParams<K>,
+        join_type: JoinType,
+        cond: Option<&'a BoxedExpression>,
+        output_indices: &'a [usize],
+        output_data_types: Vec<DataType>,
+    ) {
+        let cond = cond.filter(|_| !params.is_asof_join());
+        let chunk_size = params.chunk_size;
+        let stream = Self::do_probe(params, join_type, cond);
+        if cond.is_some() {
+            // Evaluating the condition hides rows and leaves partial chunks behind, so realign
+            // the output chunks.
+            let mut output_chunk_builder = DataChunkBuilder::new(output_data_types, chunk_size);
+            #[for_await]
+            for chunk in stream {
+                for output_chunk in
+                    output_chunk_builder.append_chunk(chunk?.project(output_indices))
+                {
+                    yield output_chunk
+                }
+            }
+            if let Some(output_chunk) = output_chunk_builder.consume_all() {
+                yield output_chunk
+            }
+        } else {
+            #[for_await]
+            for chunk in stream {
+                yield chunk?.project(output_indices)
+            }
+        }
+    }
+
+    /// Probes the hash table with each probe row and produces the join output.
+    ///
+    /// The candidates of a probe row are the build rows with the same key, or for an AS OF join,
+    /// the closest of them. A candidate pair matches if it satisfies the non-equi condition
+    /// `cond`, or always if there is none. A probe or build row is matched if it is part of a
+    /// matched pair. [`JoinOutput`] gives what each join type outputs:
+    ///
+    /// | join type         | matched pairs | probe rows            | build rows            |
+    /// |-------------------|---------------|-----------------------|-----------------------|
+    /// | inner             | yes           |                       |                       |
+    /// | left outer        | yes           | unmatched, with NULLs |                       |
+    /// | left semi / anti  |               | matched / unmatched   |                       |
+    /// | right outer       | yes           |                       | unmatched, with NULLs |
+    /// | right semi / anti |               |                       | matched / unmatched   |
+    /// | full outer        | yes           | unmatched, with NULLs | unmatched, with NULLs |
+    ///
+    /// With a condition, candidate pairs are buffered and the condition is evaluated on a whole
+    /// chunk of them at a time. Probe rows are output per probe chunk: if the join outputs them,
+    /// all candidates of a probe chunk are evaluated before moving on to the next one, so that
+    /// they have their final match state. Build rows are output after the last probe chunk.
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    async fn do_probe(
         EquiJoinParams {
             probe_side,
+            probe_data_types,
             probe_key_idxs,
             build_side,
+            build_data_types,
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
             shutdown_rx,
             asof_desc,
-            ..
         }: EquiJoinParams<K>,
+        join_type: JoinType,
+        cond: Option<&BoxedExpression>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
+        let output = JoinOutput::new(join_type);
+        let mut pair_builder = DataChunkBuilder::new(full_data_types.clone(), chunk_size);
+        let mut pair_row_ids = PairRowIds::default();
+        let mut row_builder = DataChunkBuilder::new(
+            output.row_data_types(&probe_data_types, &build_data_types, &full_data_types),
+            chunk_size,
+        );
+        // One row of NULLs for each side, to pad the unmatched rows of the other side.
+        let null_probe_row = Self::null_row(&probe_data_types);
+        let null_build_row = Self::null_row(&build_data_types);
+        let mut matched = MatchState {
+            probe: (output.probe_rows != RowOutput::Omit).then(Vec::new),
+            build: (output.build_rows != RowOutput::Omit)
+                .then(|| ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity())))
+                .transpose()?,
+        };
+
         #[for_await]
         for probe_chunk in probe_side.execute() {
+            shutdown_rx.check()?;
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
+            if let Some(probe_matched) = &mut matched.probe {
+                probe_matched.clear();
+                probe_matched.resize(probe_chunk.capacity(), false);
+            }
+
             for (probe_row_id, probe_key) in probe_keys
                 .iter()
                 .enumerate()
                 .filter_by_bitmap(probe_chunk.visibility())
             {
-                let build_side_row_iter =
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied());
-                if let Some(asof_desc) = &asof_desc {
-                    if let Some(build_row_id) = Self::find_asof_matched_rows(
-                        probe_chunk.row_at_unchecked_vis(probe_row_id),
-                        &build_side,
-                        build_side_row_iter,
-                        asof_desc,
-                    ) {
-                        shutdown_rx.check()?;
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
+                let first_same_key_row = hash_map.get(probe_key).copied();
+                if cond.is_none() && !output.pairs {
+                    // Semi and anti joins without a condition: every candidate matches, and only
+                    // which rows matched is needed.
+                    if first_same_key_row.is_some() {
+                        matched.mark_probe(probe_row_id);
+                    }
+                    if let Some(build_matched) = &mut matched.build {
+                        for build_row_id in
+                            next_build_row_with_same_key.row_id_iter(first_same_key_row)
+                        {
+                            shutdown_rx.check()?;
+                            build_matched[build_row_id] = true;
+                        }
+                    }
+                    continue;
+                }
+                let same_key_rows = next_build_row_with_same_key.row_id_iter(first_same_key_row);
+                let candidates = match &asof_desc {
+                    Some(asof_desc) => Either::Right(
+                        Self::find_asof_matched_rows(
+                            probe_chunk.row_at_unchecked_vis(probe_row_id),
+                            &build_side,
+                            same_key_rows,
+                            asof_desc,
+                        )
+                        .into_iter(),
+                    ),
+                    None => Either::Left(same_key_rows),
+                };
+                for build_row_id in candidates {
+                    shutdown_rx.check()?;
+                    if !output.needs_every_candidate() && matched.probe_matched(probe_row_id) {
+                        break;
+                    }
+                    if let Some(cond) = cond {
+                        pair_row_ids.push(&matched, probe_row_id, build_row_id);
+                        if let Some(pairs) = Self::append_one_row(
+                            &mut pair_builder,
                             &probe_chunk,
                             probe_row_id,
                             &build_side[build_row_id.chunk_id()],
                             build_row_id.row_id(),
-                        ) {
-                            yield spilled
+                        ) && let Some(chunk) = pair_row_ids
+                            .evaluate(pairs, cond, &mut matched, output.pairs)
+                            .await?
+                        {
+                            yield chunk
                         }
-                    }
-                } else {
-                    for build_row_id in build_side_row_iter {
-                        shutdown_rx.check()?;
-                        let build_chunk = &build_side[build_row_id.chunk_id()];
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            &probe_chunk,
-                            probe_row_id,
-                            build_chunk,
-                            build_row_id.row_id(),
-                        ) {
-                            yield spilled
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield spilled
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_inner_join_with_non_equi_condition(
-        params: EquiJoinParams<K>,
-        cond: &BoxedExpression,
-    ) {
-        #[for_await]
-        for chunk in Self::do_inner_join(params) {
-            let mut chunk = chunk?;
-            chunk.set_visibility(cond.eval(&chunk).await?.as_bool().iter().collect());
-            yield chunk
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_left_outer_join(
-        EquiJoinParams {
-            probe_side,
-            probe_key_idxs,
-            build_side,
-            build_data_types,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            asof_desc,
-            ..
-        }: EquiJoinParams<K>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
-                    let build_side_row_iter =
-                        next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id));
-                    if let Some(asof_desc) = &asof_desc {
-                        if let Some(build_row_id) = Self::find_asof_matched_rows(
-                            probe_chunk.row_at_unchecked_vis(probe_row_id),
-                            &build_side,
-                            build_side_row_iter,
-                            asof_desc,
-                        ) {
-                            shutdown_rx.check()?;
-                            if let Some(spilled) = Self::append_one_row(
-                                &mut chunk_builder,
+                    } else {
+                        matched.mark(probe_row_id, build_row_id);
+                        if output.pairs
+                            && let Some(chunk) = Self::append_one_row(
+                                &mut pair_builder,
                                 &probe_chunk,
                                 probe_row_id,
                                 &build_side[build_row_id.chunk_id()],
                                 build_row_id.row_id(),
-                            ) {
-                                yield spilled
-                            }
-                        } else {
-                            shutdown_rx.check()?;
-                            let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
-                            if let Some(spilled) = Self::append_one_row_with_null_build_side(
-                                &mut chunk_builder,
-                                probe_row,
-                                build_data_types.len(),
-                            ) {
-                                yield spilled
-                            }
-                        }
-                    } else {
-                        for build_row_id in build_side_row_iter {
-                            shutdown_rx.check()?;
-                            let build_chunk = &build_side[build_row_id.chunk_id()];
-                            if let Some(spilled) = Self::append_one_row(
-                                &mut chunk_builder,
-                                &probe_chunk,
-                                probe_row_id,
-                                build_chunk,
-                                build_row_id.row_id(),
-                            ) {
-                                yield spilled
-                            }
-                        }
-                    }
-                } else {
-                    shutdown_rx.check()?;
-                    let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
-                    if let Some(spilled) = Self::append_one_row_with_null_build_side(
-                        &mut chunk_builder,
-                        probe_row,
-                        build_data_types.len(),
-                    ) {
-                        yield spilled
-                    }
-                }
-            }
-        }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield spilled
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_left_outer_join_with_non_equi_condition(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            build_side,
-            build_data_types,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-        cond: &BoxedExpression,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types.clone(), chunk_size);
-        let mut remaining_chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut non_equi_state = LeftNonEquiJoinState {
-            probe_column_count: probe_data_types.len(),
-            ..Default::default()
-        };
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
-                    non_equi_state
-                        .first_output_row_id
-                        .push(chunk_builder.buffered_count());
-
-                    let mut build_row_id_iter = next_build_row_with_same_key
-                        .row_id_iter(Some(*first_matched_build_row_id))
-                        .peekable();
-                    while let Some(build_row_id) = build_row_id_iter.next() {
-                        shutdown_rx.check()?;
-                        let build_chunk = &build_side[build_row_id.chunk_id()];
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            &probe_chunk,
-                            probe_row_id,
-                            build_chunk,
-                            build_row_id.row_id(),
-                        ) {
-                            non_equi_state.has_more_output_rows =
-                                build_row_id_iter.peek().is_some();
-                            yield Self::process_left_outer_join_non_equi_condition(
-                                spilled,
-                                cond,
-                                &mut non_equi_state,
                             )
-                            .await?
+                        {
+                            yield chunk
                         }
-                    }
-                } else {
-                    shutdown_rx.check()?;
-                    let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
-                    if let Some(spilled) = Self::append_one_row_with_null_build_side(
-                        &mut remaining_chunk_builder,
-                        probe_row,
-                        build_data_types.len(),
-                    ) {
-                        yield spilled
                     }
                 }
             }
-        }
-        non_equi_state.has_more_output_rows = false;
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield Self::process_left_outer_join_non_equi_condition(
-                spilled,
-                cond,
-                &mut non_equi_state,
-            )
-            .await?
-        }
 
-        if let Some(spilled) = remaining_chunk_builder.consume_all() {
-            yield spilled
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_left_semi_anti_join<const ANTI_JOIN: bool>(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            hash_map,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(probe_data_types, chunk_size);
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
+            // Evaluate the remaining candidates of this probe chunk, so that its probe rows have
+            // their final match state before they are output.
+            if let Some(cond) = cond
+                && output.probe_rows != RowOutput::Omit
+                && let Some(pairs) = pair_builder.consume_all()
+                && let Some(chunk) = pair_row_ids
+                    .evaluate(pairs, cond, &mut matched, output.pairs)
+                    .await?
             {
-                shutdown_rx.check()?;
-                if !ANTI_JOIN {
-                    if hash_map.contains_key(probe_key)
-                        && let Some(spilled) = Self::append_one_probe_row(
-                            &mut chunk_builder,
+                yield chunk
+            }
+            if let Some(probe_matched) = &matched.probe {
+                for probe_row_id in probe_chunk.visibility().iter_ones() {
+                    if output.probe_rows.emits(probe_matched[probe_row_id])
+                        && let Some(chunk) = Self::append_probe_row_output(
+                            &mut row_builder,
+                            output.probe_rows,
                             &probe_chunk,
                             probe_row_id,
+                            &null_build_row,
                         )
                     {
-                        yield spilled
+                        yield chunk
                     }
-                } else if hash_map.get(probe_key).is_none()
-                    && let Some(spilled) =
-                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)
+                }
+            }
+        }
+
+        if let Some(pairs) = pair_builder.consume_all() {
+            if let Some(cond) = cond {
+                if let Some(chunk) = pair_row_ids
+                    .evaluate(pairs, cond, &mut matched, output.pairs)
+                    .await?
                 {
-                    yield spilled
+                    yield chunk
                 }
-            }
-        }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield spilled
-        }
-    }
-
-    /// High-level idea:
-    /// 1. For each `probe_row`, append candidate rows to buffer.
-    ///    Candidate rows: Those satisfying `equi_predicate` (==).
-    /// 2. If buffer becomes full, process it.
-    ///    Apply `non_equi_join` predicates e.g. `>=`, `<=` to filter rows.
-    ///    Track if `probe_row` is matched to avoid duplicates.
-    /// 3. If we matched `probe_row` in spilled chunk,
-    ///    stop appending its candidate rows,
-    ///    to avoid matching it again in next spilled chunk.
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_left_semi_join_with_non_equi_condition<'a>(
-        EquiJoinParams {
-            probe_side,
-            probe_key_idxs,
-            build_side,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-        cond: &'a BoxedExpression,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut non_equi_state = LeftNonEquiJoinState::default();
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                non_equi_state.found_matched = false;
-                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
-                    non_equi_state
-                        .first_output_row_id
-                        .push(chunk_builder.buffered_count());
-
-                    for build_row_id in
-                        next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
-                    {
-                        shutdown_rx.check()?;
-                        if non_equi_state.found_matched {
-                            break;
-                        }
-                        let build_chunk = &build_side[build_row_id.chunk_id()];
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            &probe_chunk,
-                            probe_row_id,
-                            build_chunk,
-                            build_row_id.row_id(),
-                        ) {
-                            yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
-                                spilled,
-                                cond,
-                                &mut non_equi_state,
-                            )
-                            .await?
-                        }
-                    }
-                }
-            }
-        }
-
-        // Process remaining rows in buffer
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
-                spilled,
-                cond,
-                &mut non_equi_state,
-            )
-            .await?
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_left_anti_join_with_non_equi_condition(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            build_side,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-        cond: &BoxedExpression,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut remaining_chunk_builder = DataChunkBuilder::new(probe_data_types, chunk_size);
-        let mut non_equi_state = LeftNonEquiJoinState::default();
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
-                    non_equi_state
-                        .first_output_row_id
-                        .push(chunk_builder.buffered_count());
-                    let mut build_row_id_iter = next_build_row_with_same_key
-                        .row_id_iter(Some(*first_matched_build_row_id))
-                        .peekable();
-                    while let Some(build_row_id) = build_row_id_iter.next() {
-                        shutdown_rx.check()?;
-                        let build_chunk = &build_side[build_row_id.chunk_id()];
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            &probe_chunk,
-                            probe_row_id,
-                            build_chunk,
-                            build_row_id.row_id(),
-                        ) {
-                            non_equi_state.has_more_output_rows =
-                                build_row_id_iter.peek().is_some();
-                            yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
-                                spilled,
-                                cond,
-                                &mut non_equi_state,
-                            )
-                            .await?
-                        }
-                    }
-                } else if let Some(spilled) = Self::append_one_probe_row(
-                    &mut remaining_chunk_builder,
-                    &probe_chunk,
-                    probe_row_id,
-                ) {
-                    yield spilled
-                }
-            }
-        }
-        non_equi_state.has_more_output_rows = false;
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
-                spilled,
-                cond,
-                &mut non_equi_state,
-            )
-            .await?
-        }
-        if let Some(spilled) = remaining_chunk_builder.consume_all() {
-            yield spilled
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_right_outer_join(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            build_side,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut build_row_matched =
-            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
-                {
-                    shutdown_rx.check()?;
-                    build_row_matched[build_row_id] = true;
-                    let build_chunk = &build_side[build_row_id.chunk_id()];
-                    if let Some(spilled) = Self::append_one_row(
-                        &mut chunk_builder,
-                        &probe_chunk,
-                        probe_row_id,
-                        build_chunk,
-                        build_row_id.row_id(),
-                    ) {
-                        yield spilled
-                    }
-                }
-            }
-        }
-        #[for_await]
-        for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
-            &mut chunk_builder,
-            &build_side,
-            &build_row_matched,
-            probe_data_types.len(),
-        ) {
-            yield spilled?
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_right_outer_join_with_non_equi_condition(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            build_side,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-        cond: &BoxedExpression,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let build_row_matched =
-            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let mut non_equi_state = RightNonEquiJoinState {
-            build_row_matched,
-            ..Default::default()
-        };
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
-                {
-                    shutdown_rx.check()?;
-                    non_equi_state.build_row_ids.push(build_row_id);
-                    let build_chunk = &build_side[build_row_id.chunk_id()];
-                    if let Some(spilled) = Self::append_one_row(
-                        &mut chunk_builder,
-                        &probe_chunk,
-                        probe_row_id,
-                        build_chunk,
-                        build_row_id.row_id(),
-                    ) {
-                        yield Self::process_right_outer_join_non_equi_condition(
-                            spilled,
-                            cond,
-                            &mut non_equi_state,
-                        )
-                        .await?
-                    }
-                }
-            }
-        }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield Self::process_right_outer_join_non_equi_condition(
-                spilled,
-                cond,
-                &mut non_equi_state,
-            )
-            .await?
-        }
-        #[for_await]
-        for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
-            &mut chunk_builder,
-            &build_side,
-            &non_equi_state.build_row_matched,
-            probe_data_types.len(),
-        ) {
-            yield spilled?
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_right_semi_anti_join<const ANTI_JOIN: bool>(
-        EquiJoinParams {
-            probe_side,
-            probe_key_idxs,
-            build_side,
-            build_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(build_data_types, chunk_size);
-        let mut build_row_matched =
-            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for probe_key in probe_keys.iter().filter_by_bitmap(probe_chunk.visibility()) {
-                for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
-                {
-                    shutdown_rx.check()?;
-                    build_row_matched[build_row_id] = true;
-                }
-            }
-        }
-        #[for_await]
-        for spilled in Self::handle_remaining_build_rows_for_right_semi_anti_join::<ANTI_JOIN>(
-            &mut chunk_builder,
-            &build_side,
-            &build_row_matched,
-        ) {
-            yield spilled?
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_right_semi_anti_join_with_non_equi_condition<const ANTI_JOIN: bool>(
-        EquiJoinParams {
-            probe_side,
-            probe_key_idxs,
-            build_side,
-            build_data_types,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-        cond: &BoxedExpression,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut remaining_chunk_builder = DataChunkBuilder::new(build_data_types, chunk_size);
-        let build_row_matched =
-            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let mut non_equi_state = RightNonEquiJoinState {
-            build_row_matched,
-            ..Default::default()
-        };
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
-                {
-                    shutdown_rx.check()?;
-                    non_equi_state.build_row_ids.push(build_row_id);
-                    let build_chunk = &build_side[build_row_id.chunk_id()];
-                    if let Some(spilled) = Self::append_one_row(
-                        &mut chunk_builder,
-                        &probe_chunk,
-                        probe_row_id,
-                        build_chunk,
-                        build_row_id.row_id(),
-                    ) {
-                        Self::process_right_semi_anti_join_non_equi_condition(
-                            spilled,
-                            cond,
-                            &mut non_equi_state,
-                        )
-                        .await?
-                    }
-                }
-            }
-        }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            Self::process_right_semi_anti_join_non_equi_condition(
-                spilled,
-                cond,
-                &mut non_equi_state,
-            )
-            .await?
-        }
-        #[for_await]
-        for spilled in Self::handle_remaining_build_rows_for_right_semi_anti_join::<ANTI_JOIN>(
-            &mut remaining_chunk_builder,
-            &build_side,
-            &non_equi_state.build_row_matched,
-        ) {
-            yield spilled?
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_full_outer_join(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            build_side,
-            build_data_types,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut build_row_matched =
-            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
-                    for build_row_id in
-                        next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
-                    {
-                        shutdown_rx.check()?;
-                        build_row_matched[build_row_id] = true;
-                        let build_chunk = &build_side[build_row_id.chunk_id()];
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            &probe_chunk,
-                            probe_row_id,
-                            build_chunk,
-                            build_row_id.row_id(),
-                        ) {
-                            yield spilled
-                        }
-                    }
-                } else {
-                    let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
-                    if let Some(spilled) = Self::append_one_row_with_null_build_side(
-                        &mut chunk_builder,
-                        probe_row,
-                        build_data_types.len(),
-                    ) {
-                        yield spilled
-                    }
-                }
-            }
-        }
-        #[for_await]
-        for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
-            &mut chunk_builder,
-            &build_side,
-            &build_row_matched,
-            probe_data_types.len(),
-        ) {
-            yield spilled?
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub async fn do_full_outer_join_with_non_equi_condition(
-        EquiJoinParams {
-            probe_side,
-            probe_data_types,
-            probe_key_idxs,
-            build_side,
-            build_data_types,
-            full_data_types,
-            hash_map,
-            next_build_row_with_same_key,
-            chunk_size,
-            shutdown_rx,
-            ..
-        }: EquiJoinParams<K>,
-        cond: &BoxedExpression,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types.clone(), chunk_size);
-        let mut remaining_chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
-        let mut left_non_equi_state = LeftNonEquiJoinState {
-            probe_column_count: probe_data_types.len(),
-            ..Default::default()
-        };
-        let build_row_matched =
-            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let mut right_non_equi_state = RightNonEquiJoinState {
-            build_row_matched,
-            ..Default::default()
-        };
-
-        #[for_await]
-        for probe_chunk in probe_side.execute() {
-            let probe_chunk = probe_chunk?;
-            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
-            for (probe_row_id, probe_key) in probe_keys
-                .iter()
-                .enumerate()
-                .filter_by_bitmap(probe_chunk.visibility())
-            {
-                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
-                    left_non_equi_state
-                        .first_output_row_id
-                        .push(chunk_builder.buffered_count());
-                    let mut build_row_id_iter = next_build_row_with_same_key
-                        .row_id_iter(Some(*first_matched_build_row_id))
-                        .peekable();
-                    while let Some(build_row_id) = build_row_id_iter.next() {
-                        shutdown_rx.check()?;
-                        right_non_equi_state.build_row_ids.push(build_row_id);
-                        let build_chunk = &build_side[build_row_id.chunk_id()];
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            &probe_chunk,
-                            probe_row_id,
-                            build_chunk,
-                            build_row_id.row_id(),
-                        ) {
-                            left_non_equi_state.has_more_output_rows =
-                                build_row_id_iter.peek().is_some();
-                            yield Self::process_full_outer_join_non_equi_condition(
-                                spilled,
-                                cond,
-                                &mut left_non_equi_state,
-                                &mut right_non_equi_state,
-                            )
-                            .await?
-                        }
-                    }
-                } else {
-                    shutdown_rx.check()?;
-                    let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
-                    if let Some(spilled) = Self::append_one_row_with_null_build_side(
-                        &mut remaining_chunk_builder,
-                        probe_row,
-                        build_data_types.len(),
-                    ) {
-                        yield spilled
-                    }
-                }
-            }
-        }
-        left_non_equi_state.has_more_output_rows = false;
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield Self::process_full_outer_join_non_equi_condition(
-                spilled,
-                cond,
-                &mut left_non_equi_state,
-                &mut right_non_equi_state,
-            )
-            .await?
-        }
-        #[for_await]
-        for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
-            &mut remaining_chunk_builder,
-            &build_side,
-            &right_non_equi_state.build_row_matched,
-            probe_data_types.len(),
-        ) {
-            yield spilled?
-        }
-    }
-
-    /// Process output chunk for left outer join when non-equi condition is presented.
-    ///
-    /// # Arguments
-    /// * `chunk` - Output chunk from `do_left_outer_join_with_non_equi_condition`, containing:
-    ///     - Concatenation of probe row and its corresponding build row according to the hash map.
-    ///     - Concatenation of probe row and `NULL` build row, if there is no matched build row
-    ///       found for the probe row.
-    /// * `cond` - Non-equi join condition.
-    /// * `probe_column_count` - The number of columns in the probe side.
-    /// * `first_output_row_id` - The offset of the first output row in `chunk` for each probe side
-    ///   row that has been processed.
-    /// * `has_more_output_rows` - Whether the probe row being processed currently has output rows
-    ///   in next output chunk.
-    /// * `found_matched` - Whether the probe row being processed currently has matched non-NULL
-    ///   build rows in last output chunk.
-    ///
-    /// # Examples
-    /// Assume we have two tables `t1` and `t2` as probe side and build side, respectively.
-    /// ```sql
-    /// CREATE TABLE t1 (v1 int, v2 int);
-    /// CREATE TABLE t2 (v3 int);
-    /// ```
-    ///
-    /// Now we de left outer join on `t1` and `t2`, as the following query shows:
-    /// ```sql
-    /// SELECT * FROM t1 LEFT JOIN t2 ON t1.v1 = t2.v3 AND t1.v2 <> t2.v3;
-    /// ```
-    ///
-    /// Assume the chunk builder in `do_left_outer_join_with_non_equi_condition` has buffer size 5,
-    /// and we have the following chunk as the first output ('-' represents NULL).
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | 1 | 2 | 1 |
-    /// | 1 | 1 | 1 | 1 |
-    /// | 2 | 2 | 3 | - |
-    /// | 3 | 3 | 3 | 3 |
-    /// | 4 | 3 | 3 | 3 |
-    ///
-    /// We have the following precondition:
-    /// ```ignore
-    /// assert_eq!(probe_column_count, 2);
-    /// assert_eq!(first_out_row_id, vec![0, 1, 2, 3]);
-    /// assert_eq!(has_more_output_rows);
-    /// assert_eq!(!found_matched);
-    /// ```
-    ///
-    /// In `process_left_outer_join_non_equi_condition`, we transform the chunk in following steps.
-    ///
-    /// 1. Evaluate the non-equi condition on the chunk. Here the condition is `t1.v2 <> t2.v3`.
-    ///
-    /// We get the result array:
-    ///
-    /// | offset | value |
-    /// | --- | --- |
-    /// | 0 | true |
-    /// | 1 | false |
-    /// | 2 | false |
-    /// | 3 | false |
-    /// | 4 | false |
-    ///
-    /// 2. Set the build side columns to NULL if the corresponding result value is false.
-    ///
-    /// The chunk is changed to:
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | 1 | 2 | 1 |
-    /// | 1 | 1 | 1 | - |
-    /// | 2 | 2 | 3 | - |
-    /// | 3 | 3 | 3 | - |
-    /// | 4 | 3 | 3 | - |
-    ///
-    /// 3. Remove duplicate rows with NULL build side. This is done by setting the visibility bitmap
-    ///    of the chunk.
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | 1 | 2 | 1 |
-    /// | 1 | 1 | 1 | - |
-    /// | 2 | 2 | 3 | - |
-    /// | 3 | ~~3~~ | ~~3~~ | ~~-~~ |
-    /// | 4 | ~~3~~ | ~~3~~ | ~~-~~ |
-    ///
-    /// For the probe row being processed currently (`(3, 3)` here), we don't have output rows with
-    /// non-NULL build side, so we set `found_matched` to false.
-    ///
-    /// In `do_left_outer_join_with_non_equi_condition`, we have next output chunk as follows:
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | 3 | 3 | 3 |
-    /// | 1 | 3 | 3 | 3 |
-    /// | 2 | 5 | 5 | - |
-    /// | 3 | 5 | 3 | - |
-    /// | 4 | 5 | 3 | - |
-    ///
-    /// This time We have the following precondition:
-    /// ```ignore
-    /// assert_eq!(probe_column_count, 2);
-    /// assert_eq!(first_out_row_id, vec![2, 3]);
-    /// assert_eq!(!has_more_output_rows);
-    /// assert_eq!(!found_matched);
-    /// ```
-    ///
-    /// The transformed chunk is as follows after the same steps.
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | ~~3~~ | ~~3~~ | ~~3~~ |
-    /// | 1 | 3 | 3 | - |
-    /// | 2 | 5 | 5 | - |
-    /// | 3 | 5 | 3 | - |
-    /// | 4 | ~~5~~ | ~~3~~ | ~~-~~ |
-    ///
-    /// After we add these chunks to output chunk builder in `do_execute`, we get the final output:
-    ///
-    /// Chunk 1
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | 1 | 2 | 1 |
-    /// | 1 | 1 | 1 | - |
-    /// | 2 | 2 | 3 | - |
-    /// | 3 | 3 | 3 | - |
-    /// | 4 | 5 | 5 | - |
-    ///
-    /// Chunk 2
-    ///
-    /// | offset | v1 | v2 | v3 |
-    /// |---|---|---|---|
-    /// | 0 | 5 | 3 | - |
-    ///
-    ///
-    /// For more information about how `process_*_join_non_equi_condition` work, see their unit
-    /// tests.
-    async fn process_left_outer_join_non_equi_condition(
-        chunk: DataChunk,
-        cond: &BoxedExpression,
-        LeftNonEquiJoinState {
-            probe_column_count,
-            first_output_row_id,
-            has_more_output_rows,
-            found_matched,
-        }: &mut LeftNonEquiJoinState,
-    ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
-        Ok(DataChunkMutator(chunk)
-            .nullify_build_side_for_non_equi_condition(&filter, *probe_column_count)
-            .remove_duplicate_rows_for_left_outer_join(
-                &filter,
-                first_output_row_id,
-                *has_more_output_rows,
-                found_matched,
-            )
-            .take())
-    }
-
-    /// Filters for candidate rows which satisfy `non_equi` predicate.
-    /// Removes duplicate rows.
-    async fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
-        chunk: DataChunk,
-        cond: &BoxedExpression,
-        LeftNonEquiJoinState {
-            first_output_row_id,
-            found_matched,
-            has_more_output_rows,
-            ..
-        }: &mut LeftNonEquiJoinState,
-    ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
-        Ok(DataChunkMutator(chunk)
-            .remove_duplicate_rows_for_left_semi_anti_join::<ANTI_JOIN>(
-                &filter,
-                first_output_row_id,
-                *has_more_output_rows,
-                found_matched,
-            )
-            .take())
-    }
-
-    async fn process_right_outer_join_non_equi_condition(
-        chunk: DataChunk,
-        cond: &BoxedExpression,
-        RightNonEquiJoinState {
-            build_row_ids,
-            build_row_matched,
-        }: &mut RightNonEquiJoinState,
-    ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
-        Ok(DataChunkMutator(chunk)
-            .remove_duplicate_rows_for_right_outer_join(&filter, build_row_ids, build_row_matched)
-            .take())
-    }
-
-    async fn process_right_semi_anti_join_non_equi_condition(
-        chunk: DataChunk,
-        cond: &BoxedExpression,
-        RightNonEquiJoinState {
-            build_row_ids,
-            build_row_matched,
-        }: &mut RightNonEquiJoinState,
-    ) -> Result<()> {
-        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
-        DataChunkMutator(chunk).remove_duplicate_rows_for_right_semi_anti_join(
-            &filter,
-            build_row_ids,
-            build_row_matched,
-        );
-        Ok(())
-    }
-
-    async fn process_full_outer_join_non_equi_condition(
-        chunk: DataChunk,
-        cond: &BoxedExpression,
-        left_non_equi_state: &mut LeftNonEquiJoinState,
-        right_non_equi_state: &mut RightNonEquiJoinState,
-    ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
-        Ok(DataChunkMutator(chunk)
-            .nullify_build_side_for_non_equi_condition(
-                &filter,
-                left_non_equi_state.probe_column_count,
-            )
-            .remove_duplicate_rows_for_full_outer_join(
-                &filter,
-                left_non_equi_state,
-                right_non_equi_state,
-            )
-            .take())
-    }
-
-    #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn handle_remaining_build_rows_for_right_outer_join<'a>(
-        chunk_builder: &'a mut DataChunkBuilder,
-        build_side: &'a [DataChunk],
-        build_row_matched: &'a ChunkedData<bool>,
-        probe_column_count: usize,
-    ) {
-        for build_row_id in build_row_matched
-            .all_row_ids()
-            .filter(|build_row_id| !build_row_matched[*build_row_id])
-        {
-            let build_row =
-                build_side[build_row_id.chunk_id()].row_at_unchecked_vis(build_row_id.row_id());
-            if let Some(spilled) = Self::append_one_row_with_null_probe_side(
-                chunk_builder,
-                build_row,
-                probe_column_count,
-            ) {
-                yield spilled
-            }
-        }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield spilled
-        }
-    }
-
-    #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn handle_remaining_build_rows_for_right_semi_anti_join<'a, const ANTI_JOIN: bool>(
-        chunk_builder: &'a mut DataChunkBuilder,
-        build_side: &'a [DataChunk],
-        build_row_matched: &'a ChunkedData<bool>,
-    ) {
-        for build_row_id in build_row_matched.all_row_ids().filter(|build_row_id| {
-            if !ANTI_JOIN {
-                build_row_matched[*build_row_id]
             } else {
-                !build_row_matched[*build_row_id]
-            }
-        }) {
-            if let Some(spilled) = Self::append_one_build_row(
-                chunk_builder,
-                &build_side[build_row_id.chunk_id()],
-                build_row_id.row_id(),
-            ) {
-                yield spilled
+                yield pairs
             }
         }
-        if let Some(spilled) = chunk_builder.consume_all() {
-            yield spilled
+        if let Some(build_matched) = &matched.build {
+            for build_row_id in build_matched.all_row_ids() {
+                if output.build_rows.emits(build_matched[build_row_id])
+                    && let Some(chunk) = Self::append_build_row_output(
+                        &mut row_builder,
+                        output.build_rows,
+                        &build_side[build_row_id.chunk_id()],
+                        build_row_id.row_id(),
+                        &null_probe_row,
+                    )
+                {
+                    yield chunk
+                }
+            }
+        }
+        if let Some(chunk) = row_builder.consume_all() {
+            yield chunk
+        }
+    }
+
+    fn null_row(data_types: &[DataType]) -> DataChunk {
+        let columns = data_types
+            .iter()
+            .map(|data_type| {
+                let mut builder = data_type.create_array_builder(1);
+                builder.append_null();
+                builder.finish().into()
+            })
+            .collect();
+        DataChunk::new(columns, 1)
+    }
+
+    fn append_probe_row_output(
+        chunk_builder: &mut DataChunkBuilder,
+        output: RowOutput,
+        probe_chunk: &DataChunk,
+        probe_row_id: usize,
+        null_build_row: &DataChunk,
+    ) -> Option<DataChunk> {
+        if output == RowOutput::UnmatchedWithNulls {
+            Self::append_one_row(chunk_builder, probe_chunk, probe_row_id, null_build_row, 0)
+        } else {
+            Self::append_one_probe_row(chunk_builder, probe_chunk, probe_row_id)
+        }
+    }
+
+    fn append_build_row_output(
+        chunk_builder: &mut DataChunkBuilder,
+        output: RowOutput,
+        build_chunk: &DataChunk,
+        build_row_id: usize,
+        null_probe_row: &DataChunk,
+    ) -> Option<DataChunk> {
+        if output == RowOutput::UnmatchedWithNulls {
+            Self::append_one_row(chunk_builder, null_probe_row, 0, build_chunk, build_row_id)
+        } else {
+            Self::append_one_build_row(chunk_builder, build_chunk, build_row_id)
         }
     }
 
@@ -1981,22 +1156,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_chunk.columns().iter().map(|c| c.as_ref()),
             build_row_id,
         )
-    }
-
-    fn append_one_row_with_null_build_side(
-        chunk_builder: &mut DataChunkBuilder,
-        probe_row_ref: RowRef<'_>,
-        build_column_count: usize,
-    ) -> Option<DataChunk> {
-        chunk_builder.append_one_row(probe_row_ref.chain(repeat_n(Datum::None, build_column_count)))
-    }
-
-    fn append_one_row_with_null_probe_side(
-        chunk_builder: &mut DataChunkBuilder,
-        build_row_ref: RowRef<'_>,
-        probe_column_count: usize,
-    ) -> Option<DataChunk> {
-        chunk_builder.append_one_row(repeat_n(Datum::None, probe_column_count).chain(build_row_ref))
     }
 
     fn find_asof_matched_rows(
@@ -2055,240 +1214,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
         } else {
             None
         }
-    }
-}
-
-/// `DataChunkMutator` transforms the given data chunk for non-equi join.
-#[repr(transparent)]
-struct DataChunkMutator(DataChunk);
-
-impl DataChunkMutator {
-    fn nullify_build_side_for_non_equi_condition(
-        self,
-        filter: &Bitmap,
-        probe_column_count: usize,
-    ) -> Self {
-        let (mut columns, vis) = self.0.into_parts();
-
-        for build_column in columns.split_off(probe_column_count) {
-            // Is it really safe to use Arc::try_unwrap here?
-            let mut array = Arc::try_unwrap(build_column).unwrap();
-            array.set_bitmap(array.null_bitmap() & filter);
-            columns.push(array.into());
-        }
-
-        Self(DataChunk::new(columns, vis))
-    }
-
-    fn remove_duplicate_rows_for_left_outer_join(
-        mut self,
-        filter: &Bitmap,
-        first_output_row_ids: &mut Vec<usize>,
-        has_more_output_rows: bool,
-        found_non_null: &mut bool,
-    ) -> Self {
-        let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
-
-        for (&start_row_id, &end_row_id) in iter::once(&0)
-            .chain(first_output_row_ids.iter())
-            .tuple_windows()
-            .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
-        {
-            for row_id in start_row_id..end_row_id {
-                if filter.is_set(row_id) {
-                    *found_non_null = true;
-                    new_visibility.set(row_id, true);
-                }
-            }
-            if !*found_non_null {
-                new_visibility.set(start_row_id, true);
-            }
-            *found_non_null = false;
-        }
-
-        let start_row_id = first_output_row_ids.last().copied().unwrap_or_default();
-        for row_id in start_row_id..filter.len() {
-            if filter.is_set(row_id) {
-                *found_non_null = true;
-                new_visibility.set(row_id, true);
-            }
-        }
-        if !has_more_output_rows {
-            if !*found_non_null {
-                new_visibility.set(start_row_id, true);
-            }
-            *found_non_null = false;
-        }
-
-        first_output_row_ids.clear();
-
-        self.0
-            .set_visibility(new_visibility.finish() & self.0.visibility());
-        self
-    }
-
-    /// Removes duplicate rows using `filter`
-    /// and only returns the first match for each window.
-    /// Windows are indicated by `first_output_row_ids`.
-    fn remove_duplicate_rows_for_left_semi_anti_join<const ANTI_JOIN: bool>(
-        mut self,
-        filter: &Bitmap,
-        first_output_row_ids: &mut Vec<usize>,
-        has_more_output_rows: bool,
-        found_matched: &mut bool,
-    ) -> Self {
-        let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
-
-        for (&start_row_id, &end_row_id) in iter::once(&0)
-            .chain(first_output_row_ids.iter())
-            .tuple_windows()
-            .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
-        {
-            for row_id in start_row_id..end_row_id {
-                if filter.is_set(row_id) {
-                    if !ANTI_JOIN && !*found_matched {
-                        new_visibility.set(row_id, true);
-                    }
-                    *found_matched = true;
-                    break;
-                }
-            }
-            if ANTI_JOIN && !*found_matched {
-                new_visibility.set(start_row_id, true);
-            }
-            *found_matched = false;
-        }
-
-        let start_row_id = first_output_row_ids.last().copied().unwrap_or_default();
-        for row_id in start_row_id..filter.len() {
-            if filter.is_set(row_id) {
-                if !ANTI_JOIN && !*found_matched {
-                    new_visibility.set(row_id, true);
-                }
-                *found_matched = true;
-                break;
-            }
-        }
-        if !has_more_output_rows && ANTI_JOIN {
-            if !*found_matched {
-                new_visibility.set(start_row_id, true);
-            }
-            *found_matched = false;
-        }
-
-        first_output_row_ids.clear();
-
-        self.0
-            .set_visibility(new_visibility.finish() & self.0.visibility());
-        self
-    }
-
-    fn remove_duplicate_rows_for_right_outer_join(
-        mut self,
-        filter: &Bitmap,
-        build_row_ids: &mut Vec<RowId>,
-        build_row_matched: &mut ChunkedData<bool>,
-    ) -> Self {
-        let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
-        for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
-        {
-            if output_row_non_null {
-                build_row_matched[build_row_id] = true;
-                new_visibility.set(output_row_id, true);
-            }
-        }
-
-        build_row_ids.clear();
-
-        self.0
-            .set_visibility(new_visibility.finish() & self.0.visibility());
-        self
-    }
-
-    fn remove_duplicate_rows_for_right_semi_anti_join(
-        self,
-        filter: &Bitmap,
-        build_row_ids: &mut Vec<RowId>,
-        build_row_matched: &mut ChunkedData<bool>,
-    ) {
-        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq_fast(build_row_ids.iter())
-        {
-            if output_row_non_null {
-                build_row_matched[build_row_id] = true;
-            }
-        }
-
-        build_row_ids.clear();
-    }
-
-    fn remove_duplicate_rows_for_full_outer_join(
-        mut self,
-        filter: &Bitmap,
-        LeftNonEquiJoinState {
-            first_output_row_id,
-            has_more_output_rows,
-            found_matched,
-            ..
-        }: &mut LeftNonEquiJoinState,
-        RightNonEquiJoinState {
-            build_row_ids,
-            build_row_matched,
-        }: &mut RightNonEquiJoinState,
-    ) -> Self {
-        let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
-
-        for (&start_row_id, &end_row_id) in iter::once(&0)
-            .chain(first_output_row_id.iter())
-            .tuple_windows()
-            .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
-        {
-            for row_id in start_row_id..end_row_id {
-                if filter.is_set(row_id) {
-                    *found_matched = true;
-                    new_visibility.set(row_id, true);
-                }
-            }
-            if !*found_matched {
-                new_visibility.set(start_row_id, true);
-            }
-            *found_matched = false;
-        }
-
-        let start_row_id = first_output_row_id.last().copied().unwrap_or_default();
-        for row_id in start_row_id..filter.len() {
-            if filter.is_set(row_id) {
-                *found_matched = true;
-                new_visibility.set(row_id, true);
-            }
-        }
-        if !*has_more_output_rows {
-            if !*found_matched {
-                new_visibility.set(start_row_id, true);
-            }
-            *found_matched = false;
-        }
-
-        first_output_row_id.clear();
-
-        for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
-        {
-            if output_row_non_null {
-                build_row_matched[build_row_id] = true;
-                new_visibility.set(output_row_id, true);
-            }
-        }
-
-        build_row_ids.clear();
-
-        self.0
-            .set_visibility(new_visibility.finish() & self.0.visibility());
-        self
-    }
-
-    fn take(self) -> DataChunk {
-        self.0
     }
 }
 
@@ -2534,10 +1459,7 @@ mod tests {
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
-    use super::{
-        AsOfDesc, AsOfInequalityType, ChunkedData, HashJoinExecutor, JoinType,
-        LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
-    };
+    use super::{AsOfDesc, AsOfInequalityType, ChunkedData, HashJoinExecutor, JoinType, RowId};
     use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{BoxedExecutor, Executor};
@@ -3482,591 +2404,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[tokio::test]
-    async fn test_process_left_outer_join_non_equi_condition() {
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             1   3.5 1   2.5
-             2   4.0 .   .
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             4   1.0 4   0
-             4   1.0 4   9.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             2   4.0 .   .
-             3   5.0 .   .
-             3   5.0 .   .
-             4   1.0 4   9.0",
-        );
-        let cond = TestFixture::create_cond();
-        let mut state = LeftNonEquiJoinState {
-            probe_column_count: 2,
-            first_output_row_id: vec![0, 2, 3, 5, 7],
-            has_more_output_rows: true,
-            found_matched: false,
-        };
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(state.found_matched);
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   2.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   5.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   2.0
-             5   4.0 .   .
-             6   7.0 .   .",
-        );
-        state.first_output_row_id = vec![2, 3];
-        state.has_more_output_rows = false;
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   1.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   8.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 .   .
-             5   4.0 .   .
-             6   7.0 6   8.0",
-        );
-        state.first_output_row_id = vec![2, 3];
-        state.has_more_output_rows = false;
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
-    }
-
-    #[tokio::test]
-    async fn test_process_left_semi_join_non_equi_condition() {
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             1   3.5 1   2.5
-             2   4.0 .   .
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             4   1.0 4   0
-             4   1.0 4   0.5",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5",
-        );
-        let cond = TestFixture::create_cond();
-        let mut state = LeftNonEquiJoinState {
-            probe_column_count: 2,
-            first_output_row_id: vec![0, 2, 3, 5, 7],
-            found_matched: false,
-            ..Default::default()
-        };
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   2.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   5.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   2.0",
-        );
-        state.first_output_row_id = vec![2, 3];
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   1.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   8.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             6   7.0 6   8.0",
-        );
-        state.first_output_row_id = vec![2, 3];
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-    }
-
-    #[tokio::test]
-    async fn test_process_left_anti_join_non_equi_condition() {
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             1   3.5 1   2.5
-             2   4.0 .   .
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             4   1.0 4   0
-             4   1.0 4   0.5",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             2   4.0 .   .
-             3   5.0 3   4.0
-             3   5.0 3   4.0",
-        );
-        let cond = TestFixture::create_cond();
-        let mut state = LeftNonEquiJoinState {
-            probe_column_count: 2,
-            first_output_row_id: vec![0, 2, 3, 5, 7],
-            has_more_output_rows: true,
-            found_matched: false,
-        };
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   2.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   5.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             5   4.0 5   .
-             6   7.0 6   .",
-        );
-        state.first_output_row_id = vec![2, 3];
-        state.has_more_output_rows = false;
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   1.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   8.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             5   4.0 5   .",
-        );
-        state.first_output_row_id = vec![2, 3];
-        state.has_more_output_rows = false;
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-    }
-
-    #[tokio::test]
-    async fn test_process_right_outer_join_non_equi_condition() {
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             1   3.5 1   2.5
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             4   1.0 4   0
-             4   1.0 4   0.5",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5",
-        );
-        let cond = TestFixture::create_cond();
-        // For simplicity, all rows are in one chunk.
-        // Build side table
-        // 0  - (1, 5.5)
-        // 1  - (1, 2.5)
-        // 2  - ?
-        // 3  - (3, 4.0)
-        // 4  - (3, 3.0)
-        // 5  - (4, 0)
-        // 6  - ?
-        // 7  - (4, 0.5)
-        // 8  - (4, 0.6)
-        // 9  - (4, 2.0)
-        // 10 - (5, .)
-        // 11 - ?
-        // 12 - (6, .)
-        // 13 - (6, 5.0)
-        // Rows with '?' are never matched here.
-        let build_row_matched = ChunkedData::with_chunk_sizes([14].into_iter()).unwrap();
-        let mut state = RightNonEquiJoinState {
-            build_row_ids: vec![
-                RowId::new(0, 0),
-                RowId::new(0, 1),
-                RowId::new(0, 3),
-                RowId::new(0, 4),
-                RowId::new(0, 3),
-                RowId::new(0, 4),
-                RowId::new(0, 5),
-                RowId::new(0, 7),
-            ],
-            build_row_matched,
-        };
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.build_row_ids, Vec::new());
-        assert_eq!(
-            state.build_row_matched,
-            ChunkedData::try_from(vec![{
-                let mut v = vec![false; 14];
-                v[0] = true;
-                v
-            }])
-            .unwrap()
-        );
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   2.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   5.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   2.0",
-        );
-        state.build_row_ids = vec![
-            RowId::new(0, 8),
-            RowId::new(0, 9),
-            RowId::new(0, 10),
-            RowId::new(0, 12),
-            RowId::new(0, 13),
-        ];
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(state.build_row_ids, Vec::new());
-        assert_eq!(
-            state.build_row_matched,
-            ChunkedData::try_from(vec![{
-                let mut v = vec![false; 14];
-                v[0] = true;
-                v[9] = true;
-                v
-            }])
-            .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_process_right_semi_anti_join_non_equi_condition() {
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             1   3.5 1   2.5
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             4   1.0 4   0
-             4   1.0 4   0.5",
-        );
-        let cond = TestFixture::create_cond();
-        let build_row_matched = ChunkedData::with_chunk_sizes([14].into_iter()).unwrap();
-        let mut state = RightNonEquiJoinState {
-            build_row_ids: vec![
-                RowId::new(0, 0),
-                RowId::new(0, 1),
-                RowId::new(0, 3),
-                RowId::new(0, 4),
-                RowId::new(0, 3),
-                RowId::new(0, 4),
-                RowId::new(0, 5),
-                RowId::new(0, 7),
-            ],
-            build_row_matched,
-        };
-
-        assert!(
-            HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .is_ok()
-        );
-        assert_eq!(state.build_row_ids, Vec::new());
-        assert_eq!(
-            state.build_row_matched,
-            ChunkedData::try_from(vec![{
-                let mut v = vec![false; 14];
-                v[0] = true;
-                v
-            }])
-            .unwrap()
-        );
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   2.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   5.0",
-        );
-        state.build_row_ids = vec![
-            RowId::new(0, 8),
-            RowId::new(0, 9),
-            RowId::new(0, 10),
-            RowId::new(0, 12),
-            RowId::new(0, 13),
-        ];
-        assert!(
-            HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
-                chunk, &cond, &mut state
-            )
-            .await
-            .is_ok()
-        );
-        assert_eq!(state.build_row_ids, Vec::new());
-        assert_eq!(
-            state.build_row_matched,
-            ChunkedData::try_from(vec![{
-                let mut v = vec![false; 14];
-                v[0] = true;
-                v[9] = true;
-                v
-            }])
-            .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_process_full_outer_join_non_equi_condition() {
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             1   3.5 1   2.5
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             3   5.0 3   4.0
-             3   5.0 3   3.0
-             4   1.0 4   0
-             4   1.0 4   0.5",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             1   3.5 1   5.5
-             3   5.0 .   .
-             3   5.0 .   .",
-        );
-        let cond = TestFixture::create_cond();
-        let mut left_state = LeftNonEquiJoinState {
-            probe_column_count: 2,
-            first_output_row_id: vec![0, 2, 4, 6],
-            has_more_output_rows: true,
-            found_matched: false,
-        };
-        let mut right_state = RightNonEquiJoinState {
-            build_row_ids: vec![
-                RowId::new(0, 0),
-                RowId::new(0, 1),
-                RowId::new(0, 3),
-                RowId::new(0, 4),
-                RowId::new(0, 3),
-                RowId::new(0, 4),
-                RowId::new(0, 5),
-                RowId::new(0, 7),
-            ],
-            build_row_matched: ChunkedData::with_chunk_sizes([14].into_iter()).unwrap(),
-        };
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
-                chunk,
-                &cond,
-                &mut left_state,
-                &mut right_state,
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
-        assert!(!left_state.found_matched);
-        assert_eq!(right_state.build_row_ids, Vec::new());
-        assert_eq!(
-            right_state.build_row_matched,
-            ChunkedData::try_from(vec![{
-                let mut v = vec![false; 14];
-                v[0] = true;
-                v
-            }])
-            .unwrap()
-        );
-
-        let chunk = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   0.6
-             4   1.0 4   2.0
-             5   4.0 5   .
-             6   7.0 6   .
-             6   7.0 6   8.0",
-        );
-        let expect = DataChunk::from_pretty(
-            "i   f   i   F
-             4   1.0 4   2.0
-             5   4.0 .   .
-             6   7.0 6   8.0",
-        );
-        left_state.first_output_row_id = vec![2, 3];
-        left_state.has_more_output_rows = false;
-        right_state.build_row_ids = vec![
-            RowId::new(0, 8),
-            RowId::new(0, 9),
-            RowId::new(0, 10),
-            RowId::new(0, 12),
-            RowId::new(0, 13),
-        ];
-        assert!(compare_data_chunk_with_rowsort(
-            &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
-                chunk,
-                &cond,
-                &mut left_state,
-                &mut right_state,
-            )
-            .await
-            .unwrap()
-            .compact_vis(),
-            &expect
-        ));
-        assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
-        assert!(!left_state.found_matched);
-        assert_eq!(right_state.build_row_ids, Vec::new());
-        assert_eq!(
-            right_state.build_row_matched,
-            ChunkedData::try_from(vec![{
-                let mut v = vec![false; 14];
-                v[0] = true;
-                v[9] = true;
-                v[13] = true;
-                v
-            }])
-            .unwrap()
-        );
     }
 
     #[test]

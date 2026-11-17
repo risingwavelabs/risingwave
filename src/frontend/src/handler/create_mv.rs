@@ -257,9 +257,9 @@ pub(crate) fn resolve_streaming_job_resource_type(
     Ok(resource_type)
 }
 
-fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
-    let context = OptimizerContext::from_handler_args(handler_args);
-    context.with_options().clone()
+fn get_with_options(handler_args: HandlerArgs) -> Result<WithOptions> {
+    let context = OptimizerContext::from_handler_args(handler_args)?;
+    Ok(context.with_options().clone())
 }
 
 pub async fn handle_create_mv_bound(
@@ -355,7 +355,7 @@ pub(crate) fn gen_create_mv_graph(
     streaming_job_resource_type::ResourceType,
     Option<u64>,
 )> {
-    let mut with_options = get_with_options(handler_args.clone());
+    let mut with_options = get_with_options(handler_args.clone())?;
     let refresh_interval_sec = with_options.refresh_interval_sec()?;
     with_options.remove(MV_REFRESH_INTERVAL_SEC_KEY);
     let resource_type =
@@ -369,7 +369,7 @@ pub(crate) fn gen_create_mv_graph(
         ))));
     }
 
-    let context = OptimizerContext::from_handler_args(handler_args);
+    let context = OptimizerContext::from_handler_args(handler_args)?;
     let has_order_by = !query.order.is_empty();
     if has_order_by {
         context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.

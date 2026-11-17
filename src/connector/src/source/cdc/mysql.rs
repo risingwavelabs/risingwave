@@ -19,8 +19,8 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Mysql,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, Mysql, check_alter_with_options_inner, check_common_with_options,
 };
 
 // ------- Runtime flags -------
@@ -67,3 +67,7 @@ impl CdcSourceDdlValidator for Mysql {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Mysql {}

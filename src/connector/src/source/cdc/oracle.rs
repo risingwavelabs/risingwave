@@ -20,8 +20,8 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Oracle,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, Oracle, check_alter_with_options_inner, check_common_with_options,
 };
 
 const HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY: &str = "heartbeat.table.auto.initialize";
@@ -72,3 +72,7 @@ impl CdcSourceDdlValidator for Oracle {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Oracle {}
