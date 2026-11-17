@@ -59,7 +59,7 @@ pub use self::command::{
     IcebergPkIndexCompactionOverwrite, IndependentStreamingJobType, ReplaceStreamJobPlan,
     Reschedule, ReschedulePlan, ResumeBackfillTarget, SinceEpochInfo, SnapshotBackfillInfo,
 };
-pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
+pub(crate) use self::info::{SharedActorInfos, SharedActorInfosInner, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub(crate) use self::rpc::to_partial_graph_id;
 pub use self::schedule::BarrierScheduler;

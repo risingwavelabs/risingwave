@@ -20,16 +20,19 @@ use risingwave_common::config::SessionInitConfig;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
-use risingwave_pb::meta::SetSessionParamRequest;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{SetSessionParamRequest, SubscribeType};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{DatabaseConnection, EntityTrait, TransactionTrait};
 use thiserror_ext::AsReport;
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::controller::SqlMetaStore;
-use crate::manager::{LocalNotification, NotificationManagerRef};
+use crate::manager::{
+    LocalNotification, NotificationManagerRef, NotificationPart, NotificationPartState,
+    SnapshotMarkerSender,
+};
 use crate::{MetaError, MetaResult};
 
 pub type SessionParamsControllerRef = Arc<SessionParamsController>;
@@ -37,12 +40,19 @@ pub type SessionParamsControllerRef = Arc<SessionParamsController>;
 const ENABLE_LOCALITY_BACKFILL_PARAM: &str = "enable_locality_backfill";
 const LOCALITY_BACKFILL_MODE_PARAM: &str = "locality_backfill_mode";
 
+/// The default session params behind the lock.
+struct LockedSessionParams(SessionConfig);
+
+impl NotificationPartState for LockedSessionParams {
+    const PART: NotificationPart = NotificationPart::SessionParams;
+}
+
 /// Manages the global default session params on meta.
 /// Note that the session params in each session will be initialized from the default value here.
 pub struct SessionParamsController {
     db: DatabaseConnection,
     // Cached parameters.
-    params: RwLock<SessionConfig>,
+    params: RwLock<LockedSessionParams>,
     notification_manager: NotificationManagerRef,
 }
 
@@ -114,7 +124,7 @@ impl SessionParamsController {
 
         let ctl = Self {
             db,
-            params: RwLock::new(init_params.clone()),
+            params: RwLock::new(LockedSessionParams(init_params.clone())),
             notification_manager,
         };
         // flush to db.
@@ -124,16 +134,17 @@ impl SessionParamsController {
     }
 
     pub async fn get_params(&self) -> SessionConfig {
-        self.params.read().await.clone()
+        self.params.read().await.0.clone()
     }
 
-    /// Retain the read guard through reading the session snapshot and sending its marker.
-    pub async fn get_params_read_guard(&self) -> RwLockReadGuard<'_, SessionConfig> {
-        self.params.read().await
+    pub async fn get_params_for_snapshot(&self, tx: &SnapshotMarkerSender) -> SessionConfig {
+        let params = self.params.read().await;
+        tx.snapshot_read(&*params);
+        params.0.clone()
     }
 
     async fn flush_params(&self) -> MetaResult<()> {
-        let params = self.params.read().await.list_all();
+        let params = self.params.read().await.0.list_all();
         let models = params
             .into_iter()
             .map(|param| session_parameter::ActiveModel {
@@ -163,20 +174,20 @@ impl SessionParamsController {
                 name
             )));
         };
-        let old_batch_parallelism = params_guard.batch_parallelism();
+        let old_batch_parallelism = params_guard.0.batch_parallelism();
         // FIXME: use a real reporter
         let reporter = &mut ();
         let new_param = if let Some(value) = value {
-            params_guard.set(&name, value, reporter)?
+            params_guard.0.set(&name, value, reporter)?
         } else {
-            params_guard.reset(&name, reporter)?
+            params_guard.0.reset(&name, reporter)?
         };
 
         let mut param: session_parameter::ActiveModel = param.into();
         param.value = Set(new_param.clone());
         SessionParameter::update(param).exec(&self.db).await?;
-        let new_batch_parallelism = params_guard.batch_parallelism();
-        self.notify_workers(name.clone(), new_param.clone());
+        let new_batch_parallelism = params_guard.0.batch_parallelism();
+        self.notify_workers(&mut params_guard, name.clone(), new_param.clone());
         if old_batch_parallelism != new_batch_parallelism {
             self.notification_manager
                 .notify_local_subscribers(LocalNotification::BatchParallelismChange);
@@ -185,8 +196,10 @@ impl SessionParamsController {
         Ok(new_param)
     }
 
-    pub fn notify_workers(&self, name: String, value: String) {
-        self.notification_manager.notify_frontend_without_version(
+    fn notify_workers(&self, params: &mut LockedSessionParams, name: String, value: String) {
+        self.notification_manager.notify_part(
+            params,
+            SubscribeType::Frontend,
             Operation::Update,
             Info::SessionParam(SetSessionParamRequest {
                 param: name,

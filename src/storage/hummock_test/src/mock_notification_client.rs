@@ -64,23 +64,17 @@ impl NotificationClient for MockNotificationClient {
             .start_subscription(subscribe_type, worker_key)
             .map_err(MessageStatus::from)?;
         // These mock fields are constant; only the Hummock version is sampled from live state.
-        for &part in NotificationPart::for_subscriber(subscribe_type) {
+        let parts = NotificationPart::for_subscriber(subscribe_type);
+        for &part in parts {
             if part != NotificationPart::HummockVersion {
-                tx.snapshot_read(part);
+                tx.mark_constant_part(part);
             }
         }
-        let hummock_version = self
-            .hummock_manager
-            .on_current_version_arc(|hummock_version| {
-                let snapshot = Arc::clone(hummock_version);
-                if NotificationPart::for_subscriber(subscribe_type)
-                    .contains(&NotificationPart::HummockVersion)
-                {
-                    tx.snapshot_read(NotificationPart::HummockVersion);
-                }
-                snapshot
-            })
-            .await;
+        let hummock_version = if parts.contains(&NotificationPart::HummockVersion) {
+            self.hummock_manager.current_version_for_snapshot(&tx).await
+        } else {
+            Arc::new(self.hummock_manager.get_current_version().await)
+        };
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version.as_ref().into()),
             version: Some(Default::default()),
@@ -91,7 +85,7 @@ impl NotificationClient for MockNotificationClient {
             cluster_resource: Some(Default::default()),
             ..Default::default()
         };
-        drop(tx);
+        tx.finish(subscribe_type);
         Ok(TestChannel(
             notification_stream(subscribe_type, rx, meta_snapshot).boxed(),
         ))
