@@ -274,6 +274,7 @@ impl ReadGroup {
             drop(request._queued.take());
             queue_duration.observe(request.queued_at.elapsed().as_secs_f64());
         }
+        let mut partial_overlap_bytes = 0;
         let flight = if let Some((queue, config)) = sharing {
             let mut state = queue.pending.lock().unwrap();
             let max_followers = config.max_batch_requests.get();
@@ -284,6 +285,7 @@ impl ReadGroup {
                 followers.as_mut().unwrap().append(&mut self.requests);
                 return;
             }
+            partial_overlap_bytes = state.partial_overlap_bytes(&path, &span);
             // Move covered G waiters into the flight before starting the GET.
             // Waking them to retry would race a fast physical completion.
             let mut followers = Vec::new();
@@ -339,6 +341,16 @@ impl ReadGroup {
             .copied();
         let physical = async {
             let _permit = reservation.start();
+            if partial_overlap_bytes > 0 {
+                metrics
+                    .read_scheduler_events
+                    .with_label_values(&[media_type, "partial_overlap_dispatch"])
+                    .inc();
+                metrics
+                    .read_scheduler_partial_overlap_bytes
+                    .with_label_values(&[media_type])
+                    .inc_by(partial_overlap_bytes as u64);
+            }
             #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
             _permit.backend_begin();
             let _in_flight = ReadGauge::new(

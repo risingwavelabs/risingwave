@@ -57,7 +57,9 @@ use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, Recen
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 mod cold_range;
+mod cold_range_observation;
 pub(crate) use cold_range::ColdRangePrefetch;
+use cold_range_observation::{BufferedRangeGuard, BufferedRanges};
 
 macro_rules! impl_vector_index_meta_file {
     ($($type_name:ident),+) => {
@@ -267,6 +269,7 @@ pub struct SstableStore {
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     prefetch_buffer_usage: Arc<AtomicUsize>,
+    buffered_cold_ranges: Arc<BufferedRanges>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
     pub(crate) blockwise_prefetch: risingwave_common::config::storage::BlockwisePrefetchConfig,
@@ -305,6 +308,7 @@ impl SstableStore {
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
+            buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
             blockwise_prefetch: config.blockwise_prefetch,
@@ -356,6 +360,7 @@ impl SstableStore {
             store,
 
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
+            buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             blockwise_prefetch: Default::default(),
@@ -589,8 +594,21 @@ impl SstableStore {
         let fetch_range = range.clone();
         let fetch_block = || {
             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
+            let buffered_ranges = self.buffered_cold_ranges.clone();
+            let read_metrics = self.read_metrics.clone();
             async move {
             outer_fetch.inc();
+            // Only a polled external fallback counts: cache hits and Foyer followers
+            // never reach this point. Scheduler reuse can still avoid a physical GET.
+            if buffered_ranges.contains(object_id, &fetch_range) {
+                let policy = match policy {
+                    CachePolicy::Fill(_) => "fill",
+                    CachePolicy::NotFill => "not_fill",
+                    CachePolicy::Disable => "disable",
+                };
+                read_metrics.cold_range_buffered_overlap_reads.with_label_values(&[policy]).inc();
+                read_metrics.cold_range_buffered_overlap_bytes.with_label_values(&[policy]).inc_by(fetch_range.len() as u64);
+            }
             let block_data = match store
                 .read_with_plug(&data_path, fetch_range.clone(), token)
                 .instrument_await("get_block_response".verbose())
@@ -1100,13 +1118,17 @@ mod tests {
     async fn test_prefetch_failure_falls_back_and_releases_tracker() {
         use crate::store::PrefetchMode;
 
-        for (truncate, mode) in [
-            (true, PrefetchMode::Range),
-            (false, PrefetchMode::Range),
-            (true, PrefetchMode::Blockwise),
-            (false, PrefetchMode::Blockwise),
-            (true, PrefetchMode::ColdRanges),
-            (false, PrefetchMode::ColdRanges),
+        for (truncate, mode, policy) in [
+            (true, PrefetchMode::Range, CachePolicy::Disable),
+            (false, PrefetchMode::Range, CachePolicy::Disable),
+            (true, PrefetchMode::Blockwise, CachePolicy::default()),
+            (false, PrefetchMode::Blockwise, CachePolicy::default()),
+            (true, PrefetchMode::ColdRanges, CachePolicy::default()),
+            (false, PrefetchMode::ColdRanges, CachePolicy::default()),
+            (true, PrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (false, PrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (true, PrefetchMode::ColdRanges, CachePolicy::Disable),
+            (false, PrefetchMode::ColdRanges, CachePolicy::Disable),
         ] {
             let sstable_store = mock_sstable_store().await;
             let (sstable, info) =
@@ -1134,25 +1156,37 @@ mod tests {
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions {
                     prefetch: mode,
-                    cache_policy: if matches!(mode, PrefetchMode::Blockwise | PrefetchMode::ColdRanges) {
-                        CachePolicy::default()
-                    } else {
-                        CachePolicy::Disable
-                    },
+                    cache_policy: policy,
                     ..Default::default()
                 }),
                 &info,
             );
             iter.rewind().await.unwrap();
             assert_eq!(iter.key(), test_key_of(0).to_ref());
-            assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+            let lazy_head = mode == PrefetchMode::ColdRanges && !truncate;
+            assert_eq!(sstable_store.get_prefetch_memory_usage() > 0, lazy_head);
             let mut stats = StoreLocalStatistic::default();
             iter.collect_local_statistic(&mut stats);
             assert_eq!(
                 stats.cache_data_prefetch_count,
-                u64::from(matches!(mode, PrefetchMode::Range | PrefetchMode::ColdRanges))
+                u64::from(matches!(
+                    mode,
+                    PrefetchMode::Range | PrefetchMode::ColdRanges
+                ))
             );
-            assert_eq!(stats.cache_data_block_total, 1);
+            // A valid ColdRanges head no longer falls back because a later block is corrupt.
+            assert_eq!(stats.cache_data_block_total, u64::from(!lazy_head));
+            if lazy_head {
+                // Advance through the valid head to exercise failure of a buffered neighbor,
+                // not just a fresh seek. The iterator must release that window on failure.
+                loop {
+                    assert!(iter.is_valid());
+                    if iter.next().await.is_err() {
+                        break;
+                    }
+                }
+                assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+            }
             // If the single-block read also fails, the error must still reach the caller.
             let second_key = risingwave_hummock_sdk::key::FullKey::decode(
                 &sstable.meta.block_metas[1].smallest_key,

@@ -291,7 +291,21 @@ impl SstableIterator {
                 }
             }
         }
-        if self.options.prefetch == PrefetchMode::ColdRanges {
+        if self
+            .cold_ranges
+            .as_ref()
+            .is_some_and(|window| window.is_empty())
+        {
+            self.cold_ranges = None;
+        }
+        if self.options.prefetch == PrefetchMode::ColdRanges
+            && (self.cold_ranges.is_some()
+                || self.sstable_store.can_prefetch_cold_ranges(
+                    &self.sst,
+                    idx,
+                    self.block_end_idx_exclusive,
+                ))
+        {
             let start = profile_seek.then(Instant::now);
             let result = Box::pin(self.read_cold_range_block(idx)).await;
             SeekAwait::Prefetch.record(start);
@@ -433,6 +447,7 @@ impl SstableIterator {
                 self.options.cache_policy,
                 &mut self.stats,
             )
+            .await
             .map(Box::new);
         match self.cold_ranges.as_mut() {
             Some(window) => {
@@ -689,7 +704,6 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
-    use foyer::Hint;
     use itertools::Itertools;
     use rand::prelude::*;
     use rand::rng as thread_rng;
@@ -1367,7 +1381,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_prefetch_table_read() {
-        for mode in [PrefetchMode::Range, PrefetchMode::ColdRanges] {
+        for (mode, policy) in [
+            (PrefetchMode::Range, CachePolicy::default()),
+            (PrefetchMode::ColdRanges, CachePolicy::default()),
+            (PrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (PrefetchMode::ColdRanges, CachePolicy::Disable),
+        ] {
             let sstable_store = mock_sstable_store().await;
             // when upload data is successful, but upload meta is fail and delete is fail
             let kv_iter =
@@ -1386,7 +1405,7 @@ mod tests {
                 TableKey(Bytes::from(end_key.user_key.table_key.0)),
             );
             let options = Arc::new(SstableIteratorReadOptions {
-                cache_policy: CachePolicy::Fill(Hint::Normal),
+                cache_policy: policy,
                 read_table_id: None,
                 scan_end_user_key: Some(Bound::Included(uk.clone())),
                 prefetch: mode,
@@ -1574,16 +1593,16 @@ mod tests {
         assert!(table_2_block_start + 2 < table_3_block_start);
 
         let table_3_start = UserKey::new(TableId::new(3), TableKey(Bytes::from_static(b"")));
-        for (case, prefetch) in [("prefetch off", false), ("prefetch on", true)] {
+        for (case, mode) in [
+            ("prefetch off", PrefetchMode::Disabled),
+            ("range", PrefetchMode::Range),
+            ("cold ranges", PrefetchMode::ColdRanges),
+        ] {
             let options = Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::Disable,
                 read_table_id: None,
                 scan_end_user_key: Some(Bound::Excluded(table_3_start.clone())),
-                prefetch: if prefetch {
-                    PrefetchMode::Range
-                } else {
-                    PrefetchMode::Disabled
-                },
+                prefetch: mode,
             });
             let mut sstable_iter = SstableIterator::create(
                 sstable.clone(),
@@ -1594,7 +1613,7 @@ mod tests {
 
             assert_eq!(sstable_iter.block_end_idx_exclusive, table_3_block_start);
             sstable_iter.seek(test_key(2, 0).to_ref()).await.unwrap();
-            if prefetch {
+            if mode == PrefetchMode::Range {
                 assert_eq!(
                     sstable_iter.preload_end_block_idx, sstable_iter.block_end_idx_exclusive,
                     "{case}"
@@ -1621,7 +1640,7 @@ mod tests {
                 (table_3_block_start - table_2_block_start) as u64,
                 "{case}"
             );
-            if prefetch {
+            if mode != PrefetchMode::Disabled {
                 assert!(stats.cache_data_prefetch_block_count > 0, "{case}");
             } else {
                 assert_eq!(stats.cache_data_prefetch_block_count, 0, "{case}");

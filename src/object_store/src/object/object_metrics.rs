@@ -47,6 +47,7 @@ pub struct ObjectStoreMetrics {
     pub(super) read_request_duration: HistogramVec,
     pub(super) read_request_bytes: HistogramVec,
     pub(super) read_scheduler_overread_bytes: IntCounterVec,
+    pub(super) read_scheduler_partial_overlap_bytes: IntCounterVec,
     pub(super) read_scheduler_group_size: HistogramVec,
     pub(super) read_scheduler_queue_duration: HistogramVec,
     pub(super) read_scheduler_physical_duration: HistogramVec,
@@ -187,6 +188,11 @@ impl ObjectStoreMetrics {
             registry
         )
         .unwrap();
+        let read_scheduler_partial_overlap_bytes = register_int_counter_vec_with_registry!(
+            "object_store_read_scheduler_partial_overlap_bytes",
+            "Union of byte intersections with older active same-object reads that do not fully cover the new dispatch; observed at flight registration, counts attempted group reads, not successful or unique duplicate bytes",
+            &["media_type"], registry
+        ).unwrap();
         let read_scheduler_overread_bytes = register_int_counter_vec_with_registry!(
             "object_store_read_scheduler_overread_bytes",
             "Gap bytes in successful scheduled reads, including holes left by cancelled members",
@@ -264,6 +270,7 @@ impl ObjectStoreMetrics {
             read_request_duration,
             read_request_bytes,
             read_scheduler_overread_bytes,
+            read_scheduler_partial_overlap_bytes,
             read_scheduler_group_size,
             read_scheduler_queue_duration,
             read_scheduler_physical_duration,

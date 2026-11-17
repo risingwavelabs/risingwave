@@ -1903,3 +1903,84 @@ async fn collecting_plug_does_not_reserve_point_read_capacity() {
     .await
     .unwrap();
 }
+
+#[test]
+fn partial_overlap_observation_counts_union_for_same_object_only() {
+    let mut state = PendingReadGroups::default();
+    for (path, span) in [("sst", 0..4), ("sst", 2..6), ("other", 0..10)] {
+        state.active.push(Arc::new(ActiveRead {
+            path: path.into(),
+            span,
+            followers: Mutex::new(Some(Vec::new())),
+        }));
+    }
+    assert_eq!(state.partial_overlap_bytes("sst", &(0..8)), 6);
+    assert_eq!(state.partial_overlap_bytes("sst", &(6..8)), 0);
+    assert_eq!(state.partial_overlap_bytes("sst", &(2..3)), 0);
+    state.active[1].followers.lock().unwrap().take();
+    assert_eq!(state.partial_overlap_bytes("sst", &(0..8)), 4);
+}
+
+#[tokio::test]
+async fn partial_overlap_metrics_exclude_single_flight_reuse_and_other_objects() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+        let (calls, mut reads) = mpsc::unbounded_channel();
+        let release = Arc::new(Notify::new());
+        let scheduler = ReadScheduler::new(
+            &metrics,
+            "test",
+            ReadSchedulerConfig {
+                max_admitted_groups: 8.try_into().unwrap(),
+                max_inflight_reads: 8.try_into().unwrap(),
+                reuse_inflight_reads: true,
+                use_dedicated_io_runtime: false,
+                ..Default::default()
+            },
+            {
+                let release = release.clone();
+                move |path: String, range: Range<usize>| {
+                    let calls = calls.clone();
+                    let release = release.clone();
+                    async move {
+                        calls.send((path.clone(), range.clone())).unwrap();
+                        if path == "sst" && range == (0..4) {
+                            release.notified().await;
+                        }
+                        Ok(Bytes::from_static(&b"abcdefgh"[range]))
+                    }
+                }
+            },
+        );
+        let count = metrics
+            .read_scheduler_events
+            .with_label_values(&["test", "partial_overlap_dispatch"]);
+        let bytes = metrics
+            .read_scheduler_partial_overlap_bytes
+            .with_label_values(&["test"]);
+        let leader = scheduler.submit("sst", 0..4, None).await.unwrap();
+        assert_eq!(reads.recv().await.unwrap(), ("sst".into(), 0..4));
+        let follower = scheduler.submit("sst", 1..3, None).await.unwrap();
+        assert!(reads.try_recv().is_err());
+        assert_eq!(count.get(), 0);
+        let partial = scheduler.submit("sst", 3..7, None).await.unwrap();
+        assert_eq!(partial.await.unwrap().unwrap(), "defg");
+        assert_eq!(reads.recv().await.unwrap(), ("sst".into(), 3..7));
+        assert_eq!(count.get(), 1);
+        assert_eq!(bytes.get(), 1);
+        let other = scheduler.submit("other", 3..7, None).await.unwrap();
+        assert_eq!(other.await.unwrap().unwrap(), "defg");
+        assert_eq!(reads.recv().await.unwrap(), ("other".into(), 3..7));
+        assert_eq!(count.get(), 1);
+        release.notify_one();
+        assert_eq!(leader.await.unwrap().unwrap(), "abcd");
+        assert_eq!(follower.await.unwrap().unwrap(), "bc");
+        // Completion removes the old flight; a later read is not an in-flight overlap.
+        let later = scheduler.submit("sst", 2..6, None).await.unwrap();
+        assert_eq!(later.await.unwrap().unwrap(), "cdef");
+        assert_eq!(count.get(), 1);
+        assert_eq!(bytes.get(), 1);
+    })
+    .await
+    .unwrap();
+}

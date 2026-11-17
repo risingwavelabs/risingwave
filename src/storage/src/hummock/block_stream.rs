@@ -33,6 +33,17 @@ impl MemoryUsageTracker {
         total_usage.fetch_add(usage, Ordering::SeqCst);
         Self { total_usage, usage }
     }
+
+    /// Reserve without waiting. Legacy unbounded reservations made through `new`
+    /// are included in usage, but can still independently exceed this capacity.
+    pub fn try_new(total_usage: Arc<AtomicUsize>, usage: usize, capacity: usize) -> Option<Self> {
+        total_usage
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_add(usage).filter(|&next| next <= capacity)
+            })
+            .ok()?;
+        Some(Self { total_usage, usage })
+    }
 }
 
 impl Drop for MemoryUsageTracker {
@@ -193,6 +204,54 @@ mod tests {
     use super::*;
     use crate::hummock::test_utils::test_key_of;
     use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
+
+    #[test]
+    fn test_memory_reservation_limits_and_overflow() {
+        let usage = Arc::new(AtomicUsize::new(0));
+        assert!(MemoryUsageTracker::try_new(usage.clone(), 1, 0).is_none());
+        let first = MemoryUsageTracker::try_new(usage.clone(), 40, 100).unwrap();
+        assert!(MemoryUsageTracker::try_new(usage.clone(), 61, 100).is_none());
+        let second = MemoryUsageTracker::try_new(usage.clone(), 60, 100).unwrap();
+        assert_eq!(usage.load(Ordering::SeqCst), 100);
+        assert!(MemoryUsageTracker::try_new(usage.clone(), 1, 100).is_none());
+        assert!(MemoryUsageTracker::try_new(usage.clone(), usize::MAX, usize::MAX).is_none());
+        assert_eq!(usage.load(Ordering::SeqCst), 100);
+        drop(first);
+        drop(second);
+        assert_eq!(usage.load(Ordering::SeqCst), 0);
+        let full = MemoryUsageTracker::try_new(usage.clone(), usize::MAX, usize::MAX).unwrap();
+        assert!(MemoryUsageTracker::try_new(usage.clone(), 1, usize::MAX).is_none());
+        drop(full);
+        assert_eq!(usage.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_concurrent_memory_reservations_hold_capacity_until_drop() {
+        use std::sync::Barrier;
+
+        let usage = Arc::new(AtomicUsize::new(7));
+        let admitted = AtomicUsize::new(0);
+        let barrier = Barrier::new(16);
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                scope.spawn(|| {
+                    barrier.wait();
+                    let tracker = MemoryUsageTracker::try_new(usage.clone(), 37, 7 + 3 * 37);
+                    if tracker.is_some() {
+                        admitted.fetch_add(1, Ordering::SeqCst);
+                    }
+                    // Keep every successful reservation alive until all contenders finish.
+                    barrier.wait();
+                    let observed = usage.load(Ordering::SeqCst);
+                    barrier.wait();
+                    drop(tracker);
+                    assert_eq!(observed, 7 + 3 * 37);
+                });
+            }
+        });
+        assert_eq!(admitted.load(Ordering::SeqCst), 3);
+        assert_eq!(usage.load(Ordering::SeqCst), 7);
+    }
 
     fn test_blocks() -> Vec<Arc<Block>> {
         (10..14)

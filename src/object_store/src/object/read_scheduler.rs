@@ -395,6 +395,29 @@ impl PendingReadGroups {
         self.remove_waiter(path, key)
     }
 
+    // Observe existing flights only; this must never affect admission or reuse.
+    fn partial_overlap_bytes(&self, path: &str, span: &Range<usize>) -> usize {
+        let mut overlaps = Vec::new();
+        for read in &self.active {
+            if read.path != path || read.covers(path, span) {
+                continue;
+            }
+            let start = read.span.start.max(span.start);
+            let end = read.span.end.min(span.end);
+            if start < end && read.followers.lock().unwrap().is_some() {
+                overlaps.push(start..end);
+            }
+        }
+        overlaps.sort_unstable_by_key(|range| range.start);
+        let mut end = 0;
+        let mut bytes = 0;
+        for range in overlaps {
+            bytes += range.end.saturating_sub(range.start.max(end));
+            end = end.max(range.end);
+        }
+        bytes
+    }
+
     fn covering_read(
         &self,
         path: &str,

@@ -65,11 +65,15 @@ pub struct HummockStateStoreMetrics {
     pub block_cache_read_events: IntCounterVec,
     pub blockwise_prefetch_bytes: IntCounterVec,
     pub blockwise_prefetch_wait_duration: Histogram,
+    pub cold_range_buffered_overlap_reads: IntCounterVec,
+    pub cold_range_buffered_overlap_bytes: IntCounterVec,
     pub cold_range_prefetch_window_runs: Histogram,
     pub cold_range_prefetch_read_bytes: Histogram,
     pub cold_range_prefetch_gap_bytes: Histogram,
     pub cold_range_prefetch_gap_blocks: Histogram,
+    pub cold_range_prefetch_single_blocks: IntCounter,
     pub cold_range_prefetch_hint_misses: IntCounter,
+    pub cold_range_prefetch_budget_denied: IntCounter,
 
     pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
     pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
@@ -172,16 +176,26 @@ impl HummockStateStoreMetrics {
             "state_store_blockwise_prefetch_bytes", "Compressed block bytes represented by registered, consumed or discarded handles; not physical IO bytes", &["event"], registry).unwrap();
         let blockwise_prefetch_wait_duration = register_histogram_with_registry!(
             "state_store_blockwise_prefetch_wait_duration_seconds", "Time waiting on a prefetched block when the iterator consumes its handle, including cancelled waits", exponential_buckets(0.000001, 2.0, 25).unwrap(), registry).unwrap();
+        let cold_range_buffered_overlap_reads = register_int_counter_vec_with_registry!(
+            "state_store_cold_range_buffered_overlap_reads",
+            "External block-read fallbacks whose bytes are already returned but not yet decoded/published by a ColdRanges window; counted once per fallback, not physical GETs",
+            &["cache_policy"], registry
+        ).unwrap();
+        let cold_range_buffered_overlap_bytes = register_int_counter_vec_with_registry!(
+            "state_store_cold_range_buffered_overlap_bytes",
+            "Compressed block bytes of cold_range_buffered_overlap_reads; not physical duplicate GET bytes",
+            &["cache_policy"], registry
+        ).unwrap();
         let cold_range_prefetch_window_runs = register_histogram_with_registry!(
             "state_store_cold_range_prefetch_window_runs",
-            "Logical cold reads submitted per planned window, including zero for fully cached windows; not physical GETs",
+            "Cold segments registered per window, including shared singleton fetches and zero for fully cached windows; not physical GETs",
             vec![0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0],
             registry
         )
         .unwrap();
         let cold_range_prefetch_read_bytes = register_histogram_with_registry!(
             "state_store_cold_range_prefetch_read_bytes",
-            "Bytes per submitted logical cold-range read, including reads later cancelled; not physical GET bytes",
+            "Bytes per submitted direct cold-range read, excluding shared singleton registrations; includes cancelled reads, not physical GET bytes",
             exponential_buckets(1024.0, 2.0, 20).unwrap(),
             registry
         )
@@ -200,9 +214,21 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let cold_range_prefetch_single_blocks = register_int_counter_with_registry!(
+            "state_store_cold_range_prefetch_single_blocks",
+            "Singleton cold segments registered through Foyer sharing; not physical GETs",
+            registry
+        )
+        .unwrap();
         let cold_range_prefetch_hint_misses = register_int_counter_with_registry!(
             "state_store_cold_range_prefetch_hint_misses",
             "Positive disk index hints whose cache-only lookup returned no entry and required a demand fallback",
+            registry
+        )
+        .unwrap();
+        let cold_range_prefetch_budget_denied = register_int_counter_with_registry!(
+            "state_store_cold_range_prefetch_budget_denied",
+            "Cold-range windows skipped because the shared prefetch reservation budget was unavailable",
             registry
         )
         .unwrap();
@@ -788,11 +814,15 @@ impl HummockStateStoreMetrics {
             blockwise_prefetch_events,
             blockwise_prefetch_window_blocks,
             blockwise_prefetch_window_bytes,
+            cold_range_buffered_overlap_reads,
+            cold_range_buffered_overlap_bytes,
             cold_range_prefetch_window_runs,
             cold_range_prefetch_read_bytes,
             cold_range_prefetch_gap_bytes,
             cold_range_prefetch_gap_blocks,
+            cold_range_prefetch_single_blocks,
             cold_range_prefetch_hint_misses,
+            cold_range_prefetch_budget_denied,
             block_cache_read_events,
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
