@@ -2589,3 +2589,991 @@ with `--ignored --nocapture --test-threads=1` and `RW_PLUG_ARM=P`,
 workers=8, IO=1, CROSS=0. Select `RW_PLUG_CASE=single_cold|point|cold16|mixed_points`,
 `RW_PLUG_DELAY_US=0|2000`, and optionally `RW_SHARED_INDEX=0|8|15` for mixed points.
 Unset the shared index for independent cases. Alternate binary order between rounds.
+
+
+## Locality storage-path plug diagnosis (2026-11-17)
+
+Production scheduling remains unchanged. Only opt-in plug stage/late/flush trace
+points and an ignored experiment are retained. Foyer remains at `02d6b5e`, with
+no disk cache in this experiment; Range and decode are unchanged.
+
+The fixture calls `HummockVersionReader::iter` with
+`PrefetchOptions::prefetch_for_locality_backfill()`, a committed real SST and a
+hard upper bound. It consumes and verifies every key/value and the end boundary.
+It exercises Locality mode routing, the SST iterator, Foyer and the scheduler;
+it does not instantiate the Locality/Join executors or deserialize SQL rows.
+Point probes time the SstableStore path independently of scan completion.
+
+The cache is initialized on an eight-worker runtime, scans run on a separate
+eight-worker runtime, and dedicated IO has two workers. The initialization worker
+count is a local choice: the SF10 record does not identify that runtime's worker
+count. G128/P32, 16 blocks/1MiB and zero gap match the optimized read limits.
+Target SST blocks are 4KiB; the first 16 contiguous blocks total 64,682 bytes.
+The backends are immediate InMem and InMem with a 2ms Tokio sleep after admission.
+These unoptimized macOS timings do not estimate production S3 latency.
+
+Three alternating process pairs (current/plan, plan/current, current/plan) each
+measure 50 samples per case after five warmups. Tracing is disabled for these
+7,200 samples. Both arms use the same test binary; the range plan is a test-only
+prototype. The [results](read-optimization-evidence/locality-plug-results.json)
+contain pooled p50/p95 and per-round counts/medians;
+[full samples](read-optimization-evidence/locality-plug-samples.json.gz) retain
+every measurement. The separately collected
+[diagnostic trace](read-optimization-evidence/locality-plug-trace.txt) is buffered
+in memory and is not used for latency or merge-rate statistics.
+
+| Case, 150 scans | Immediate GETs, current → plan | 2ms GETs, current → plan |
+| --- | ---: | ---: |
+| 16 cold blocks | 237 → 150 | 210 → 150 |
+| 32 cold blocks | 629 → 300 | 363 → 300 |
+| Eight contiguous cold blocks, eight warm | 253 → 150 | 220 → 150 |
+| Existing point producer on block 7 | 534 → 303 | 544 → 300 |
+| Alternating cold/warm blocks | 1,200 → 1,200 | 1,200 → 1,200 |
+
+The current immediate-backend cold16 rounds issue 64/80/93 GETs; the plan issues
+50/50/50. All-cold byte counts are identical. The trace records registration
+completion, a handoff flush with fewer than 16 reads, late arrivals and separate
+physical ranges. It also shows that pending merging sometimes rescues an early
+flush; late-arrival counts alone are not lost-merge counts. Registration completion
+is insufficient because Foyer producers can enter outer reads later. This
+mechanism reproduces without a disk cache or cross-probe dependencies. Its share
+of the historical SF10 GET increase remains unmeasured.
+
+The rejected range prototype plans contiguous memory-cold runs before registering
+Foyer handles. The first actual outer fetch starts a shared range read; later
+callbacks take slices. Each block still follows Foyer get-or-fetch ownership and
+decode. Known warm gaps and singleton cold runs use ordinary reads. There is no
+collection timer. Its scheduler descriptor is a planned range, so group-member
+histograms cannot be compared directly with the current per-block descriptors;
+physical GETs and bytes are the comparison boundary.
+
+This prototype duplicates bytes when another Foyer producer already owns a block.
+In the 2ms existing-point case, all 150 plan samples read 68,734 bytes for 64,682
+unique cold bytes: block 7's 4,052 bytes are read twice (6.26% amplification).
+The immediate-backend case duplicates bytes in 147/150 samples. Foyer sharing and
+row correctness pass, but physical sharing becomes less efficient. This is a
+range-prefetch policy change, not a transparent repair to plug closing.
+
+Immediate-backend point p50/p95 changes from 55.9/60.9 to 55.5/61.5 microseconds;
+single-block cold scan first-row p50/p95 changes from 75.9/93.8 to 75.5/83.9.
+A point sharing an already registered block improves from 127.3/173.7 to
+94.8/138.7, but a point racing registration regresses from 80.0/160.7 to
+96.6/226.4. All-cold first-row p50/p95 improves from 170.5/258.4 to 151.4/232.4.
+With the 2ms timer backend, cold16 scan p50 changes from 5.140 to 5.312ms. There is
+no blanket latency-nonregression claim.
+
+An earlier diagnostic changed only the one-yield close to a 100us Tokio sleep.
+Full-window collection improved, while incomplete windows incurred roughly a
+millisecond of additional wait locally. It was rejected before the paired range
+experiment. Both the [timer change](read-optimization-evidence/locality-timer-rejected.patch)
+and the [range prototype](read-optimization-evidence/locality-range-plan-rejected.patch)
+are archived, not retained in production. The latter includes the fixture and
+applies to clean `c69c12b`; its applicability was checked with `git apply --check`.
+
+Run the retained baseline fixture explicitly:
+
+```sh
+RW_LOCALITY_TRIALS=50 cargo test --locked -p risingwave_storage --lib --features test \
+  locality_plug_experiment -- --ignored --nocapture --test-threads=1
+```
+
+Use `RW_LOCALITY_SCENARIO=cold16 RW_LOCALITY_TRACE=1 RW_LOCALITY_TRIALS=3` for a
+short diagnostic. Cache counters are observed only by the test harness; no
+metric-driven scheduling policy is introduced. The archived prototype uses
+`RW_LOCALITY_PLAN=1` after applying its patch in an isolated clean checkout.
+
+Final restored-source checks: scheduler 24/24, version reader 4/4, SST iterator
+13/13 and SstableStore 11/11. All twelve fixture cases on both backends were also
+rerun with three measured samples per case, plus warmups. Exact key/value, bounds,
+outer-fetch counts and byte-accounting assertions passed. No timer, range plan,
+Foyer patch, Range change or decode change is retained.
+
+
+## Locality scoped range experiment and read-pattern audit (2026-11-17)
+
+This is a storage-boundary mechanism experiment, **not a faithful Locality/Join
+workload replay**. No candidate execution code is retained. The ignored fixture
+and evidence remain; Foyer, Range and decode are unchanged. The standalone
+`read-optimization-evidence/locality-scoped-prototype.patch` reproduces the
+measured sources against `c69c12b` (apply on a separate clean checkout). Its
+application was checked against the relevant HEAD files.
+
+The measured setup uses four independent tasks, one vnode each, on an
+eight-worker streaming runtime; cache initialization uses another eight-worker
+runtime, dedicated IO uses two workers. There is no disk cache. A single
+committed SST contains four vnodes with 4,097 rows each, 512-byte values, 133
+approximately 64KiB blocks and 8,640,079 total block bytes. Three shared physical
+vnode-boundary blocks are deliberately ensured. Prefetch and merging are bounded
+by 16 blocks/1MiB, zero gap, G128/P32. Immediate InMem and a constant 2ms read-delay
+backend isolate scheduling; they do not model bandwidth or MinIO service times.
+
+The arms are current scheduling, a Locality-only planned-range prototype, and
+that prototype limited to initial vnode-prefix bounds (resumed scans use current
+scheduling). A planned range shares raw bytes within one window; Foyer continues
+to own individual block fetch/decode/cache operations. The initial-only variant
+is an experiment, not a proposed permanent heuristic. Three rotated arm orders
+measure 10 samples after two warmups for each of 12 scenarios and two backends:
+2,160 measured groups. Each group includes four readers. The summary and all
+samples are `locality-scoped-results.json` and `locality-scoped-samples.json.gz`
+in the evidence directory. Build with `cargo test -p risingwave_storage
+--features test --lib --no-run`; run `locality_scoped_experiment --ignored
+--nocapture --test-threads=1` on the resulting binary. Set
+`RW_LOCALITY_SCOPE_TRIALS=10`; baseline unsets both flags, full sets
+`RW_LOCALITY_SCOPED_PLAN=1` and `RW_LOCALITY_INCLUDE_RESUMED=1`, initial-only sets
+just the first flag. The flags apply only with the archived prototype patch.
+
+For 30 groups of full scans, immediate physical GET counts are 699/360/360
+(current/full/initial-only), and 2ms counts are 544/360/360; bytes match.
+Immediate scan p50/p95 milliseconds are 10.246/14.324, 9.699/11.205 and
+9.823/15.382; 2ms values are 22.665/24.185, 22.919/24.183 and 23.337/24.343.
+GET reductions do not imply proportional wall-time reductions. In forced
+staggered starts both variants read 1.513% more bytes than baseline. For forced
+restart after row 128, full reads 0.807%/3.682% more bytes (immediate/2ms);
+initial-only matches baseline. These are reproducible boundary risks, not
+measurements of their frequency in SF10. The `demand_bytes` field is the union
+of blocks holding consumed rows, not a minimal required IO oracle: seek can
+also read a predecessor block, and early-stop cases include existing speculative
+prefetch. Compare bytes between arms before attributing duplication.
+
+### What the real callers require
+
+- `locality_provider.rs::make_snapshot_stream` scans each actor's vnode bitmap
+  sequentially, keeping one iterator per current vnode. It requests Locality
+  prefetch, resumes after the last key using an excluded lower bound, deserializes
+  SQL rows and rate-limits row output. Four one-vnode tasks model only a subset.
+- The executor accumulates rows into chunks and yields them downstream. Exchange
+  uses permits for backpressure. Scan and downstream work can overlap while
+  buffers have space; they are not independent unbounded tasks and not globally
+  lockstep scan/probe pairs.
+- An ordinary barrier retains `snapshot_stream`. It is rebuilt only when the
+  upstream chunk buffer was nonempty and its writes have been committed. Fixed
+  row 1/128/1024 restarts in this fixture do not execute those trigger conditions
+  or update the read version. They cannot establish normal restart frequency.
+- Real `FlushedStateTableReader` enters `LocalHummockFlushedSnapshotReader`, which
+  selects a read snapshot from the live read version before calling
+  `HummockVersionReader::iter`. The fixture supplies one committed SST directly;
+  it omits immutable batches, multiple/overlapping SSTs and evolving snapshots.
+- HashJoin handles input rows serially within a chunk. A Join-cache miss calls
+  `fetch_matched_rows_and_get_degree_table_ref`, then the state-table prefix
+  iterator with `prefetch_for_prefix_scan()`, consuming matches before proceeding.
+  The fixture's independent table-32 `get` calls are not that read pattern.
+- Adjacent logical vnodes may share a physical block (SST builder does not always
+  cut a block at vnode boundaries), but actual SST/compaction partitions and
+  actor vnode assignment determine whether this matters. The fixture forces
+  shared boundaries and gates start timing; neither was observed in SF10 traces.
+
+Consequently the measurements establish the intra-window batching mechanism and
+some physical-overlap risks. They neither explain the entire SF10 GET increase
+nor accept/reject a production policy on expected end-to-end benefit. A useful
+next acceptance experiment must connect actual Locality chunk production to
+HashJoin prefix reads through bounded exchange, preserve per-actor sequential
+vnode traversal and barrier semantics, and distinguish reads by table and window.
+Use the existing Q18 configuration (fixed4, eight streaming workers, two IO
+workers, no disk, sort buffering off) and a small Q18-shaped data set; keep row
+correctness, physical GETs/bytes, first-row and total latency as joint outcomes.
+Small synthetic restart/overlap cases remain separate regression checks.
+
+After restoring execution code, the storage test binary rebuilt successfully.
+Version (4), forward iterator (13), and SST store (11) tests passed. The retained
+scoped fixture also passed all 12 scenarios on both backends, with two measured
+samples per scenario/backend (48 groups), plus warmups. `git diff --check` passed.
+These are correctness/cleanup checks, not an executor-level read-pattern test.
+
+
+## Generic Locality/exchange/HashJoin pressure experiment (2026-11-17)
+
+This first harness uses four left rows per key for both joins and a composite
+right stream key even in the one-row-per-key Semi case. It exercises real
+operators but is **not matched to Q18's side-specific uniqueness/multiplicity**.
+Its prototype patch preserves that generic harness; the live ignored fixture is
+corrected in the follow-up below. Do not use this table as the Q18-shaped result.
+
+The archived `locality_join_read_pattern` test runs the real LocalityProvider and
+HashJoin executors, real Hummock local/flushed snapshot readers and SSTs, SQL row
+serde, Foyer, read scheduler and the production local exchange permit channel.
+It does not run the SQL optimizer, meta barrier scheduler, full Q18 graph or
+MinIO. The source rows, vnode assignment and barriers are controlled inputs.
+This is a representative steady Locality-to-Join fragment, not an SF10 replay.
+
+Four Locality tasks each own four of 16 vnodes, traversed sequentially by the
+actual executor. Their chunks drive four HashJoin tasks through the permit
+channel; Join probes are not independent tasks. Table 34 contains 16,384 keys
+with four rows/key (65,536 rows), ordered by join key and row id within vnode.
+Right table 32 has one row/key for LeftSemi and three rows/key for Inner.
+512-byte deterministic payloads yield multiple 4MiB SSTs with 64KiB block targets.
+Each arm starts from newly committed identical seed data and a cleared block
+cache. Per-Join-type SST manifests (object IDs, table IDs and sizes) match in all
+runs. Result key/row tuples, uniqueness, actor ownership and row counts are
+checked: 65,536 output rows for Semi and 196,608 for Inner.
+
+The initial and start-backfill barriers execute normally. A completion barrier
+flushes Join counters after the measured interval. No fixed-row restart, forced
+cross-reader arrival gate or per-key I/O timer is inserted. This fixture does
+not cover active upstream updates or a mid-scan snapshot refresh. The initial
+gate synchronizes measurement start across actors, without controlling individual
+Foyer or scheduler callbacks. Scans and probes thereafter run at their natural
+executor pace under backpressure. Streaming task-local configuration is installed
+for every task. Default chunk size is 256, exchange permits are 2048, batched
+permits 256, concurrent barriers one; 512 permits is a sensitivity case.
+
+The cache/main runtime has eight workers, streaming has eight, dedicated IO has
+two. G128/P32, 16 blocks/1MiB, zero gap, metadata reuse and in-flight reuse are
+enabled. There is no Foyer disk cache, no Range change, no decode migration, and
+Locality sort buffering is disabled. InMem immediate and constant 2ms backends
+isolate mechanisms; the latter is a backend-delay control, not a batching timer
+or a bandwidth model. Neither these unoptimized timings nor the chosen cache
+sizes are calibrated estimates of production Q18 performance.
+
+Both arms run the same binary. The candidate is the archived Locality-only
+planned-range prototype; it does not change Foyer ownership. Baseline leaves its
+environment flags unset. A 64MiB cache is a pressure experiment, not a claim
+about SF10's actual memory allocation. The 256MiB control fits this working set.
+The first set ran 64 groups (eight scenarios, two arms, four rounds); round zero
+is warmup and round three is conservatively excluded because an auxiliary build
+overlapped its tail. The 256MiB set ran 32 groups (four scenarios, two arms, four
+rounds), excluding round zero. Thus 56 groups are included in comparisons, with
+24 warmup groups and 16 excluded groups. No compilation ran during the included
+rounds. All 96 groups passed result and lookup-count assertions. Each group has
+exactly 65,536 right-side lookups and 16,384 Join-cache misses: repeated-key cache
+reuse is exercised, with actual prefix reads on misses.
+
+### Working-set-fits result
+
+Values below are medians of three groups with default 2048 exchange permits.
+Byte changes compare each arm's median; the full per-round values remain in the
+JSON. GET and bytes are sampled before the completion barrier, not during seed
+creation. End-to-end means this fragment's scan-to-final-Join-output interval.
+
+| Join | Backend | Physical GET current → plan | Fragment ms current → plan | First output ms current → plan | Read bytes change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| LeftSemi | Immediate | 201 → 191 | 693.6 → 646.6 | 15.19 → 13.03 | +0.144% |
+| LeftSemi | 2ms | 200 → 191 | 734.0 → 640.5 | 21.72 → 20.48 | +0.288% |
+| Inner | Immediate | 484 → 467 | 915.0 → 955.8 | 11.50 → 15.64 | +0.103% |
+| Inner | 2ms | 472 → 466 | 1083.7 → 1087.7 | 17.62 → 17.42 | +0.103% |
+
+Foyer outer-fetch counts are identical between arms in all fit-cache groups:
+701 for Semi, 977 for Inner. The extra physical bytes therefore do not reflect
+more Foyer outer-fetch invocations. Per group, the candidate adds 65,263 to
+195,797 bytes for Semi, and 65,263 to 130,535 for Inner. This is consistent with
+the known planned-range overlap risk, but this experiment does not map each
+extra physical GET to a vnode boundary. Do not claim a proven per-GET attribution.
+
+The small-case trace/metric check also shows why pure-scan results overpredict
+mixed-chain benefits: 4,096 unique Join keys plus Locality scanning produced
+4,114 Blockwise windows totaling 4,287 blocks. Many prefix windows are very small.
+Real scan chunk production, serial per-key probe consumption and backpressure
+must remain in the model; do not treat every request as a full 16-block window.
+
+### Cache pressure and interpretation
+
+At 64MiB, Semi outer fetches remain 701, but Inner varies. With default exchange
+and immediate backend, the two included baseline Inner groups have 1,442/1,413
+outer fetches and 928/909 GETs; the plan has 1,562/1,483 outer fetches and
+1,034/957 GETs. At 256MiB the same shape settles to 977 outer fetches for both
+arms. This capacity control establishes that the pressure-case comparison mixes
+re-fetch/cache residency effects with batching. It is not a clean plug-only
+measurement, nor evidence of those precise eviction rates in SF10.
+
+Latency varies substantially across runs; three groups do not establish a tail
+latency guarantee. Semi's medians improve locally; Inner does not show a
+consistent end-to-end improvement. Fewer GETs alone do not justify retaining
+this candidate as a transparent plug fix. The candidate is archived and execution
+code restored; the ignored actual-operator fixture remains. There is no newly
+established baseline correctness bug or claim that all SF10 regression is caused
+by plug closing. The result supports evaluating explicit read-ahead as a policy
+with byte/latency tradeoffs, rather than assuming it is lossless merging.
+
+Evidence: `locality-chain-results.json`, `locality-chain-samples.json.gz`,
+`locality-chain-build-identities.json` and the unapplied
+`locality-chain-prototype.patch` in the evidence directory. The standalone patch
+was checked against the corresponding files at `c69c12b`. On a separate clean
+checkout, apply it, build `cargo test -p risingwave_stream --features test --lib
+--no-run`, then run the emitted test binary with `locality_join_read_pattern
+--ignored --nocapture --test-threads=1`. Set `RW_CHAIN_KEYS=16384`,
+`RW_CHAIN_JOIN=semi|inner`, `RW_CHAIN_DELAY_US=0|2000`,
+`RW_CHAIN_PERMITS=2048|512` and `RW_CHAIN_CACHE_MB=64|256`.
+Baseline unsets `RW_LOCALITY_SCOPED_PLAN` and `RW_LOCALITY_INCLUDE_RESUMED`;
+candidate sets both to 1. Rotate pair order; keep warmup and concurrent-build
+rounds out of comparisons. Without the candidate patch, the retained fixture
+exercises only the unchanged scheduler.
+
+
+## Q18-shaped uniqueness/multiplicity correction (2026-11-17)
+
+This follow-up supersedes the generic test as the main operator-pattern result.
+The repository TPCH schema has orders keyed by orderkey and lineitem keyed by
+(orderkey, linenumber); Q18's aggregate/IN side is unique on orderkey. The test
+now represents these constraints separately. It still does not generate or
+verify the exact historical SF10 physical plan/catalogs, payload distribution,
+SST overlap/version history, 53-actor concurrency or full-query barrier flow.
+
+- Semi: 16,384 keys, four left rows/key with composite stream key, one right
+  row/key with stream/state key containing only the join key. The right-side
+  deduplicated non-join PK list is empty. Each run has 65,536 Join lookups,
+  16,384 Join-cache misses and 65,536 correct output rows.
+- Inner: 65,536 keys, one left row/key with a unique join key, three right
+  rows/key with composite key. Each run has 65,536 lookups and 65,536 Join-cache
+  misses, producing 196,608 correct output rows. This replaces the misleading
+  75% Join-cache-hit rate of the first generic Inner test.
+
+Both have 65,536 Locality rows, real multi-vnode executor traversal and multiple
+prefetch windows, a 256MiB block cache that fits the generated working set, and
+default 256-row chunks/2048 exchange permits. Other settings match the previous
+section. Thirty-two groups run on one binary: four scenarios, two arms, one
+warmup and three measured rounds, rotating pair order. No build overlaps these
+runs. All result/lookup assertions pass, SST manifests match across arms/runs,
+and measured-end scheduler pending/waiting/inflight gauges are zero.
+
+| Join | Backend | Median GET current → plan | Fragment ms current → plan | First output ms current → plan | Median bytes change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| LeftSemi | Immediate | 201 → 189 | 638.6 → 696.3 | 14.51 → 15.58 | +0.144% |
+| LeftSemi | 2ms | 207 → 188 | 742.8 → 723.1 | 21.50 → 21.94 | +0.288% |
+| Inner | Immediate | 1740 → 1718 | 3141.4 → 3116.8 | 17.41 → 17.93 | +0.045% |
+| Inner | 2ms | 1729 → 1718 | 3095.0 → 3177.8 | 28.62 → 27.86 | +0.045% |
+
+Every measured Semi group has 699 Foyer outer fetches in both arms; every Inner
+group has 2,222. Bytes added by the candidate are physical read amplification,
+not additional outer-fetch invocations. The test does not locate every extra
+byte at a specific boundary. GET reductions are real here; stable total/first
+output latency improvements are not established. The three-pair unoptimized
+local timings are not a production tail-latency guarantee. The plan remains an
+archived read-ahead policy experiment, not retained production scheduling.
+
+Use `locality-chain-shaped-results.json`, `locality-chain-shaped-samples.json.gz`,
+`locality-chain-shaped-source-sha256.json` and
+`locality-chain-shaped-prototype.patch`. The standalone patch was checked against
+`c69c12b`. Build/run as above, with `RW_CHAIN_CACHE_MB=256`,
+`RW_CHAIN_PERMITS=2048`, `RW_CHAIN_KEYS=16384` for Semi or `65536` for Inner.
+The live ignored fixture now uses these per-side constraints. The generic patch
+and results remain explicitly separate historical pressure experiments.
+
+### Follow-up design boundary: unused fetch lifetime is not a completion signal
+
+Reading the pinned Foyer `02d6b5e` source rules out a tempting no-timer counter:
+`HybridCache::get_or_fetch` eagerly constructs the external future, then passes
+its builder to memory-cache registration. `InflightManager::enqueue` may retain
+a follower's required-fetch builder in `inflight.f` as a fallback instead of
+dropping it immediately. The leader can already hold its own required builder.
+Thus a shared request's captured Drop guard need not run until the existing
+fetch resolves. A plug that waits for all candidate guards to resolve before
+releasing its own reads can wait on a shared request whose owner is another
+waiting plug; interleaved windows can form a cycle. Memory hits and some other
+followers may drop immediately, but that is not sufficient for a universal rule.
+
+This is a reason to reject that prospective design, not a newly observed
+baseline deadlock. No such counter or Foyer patch was added. Current
+opportunistic merging does not require a complete candidate inventory. Before
+changing dispatch again, use existing window/stage/late/physical-dispatch trace
+relationships to classify actual SF10 reads: same-window split opportunities,
+serialized prefix dependencies, different objects and configured limits. Late
+arrival counts alone do not measure missed physical merging. This experiment
+does not provide evidence for a new simple production dispatch fix.
+
+Final cleanup validation: restored execution files byte-match their pre-prototype
+snapshots; the test-only range helper is removed. The stream test binary rebuilt
+successfully. Three Locality tests, 26 HashJoin tests and both corrected-shape
+restored-scheduler smoke tests passed (31 checks). `git diff --check` passed.
+The only new executor source hook is an ignored test module. No commit/push was
+performed in this experiment.
+
+
+## Follow-up: window pipelining versus registration scope (2026-11-17)
+
+Two isolated test-feature prototypes were evaluated against their own same-binary
+baseline. Both used the corrected real Locality -> local permit channel ->
+HashJoin fixture described above: 4+4 actors, 16 vnodes, streaming/cache/IO
+workers 8/8/2, memory-only Foyer, 256 MiB cache, G128/P32, N16/1MiB,
+zero gap, 2048 exchange permits and 256-row chunks. Each arm/case has one
+excluded warmup and three measured runs, with alternating execution order.
+There are 32 runs per prototype (24 measured). Backend delay 2ms is a fixture
+IO delay, not a batching timer. These are macOS debug local measurements,
+not a repeated SF10/MinIO run or statistical proof of a production speedup.
+Compilation and performance measurement did not overlap.
+
+### Entering the last block to launch the next window
+
+This Locality-only, no-disk prototype starts the next complete bounded Foyer
+window when the last retained block of the current window is entered. It
+retains the current block plus at most one next window. Every block still
+uses Foyer get-or-fetch; there is no planned physical-range read or decode
+relocation. It is distinct from the previous half-window rolling experiment.
+
+| Chain / backend delay | GET median baseline -> early | Total ms baseline -> early |
+| --- | ---: | ---: |
+| Semi / 0 | 206 -> 210 | 357.924 -> 360.592 |
+| Semi / 2ms | 205 -> 199 | 461.628 -> 466.098 |
+| Inner / 0 | 1738 -> 1741 | 1163.693 -> 1163.508 |
+| Inner / 2ms | 1727 -> 1734 | 2641.479 -> 2638.804 |
+
+Full-chain physical bytes were exactly equal within each pair, as were outer
+fetches: 699 for Semi and 2222 for Inner. The real exchange send-wait samples
+show substantial downstream backpressure; their sums across concurrent actors
+are overlapping wall time, not additive critical-path CPU or IO attribution.
+There is no stable chain speedup. A targeted storage-path stop after entering
+block 15, with a logical range of 32 blocks, reads 64,682 bytes in the baseline
+versus 129,493 in the early prototype. Speculative IO is settled after the
+measured scan before accounting. The stop-case per-row boundary checks are
+for byte/cancellation diagnosis, not latency comparison. This prototype is
+rejected and its two execution files are restored exactly.
+
+The storage control matrix covers 13 scenarios x two delays x 30 measured
+trials per arm (1560 samples excluding warmups): cold16, cold32, single cold,
+warm neighbors/head/gaps, cold8, independent point, mixed/shared/racing/existing
+point and stop_last. It verifies values, outer fetch counts and registered
+counts. A full first window or point does not exercise the new early-refill
+branch; apparent differences there must not be presented as its causal benefit.
+
+### Hold collection until bounded RW registration finishes
+
+The second prototype adds a test-only registration-open flag to ReadPlug.
+Before the owning handle drops, actual reads are collected without scheduling
+the one-yield flush (capacity still flushes immediately). On drop, existing
+reads schedule the normal one-yield flush on the IO runtime; if none have
+arrived, the first later outer read schedules it. Foyer callbacks and unused
+fallback futures do not own this registration flag. This affects Blockwise
+plugs, including Join prefix windows, not just Locality windows.
+
+| Chain / backend delay | GET median baseline -> registration | Total ms baseline -> registration |
+| --- | ---: | ---: |
+| Semi / 0 | 213 -> 194 | 358.673 -> 358.925 |
+| Semi / 2ms | 205 -> 199 | 463.895 -> 461.083 |
+| Inner / 0 | 1746 -> 1733 | 1177.701 -> 1171.099 |
+| Inner / 2ms | 1732 -> 1723 | 2634.386 -> 2599.802 |
+
+Bytes and outer fetch counts remain exactly equal within every pair. For
+Semi, submitted batch members increase 480 -> 602 (0 delay) and 456 -> 607
+(2ms), substantially more than the physical GET reduction. Late reads can
+already merge in the pending scheduler queue. One zero-delay Semi pair worsens
+GETs 198 -> 204; the three-run median is not proof of a uniform 9% saving.
+End-to-end changes range from +0.07% to -1.31%, too small to claim a reliable
+production speedup from these samples.
+
+The storage controls use A/B/B/A order, 15 measured trials per process per
+scenario/delay, for another 1560 measured samples. Cold16 median GETs remain
+1 -> 1 in both delay cases; cold32 improves 5 -> 2 at zero delay and remains
+2 -> 2 at 2ms. Independent point zero-delay median/p95 is 54.980/61.333us ->
+55.208/60.917us; shared point is 119.730/158.167us -> 104.167/134.000us.
+At 2ms, independent point medians are 4032.249 -> 4105.791us and shared point
+3990.562 -> 3998.313us. Single-cold zero-delay median varies 308.729 -> 348.250us
+with p95 falling 740.250 -> 578.875us; that path creates no plug and is unchanged,
+so this noisy control does not establish a causal latency regression or a
+universal non-regression guarantee. Stop_last bytes remain 64,682 -> 64,682.
+
+An existing scheduler progress test rejects generalizing handle lifetime into
+a registration barrier: with the prototype enabled,
+`collecting_plug_does_not_reserve_point_read_capacity` times out in 5 seconds.
+The independent point finishes, but the test holds the plug while awaiting its
+prefetch result, so the new gate cannot close. This is a prototype regression,
+not a newly found baseline bug. The experiment is archived and the production
+batch implementation restored byte-for-byte to its pre-experiment snapshot.
+
+A cleaner future design, if this small merge saving merits implementation,
+is a private synchronous RW `register_window` helper that registers the head
+and neighbors, closes a non-escaping registration guard, and returns Foyer
+responses. Only after returning may the caller await the head. Its Fill-only
+registration path must be synchronous by construction, with non-Fill/failpoint
+bypass outside the guard. Tokens captured by Foyer must not capture that guard.
+Generic ReadPlug handle lifetime remains unrelated to flushing. This needs no
+Foyer API or disk behavior changes, no extra read-ahead window, no timer and no
+expected-candidate completion counter. It still cannot guarantee a complete
+batch when Foyer producers arrive after registration; missing/shared candidates
+must never block dispatch. This scoped production implementation is a design,
+not implemented or validated by the above general-handle prototype.
+
+Evidence: `locality-pipeline-*` and `locality-registration-*` in
+`read-optimization-evidence/` contain paired results, summaries, driver scripts,
+prototype patches and compressed raw logs. The pipeline driver's historical
+arm name `plan` denotes early next-window registration here, not the previous
+planned-range prototype. Only the stop-at-window-boundary ignored test addition
+is retained from these execution experiments; Foyer, Range and decode are unchanged.
+
+Final verification after restoring both prototypes: storage and object-store test
+binaries rebuilt successfully. Scheduler 24, forward SST iterator 13, SST store
+11, backfill routing 1 and the retained stop-boundary diagnostic 1 passed
+(50 checks total). The earlier held-handle timeout passes again in the restored
+scheduler suite. `git diff --check` passed. No Foyer, Range, decode, production
+scheduling change, commit or push is retained from this follow-up.
+
+
+## Operator review and capability ablation (2026-11-17)
+
+The proposed private synchronous registration scope has NOT been implemented.
+Before further scheduler work, this follow-up reviews where independent reads
+actually exist and disables selected capabilities in the real executor fixture.
+No operator execution ordering, Foyer behavior, Range path or decode changes
+are proposed by this experiment.
+
+### Call-site findings
+
+- `executor/hash_join.rs:994` builds all input keys before the per-row loop at
+  996. It consumes `handle_match_rows` for a row before advancing; on a miss,
+  1186 fetches the matching prefix. The handler updates cached state, cleans
+  matched rows and applies insert/delete/degree effects before returning.
+  This is serial execution in the current implementation, NOT proof that the
+  next key's address inherently depends on the preceding IO result. Distinct
+  keys can be known in advance; changing execution/prefetch across keys is an
+  operator-level design and cannot be achieved by holding an IO plug longer.
+- `executor/join/hash_join.rs:237` optionally fetches degrees before the row
+  stream. `into_stream:292` uses `iter_with_prefix_respecting_watermark` with
+  Blockwise prefix prefetch. A unique/short prefix frequently has just one
+  block per SST. Large-fanout keys can span many blocks and must not be ruled
+  out by the HashJoin operator label alone.
+- A prefix seek may initialize several SST children concurrently through
+  `merge_inner.rs:260`. Those are often different object paths, so their
+  concurrency does not imply byte-range coalescing. Same-block cache sharing
+  belongs to Foyer; it is not additional physical-range merging by a plug.
+- `locality_provider.rs:338` scans each vnode's remaining range through
+  `FlushedStateTableReader`, with Locality prefetch requested at 374. This
+  exposes multiple independent same-SST blocks. It also has chunk/channel
+  backpressure. Only buffered upstream updates cause snapshot replacement at
+  995; an ordinary barrier alone does not necessarily abandon the iterator.
+- `aggregate/hash_agg.rs:308` restores independent missing group states through
+  `get_rows` when native point batching is enabled; fallback work uses bounded
+  concurrency at 356. `mview/cache.rs:390,418` similarly batches missing keys
+  or uses concurrency 10. The native `local_hummock_storage.rs:351` batch
+  advances keys independently with bounded concurrency and shared SST metadata;
+  each key still preserves version/candidate visibility. This creates potential
+  candidates, but random nonadjacent ranges do not become mergeable at gap=0.
+- TopN's bounded cache fills use disabled prefetch; unbounded fills select the
+  existing Range mode (`top_n_state.rs:148,211`). Aggregate materialized-input
+  fills similarly use `PrefetchOptions::new` (`aggregate/minput.rs:224`). These
+  are not new Blockwise plug consumers and should remain outside this change.
+- `forward_sstable_iterator.rs:159` clips the scan upper bound, and at 464 a
+  single-block window returns before creating a plug. At 505 all memory-ready
+  neighbors also avoid plugging the demand. This existing behavior already
+  covers the common single-candidate case; no new operator-specific filter is
+  required to avoid waiting for a nonexistent second block.
+
+### Experiment
+
+The corrected Semi and Inner fixtures, runtime topology and read limits are
+unchanged from the previous section. Same-binary arms use a rotating order:
+
+1. baseline: current Blockwise windows, plug and scheduler queue coalescing;
+2. no_prefix: disable only ordinary/prefix Blockwise via the existing config;
+3. no_locality: a test-only mode override maps Locality to Disabled, explicitly
+   NOT to its legacy Range fallback;
+4. no_plug: return no plug while keeping Foyer window registrations, scheduler
+   G/P limits, dedicated IO runtime, queue coalescing and in-flight reuse.
+
+Two join shapes x two backend delays x four arms x four rounds = 64 successful
+runs. Round zero is warmup, leaving three measured rounds per case/arm. Outputs,
+Join lookup/miss counts, identical seed SST manifests, equal physical bytes and
+equal outer fetch counts were verified. All arms have 699 outer reads and
+45,248,719 physical bytes in Semi; 2222 outer reads and 144,900,547 bytes in Inner.
+No build overlapped a benchmark. Later baseline wall times varied markedly
+(e.g. zero-delay Semi about 0.4s then 0.79s), and some comparisons are noisy;
+all samples are retained. This run does NOT establish latency/speedup or prove
+absence of latency regressions. GET/byte/window evidence is the primary result.
+
+| Join / backend delay | Baseline GET | No prefix prefetch | No Locality prefetch | No plug |
+| --- | ---: | ---: | ---: | ---: |
+| Semi / 0 | 211 | 213 | 699 | 229 |
+| Semi / 2ms | 199 | 205 | 699 | 211 |
+| Inner / 0 | 1750 | 1736 | 2222 | 1744 |
+| Inner / 2ms | 1723 | 1727 | 2222 | 1735 |
+
+These are three-run medians. The no-plug arm is NOT a no-scheduler arm.
+It still permits normal queued requests to coalesce. Current plugging has
+some marginal GET benefit in Semi, whereas exposing Locality read-ahead
+candidates produces the much larger reduction. Disabling prefix prefetch has
+little observable GET effect in these short-prefix shapes; this does not
+justify globally disabling it for high-fanout joins.
+
+The isolated window histograms are stable across all measured rounds and delays:
+
+| Path | Windows | Selected block slots | One-block windows | Mean selected blocks |
+| --- | ---: | ---: | ---: | ---: |
+| Semi Join prefixes | 16384 | 16520 | 16248 (99.17%) | 1.0083 |
+| Inner Join prefixes | 65554 | 67196 | 63912 (97.50%) | 1.0250 |
+| Locality feeding Semi | 51 | 575 | 3 | 11.2745 |
+| Locality feeding Inner | 49 | 568 | 0 | 11.5918 |
+
+These are per-SST selection windows, BEFORE cache arbitration, not physical
+GETs or an assertion that every selected block misses. Prefix windows in
+these fixtures have at most two slots. Cache hits/shared producers further
+reduce actual external candidates. The histograms explain why improving a
+registration boundary cannot improve most individual prefix windows.
+
+### Decision
+
+Do not implement the more elaborate registration-scope candidate as the next
+production change. Retain bounded Locality read-ahead and simple best-effort
+queue merging. Avoid waiting for the next serial probe, and do not add a
+universal cross-key batch, a timer, a completion counter or Foyer-specific role
+API. The whole feature is not pointless: removing Locality read-ahead raises
+GETs significantly at identical bytes. The narrower negative conclusion is
+that extra batching effort on these short serial Join prefixes has little
+opportunity. The existing simple plug itself is not proven useless.
+
+For short unique-key probes, a separate future review of iterator setup/SST
+candidate work (or a correctly guarded point-lookup path) is more relevant than
+longer IO waits. A direct `get_row` replacement is NOT validated: matching-PK
+layout, watermark filtering, degree handling, cache updates and insert/delete
+semantics must be preserved. No such replacement is made here. The actual
+SF10 regression still needs same-window physical attribution; these synthetic
+SSTs do not reproduce its layered history or full 53-actor graph.
+
+All three temporary ablation source edits are restored exactly. Evidence is
+archived as `operator-ablation-*` (patch, run script, full results, window
+summary and compressed logs). No commit or push is performed.
+
+Restored-code validation: the stream test binary rebuilt successfully; three
+Locality tests, 26 HashJoin tests and both restored chain smoke tests passed
+(31 checks). All ablated source/fixture files byte-match their pre-experiment
+snapshots, and `git diff --check` passed. The synchronous registration-scope
+design remains unimplemented; only review/experiment records are retained.
+
+
+## Scope cleanup: Range baseline and independent scheduler value (2026-11-17)
+
+The operator ablation above compared Blockwise with Disabled, NOT with the
+existing Range implementation. It proves the value of lookahead in those
+fixtures; it does not prove that splitting a known contiguous range into
+Foyer requests and merging them again outperforms Range prefetch. The SF10
+clean-main / previous-all-on / simplified-all-on cohorts changed several
+features and advertised different slot counts, so they do not isolate that
+comparison either.
+
+`SstableStore::prefetch_blocks` chooses a bounded contiguous span with cache
+checks/heuristics, issues one object read, decodes the selected blocks and
+retains holders. Blockwise registers separate per-block Foyer responses and
+leaves physical merging to the scheduler. Its cache arbitration/sharing can
+be useful for mixed hit/shared-fetch workloads; it is not a demonstrated
+universal sequential-scan improvement. Both paths retain lookahead through
+holders/responses. The misleading PrefetchOptions comment contrasting Range
+retention with supposedly cache-only Blockwise retention is corrected.
+
+Scheduler duties should be evaluated separately: admitted/physical concurrency
+and runtime placement can be useful without range coalescing. The current
+implementation does not provide complete global IO limits: read_with_plug
+routes oversized/unbounded reads directly, and can_schedule uses max_read_bytes
+both as a scheduling eligibility bound and a merge bound. Waiting callers and
+staged plug reads are outside the G admission budget. Do not describe this as
+a full global memory bound, bandwidth/fairness scheduler, or isolated IO path
+for all object reads. These are scope limitations, not newly fixed behavior.
+
+A decisive future comparison should keep the branch, input SSTs, cache and
+runtime settings controlled and distinguish:
+- Range + direct reads;
+- Range + admission/runtime dispatch with physical merging and inflight reuse
+  disabled (the current scheduler can screen this with max_batch_requests=1
+  and reuse_inflight_reads=false, though it still pays the queue machinery);
+- Range + the current scheduler;
+- Blockwise + the current scheduler.
+
+Check oversized/direct-route coverage, bytes, GETs, end-to-end and point-read
+tails, CPU and retained memory. A win from dispatch alone would justify a
+smaller dispatch implementation, not automatically the current merge machinery.
+No new four-arm Range benchmark is claimed here and no default policy is changed.
+
+Behavior-preserving cleanup: remove the temporary pointer-ID stage/flush/late
+DEBUG events added for the plug investigation; restore the simple Option
+propagation in stage(). The diagnostic patch is archived as
+`read-optimization-evidence/plug-diagnostic-tracing.patch` for reproducing old
+window-correlated traces. Existing production tracing, ignored experiments,
+regression tests and their evidence are retained. No Foyer, Range algorithm,
+decode, scheduling policy, commit or push change is made in this cleanup.
+
+Cleanup validation: storage/object-store test binaries rebuilt successfully. Scheduler 24, forward iterator 13, SST store 11 and routing 1 passed (49 checks); git diff --check passed.
+
+
+### 2026-11-17: Range versus Blockwise, dispatch, and full scheduler
+
+This comparison separates Locality prefetch strategy from scheduler behavior.
+The starting HEAD was `c69c12bb910bfab52d9053b7a19931572e3b546c`, with the existing
+ignored operator/storage fixtures and working-tree changes retained.
+No Foyer, Range algorithm, decode, production scheduling, or default configuration
+changes were retained from this experiment.
+
+Arms: A = Locality Range + direct reads; B = Locality Range + the existing scheduler
+with `max_batch_requests=1` and `reuse_inflight_reads=false`; C = Locality Range +
+full scheduler; D = Locality Blockwise + full scheduler. Ordinary Join prefix
+Blockwise and native read-batch/meta reuse were identical across all four arms.
+B is a dispatch screening configuration, not an implemented minimal wrapper.
+
+The real LocalityProvider / local permit channel / HashJoin fixture used 4+4 actors,
+16 vnodes, 256-row chunks, 2048 exchange permits, a 256 MiB memory-only Foyer cache,
+8 initialization/cache workers, 8 streaming workers, and 2 IO workers. Scheduler
+settings were G128/P32, N16, 1 MiB, and zero gap. Semi used 16,384 keys with four
+input rows and one right row per key; Inner used 65,536 keys with one input row and
+three right rows per key. Deterministic SST manifests matched across arms. Output
+and Join lookup/miss assertions passed. This is not a complete Q18/SF10 deployment.
+
+There were 64 chain runs: four arms, two Join variants, two backend delays (0 and
+2000 us), and one warmup plus three measured rounds in rotating order. All requests
+in B/C/D used the scheduled route; no oversized/unbounded bypass was observed.
+Final scheduler and physical-read gauges were zero. GET medians:
+
+| Backend delay | Join | A Range/direct | B Range/dispatch | C Range/full | D Blockwise/full |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 0 us | Semi | 188 | 188 | 188 | 215 |
+| 2000 us | Semi | 188 | 188 | 188 | 199 |
+| 0 us | Inner | 1718 | 1718 | 1718 | 1726 |
+| 2000 us | Inner | 1718 | 1718 | 1718 | 1734 |
+
+C eliminated just one additional GET in one of its 12 measured chain runs. Range
+read roughly 0.05–0.43% more bytes than D. Host timing drift was substantial; for
+example A Semi/0 varied from 369 to 934 ms and A Inner/0 from 1516 to 4558 ms. Keep
+all samples; these timings do not establish a throughput winner.
+
+The main storage-path comparison collected 3840 measured samples (12 scenarios,
+two delays, four arms, 40 samples each), plus 640 mechanism-control samples.
+Every process/scenario also ran five warmups. Mixed point reads started after the
+first real iterator-initialization poll rather than a Blockwise-specific counter.
+
+- All-cold 16 blocks: Range consistently used one GET. D had a median of one but
+  maxima of four (0 us) and two (2000 us). In the extra controls, Blockwise direct
+  and dispatch each used 16 GETs; full scheduling reduced this to a median of one.
+- Alternating warm/cold blocks: all arms used eight GETs and 32,222 bytes. At 2000 us,
+  Range took about 37–38 ms while D took 8.45 ms. Extra Blockwise direct/dispatch/full
+  controls took 8.16/8.54/8.22 ms: this is concurrent-prefetch benefit, not merging.
+- A point read already owning the middle block: Range used two GETs/68,734 bytes;
+  D typically used three GETs/64,682 bytes. Sharing the middle block leaves two
+  separated cold spans under zero-gap merging. Fewer bytes need not mean fewer GETs.
+- A point read started with the scan: Range/full sometimes reduced two GETs to one.
+  Added event counters attributed the observed savings to pre-dispatch overlapping
+  merges (`merged_requests`), not active reuse (`inflight_reused` stayed zero).
+  Do not cite this experiment as evidence of inflight-reuse benefit.
+- Standalone point p50 at 0 us was about 33/58/63/58 us for A/B/C/D. At 2000 us it
+  was 3.71/3.78/3.86/3.84 ms. No point-latency advantage was demonstrated. These are
+  local debug-build samples, not a production tail-latency guarantee.
+- Stopping at the first row of block 16 in a 32-block logical scan read 64,682 bytes
+  in every arm; the next window was not prefetched speculatively.
+
+Whole-process CPU and raw maximum RSS include SST generation/setup. End cache usage
+was identical for Semi and near capacity for Inner; the Range tracker ended at zero.
+These are not isolated IO CPU measurements or peak lookahead-retention measurements.
+
+Interpretation: use existing Range as the continuous Locality baseline. Blockwise
+can still be useful for per-block sharing and concurrent sparse misses, independently
+of physical merging. The scheduler can merge existing compatible requests, but this
+workload does not justify more plug waiting or establish an independent benefit for
+admission/runtime isolation under backend overload. Do not replace serial Join probe
+execution with an assumed concurrent workload. No automatic strategy selector was
+implemented and no default was changed.
+
+Evidence uses the `read-optimization-evidence/range-dispatch-*` prefix: `results.json`
+and `summary.json` for the chain, `micro-results.json`/`micro-summary.json` for storage,
+`control-results.json`/`control-summary.json` for attribution, and `logs.json.gz` for
+raw output. Scripts, binary identities, source hashes, a baseline chain fixture, and
+ordered experiment patches are archived. Temporary fixture switches were restored
+from their pre-run copies after testing. Validation results are recorded separately.
+
+Cleanup validation: rebuilt storage and stream test binaries. Iterator 13, SST store 11,
+routing 1, Locality 3, HashJoin 26, and two small chain smoke tests passed (56 total).
+`git diff --check` passed. Fixture backups matched byte-for-byte after restoration;
+production SST store/iterator/scheduler and Cargo.lock source hashes were unchanged.
+
+
+### 2026-11-17: cold-run prefetch prototype (memory and disk cache)
+
+Retained an opt-in `PrefetchMode::ColdRanges` implementation in
+`hummock/sstable_store/cold_range.rs`, integrated with the SST iterator. Existing
+Locality/default routing, Range, Blockwise, Foyer dependencies, and scheduler logic
+are unchanged. Temporary operator-routing overrides are archived, not retained.
+
+The iterator plans one bounded window (existing block/byte limits and scan/table
+bounds). Actual memory hits are pinned. For hybrid caches, a positive `contains`
+hint starts a cache-only lookup and terminates the preceding cold run; a negative
+hint extends the cold run. Each closed run starts an object range read immediately,
+without waiting for any preceding run or iterator consumption. Disk lookups do not
+form a window-wide await barrier. A stale positive hint falls back to a demand get.
+Direct runs intentionally do not provide Foyer per-block single-flight. Results are
+consumed in order, decoded on the caller, and inserted into the cache. Private range
+tasks are aborted on drop/seek; Foyer retains ownership of shared cache producers.
+The next window starts only when the current window is exhausted. No timer, new
+plug state, Foyer interface, or adaptive policy was introduced.
+
+The outer range task runs on the caller. `object.read()` still routes scheduled
+physical reads to the scheduler's dedicated IO runtime when enabled. Direct controls
+are explicitly scheduler-OFF. Scheduled controls use the same G128/P32, N16/1 MiB,
+zero-gap, 2-worker IO runtime for Range and ColdRanges. Every scheduled-control
+request used the scheduled route; no oversized/unbounded bypass occurred in these
+fixtures. Existing oversized bypass behavior is not changed by the prototype.
+
+New tests assert two physical reads simultaneously in flight for
+`cold,cold,cold,hot,cold,cold,cold`, before any block is consumed, for both memory and
+disk hits. They also verify cancellation/reservation release, actual Source::Disk
+hits, stale-index fallback after deletion, ordered keys/bytes, and malformed/truncated
+prefetch fallback. The first test version accidentally used the default 3-block
+window for a 7-block scenario; the fixture now explicitly configures 16 blocks/1 MiB.
+The concurrency assertion was not weakened. Cache-only lookups that join an external
+fetch count Source::Outer as a miss, matching existing get/Range accounting.
+
+Measured samples: 2880 main micro samples (Range/direct, Blockwise/scheduler,
+ColdRanges/direct), 1920 scheduler-ON micro samples, 480 main disk samples and
+320 scheduler-ON disk samples; 5600 total, excluding per-scenario warmups. Disk warm
+blocks were written only to disk, with memory absence checked. Backend delays were
+0/2000 us, injected after routing, not batching timers. Main micro cases have
+40 samples per arm/delay/scenario; disk cases have 20.
+
+At 2000 us, with scheduler and dedicated IO runtime enabled:
+
+| Scenario | Range | ColdRanges | Physical reads |
+| --- | ---: | ---: | --- |
+| 16 all-cold blocks, scan p50 | 5.01 ms | 4.95 ms | both 1 GET / 64,682 bytes |
+| Alternating memory hits/misses, scan p50 | 37.93 ms | 8.53 ms | both 8 GETs / 32,222 bytes |
+| Alternating disk hits/misses, scan p50 | 38.23 ms | 8.77 ms | both 8 GETs / 32,222 bytes |
+| Single cold block, scan p50 | 3.96 ms | 3.91 ms | both 1 GET |
+| Unrelated point mixed with scan, point p50 | 3.59 ms | 3.57 ms | both 2 GETs total |
+| Memory-hot head, first block p50 | 241 us | 349 us | both 1 cold GET later |
+| Disk-hot head, first block p50 | 526 us | 672 us | both 1 cold GET later |
+
+The hot-head latency increase is an observable tradeoff of planning the window before
+returning its head; do not advertise universally unchanged latency. Direct shared
+point controls use two GETs for both range strategies; scheduler-ON overlapping reads
+can reduce the median to one, but per-block sharing is not guaranteed. Stopping at
+the first row of block 16 in a 32-block logical scan reads only the first window
+(64,682 bytes), with no next-window speculation.
+
+The real Locality/permit-channel/HashJoin comparison used the same fixtures/settings
+as the preceding experiment: 48 main runs and 32 scheduler-ON runs (20 warmup,
+60 measured). SST manifests, outputs and Join lookup/miss checks matched; all final
+queue/reservation/inflight gauges drained. GETs are near Range, not always identical:
+0-us Semi GET medians are Range 188 vs ColdRanges 189; 2000-us scheduled Inner medians
+are Range 1717 vs ColdRanges 1718. Strict hot-block boundaries may add a request that
+Range's heuristic overread avoided. There was substantial host wall-time drift;
+these results do not establish end-to-end throughput improvement or a no-regression
+guarantee. This is not a full SF10/Q18 deployment. Whole-process CPU/RSS includes setup.
+
+Evidence is archived with the `read-optimization-evidence/cold-range-prefetch-*`
+prefix. `implementation.patch` is the retained code change; `experiment.patch`
+contains temporary operator/test hooks. `results.json` and `scheduled-results.json`
+contain all chain runs, with separate micro/disk result files. Drivers, summaries,
+binary hashes, source identities, logs and a human-readable report are included.
+The final Source::Outer accounting fix does not change physical requests or routing;
+performance samples preceded that statistics-only adjustment.
+
+The prototype is retained for review, not enabled by default. Adopting it should
+explicitly replace an existing target path rather than make three strategies the
+permanent default design. The acceptance decision must include redundant overlap
+reads, extra hot-head work, memory retention, and occasionally more range requests.
+
+Final validation after the Source::Outer accounting fix: storage/stream test builds
+passed, followed by 59 checks (iterator 13, SST store 11, cold ranges 2, routing 1,
+Locality 3, HashJoin 26, two chain smoke tests, dedicated IO runtime isolation 1).
+The existing object-store binary was reused for its unchanged runtime-isolation test.
+The old Range function and restored temporary fixtures matched their starting copies;
+Foyer/Cargo.lock were unchanged. `git diff --check` passed.
+
+### ColdRanges configuration and fragmentation observability (2026-11-17)
+
+ColdRanges now has a startup configuration entry, without changing the default
+selection. Normal deployment needs only the unified mode:
+
+```toml
+[storage.blockwise_prefetch]
+mode = "cold_ranges" # also: "range", "blockwise", "disabled"
+# Optional: reproduce the preceding microbench window instead of the 3-block/256-KiB defaults.
+max_blocks = 16
+max_bytes = 1048576
+```
+
+The section keeps its existing name for configuration compatibility. Optional
+`prefix_mode`, `changelog_mode`, `range_scan_mode`, `snapshot_backfill_mode`, and
+`locality_backfill_mode` override `mode` for controlled comparisons. For example,
+`mode = "range"` plus `locality_backfill_mode = "cold_ranges"` isolates the Locality
+strategy. Empty/omitted per-path modes inherit `mode`; an empty/omitted unified
+mode preserves the old boolean switches and defaults. Explicit mode selection
+does not require also setting a legacy boolean. Ordinary point gets are unchanged.
+These settings require a compute-process restart.
+
+Blockwise and ColdRanges share `max_blocks`/`max_bytes`; Range retains its existing
+`storage.max_prefetch_block_number` and memory-budget behavior. ColdRanges requires
+cache-fill policy and an eligible multi-block window; otherwise it uses demand
+reads. No Foyer or old Range algorithm changes were made. The optional ColdRanges
+state is now boxed so disabled iterators retain only one pointer, and its await is
+included in existing `SeekAwait::Prefetch` profiling.
+
+The outer private task still runs on the caller runtime. Its `object.read` goes
+through the existing object-store routing. To enable scheduled physical reads on
+`rw-read-io`, also configure:
+
+```toml
+[storage.object_store]
+enable_hummock_read_coalescing = true
+[storage.object_store.read_scheduler]
+use_dedicated_io_runtime = true
+```
+
+This runtime guarantee applies to reads accepted by the scheduler; oversized or
+unbounded reads retain the existing direct route. Decoding remains on consumption
+in the caller runtime. No timer or new scheduling policy was added.
+
+Five new metrics use the `state_store_cold_range_prefetch_` prefix:
+
+| Suffix | Interpretation |
+| --- | --- |
+| `window_runs` | Histogram of logical cold reads per planned window; zero includes all-hot windows. |
+| `read_bytes` | Histogram of each submitted logical cold range's compressed byte length. |
+| `gap_bytes` | Histogram of compressed bytes in each internal cache-hit/index-hint gap between two cold runs. Its count is the number of within-window split boundaries caused by such gaps. |
+| `gap_blocks` | Histogram of the number of consecutive cache-hit/index-hint blocks per internal gap. |
+| `hint_misses` | Counter of positive disk index hints that later produced no cache entry and needed demand fallback. |
+
+Leading/trailing hot blocks and window boundaries do not count as gaps.
+Consecutive memory/disk-hinted blocks form one gap, not one gap per block.
+For `cold cold cold hot cold cold cold`, planning records two reads and one gap;
+for `cold cold hot hot cold cold`, it records two reads and one two-block gap.
+Planned/submitted reads remain counted if subsequently cancelled or failed.
+Gap index hints are not claimed to be verified disk hits.
+
+Example PromQL (apply the same job/instance filters to all series):
+
+```promql
+# Small internal split boundaries per second, here <= 16 KiB.
+sum(rate(state_store_cold_range_prefetch_gap_bytes_bucket{le="16384"}[5m]))
+
+# Fraction of internal gaps that are <= 16 KiB; undefined when no gaps occur.
+sum(rate(state_store_cold_range_prefetch_gap_bytes_bucket{le="16384"}[5m]))
+/
+sum(rate(state_store_cold_range_prefetch_gap_bytes_count[5m]))
+
+# Mean submitted cold range size.
+sum(rate(state_store_cold_range_prefetch_read_bytes_sum[5m]))
+/
+sum(rate(state_store_cold_range_prefetch_read_bytes_count[5m]))
+```
+
+These metrics reveal small gaps and fragmentation in the iterator plan, not an
+exact count of avoidable physical GETs. Scheduler coalescing can join the segments
+again; independent windows, limits, cancellation, and cache-hint fallbacks also
+affect physical reads. Correlate them with existing object-store logical/physical
+counts, `object_store_read_scheduler_group_size`, and scheduler overread bytes.
+Metrics are observability only and are never read to make scheduling decisions.
+
+This round verifies configuration, read routing, cache gaps and correctness;
+it does not rerun the preceding performance experiment or claim a new latency win.
+
+Validation: common configuration tests passed (15), followed by storage/stream
+regressions (59: iterator 13, SST store 11, cold-range 4, legacy routing 1,
+explicit routing 1, Locality 3, HashJoin 26). The explicit routing test exercises
+32 combinations of unified/per-path selection, four strategies, and four scan
+entry points; it verifies the two-block upper bound as well as strategy selection.
+Changelog mode resolution is covered by configuration tests and compilation;
+this round did not run the standalone changelog integration test. Cold-range
+checks cover memory and disk hits, stale disk index fallback, eager submission
+of both sides, cancellation, consecutive hot gaps, and window boundaries.
+Range/ColdRanges both pass the existing sequential-read/seek correctness test.
+
+The storage and stream test targets compile successfully. Default configuration
+and config docs were regenerated by the exact Cargo test used by the RiseDev
+recipe: the local wrapper could not run because cargo-make/cargo-binstall are not
+installed. The generated-file test then passed without UPDATE_EXPECT. Metrics
+inventory generation/check and `git diff --check` passed. The old Range function
+matches the pre-prototype copy byte-for-byte, and Cargo.lock/object-store sources
+remain unchanged. Existing macOS linker unwind-table and proc-macro future
+compatibility warnings are unrelated to these changes.
+
+A mergeable comparison configuration is provided in
+[`src/config/cold-range-prefetch.toml`](../../../../src/config/cold-range-prefetch.toml).
+It sets the Blockwise/ColdRanges window to 16 blocks/1 MiB, Range's existing block
+limit to 16, and the scheduler's accepted range limit to 1 MiB. The last setting
+matters: leaving the scheduler at its 256-KiB default would route larger cold
+runs directly instead of through the dedicated runtime. `max_gap_bytes = 0`
+keeps cache-gap splitting visible without enabling scheduler gap overread.
+For the three-arm comparison, change only `mode` between `range`, `blockwise`,
+and `cold_ranges`, leave per-path mode overrides unset, restart compute processes,
+and repeat the same workload from the same cache state. Keep disk-cache settings
+and all other read-optimization settings fixed. This configuration does not itself
+clear caches or create a cold workload.

@@ -1,0 +1,599 @@
+--- a/src/storage/src/store.rs
++++ b/src/storage/src/store.rs
+@@ -502,15 +502,17 @@
+     Range,
+     /// Request a small window through the block cache, leaving I/O merging to the scheduler.
+     Blockwise,
++    /// Opt-in prototype: concurrently read contiguous cache misses in a bounded window.
++    ColdRanges,
+     /// Use the storage instance's ordinary Snapshot Backfill source policy.
+     SnapshotBackfill,
+     /// Use the storage instance's Locality Backfill policy. Resolved before building SST iterators.
+     LocalityBackfill,
+ }
+ 
+-/// Controls prefetch for range scans. Range prefetch buffers decoded block holders;
+-/// blockwise prefetch retains per-block cache responses. Both retain lookahead until
+-/// it is consumed or the iterator releases it.
++/// Controls prefetch for range scans. Range buffers decoded blocks; Blockwise holds
++/// per-block cache responses; ColdRanges holds cache entries/lookups and pending
++/// range reads. Each retains lookahead until consumption or iterator release.
+ #[derive(Default, Clone, Copy)]
+ pub struct PrefetchOptions {
+     pub mode: PrefetchMode,
+--- a/src/storage/src/hummock/sstable_store.rs
++++ b/src/storage/src/hummock/sstable_store.rs
+@@ -55,6 +55,9 @@
+ use crate::hummock::vector::monitor::VectorStoreCacheStats;
+ use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
+ use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
++
++mod cold_range;
++pub(crate) use cold_range::ColdRangePrefetch;
+ 
+ macro_rules! impl_vector_index_meta_file {
+     ($($type_name:ident),+) => {
+@@ -1102,6 +1105,8 @@
+             (false, PrefetchMode::Range),
+             (true, PrefetchMode::Blockwise),
+             (false, PrefetchMode::Blockwise),
++            (true, PrefetchMode::ColdRanges),
++            (false, PrefetchMode::ColdRanges),
+         ] {
+             let sstable_store = mock_sstable_store().await;
+             let (sstable, info) =
+@@ -1129,7 +1134,7 @@
+                 sstable_store.clone(),
+                 Arc::new(SstableIteratorReadOptions {
+                     prefetch: mode,
+-                    cache_policy: if mode == PrefetchMode::Blockwise {
++                    cache_policy: if matches!(mode, PrefetchMode::Blockwise | PrefetchMode::ColdRanges) {
+                         CachePolicy::default()
+                     } else {
+                         CachePolicy::Disable
+@@ -1145,7 +1150,7 @@
+             iter.collect_local_statistic(&mut stats);
+             assert_eq!(
+                 stats.cache_data_prefetch_count,
+-                u64::from(mode == PrefetchMode::Range)
++                u64::from(matches!(mode, PrefetchMode::Range | PrefetchMode::ColdRanges))
+             );
+             assert_eq!(stats.cache_data_block_total, 1);
+             // If the single-block read also fails, the error must still reach the caller.
+--- a/src/storage/src/hummock/sstable/forward_sstable_iterator.rs
++++ b/src/storage/src/hummock/sstable/forward_sstable_iterator.rs
+@@ -28,6 +28,7 @@
+ use crate::hummock::block_stream::{PrefetchBlockStream, PrefetchLookup};
+ use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
+ use crate::hummock::sstable::SstableIteratorReadOptions;
++use crate::hummock::sstable_store::ColdRangePrefetch;
+ use crate::hummock::store::iter_init_profile::SeekAwait;
+ use crate::hummock::{BlockEntry, BlockIterator, BlockResponse, SstableStoreRef, TableHolder};
+ use crate::monitor::StoreLocalStatistic;
+@@ -51,6 +52,7 @@
+     cur_idx: usize,
+ 
+     preload_stream: Option<Box<PrefetchBlockStream>>,
++    cold_ranges: Option<ColdRangePrefetch>,
+     /// Reference to the sst
+     pub sst: TableHolder,
+     preload_end_block_idx: usize,
+@@ -174,6 +176,7 @@
+             block_iter: None,
+             cur_idx: 0,
+             preload_stream: None,
++            cold_ranges: None,
+             sst: sstable,
+             sstable_store,
+             stats: StoreLocalStatistic::default(),
+@@ -187,6 +190,7 @@
+     }
+ 
+     fn discard_read_ahead(&mut self) {
++        self.cold_ranges = None;
+         if !self.read_ahead.is_empty() {
+             self.sstable_store
+                 .read_metrics
+@@ -284,6 +288,16 @@
+                 }
+                 Err(e) => {
+                     tracing::warn!(error = %e.as_report(), "failed to prefetch data, fall back to block get");
++                }
++            }
++        }
++        if self.options.prefetch == PrefetchMode::ColdRanges {
++            match Box::pin(self.read_cold_range_block(idx)).await {
++                Ok(block) => prefetched_block = block,
++                Err(error) => {
++                    // As with Range, a failed speculative neighbor must not fail a valid head.
++                    self.cold_ranges = None;
++                    tracing::warn!(error = %error.as_report(), "cold-range prefetch failed, fall back to block get");
+                 }
+             }
+         }
+@@ -387,6 +401,46 @@
+         self.cur_idx = idx;
+ 
+         Ok(())
++    }
++
++    async fn read_cold_range_block(
++        &mut self,
++        idx: usize,
++    ) -> HummockResult<Option<crate::hummock::BlockHolder>> {
++        if let Some(window) = self.cold_ranges.as_mut()
++            && let Some(block) = window
++                .next(
++                    &self.sstable_store,
++                    &self.sst,
++                    self.options.cache_policy,
++                    &mut self.stats,
++                )
++                .await?
++        {
++            return Ok(Some(block));
++        }
++        // Release the preceding window's reservation before requesting another one.
++        self.cold_ranges = None;
++        self.cold_ranges = self.sstable_store.prefetch_cold_ranges(
++            &self.sst,
++            idx,
++            self.block_end_idx_exclusive,
++            self.options.cache_policy,
++            &mut self.stats,
++        );
++        match self.cold_ranges.as_mut() {
++            Some(window) => {
++                window
++                    .next(
++                        &self.sstable_store,
++                        &self.sst,
++                        self.options.cache_policy,
++                        &mut self.stats,
++                    )
++                    .await
++            }
++            None => Ok(None),
++        }
+     }
+ 
+     // Keep construction of the large Range refill future off the common seek stack too.
+--- /dev/null
++++ b/src/storage/src/hummock/sstable_store/cold_range.rs
+@@ -0,0 +1,436 @@
++// Copyright 2026 RisingWave Labs
++// SPDX-License-Identifier: Apache-2.0
++
++//! Bounded, opt-in read-ahead of contiguous memory/disk-cache misses.
++//! Each cold run starts immediately; consuming a preceding run never starts the next one.
++//! Direct ranges do not participate in Foyer single-flight. Positive cache hints
++//! use cache-only lookups with a demand-read fallback if the hint becomes stale.
++
++use std::ops::Range;
++
++use risingwave_object_store::object::ObjectResult;
++
++use super::*;
++
++enum Part {
++    Cached(BlockHolder),
++    CacheLookup(usize, foyer::HybridGet<SstableBlockIndex, Box<Block>>),
++    Read(Range<usize>, PendingRead),
++}
++
++struct PendingRead(tokio::task::JoinHandle<ObjectResult<Bytes>>);
++
++impl Drop for PendingRead {
++    fn drop(&mut self) {
++        // These tasks belong exclusively to this iterator, not to a shared cache producer.
++        self.0.abort();
++    }
++}
++
++pub(crate) struct ColdRangePrefetch {
++    parts: VecDeque<Part>,
++    decoded: VecDeque<BlockHolder>,
++    start: usize,
++    // Includes pinned hits and the larger of compressed/decoded bytes for cold blocks.
++    // Tasks retain the reservation until cancellation has actually been observed.
++    _tracker: Arc<MemoryUsageTracker>,
++}
++
++impl ColdRangePrefetch {
++    pub(crate) async fn next(
++        &mut self,
++        store: &SstableStore,
++        sst: &Sstable,
++        policy: CachePolicy,
++        stats: &mut StoreLocalStatistic,
++    ) -> HummockResult<Option<BlockHolder>> {
++        if let Some(block) = self.decoded.pop_front() {
++            return Ok(Some(block));
++        }
++        let Some(part) = self.parts.pop_front() else {
++            return Ok(None);
++        };
++        match part {
++            Part::Cached(block) => {
++                stats.cache_data_block_total += 1;
++                Ok(Some(block))
++            }
++            Part::CacheLookup(idx, lookup) => {
++                match lookup.await.map_err(HummockError::foyer_error)? {
++                    Some(entry) => {
++                        stats.cache_data_block_total += 1;
++                        // A cache-only lookup may join another caller's external fetch.
++                        if entry.source() == foyer::Source::Outer {
++                            stats.cache_data_block_miss += 1;
++                        }
++                        Ok(Some(BlockHolder::from_hybrid_cache_entry(entry)))
++                    }
++                    // A positive index hint is not a reservation. Eviction/collision must
++                    // never turn a missing block into a hole or leave it waiting for a plug.
++                    None => store.get(sst, idx, policy, stats).await.map(Some),
++                }
++            }
++            Part::Read(range, mut read) => {
++                let data = (&mut read.0).await.map_err(|error| {
++                    HummockError::other(format!("cold-range read task: {error}"))
++                })??;
++                let expected = sst.meta.block_metas[range.clone()]
++                    .iter()
++                    .map(|meta| meta.len as usize)
++                    .sum::<usize>();
++                if data.len() != expected {
++                    return Err(ObjectError::internal("unexpected cold-range read length").into());
++                }
++                let CachePolicy::Fill(hint) = policy else {
++                    unreachable!("cold ranges require cache-fill policy");
++                };
++                let mut offset = 0;
++                for idx in range {
++                    let meta = &sst.meta.block_metas[idx];
++                    let end = offset + meta.len as usize;
++                    // Decode on consumption, like Range, rather than moving decoding onto IO workers.
++                    let block = Block::decode_with_copy(
++                        data.slice(offset..end),
++                        meta.uncompressed_size as usize,
++                        true,
++                    )?;
++                    let hint = if idx == self.start { hint } else { Hint::Low };
++                    let entry = store.block_cache.insert_with_properties(
++                        SstableBlockIndex {
++                            sst_id: sst.id,
++                            block_idx: idx as _,
++                        },
++                        Box::new(block),
++                        HybridCacheProperties::default().with_hint(hint),
++                    );
++                    self.decoded
++                        .push_back(BlockHolder::from_hybrid_cache_entry(entry));
++                    offset = end;
++                }
++                Ok(self.decoded.pop_front())
++            }
++        }
++    }
++}
++
++impl SstableStore {
++    pub(crate) fn prefetch_cold_ranges(
++        &self,
++        sst: &Sstable,
++        start: usize,
++        scan_end: usize,
++        policy: CachePolicy,
++        stats: &mut StoreLocalStatistic,
++    ) -> Option<ColdRangePrefetch> {
++        fail_point!("disable_block_cache", |_| None);
++        if !matches!(policy, CachePolicy::Fill(_))
++            || self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity
++        {
++            return None;
++        }
++        let config = self.blockwise_prefetch;
++        let metas = &sst.meta.block_metas;
++        let mut end = start;
++        let mut bytes = 0usize;
++        for meta in metas
++            .iter()
++            .take(scan_end.min(start.saturating_add(config.max_blocks.get())))
++            .skip(start)
++        {
++            let next = bytes.saturating_add(meta.len.max(meta.uncompressed_size) as usize);
++            if next > config.max_bytes.get() {
++                break;
++            }
++            end += 1;
++            bytes = next;
++        }
++        // Keep single-block reads on the ordinary get path, including Foyer sharing.
++        if end <= start + 1 {
++            return None;
++        }
++        let tracker = Arc::new(MemoryUsageTracker::new(
++            self.prefetch_buffer_usage.clone(),
++            bytes,
++        ));
++        let mut parts = VecDeque::new();
++        let mut cold_start = start;
++        for idx in start..end {
++            let key = SstableBlockIndex {
++                sst_id: sst.id,
++                block_idx: idx as _,
++            };
++            let cached = if let Some(entry) = self.block_cache.memory().get(&key) {
++                // Pin actual memory entries rather than trusting a presence check.
++                Some(Part::Cached(BlockHolder::from_hybrid_cache_entry(entry)))
++            } else if self.block_cache.is_hybrid() && self.block_cache.contains(&key) {
++                // Foyer starts the cache lookup now. Do not await disk IO while planning
++                // later cold runs; a stale positive hint has an explicit fallback above.
++                Some(Part::CacheLookup(idx, self.block_cache.get(&key)))
++            } else {
++                None
++            };
++            if let Some(cached) = cached {
++                self.start_cold_range(sst, cold_start..idx, &tracker, &mut parts, stats);
++                parts.push_back(cached);
++                cold_start = idx + 1;
++            }
++        }
++        self.start_cold_range(sst, cold_start..end, &tracker, &mut parts, stats);
++        Some(ColdRangePrefetch {
++            parts,
++            decoded: VecDeque::new(),
++            start,
++            _tracker: tracker,
++        })
++    }
++
++    fn start_cold_range(
++        &self,
++        sst: &Sstable,
++        blocks: Range<usize>,
++        tracker: &Arc<MemoryUsageTracker>,
++        parts: &mut VecDeque<Part>,
++        stats: &mut StoreLocalStatistic,
++    ) {
++        if blocks.is_empty() {
++            return;
++        }
++        let first = &sst.meta.block_metas[blocks.start];
++        let last = &sst.meta.block_metas[blocks.end - 1];
++        let range = first.offset as usize..(last.offset as usize + last.len as usize);
++        let path = self.get_sst_data_path(sst.id);
++        let object = self.store.clone();
++        let tracker = tracker.clone();
++        stats.cache_data_prefetch_count += 1;
++        stats.cache_data_prefetch_block_count += blocks.len() as u64;
++        // Spawn while constructing the window, before awaiting any read or consuming any row.
++        let task = tokio::spawn(async move {
++            let _tracker = tracker;
++            object.read(&path, range).await
++        });
++        parts.push_back(Part::Read(blocks, PendingRead(task)));
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::time::Duration;
++
++    use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, PsyncIoEngineConfig};
++    use prometheus::Registry;
++    use risingwave_hummock_sdk::key::FullKey;
++    use risingwave_object_store::object::{
++        InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
++    };
++
++    use super::*;
++    use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
++    use crate::hummock::test_utils::{default_builder_opt_for_test, gen_default_test_sstable};
++    use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
++    use crate::monitor::ObjectStoreMetrics;
++
++    async fn setup(
++        disk: bool,
++    ) -> (
++        SstableStoreRef,
++        TableHolder,
++        InMemObjectStore,
++        Arc<ObjectStoreMetrics>,
++        Registry,
++        tempfile::TempDir,
++    ) {
++        let registry = Registry::new();
++        let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
++        let backend = InMemObjectStore::for_test();
++        let object = Arc::new(ObjectStoreImpl::InMem(
++            backend
++                .clone()
++                .monitored(metrics.clone(), Arc::new(ObjectStoreConfig::default())),
++        ));
++        let mut store = mock_sstable_store_with_object_store(object).await;
++        Arc::get_mut(&mut store)
++            .unwrap()
++            .blockwise_prefetch
++            .max_blocks = 16.try_into().unwrap();
++        Arc::get_mut(&mut store)
++            .unwrap()
++            .blockwise_prefetch
++            .max_bytes = (1024 * 1024).try_into().unwrap();
++        let dir = tempfile::tempdir().unwrap();
++        if disk {
++            let device = FsDeviceBuilder::new(dir.path())
++                .with_capacity(16 << 20)
++                .build()
++                .unwrap();
++            Arc::get_mut(&mut store).unwrap().block_cache = HybridCacheBuilder::new()
++                .memory(64 << 20)
++                .storage()
++                .with_io_engine_config(PsyncIoEngineConfig::new())
++                .with_engine_config(
++                    BlockEngineConfig::new(device)
++                        .with_block_size(1 << 20)
++                        .with_buffer_pool_size(4 << 20),
++                )
++                .build()
++                .await
++                .unwrap();
++        }
++        let (sst, _) =
++            gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
++        store.clear_block_cache().await.unwrap();
++        (store, sst, backend, metrics, registry, dir)
++    }
++
++    async fn seed_hot(store: &SstableStore, sst: &Sstable, idx: usize, disk: bool) {
++        if disk {
++            let (range, capacity) = sst.calculate_block_info(idx);
++            let data = store
++                .store
++                .read(&store.get_sst_data_path(sst.id), range)
++                .await
++                .unwrap();
++            let key = SstableBlockIndex {
++                sst_id: sst.id,
++                block_idx: idx as _,
++            };
++            drop(
++                store
++                    .block_cache
++                    .storage_writer(key)
++                    .insert(Box::new(Block::decode(data, capacity).unwrap()))
++                    .unwrap(),
++            );
++            store.block_cache.storage().wait().await;
++            assert!(!store.block_cache.memory().contains(&key));
++            assert!(store.block_cache.contains(&key));
++        } else {
++            store
++                .get(
++                    sst,
++                    idx,
++                    CachePolicy::default(),
++                    &mut StoreLocalStatistic::default(),
++                )
++                .await
++                .unwrap();
++        }
++    }
++
++    fn physical_inflight(registry: &Registry) -> f64 {
++        registry
++            .gather()
++            .iter()
++            .filter(|f| f.name() == "object_store_read_in_flight")
++            .flat_map(|f| f.get_metric())
++            .filter(|m| {
++                m.get_label()
++                    .iter()
++                    .any(|l| l.name() == "stage" && l.value() == "physical")
++            })
++            .map(|m| m.get_gauge().as_ref().unwrap().value())
++            .sum()
++    }
++
++    #[tokio::test]
++    async fn cold_ranges_submit_both_sides_before_consumption_and_cancel_on_drop() {
++        for disk in [false, true] {
++            let (store, sst, backend, _, registry, _dir) = setup(disk).await;
++            seed_hot(&store, &sst, 3, disk).await;
++            backend.set_read_delay_for_test(Duration::from_secs(30));
++            let window = store
++                .prefetch_cold_ranges(
++                    &sst,
++                    0,
++                    7,
++                    CachePolicy::default(),
++                    &mut StoreLocalStatistic::default(),
++                )
++                .unwrap();
++            assert!(store.get_prefetch_memory_usage() > 0);
++            // Neither cold run has completed, and no iterator block has been consumed.
++            tokio::time::timeout(Duration::from_secs(2), async {
++                while physical_inflight(&registry) != 2. {
++                    tokio::task::yield_now().await;
++                }
++            })
++            .await
++            .expect("both sides of the hot block must start independently");
++            drop(window);
++            tokio::time::timeout(Duration::from_secs(2), async {
++                while physical_inflight(&registry) != 0. || store.get_prefetch_memory_usage() != 0 {
++                    tokio::task::yield_now().await;
++                }
++            })
++            .await
++            .expect("dropping the window must abort private reads and release reservations");
++            store.block_cache.close().await.unwrap();
++        }
++    }
++
++    #[tokio::test]
++    async fn cold_ranges_preserve_disk_hits_and_fall_back_on_stale_index() {
++        for stale in [false, true] {
++            let (store, sst, _, metrics, _, _dir) = setup(true).await;
++            seed_hot(&store, &sst, 3, true).await;
++            let physical = metrics.operation_size.with_label_values(&["read"]);
++            let before = physical.get_sample_count();
++            let before_bytes = physical.get_sample_sum();
++            let mut stats = StoreLocalStatistic::default();
++            let mut window = store
++                .prefetch_cold_ranges(&sst, 0, 7, CachePolicy::default(), &mut stats)
++                .unwrap();
++            if stale {
++                // Current-thread runtime: the cache-only producer has not polled yet.
++                store.block_cache.storage().delete(&SstableBlockIndex {
++                    sst_id: sst.id,
++                    block_idx: 3,
++                });
++            }
++            for idx in 0..7 {
++                let block = tokio::time::timeout(
++                    Duration::from_secs(2),
++                    window.next(&store, &sst, CachePolicy::default(), &mut stats),
++                )
++                .await
++                .unwrap()
++                .unwrap()
++                .unwrap();
++                if idx == 3 && !stale {
++                    assert!(
++                        matches!(block.entry(), BlockEntry::HybridCache(e) if e.source() == foyer::Source::Disk)
++                    );
++                }
++                let mut iter = BlockIterator::new(block);
++                iter.seek_to_first();
++                assert_eq!(
++                    iter.key(),
++                    FullKey::decode(&sst.meta.block_metas[idx].smallest_key)
++                );
++            }
++            assert!(
++                window
++                    .next(&store, &sst, CachePolicy::default(), &mut stats)
++                    .await
++                    .unwrap()
++                    .is_none()
++            );
++            assert_eq!(
++                physical.get_sample_count() - before,
++                if stale { 3 } else { 2 }
++            );
++            let expected: usize = sst.meta.block_metas[..7]
++                .iter()
++                .enumerate()
++                .filter(|(idx, _)| stale || *idx != 3)
++                .map(|(_, meta)| meta.len as usize)
++                .sum();
++            assert_eq!(
++                (physical.get_sample_sum() - before_bytes) as usize,
++                expected
++            );
++            drop(window);
++            assert_eq!(store.get_prefetch_memory_usage(), 0);
++            store.block_cache.close().await.unwrap();
++        }
++    }
++}

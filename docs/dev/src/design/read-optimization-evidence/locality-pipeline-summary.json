@@ -1,0 +1,94 @@
+[
+  {
+    "join": "semi",
+    "backend_delay_us": 0,
+    "rounds": 3,
+    "baseline": {
+      "get": 206,
+      "total_ms": 357.924208,
+      "first_ms": 14.140125,
+      "scan_ms": 319.748541,
+      "send_wait_sum_ms": 1048.2620020000002,
+      "outer": 699.0,
+      "bytes": 45248719.0
+    },
+    "early": {
+      "get": 210,
+      "total_ms": 360.591875,
+      "first_ms": 13.696584,
+      "scan_ms": 319.614,
+      "send_wait_sum_ms": 1085.1847920000002,
+      "outer": 699.0,
+      "bytes": 45248719.0
+    }
+  },
+  {
+    "join": "semi",
+    "backend_delay_us": 2000,
+    "rounds": 3,
+    "baseline": {
+      "get": 205,
+      "total_ms": 461.628375,
+      "first_ms": 24.360584000000003,
+      "scan_ms": 406.488792,
+      "send_wait_sum_ms": 1276.086117,
+      "outer": 699.0,
+      "bytes": 45248719.0
+    },
+    "early": {
+      "get": 199,
+      "total_ms": 466.098,
+      "first_ms": 23.541875,
+      "scan_ms": 410.395375,
+      "send_wait_sum_ms": 1298.8711630000003,
+      "outer": 699.0,
+      "bytes": 45248719.0
+    }
+  },
+  {
+    "join": "inner",
+    "backend_delay_us": 0,
+    "rounds": 3,
+    "baseline": {
+      "get": 1738,
+      "total_ms": 1163.6932500000003,
+      "first_ms": 14.358291999999999,
+      "scan_ms": 1002.7031660000001,
+      "send_wait_sum_ms": 3866.370797,
+      "outer": 2222.0,
+      "bytes": 144900547.0
+    },
+    "early": {
+      "get": 1741,
+      "total_ms": 1163.507542,
+      "first_ms": 14.121292,
+      "scan_ms": 1004.279791,
+      "send_wait_sum_ms": 3875.5833780000003,
+      "outer": 2222.0,
+      "bytes": 144900547.0
+    }
+  },
+  {
+    "join": "inner",
+    "backend_delay_us": 2000,
+    "rounds": 3,
+    "baseline": {
+      "get": 1727,
+      "total_ms": 2641.4794580000002,
+      "first_ms": 27.76725,
+      "scan_ms": 2261.841833,
+      "send_wait_sum_ms": 8806.782670999999,
+      "outer": 2222.0,
+      "bytes": 144900547.0
+    },
+    "early": {
+      "get": 1734,
+      "total_ms": 2638.8037919999997,
+      "first_ms": 28.255333,
+      "scan_ms": 2260.144167,
+      "send_wait_sum_ms": 8875.246376999998,
+      "outer": 2222.0,
+      "bytes": 144900547.0
+    }
+  }
+]

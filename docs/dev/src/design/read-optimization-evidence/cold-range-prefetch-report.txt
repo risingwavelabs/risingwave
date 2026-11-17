@@ -1,0 +1,118 @@
+冷段并发预读原型：实现与本地验证（2026-11-17）
+
+本轮保留了真实的 RW 实现，不只是测试记录。新增 PrefetchMode::ColdRanges、冷段读取模块及 iterator 接入；默认 Locality/Range/Blockwise 路由不变。它目前是显式选择的原型，不是已切换生产默认的优化。Foyer 依赖、原 Range 算法和生产 scheduler 没有修改，没有 commit/push。
+
+实现逻辑
+
+1. 在 SST/table/scan_end 边界内选择一窗，沿用已有 max_blocks 与 max_bytes 预算。max_bytes 按每块 max(compressed, uncompressed) 计；单块/不允许 Fill/预算不足时回到普通 get。
+2. memory.get 取得并持有真正的内存 entry。内存 miss 后，对 hybrid cache 使用 contains 查询 disk 索引；这是同步提示，不读取磁盘数据，也不代表条目必然可读。
+3. 正向扫描遇到命中或正向 disk 提示，封闭并立即启动前面的冷段对象读取；disk 提示同时注册 Foyer cache-only get，但不 await。继续规划后段，直到窗口末尾。不存在等前段读完或消费完才启动后段的依赖。
+4. disk 查询最终 miss（例如淘汰、索引碰撞）时，消费该块通过普通 get 回源兜底。索引为负也不保证没有并发回源或最近的缓存写入；整段直读可能重复覆盖它们，这是本轮明确接受的取舍。
+5. 各冷段单独读取整个范围，不逐块 get_or_fetch 后再由 plug 合并。返回的数据在 caller 消费该段时 decode、填缓存，按原顺序返回。热块/disk 查询也保持顺序。
+6. 下一窗只在本窗耗尽后准备。drop/seek 会取消 iterator 私有的未完成范围任务；Foyer 的共享缓存查询生命周期仍由 Foyer 管理。资源 reservation 随私有任务实际取消或窗口释放回收。
+
+IO runtime 的边界
+
+外层 tokio::spawn 在 caller runtime 上，用来及时启动每个冷段和保留可取消句柄。object.read() 仍经过原有统一路由：启用 scheduler、范围可调度时，实际物理读取在 scheduler 的 dedicated IO runtime 上执行；结果返回后由 caller decode。iterator 没有获取或创建独立 runtime。
+未启用 scheduler 的消融组确实在 caller 直接读；不能混同为生产 scheduler ON 的结果。另行运行了同配置 Range+完整 scheduler 与 ColdRanges+完整 scheduler 两组，dedicated IO workers=2。实验中没有 oversized/unbounded 旁路，ON 组全部 scheduled，OFF 组全部 direct。现有 oversized 旁路规则仍然存在，本原型没有改变全局规则。
+
+正确性测试
+
+- 冷冷冷热冷冷冷：在没有消费任何 block、两段对象读取都未完成时，断言 physical in-flight=2。中间块分别来自 memory 与 disk；两种情况都通过。
+- drop 后两段私有读取取消，physical in-flight 与预读 reservation 归零。
+- disk-only 命中块保留 Source::Disk，读取两侧 6 块恰好两个 GET。
+- 在 contains 检查之后、缓存读取执行之前删除磁盘条目：没有遗漏或挂起，以第三个 GET 回源补齐中间块，逐块 key 与字节校验通过。
+- 扩展了原有截断/坏 checksum 用例：坏的预读邻居不能使仍可读的当前块失败；真正请求坏块时才返回错误，reservation 释放。
+第一版新增测试误用了默认 3-block 窗口，未覆盖测试假定的 7 块；修正测试显式使用 16 blocks/1 MiB 后通过。没有把缩小窗口当成并发成功，也没有放松两段同时 in-flight 的断言。
+
+测试范围与样本
+
+同一分支 c69c12bb910bfab52d9053b7a19931572e3b546c，保留开始前已有工作区改动。
+主存储小测：Range/direct、旧 Blockwise/scheduler、ColdRanges/direct 三组，12 场景、0/2000 us 后端延迟，每项 40 个正式样本，共 2880。
+同 runtime 补充：Range/scheduler、ColdRanges/scheduler，各 12 场景、两个延迟、40 样本，共 1920。
+Disk 小测：cold16、warm_gaps、warm_head、shared；暖块仅写入 disk，确认 memory 无对应块；三个主组共 480 样本，两个 scheduler ON 组另 320 样本。每项 20 个正式样本。
+每次进程/场景另有 5 次预热。总计 5600 个正式存储样本。2000 us 是测试后端 sleep，不是生产 batching timer，真实观测还含定时器粒度和调度成本。
+
+小测重点结果：完整 scheduler + dedicated IO runtime，注入 2 ms 后端延迟
+
+cache/scenario arm | GET p50 [min,max] | bytes p50 | 首块 us p50 | scan us p50 | point us p50/p95
+memory/cold16 cold_ranges_scheduler | 1 [1,1] | 64682 | 3607.1 | 4945.4 | 0.0/0.0
+memory/cold16 range_scheduler | 1 [1,1] | 64682 | 3638.3 | 5014.3 | 0.0/0.0
+memory/existing_point cold_ranges_scheduler | 2 [2,2] | 68734 | 3619.6 | 5487.7 | 3552.4/3700.5
+memory/existing_point range_scheduler | 2 [2,2] | 68734 | 3660.4 | 5449.7 | 3593.1/3698.4
+memory/mixed cold_ranges_scheduler | 2 [2,2] | 68733 | 3804.9 | 6004.1 | 3565.6/3656.0
+memory/mixed range_scheduler | 2 [2,2] | 68733 | 3819.9 | 5859.3 | 3587.6/3736.7
+memory/point cold_ranges_scheduler | 1 [1,1] | 4051 | 0.0 | 3733.2 | 3733.2/3981.8
+memory/point range_scheduler | 1 [1,1] | 4051 | 0.0 | 3629.7 | 3629.7/4080.0
+memory/shared cold_ranges_scheduler | 1 [1,1] | 64682 | 3675.9 | 5674.5 | 3519.4/3604.8
+memory/shared range_scheduler | 1 [1,2] | 64682 | 3709.5 | 5568.1 | 3546.8/3653.7
+memory/single cold_ranges_scheduler | 1 [1,1] | 4051 | 3727.6 | 3908.6 | 0.0/0.0
+memory/single range_scheduler | 1 [1,1] | 4051 | 3748.7 | 3964.7 | 0.0/0.0
+memory/stop_last cold_ranges_scheduler | 1 [1,1] | 64682 | 4197.0 | 7764.6 | 0.0/0.0
+memory/stop_last range_scheduler | 1 [1,1] | 64682 | 4252.1 | 7321.7 | 0.0/0.0
+memory/warm_gaps cold_ranges_scheduler | 8 [8,8] | 32222 | 349.4 | 8528.0 | 0.0/0.0
+memory/warm_gaps range_scheduler | 8 [8,8] | 32222 | 293.7 | 37931.8 | 0.0/0.0
+memory/warm_head cold_ranges_scheduler | 1 [1,1] | 4075 | 349.4 | 8620.5 | 0.0/0.0
+memory/warm_head range_scheduler | 1 [1,1] | 4075 | 241.1 | 7846.1 | 0.0/0.0
+disk/cold16 cold_ranges_scheduler | 1 [1,1] | 64682 | 3705.7 | 5086.6 | 0.0/0.0
+disk/cold16 range_scheduler | 1 [1,1] | 64682 | 3772.1 | 5163.2 | 0.0/0.0
+disk/shared cold_ranges_scheduler | 1 [1,1] | 64682 | 3685.5 | 5036.8 | 3539.3/3605.2
+disk/shared range_scheduler | 1 [1,2] | 64682 | 3670.5 | 5139.6 | 3538.7/3566.9
+disk/warm_gaps cold_ranges_scheduler | 8 [8,8] | 32222 | 696.4 | 8766.9 | 0.0/0.0
+disk/warm_gaps range_scheduler | 8 [8,8] | 32222 | 550.0 | 38230.9 | 0.0/0.0
+disk/warm_head cold_ranges_scheduler | 1 [1,1] | 4075 | 671.8 | 8622.4 | 0.0/0.0
+disk/warm_head range_scheduler | 1 [1,1] | 4075 | 525.8 | 11657.3 | 0.0/0.0
+
+解释
+
+- 全冷 16 块：新方案与 Range 在本次 direct/ON 小测中都稳定 1 GET，没有依赖跨 runtime 攒齐多个 producer。
+- 冷热交错：同样 8 GET、32,222 bytes，memory 场景从 37.93 ms 到 8.53 ms，disk 场景从 38.23 ms 到 8.77 ms。收益来自提前提交多个冷段；不是减少 GET。
+- 没有新增 disk cache 整窗等待屏障。缓存读与后续冷段都在窗口规划阶段启动，head 按顺序消费。遇到 disk 假阳性仍可能在该块上产生一次晚到的 fallback，这是保守兜底，不保证与其他段同时完成。
+- 单冷读 scan p50 3.96→3.91 ms，混合点读 p50 3.59→3.57 ms。本地小样本接近，不是生产无退化保证。独立 point get 代码没有改变；其 p50 3.63/3.73 ms 的浮动和 p95 4.08/3.98 ms 不能归因于新预读逻辑。
+- 热头场景存在代价：memory 首块 p50 241→349 us，disk 526→672 us。新方案先规划有界窗口并注册任务，旧 Range 的热头可直接返回一个块。本次没有继续加后台规划等复杂机制来掩盖它。
+- 共享点读：direct 组 Range 与新方案都是 2 GET，旧 Blockwise 可通过 Foyer 合成/共享；ON 组两种范围方案 GET 中位数都能到 1，但存在拆分样本。这里不能承诺逐块 single-flight；也没有新增对 GET 节省来自 inflight reuse 的归因。
+- 逻辑 32 块、读到第 16 块第一行即停止时，新方案没有提前启动下一窗；物理读取仍为 64,682 bytes。
+
+真实算子链
+
+真实 LocalityProvider → 生产本地 permit channel → 真实 HashJoin；4+4 actors、16 vnodes、256-row chunk、2048 permits、256 MiB memory cache（此链路无 Foyer disk）、初始化/cache 与 streaming 各 8 workers，IO 2 workers，G128/P32、N16、1 MiB、gap 0。
+Semi：16,384 keys，输入每 key 4 行、右表 1 行；Inner：65,536 keys，输入 1 行、右表 3 行。普通 Join prefix、read batch、metadata reuse 保持相同，仅切 Locality 策略与 scheduler ON/OFF。
+主对照 48 次（12 预热+36正式），ON 对照32次（8预热+24正式），均轮换顺序。SST 清单一致，输出 key/行数及 Join lookup/miss 断言通过。全部结束后 pending/waiting/queued/reserved/inflight 指标归零。
+这不是完整 SF10/Q18，没有远程 exchange、生产 barrier/后台负载与对象存储带宽模型。
+
+phase Join delay_us arm | GET p50 [min,max] | bytes p50 | total ms p50 [min,max]
+direct-controls inner 0 blockwise_scheduler | 1741 [1728,1745] | 144900547 | 7106.27 [1926.47,7484.78]
+direct-controls inner 0 cold_ranges_direct | 1718 [1718,1718] | 145031515 | 4940.10 [3963.14,5158.21]
+direct-controls inner 0 range_direct | 1718 [1718,1718] | 144966031 | 3550.70 [1606.22,4602.67]
+direct-controls inner 2000 blockwise_scheduler | 1724 [1723,1731] | 144900547 | 4521.34 [3077.09,6447.47]
+direct-controls inner 2000 cold_ranges_direct | 1718 [1718,1718] | 145031515 | 5347.92 [4655.60,6425.19]
+direct-controls inner 2000 range_direct | 1718 [1718,1718] | 145031515 | 4232.95 [4119.02,7104.53]
+direct-controls semi 0 blockwise_scheduler | 202 [199,205] | 45248719 | 1192.54 [426.65,2246.16]
+direct-controls semi 0 cold_ranges_direct | 189 [188,189] | 45313982 | 889.26 [429.95,1368.94]
+direct-controls semi 0 range_direct | 188 [188,188] | 45313982 | 1061.79 [403.45,2437.77]
+direct-controls semi 2000 blockwise_scheduler | 194 [192,197] | 45248719 | 900.63 [502.50,1161.85]
+direct-controls semi 2000 cold_ranges_direct | 188 [188,188] | 45313982 | 850.75 [551.14,1106.60]
+direct-controls semi 2000 range_direct | 188 [188,188] | 45379182 | 773.16 [485.94,1326.52]
+scheduled-controls inner 0 cold_ranges_scheduler | 1718 [1718,1718] | 144966031 | 3901.30 [3865.33,4156.44]
+scheduled-controls inner 0 range_scheduler | 1718 [1718,1718] | 145031515 | 4098.62 [3958.19,4172.07]
+scheduled-controls inner 2000 cold_ranges_scheduler | 1718 [1718,1718] | 145031516 | 4513.11 [4103.61,4684.22]
+scheduled-controls inner 2000 range_scheduler | 1717 [1717,1718] | 144966031 | 4261.26 [4051.03,4376.65]
+scheduled-controls semi 0 cold_ranges_scheduler | 189 [189,189] | 45313982 | 814.44 [754.22,1513.44]
+scheduled-controls semi 0 range_scheduler | 188 [188,188] | 45313982 | 713.68 [699.73,1183.71]
+scheduled-controls semi 2000 cold_ranges_scheduler | 188 [188,188] | 45379182 | 933.77 [819.32,949.90]
+scheduled-controls semi 2000 range_scheduler | 188 [188,188] | 45313982 | 980.09 [852.98,1176.31]
+
+链路结论：GET 接近原 Range，并非保证完全相等。例：0-us Semi 原 Range 中位数188、新方案189；2-ms、scheduler ON 的 Inner 原 Range1717、新方案1718。严格遇热切段可能失去原 Range 少量跨热块读取/合并机会，这是预期取舍。
+本机耗时仍明显漂移，不宣称原型提高了整条链吞吐，也不能据此认证端到端没有回退。整进程 CPU/RSS 包含生成数据与构建 SST，只归档原始值；不当成 IO 阶段独立资源测量。测试中的 disk 设备和微型 block 大小也不等同生产 SSD/S3。
+
+当前保留与建议
+
+保留约一套小窗口状态：热 entry / cache-only lookup / 私有范围任务，加上按顺序消费的已 decode 块。没有新 timer、plug 等候状态、Foyer 特殊接口或自适应策略。
+保留为显式 ColdRanges 原型与正确性测试，暂不自动替换默认 Locality 或 prefix 的策略。下一步若决定采用，应明确取代哪个现有路径，避免永久保留三套默认策略；需要同时接受少量重叠读取、热头首块额外开销及可能增加的分段 GET。
+不能把此原型称为完整 Linux plug 复刻：参考的是 readahead 的热块分段/提前提交；disk cache 是 RW/Foyer 场景，contains 只是提示，因此有明确 miss fallback。
+
+实现文件：src/storage/src/hummock/sstable_store/cold_range.rs、src/storage/src/hummock/sstable/forward_sstable_iterator.rs、src/storage/src/store.rs；sstable_store.rs 仅增加模块声明与测试覆盖，原 prefetch_blocks 函数未改。
+临时 Locality 测试路由和测试环境开关已从运行代码撤回，实验 patch/脚本/原始数据独立归档；生产原型与普通正确性测试保留。
+清理后编译和回归结果将在本记录末尾补充。
+
+最终验证：修正缓存查询共享回源的 Source::Outer miss 统计后，storage/stream 测试二进制重新编译通过。iterator 13、SST store 11、新冷段测试 2、路由 1、Locality 3、HashJoin 26、两个链路冒烟、dedicated IO runtime 隔离 1，共 59 项通过。最后的统计修正不改变物理 GET 或路由，性能采样在修正之前。旧 Range 函数逐字节比对未改，临时算子路由/fixture 已恢复，Foyer/Cargo.lock 无改动。git diff --check 通过。

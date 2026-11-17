@@ -1,0 +1,34 @@
+{
+  "semi": {
+    "prefix": {
+      "windows": 16384.0,
+      "selected_slots": 16520.0,
+      "single_block_windows": 16248.0,
+      "single_block_fraction": 0.99169921875,
+      "mean_selected_blocks": 1.00830078125
+    },
+    "locality": {
+      "windows": 51.0,
+      "selected_slots": 575.0,
+      "single_block_windows": 3.0,
+      "single_block_fraction": 0.058823529411764705,
+      "mean_selected_blocks": 11.27450980392157
+    }
+  },
+  "inner": {
+    "prefix": {
+      "windows": 65554.0,
+      "selected_slots": 67196.0,
+      "single_block_windows": 63912.0,
+      "single_block_fraction": 0.9749519480123258,
+      "mean_selected_blocks": 1.0250480519876743
+    },
+    "locality": {
+      "windows": 49.0,
+      "selected_slots": 568.0,
+      "single_block_windows": 0.0,
+      "single_block_fraction": 0.0,
+      "mean_selected_blocks": 11.591836734693878
+    }
+  }
+}

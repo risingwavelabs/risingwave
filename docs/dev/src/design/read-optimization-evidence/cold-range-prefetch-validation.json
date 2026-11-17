@@ -1,0 +1,47 @@
+[
+  {
+    "label": "iterator",
+    "passed": 13,
+    "result": "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 269 filtered out; finished in 0.58s"
+  },
+  {
+    "label": "store",
+    "passed": 11,
+    "result": "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 271 filtered out; finished in 0.27s"
+  },
+  {
+    "label": "cold-ranges",
+    "passed": 2,
+    "result": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 280 filtered out; finished in 0.11s"
+  },
+  {
+    "label": "routing",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 281 filtered out; finished in 0.09s"
+  },
+  {
+    "label": "locality",
+    "passed": 3,
+    "result": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 544 filtered out; finished in 0.23s"
+  },
+  {
+    "label": "join",
+    "passed": 26,
+    "result": "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 521 filtered out; finished in 0.05s"
+  },
+  {
+    "label": "semi-smoke",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 546 filtered out; finished in 0.12s"
+  },
+  {
+    "label": "inner-smoke",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 546 filtered out; finished in 0.10s"
+  },
+  {
+    "label": "io-runtime",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 0.02s"
+  }
+]

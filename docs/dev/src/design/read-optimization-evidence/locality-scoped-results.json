@@ -1,0 +1,2642 @@
+[
+  {
+    "delay_us": 0,
+    "scenario": "adjacent",
+    "baseline": {
+      "samples": 30,
+      "gets": 699,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10246.2505,
+        "p95": 14323.75,
+        "n": 30
+      },
+      "round_gets": [
+        275,
+        249,
+        175
+      ],
+      "first_us": {
+        "p50": 1338.0415,
+        "p95": 2055.208,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 766.104,
+        "p95": 1271.666,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 9699.25,
+        "p95": 11205.083,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 965.729,
+        "p95": 1279.375,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 650.5419999999999,
+        "p95": 1188.666,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 9823.041,
+        "p95": 15381.833,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 1063.6455,
+        "p95": 1506.042,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 709.9165,
+        "p95": 2178.5,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "point_mix",
+    "baseline": {
+      "samples": 30,
+      "gets": 930,
+      "bytes": 274892040,
+      "demand_bytes": 274892040,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 4230,
+      "scan_us": {
+        "p50": 10922.021,
+        "p95": 12214.958,
+        "n": 30
+      },
+      "round_gets": [
+        306,
+        327,
+        297
+      ],
+      "first_us": {
+        "p50": 1311.292,
+        "p95": 1903.75,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 738.375,
+        "p95": 1310.042,
+        "n": 120
+      },
+      "point_us": {
+        "p50": 248.875,
+        "p95": 1403.625,
+        "n": 240
+      }
+    },
+    "full": {
+      "samples": 30,
+      "gets": 600,
+      "bytes": 274892040,
+      "demand_bytes": 274892040,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 4230,
+      "scan_us": {
+        "p50": 10565.1875,
+        "p95": 11408.5,
+        "n": 30
+      },
+      "round_gets": [
+        200,
+        200,
+        200
+      ],
+      "first_us": {
+        "p50": 962.25,
+        "p95": 1378.708,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 632.625,
+        "p95": 1228.666,
+        "n": 120
+      },
+      "point_us": {
+        "p50": 248.0205,
+        "p95": 878.584,
+        "n": 240
+      }
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 600,
+      "bytes": 274892040,
+      "demand_bytes": 274892040,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 4230,
+      "scan_us": {
+        "p50": 10607.229500000001,
+        "p95": 11599.167,
+        "n": 30
+      },
+      "round_gets": [
+        200,
+        200,
+        200
+      ],
+      "first_us": {
+        "p50": 1041.7705,
+        "p95": 1492.792,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 665.2919999999999,
+        "p95": 1596.292,
+        "n": 120
+      },
+      "point_us": {
+        "p50": 251.14600000000002,
+        "p95": 965.875,
+        "n": 240
+      }
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "prefix_control",
+    "baseline": {
+      "samples": 30,
+      "gets": 678,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10996.1045,
+        "p95": 32659.541,
+        "n": 30
+      },
+      "round_gets": [
+        224,
+        235,
+        219
+      ],
+      "first_us": {
+        "p50": 1302.604,
+        "p95": 1989.875,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 778.9794999999999,
+        "p95": 1592.292,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 669,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 11268.75,
+        "p95": 14393.584,
+        "n": 30
+      },
+      "round_gets": [
+        210,
+        208,
+        251
+      ],
+      "first_us": {
+        "p50": 1393.854,
+        "p95": 1995.75,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 866.5830000000001,
+        "p95": 1490.0,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 656,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 11153.604,
+        "p95": 12362.917,
+        "n": 30
+      },
+      "round_gets": [
+        211,
+        225,
+        220
+      ],
+      "first_us": {
+        "p50": 1379.3960000000002,
+        "p95": 1794.584,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 795.4585,
+        "p95": 1537.041,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "restart1",
+    "baseline": {
+      "samples": 30,
+      "gets": 635,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10876.7505,
+        "p95": 11601.667,
+        "n": 30
+      },
+      "round_gets": [
+        199,
+        257,
+        179
+      ],
+      "first_us": {
+        "p50": 1319.9585,
+        "p95": 1772.791,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 94.0625,
+        "p95": 530.166,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 768.0415,
+        "p95": 1383.541,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10605.7915,
+        "p95": 12063.5,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 1022.75,
+        "p95": 1551.542,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 123.6665,
+        "p95": 559.291,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 695.0,
+        "p95": 1432.0,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 548,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10805.375,
+        "p95": 11710.292,
+        "n": 30
+      },
+      "round_gets": [
+        167,
+        177,
+        204
+      ],
+      "first_us": {
+        "p50": 872.3545,
+        "p95": 1358.125,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 166.9375,
+        "p95": 465.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 830.4580000000001,
+        "p95": 1300.792,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "restart1024",
+    "baseline": {
+      "samples": 30,
+      "gets": 608,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10910.542,
+        "p95": 12168.625,
+        "n": 30
+      },
+      "round_gets": [
+        193,
+        220,
+        195
+      ],
+      "first_us": {
+        "p50": 1319.8335,
+        "p95": 1725.791,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 97.562,
+        "p95": 361.916,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 453.04200000000003,
+        "p95": 696.541,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10406.375,
+        "p95": 11534.917,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 1152.5625,
+        "p95": 1557.75,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 106.729,
+        "p95": 615.375,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 471.9375,
+        "p95": 794.459,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 459,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10510.771,
+        "p95": 17602.166,
+        "n": 30
+      },
+      "round_gets": [
+        145,
+        155,
+        159
+      ],
+      "first_us": {
+        "p50": 1104.625,
+        "p95": 2545.292,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 105.229,
+        "p95": 431.125,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 467.91650000000004,
+        "p95": 817.166,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "restart128",
+    "baseline": {
+      "samples": 30,
+      "gets": 706,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10988.1665,
+        "p95": 11589.708,
+        "n": 30
+      },
+      "round_gets": [
+        226,
+        250,
+        230
+      ],
+      "first_us": {
+        "p50": 1241.1045,
+        "p95": 1580.417,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 90.042,
+        "p95": 362.417,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 824.312,
+        "p95": 1394.375,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 390,
+      "bytes": 261294355,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 4,
+      "max_extra_bytes": 1046003,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10785.6875,
+        "p95": 11859.667,
+        "n": 30
+      },
+      "round_gets": [
+        130,
+        130,
+        130
+      ],
+      "first_us": {
+        "p50": 1080.646,
+        "p95": 1961.667,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 111.0625,
+        "p95": 403.541,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 792.042,
+        "p95": 1267.083,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 524,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10947.542000000001,
+        "p95": 12363.792,
+        "n": 30
+      },
+      "round_gets": [
+        149,
+        175,
+        200
+      ],
+      "first_us": {
+        "p50": 935.2285,
+        "p95": 1464.959,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 107.1875,
+        "p95": 283.667,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 744.75,
+        "p95": 1332.75,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "resumed_neighbors",
+    "baseline": {
+      "samples": 30,
+      "gets": 321,
+      "bytes": 137606820,
+      "demand_bytes": 135645630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 65373,
+      "outer": 2130,
+      "scan_us": {
+        "p50": 9801.583,
+        "p95": 10934.875,
+        "n": 30
+      },
+      "round_gets": [
+        98,
+        110,
+        113
+      ],
+      "first_us": {
+        "p50": 640.5835,
+        "p95": 1245.125,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 253.8545,
+        "p95": 768.583,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 240,
+      "bytes": 141529800,
+      "demand_bytes": 135645630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 196139,
+      "outer": 2130,
+      "scan_us": {
+        "p50": 9975.229,
+        "p95": 10562.958,
+        "n": 30
+      },
+      "round_gets": [
+        80,
+        80,
+        80
+      ],
+      "first_us": {
+        "p50": 536.3955000000001,
+        "p95": 1073.625,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 126.6875,
+        "p95": 718.25,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 248,
+      "bytes": 141464417,
+      "demand_bytes": 135645630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 196139,
+      "outer": 2130,
+      "scan_us": {
+        "p50": 9764.6875,
+        "p95": 10404.333,
+        "n": 30
+      },
+      "round_gets": [
+        84,
+        80,
+        84
+      ],
+      "first_us": {
+        "p50": 647.063,
+        "p95": 1035.917,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 249.083,
+        "p95": 592.958,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "snapshot_control",
+    "baseline": {
+      "samples": 30,
+      "gets": 656,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 11026.0,
+        "p95": 20077.375,
+        "n": 30
+      },
+      "round_gets": [
+        208,
+        217,
+        231
+      ],
+      "first_us": {
+        "p50": 1319.4165,
+        "p95": 1957.167,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 843.5,
+        "p95": 1377.166,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 691,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 11018.2505,
+        "p95": 13056.666,
+        "n": 30
+      },
+      "round_gets": [
+        263,
+        215,
+        213
+      ],
+      "first_us": {
+        "p50": 1401.312,
+        "p95": 1987.667,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 821.1455,
+        "p95": 1311.833,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 695,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 10821.0,
+        "p95": 11268.625,
+        "n": 30
+      },
+      "round_gets": [
+        238,
+        234,
+        223
+      ],
+      "first_us": {
+        "p50": 1288.4795,
+        "p95": 1617.333,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 827.625,
+        "p95": 1303.708,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "staggered_start",
+    "baseline": {
+      "samples": 30,
+      "gets": 531,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 14873.4375,
+        "p95": 19539.875,
+        "n": 30
+      },
+      "round_gets": [
+        200,
+        156,
+        175
+      ],
+      "first_us": {
+        "p50": 477.35450000000003,
+        "p95": 1098.417,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 445.729,
+        "p95": 1276.917,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 263125350,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 130766,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 15078.6665,
+        "p95": 16607.709,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 418.85450000000003,
+        "p95": 739.208,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 435.08299999999997,
+        "p95": 670.083,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 263125350,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 130766,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 14834.7705,
+        "p95": 18719.458,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 381.95799999999997,
+        "p95": 723.875,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 391.8545,
+        "p95": 648.208,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "stop1",
+    "baseline": {
+      "samples": 30,
+      "gets": 278,
+      "bytes": 125520330,
+      "demand_bytes": 7845690,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3922488,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 3696.542,
+        "p95": 7012.625,
+        "n": 30
+      },
+      "round_gets": [
+        90,
+        92,
+        96
+      ],
+      "first_us": {
+        "p50": 2489.792,
+        "p95": 5381.875,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1.354,
+        "p95": 3.042,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 7845690,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3922488,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 2891.8959999999997,
+        "p95": 5437.042,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 2087.2915000000003,
+        "p95": 4758.75,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1.292,
+        "p95": 3.083,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 7845690,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3922488,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 3821.9790000000003,
+        "p95": 5322.583,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 3035.8959999999997,
+        "p95": 4675.334,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1.625,
+        "p95": 2.916,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "stop128",
+    "baseline": {
+      "samples": 30,
+      "gets": 312,
+      "bytes": 125520330,
+      "demand_bytes": 15690630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3660990,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 5225.2505,
+        "p95": 6809.5,
+        "n": 30
+      },
+      "round_gets": [
+        106,
+        104,
+        102
+      ],
+      "first_us": {
+        "p50": 3329.6875,
+        "p95": 5947.25,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 20.521,
+        "p95": 180.625,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 15690630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3660990,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 4518.896,
+        "p95": 6144.792,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 3041.6665000000003,
+        "p95": 5280.834,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 20.104,
+        "p95": 341.708,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 15690630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3660990,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 4913.3335,
+        "p95": 6283.667,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 3527.1875,
+        "p95": 5223.291,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 18.542,
+        "p95": 120.292,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 0,
+    "scenario": "warm_partial",
+    "baseline": {
+      "samples": 30,
+      "gets": 1464,
+      "bytes": 172907580,
+      "demand_bytes": 172907580,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 2670,
+      "scan_us": {
+        "p50": 9047.292,
+        "p95": 10813.458,
+        "n": 30
+      },
+      "round_gets": [
+        487,
+        489,
+        488
+      ],
+      "first_us": {
+        "p50": 1051.542,
+        "p95": 1311.917,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 345.7295,
+        "p95": 702.375,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 1440,
+      "bytes": 172907580,
+      "demand_bytes": 172907580,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 2670,
+      "scan_us": {
+        "p50": 8718.7915,
+        "p95": 11083.625,
+        "n": 30
+      },
+      "round_gets": [
+        480,
+        480,
+        480
+      ],
+      "first_us": {
+        "p50": 962.8125,
+        "p95": 1208.834,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 279.333,
+        "p95": 775.666,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 1440,
+      "bytes": 172907580,
+      "demand_bytes": 172907580,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 2670,
+      "scan_us": {
+        "p50": 8964.5,
+        "p95": 10207.5,
+        "n": 30
+      },
+      "round_gets": [
+        480,
+        480,
+        480
+      ],
+      "first_us": {
+        "p50": 933.6875,
+        "p95": 1094.291,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 295.75,
+        "p95": 670.5,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "adjacent",
+    "baseline": {
+      "samples": 30,
+      "gets": 544,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 22664.771,
+        "p95": 24185.25,
+        "n": 30
+      },
+      "round_gets": [
+        162,
+        183,
+        199
+      ],
+      "first_us": {
+        "p50": 4612.708500000001,
+        "p95": 5425.625,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4235.6875,
+        "p95": 5225.625,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 22919.125,
+        "p95": 24183.042,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 4217.7705000000005,
+        "p95": 5335.333,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4272.291499999999,
+        "p95": 5136.209,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23336.916,
+        "p95": 24342.917,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 4161.188,
+        "p95": 5027.916,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4101.5830000000005,
+        "p95": 4889.166,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "point_mix",
+    "baseline": {
+      "samples": 30,
+      "gets": 737,
+      "bytes": 274892040,
+      "demand_bytes": 274892040,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 4230,
+      "scan_us": {
+        "p50": 23703.125,
+        "p95": 25719.625,
+        "n": 30
+      },
+      "round_gets": [
+        246,
+        251,
+        240
+      ],
+      "first_us": {
+        "p50": 4819.916,
+        "p95": 5735.75,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4118.625,
+        "p95": 5139.875,
+        "n": 120
+      },
+      "point_us": {
+        "p50": 3704.812,
+        "p95": 5273.917,
+        "n": 240
+      }
+    },
+    "full": {
+      "samples": 30,
+      "gets": 600,
+      "bytes": 274892040,
+      "demand_bytes": 274892040,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 4230,
+      "scan_us": {
+        "p50": 22838.9795,
+        "p95": 25124.458,
+        "n": 30
+      },
+      "round_gets": [
+        200,
+        200,
+        200
+      ],
+      "first_us": {
+        "p50": 4382.396000000001,
+        "p95": 5356.083,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4129.0625,
+        "p95": 5222.417,
+        "n": 120
+      },
+      "point_us": {
+        "p50": 3672.5415000000003,
+        "p95": 4733.292,
+        "n": 240
+      }
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 600,
+      "bytes": 274892040,
+      "demand_bytes": 274892040,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 4230,
+      "scan_us": {
+        "p50": 23134.5415,
+        "p95": 24894.708,
+        "n": 30
+      },
+      "round_gets": [
+        200,
+        200,
+        200
+      ],
+      "first_us": {
+        "p50": 4259.6044999999995,
+        "p95": 5320.292,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3988.8334999999997,
+        "p95": 4871.0,
+        "n": 120
+      },
+      "point_us": {
+        "p50": 3688.0834999999997,
+        "p95": 4718.625,
+        "n": 240
+      }
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "prefix_control",
+    "baseline": {
+      "samples": 30,
+      "gets": 524,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23183.9785,
+        "p95": 24795.375,
+        "n": 30
+      },
+      "round_gets": [
+        192,
+        179,
+        153
+      ],
+      "first_us": {
+        "p50": 4865.2919999999995,
+        "p95": 5720.042,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4345.5830000000005,
+        "p95": 5491.209,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 509,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 22317.7915,
+        "p95": 24649.083,
+        "n": 30
+      },
+      "round_gets": [
+        159,
+        164,
+        186
+      ],
+      "first_us": {
+        "p50": 4838.4580000000005,
+        "p95": 5523.458,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4205.125,
+        "p95": 5262.958,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 524,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23706.646,
+        "p95": 25372.292,
+        "n": 30
+      },
+      "round_gets": [
+        168,
+        186,
+        170
+      ],
+      "first_us": {
+        "p50": 4746.209,
+        "p95": 5691.916,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4237.8330000000005,
+        "p95": 5275.0,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "restart1",
+    "baseline": {
+      "samples": 30,
+      "gets": 535,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23081.854,
+        "p95": 24948.333,
+        "n": 30
+      },
+      "round_gets": [
+        186,
+        154,
+        195
+      ],
+      "first_us": {
+        "p50": 4650.5,
+        "p95": 5396.25,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 180.22899999999998,
+        "p95": 532.709,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4367.4995,
+        "p95": 5265.417,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 22872.521,
+        "p95": 24659.542,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 4095.1245,
+        "p95": 5105.584,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 261.16650000000004,
+        "p95": 855.375,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4091.8545,
+        "p95": 5072.833,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 404,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23609.0625,
+        "p95": 24534.667,
+        "n": 30
+      },
+      "round_gets": [
+        130,
+        136,
+        138
+      ],
+      "first_us": {
+        "p50": 4137.666499999999,
+        "p95": 5184.083,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 233.29149999999998,
+        "p95": 956.792,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4210.291499999999,
+        "p95": 5391.375,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "restart1024",
+    "baseline": {
+      "samples": 30,
+      "gets": 506,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 19954.5415,
+        "p95": 21972.625,
+        "n": 30
+      },
+      "round_gets": [
+        152,
+        181,
+        173
+      ],
+      "first_us": {
+        "p50": 4740.8745,
+        "p95": 5535.125,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 123.3545,
+        "p95": 277.334,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3815.0415000000003,
+        "p95": 4592.166,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 20187.3545,
+        "p95": 21948.25,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 4372.458500000001,
+        "p95": 5633.583,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 139.0625,
+        "p95": 422.5,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3828.1040000000003,
+        "p95": 4517.958,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 393,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 19882.561999999998,
+        "p95": 22097.25,
+        "n": 30
+      },
+      "round_gets": [
+        132,
+        128,
+        133
+      ],
+      "first_us": {
+        "p50": 4197.229,
+        "p95": 5218.583,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 119.292,
+        "p95": 275.792,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3898.2709999999997,
+        "p95": 4559.917,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "restart128",
+    "baseline": {
+      "samples": 30,
+      "gets": 538,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23010.9585,
+        "p95": 24453.208,
+        "n": 30
+      },
+      "round_gets": [
+        173,
+        182,
+        183
+      ],
+      "first_us": {
+        "p50": 4644.103999999999,
+        "p95": 5517.625,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 125.521,
+        "p95": 547.125,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4190.479,
+        "p95": 5247.083,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 390,
+      "bytes": 268747060,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 24,
+      "max_extra_bytes": 1242113,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 22000.25,
+        "p95": 24715.833,
+        "n": 30
+      },
+      "round_gets": [
+        130,
+        130,
+        130
+      ],
+      "first_us": {
+        "p50": 4144.7085,
+        "p95": 5145.542,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 206.52100000000002,
+        "p95": 596.25,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4226.2495,
+        "p95": 5347.0,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 438,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23340.646,
+        "p95": 24523.208,
+        "n": 30
+      },
+      "round_gets": [
+        139,
+        150,
+        149
+      ],
+      "first_us": {
+        "p50": 4142.0830000000005,
+        "p95": 4971.416,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 182.5005,
+        "p95": 617.5,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4140.6875,
+        "p95": 5310.0,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "resumed_neighbors",
+    "baseline": {
+      "samples": 30,
+      "gets": 294,
+      "bytes": 137606820,
+      "demand_bytes": 135645630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 65373,
+      "outer": 2130,
+      "scan_us": {
+        "p50": 22574.6665,
+        "p95": 24083.541,
+        "n": 30
+      },
+      "round_gets": [
+        93,
+        94,
+        107
+      ],
+      "first_us": {
+        "p50": 4383.125,
+        "p95": 4852.625,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1858.5205,
+        "p95": 4181.208,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 240,
+      "bytes": 141529800,
+      "demand_bytes": 135645630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 196139,
+      "outer": 2130,
+      "scan_us": {
+        "p50": 21585.1455,
+        "p95": 40820.167,
+        "n": 30
+      },
+      "round_gets": [
+        80,
+        80,
+        80
+      ],
+      "first_us": {
+        "p50": 4175.791499999999,
+        "p95": 6403.0,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3686.5205,
+        "p95": 4467.167,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 244,
+      "bytes": 141333651,
+      "demand_bytes": 135645630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 196139,
+      "outer": 2130,
+      "scan_us": {
+        "p50": 23672.1875,
+        "p95": 25018.417,
+        "n": 30
+      },
+      "round_gets": [
+        80,
+        81,
+        83
+      ],
+      "first_us": {
+        "p50": 4084.0,
+        "p95": 4691.0,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1900.0,
+        "p95": 4376.542,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "snapshot_control",
+    "baseline": {
+      "samples": 30,
+      "gets": 559,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 23537.4375,
+        "p95": 25158.875,
+        "n": 30
+      },
+      "round_gets": [
+        194,
+        189,
+        176
+      ],
+      "first_us": {
+        "p50": 4910.583500000001,
+        "p95": 5626.416,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4257.271000000001,
+        "p95": 5240.25,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 539,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 24026.8955,
+        "p95": 25556.833,
+        "n": 30
+      },
+      "round_gets": [
+        178,
+        196,
+        165
+      ],
+      "first_us": {
+        "p50": 4719.584,
+        "p95": 6038.75,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4204.9795,
+        "p95": 5351.916,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 526,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 22193.5625,
+        "p95": 30413.042,
+        "n": 30
+      },
+      "round_gets": [
+        170,
+        206,
+        150
+      ],
+      "first_us": {
+        "p50": 4765.9995,
+        "p95": 5937.875,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4273.6875,
+        "p95": 5326.5,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "staggered_start",
+    "baseline": {
+      "samples": 30,
+      "gets": 474,
+      "bytes": 259202370,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 37333.021,
+        "p95": 39511.125,
+        "n": 30
+      },
+      "round_gets": [
+        158,
+        146,
+        170
+      ],
+      "first_us": {
+        "p50": 4117.25,
+        "p95": 4509.583,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3983.1040000000003,
+        "p95": 4482.334,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 263125350,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 130766,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 35978.6245,
+        "p95": 46577.709,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 3940.6455,
+        "p95": 4655.5,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3997.5,
+        "p95": 5051.833,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 360,
+      "bytes": 263125350,
+      "demand_bytes": 259202370,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 130766,
+      "outer": 3990,
+      "scan_us": {
+        "p50": 37651.146,
+        "p95": 39219.167,
+        "n": 30
+      },
+      "round_gets": [
+        120,
+        120,
+        120
+      ],
+      "first_us": {
+        "p50": 3902.312,
+        "p95": 4382.5,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4053.6455,
+        "p95": 4359.625,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "stop1",
+    "baseline": {
+      "samples": 30,
+      "gets": 233,
+      "bytes": 125520330,
+      "demand_bytes": 7845690,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3922488,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 8152.979,
+        "p95": 13643.583,
+        "n": 30
+      },
+      "round_gets": [
+        76,
+        78,
+        79
+      ],
+      "first_us": {
+        "p50": 6235.375,
+        "p95": 13208.625,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1.667,
+        "p95": 3.375,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 7845690,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3922488,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 7610.4169999999995,
+        "p95": 9164.833,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 7155.1875,
+        "p95": 8870.667,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1.208,
+        "p95": 3.0,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 7845690,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3922488,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 6453.4375,
+        "p95": 9928.292,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 5700.708,
+        "p95": 9256.0,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 1.5415,
+        "p95": 3.25,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "stop128",
+    "baseline": {
+      "samples": 30,
+      "gets": 212,
+      "bytes": 125520330,
+      "demand_bytes": 15690630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3660990,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 9075.4585,
+        "p95": 10921.875,
+        "n": 30
+      },
+      "round_gets": [
+        78,
+        73,
+        61
+      ],
+      "first_us": {
+        "p50": 6615.0,
+        "p95": 9558.458,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 20.9165,
+        "p95": 1893.5,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 15690630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3660990,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 9448.0,
+        "p95": 11004.25,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 7915.833500000001,
+        "p95": 9822.667,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 25.583,
+        "p95": 196.5,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 120,
+      "bytes": 125520330,
+      "demand_bytes": 15690630,
+      "extra_byte_samples": 30,
+      "max_extra_bytes": 3660990,
+      "outer": 1920,
+      "scan_us": {
+        "p50": 6390.75,
+        "p95": 8848.75,
+        "n": 30
+      },
+      "round_gets": [
+        40,
+        40,
+        40
+      ],
+      "first_us": {
+        "p50": 5130.2505,
+        "p95": 8077.083,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 14.9795,
+        "p95": 168.625,
+        "n": 120
+      },
+      "point_us": null
+    }
+  },
+  {
+    "delay_us": 2000,
+    "scenario": "warm_partial",
+    "baseline": {
+      "samples": 30,
+      "gets": 1452,
+      "bytes": 172907580,
+      "demand_bytes": 172907580,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 2670,
+      "scan_us": {
+        "p50": 20902.7915,
+        "p95": 22183.5,
+        "n": 30
+      },
+      "round_gets": [
+        481,
+        486,
+        485
+      ],
+      "first_us": {
+        "p50": 4700.2705,
+        "p95": 5059.042,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 4085.7084999999997,
+        "p95": 4502.708,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "full": {
+      "samples": 30,
+      "gets": 1440,
+      "bytes": 172907580,
+      "demand_bytes": 172907580,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 2670,
+      "scan_us": {
+        "p50": 19715.124499999998,
+        "p95": 21202.917,
+        "n": 30
+      },
+      "round_gets": [
+        480,
+        480,
+        480
+      ],
+      "first_us": {
+        "p50": 4468.875,
+        "p95": 4851.416,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3910.5205,
+        "p95": 4291.042,
+        "n": 120
+      },
+      "point_us": null
+    },
+    "initial": {
+      "samples": 30,
+      "gets": 1440,
+      "bytes": 172907580,
+      "demand_bytes": 172907580,
+      "extra_byte_samples": 0,
+      "max_extra_bytes": 0,
+      "outer": 2670,
+      "scan_us": {
+        "p50": 20289.25,
+        "p95": 21497.667,
+        "n": 30
+      },
+      "round_gets": [
+        480,
+        480,
+        480
+      ],
+      "first_us": {
+        "p50": 4466.5625,
+        "p95": 5068.166,
+        "n": 120
+      },
+      "resume_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "n": 120
+      },
+      "max_next_us": {
+        "p50": 3806.4995,
+        "p95": 4455.125,
+        "n": 120
+      },
+      "point_us": null
+    }
+  }
+]

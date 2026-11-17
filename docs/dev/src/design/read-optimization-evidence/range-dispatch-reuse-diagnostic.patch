@@ -1,0 +1,23 @@
+--- a/src/storage/src/hummock/store/version/tests/range_scheduler_experiment.rs
++++ b/src/storage/src/hummock/store/version/tests/range_scheduler_experiment.rs
+@@ -245,6 +245,8 @@
+                 let before_gets = physical.get_sample_count();
+                 let before_bytes = physical.get_sample_sum();
+                 let before_batch = event("submitted_batch_members");
++                let before_reused = event("inflight_reused");
++                let before_merged = event("merged_requests");
+                 let before_single = event("sealed_batch_single");
+                 let before_multi = event("sealed_batch_multiple");
+                 let before_outer = store.read_metrics.block_cache_outer_fetch.get();
+@@ -355,8 +357,10 @@
+                 assert!(bytes >= unique_bytes);
+                 if trial >= 5 {
+                     println!(
+-                        "RANGE_CONTROL arm={arm} scenario={scenario} delay_us={delay_us} trial={} gets={gets} outer={outer} registered={registered} collected={} flush_single={} flush_multi={} bytes={} unique_bytes={unique_bytes} first_us={first_us:.3} total_us={total_us:.3} point_us={point_us:.3} max_next_us={max_next_us:.3} rows={rows}",
++                        "RANGE_CONTROL arm={arm} scenario={scenario} delay_us={delay_us} trial={} gets={gets} outer={outer} registered={registered} reused={} merged={} collected={} flush_single={} flush_multi={} bytes={} unique_bytes={unique_bytes} first_us={first_us:.3} total_us={total_us:.3} point_us={point_us:.3} max_next_us={max_next_us:.3} rows={rows}",
+                         trial - 5,
++                        event("inflight_reused") - before_reused,
++                        event("merged_requests") - before_merged,
+                         event("submitted_batch_members") - before_batch,
+                         event("sealed_batch_single") - before_single,
+                         event("sealed_batch_multiple") - before_multi,

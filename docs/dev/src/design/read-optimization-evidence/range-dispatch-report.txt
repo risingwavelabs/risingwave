@@ -1,0 +1,187 @@
+Range / Blockwise / IO scheduler 四组对照（2026-11-17）
+
+结论
+
+1. 当前连续 Locality 扫描不需要先拆成 block 再依靠 plug 拼回去。本次真实 Locality→HashJoin 路径中，原 Range 的 GET 稳定少于 Blockwise + scheduler；给 Range 加完整 scheduler 几乎没有进一步减少整条链路的 GET。
+2. 不能据此删除所有 Blockwise 预读。冷热交错时，它有显著的并发预读收益；补充对照证明该收益在关闭 scheduler 后仍然存在，并非物理合并的收益。
+3. scheduler 确实能减少已经提交的相邻/重叠请求：全冷 Blockwise 的 16 个 GET 可以合成约 1 个；Range 与同块点读也可以在派发前合并。但前者对于已知连续扫描是重建 Range 已有的能力，后者是有条件的边际收益。
+4. 本次没有证明 admission/runtime dispatch 提升真实链路性能，也未覆盖后端过载、带宽争用或公平调度场景。没有证据支持现在为攒批继续增加复杂逻辑；也没有足够证据据此直接删除所有调度功能。
+
+试验范围
+
+基线 HEAD c69c12bb910bfab52d9053b7a19931572e3b546c，保留运行前工作区已有修改。
+A range_direct：Locality 使用原 Range，无 scheduler。
+B range_dispatch：同 Range，max_batch_requests=1、reuse_inflight_reads=false，保留 G/P 与 dedicated IO runtime。仍使用当前 scheduler 的队列，不能当作已实现的极简 dispatch wrapper。
+C range_scheduler：同 Range，当前完整 scheduler。
+D blockwise_scheduler：Locality Blockwise + 当前完整 scheduler。
+四组普通 Join prefix 的 Blockwise、read batch、metadata reuse 配置相同；这里比较的是 Locality Range/Blockwise，不是把所有读取全局切成 Range。
+
+真实 LocalityProvider → 生产本地 permit channel → 真实 HashJoin。4+4 actors、16 vnodes、chunk 256、exchange permits 2048、memory-only Foyer、cache 256 MiB、初始化/cache runtime 8 workers、streaming 8 workers、IO 2 workers，G128/P32、N16、1 MiB、gap 0。
+Semi：16,384 keys，输入每 key 4 行，右表唯一 key。Inner：65,536 keys，输入每 key 1 行，右表每 key 3 行。
+确定性数据与 SST 清单一致；每轮检查输出行、key 唯一性/数量及 Join lookup/miss 数。不是完整 Q18/SF10，不包含远程 exchange、生产 barrier 流程、S3 带宽与请求限流。
+64 次链路运行：4 arm × 2 Join × 2 backend delay × (1 预热 + 3 计入统计)，轮换顺序。同一实验二进制。
+3,840 个主存储小测样本：12 场景 × 2 backend delay × 4 arm × 40 样本；每个进程/场景另做 5 次预热。附加 640 个分离机制样本。
+0 / 2000 us 是内存后端注入的物理读取延迟，不是新增的 plug timer。20 ms 收尾等待在计时窗口之外；链路采样时 pending/waiting/queued/reserved/inflight 等均已归零。
+A 全部走 direct；B/C/D 本次所有请求都走 scheduled，oversized/unbounded 旁路计数为零。现实大范围请求仍可能旁路，本测试不改变该事实。
+
+链路 GET 和耗时（每项为 3 次正式运行；时间单位 ms）
+
+Join delay_us arm | GET 中位数 [min,max] | 总耗时中位数 [min,max] | bytes 中位数
+inner 0 blockwise_scheduler | 1726.00 [1726.00,1748.00] | 2923.20 [1443.25,4313.51] | 144900547
+inner 0 range_direct | 1718.00 [1718.00,1718.00] | 3475.66 [1515.94,4558.48] | 144966031
+inner 0 range_dispatch | 1718.00 [1718.00,1718.00] | 3202.86 [1666.45,4021.17] | 145031515
+inner 0 range_scheduler | 1718.00 [1717.00,1718.00] | 4613.72 [4352.12,4681.72] | 145031515
+inner 2000 blockwise_scheduler | 1734.00 [1728.00,1735.00] | 3959.70 [3667.82,4516.64] | 144900547
+inner 2000 range_direct | 1718.00 [1718.00,1718.00] | 3704.68 [3381.00,4091.17] | 144966031
+inner 2000 range_dispatch | 1718.00 [1718.00,1718.00] | 3697.55 [3437.66,4594.88] | 145031515
+inner 2000 range_scheduler | 1718.00 [1718.00,1718.00] | 3771.58 [3491.66,4172.86] | 145097000
+semi 0 blockwise_scheduler | 215.00 [198.00,216.00] | 664.70 [373.74,1721.59] | 45248719
+semi 0 range_direct | 188.00 [188.00,188.00] | 734.52 [369.07,934.47] | 45313982
+semi 0 range_dispatch | 188.00 [188.00,188.00] | 713.14 [373.74,2148.85] | 45313982
+semi 0 range_scheduler | 188.00 [188.00,188.00] | 778.64 [369.31,872.94] | 45313982
+semi 2000 blockwise_scheduler | 199.00 [194.00,204.00] | 747.64 [470.15,796.86] | 45248719
+semi 2000 range_direct | 188.00 [188.00,188.00] | 808.97 [473.22,820.46] | 45379182
+semi 2000 range_dispatch | 188.00 [188.00,188.00] | 774.43 [473.11,1340.33] | 45313982
+semi 2000 range_scheduler | 188.00 [188.00,188.00] | 814.15 [461.90,860.51] | 45379182
+
+解释：Semi Range 稳定 188 GET，Blockwise 为 194–216；Inner Range 为 1717–1718，Blockwise 为 1726–1748。完整 C 在 12 次正式链路运行中只有一次额外合并掉 1 个请求。
+Range 字节稍多，四组 Range 相对 D 的多读约 0.05%–0.43%；不能把它描述成完全等价、零成本替代。Foyer 对单块的共享与 Range 的整段读不是同一个仲裁边界。
+本机 wall time 明显漂移，例如同一 Range direct Semi/0 从 369 ms 到 934 ms，Inner/0 从 1516 ms 到 4558 ms。所有样本保留，不能用某个 arm 的时间中位数证明其吞吐优势。
+
+小测（各 40 个正式样本；GET 中位数 [min,max]，latency 为 us）
+
+scenario delay_us arm | GET | bytes | first p50 | scan p50 | point p50/p95
+cold16 0 blockwise_scheduler | 1 [1,4] | 64682 | 213.3 | 1609.8 | 0.0/0.0
+cold16 0 range_direct | 1 [1,1] | 64682 | 156.2 | 1462.8 | 0.0/0.0
+cold16 0 range_dispatch | 1 [1,1] | 64682 | 211.5 | 1550.1 | 0.0/0.0
+cold16 0 range_scheduler | 1 [1,1] | 64682 | 194.6 | 1517.2 | 0.0/0.0
+cold16 2000 blockwise_scheduler | 1 [1,2] | 64682 | 3641.9 | 5084.5 | 0.0/0.0
+cold16 2000 range_direct | 1 [1,1] | 64682 | 3616.4 | 4981.9 | 0.0/0.0
+cold16 2000 range_dispatch | 1 [1,1] | 64682 | 3681.8 | 5069.9 | 0.0/0.0
+cold16 2000 range_scheduler | 1 [1,1] | 64682 | 3632.6 | 4975.9 | 0.0/0.0
+single 0 blockwise_scheduler | 1 [1,1] | 4051 | 154.8 | 324.2 | 0.0/0.0
+single 0 range_direct | 1 [1,1] | 4051 | 89.5 | 231.7 | 0.0/0.0
+single 0 range_dispatch | 1 [1,1] | 4051 | 141.1 | 283.9 | 0.0/0.0
+single 0 range_scheduler | 1 [1,1] | 4051 | 169.7 | 353.8 | 0.0/0.0
+single 2000 blockwise_scheduler | 1 [1,1] | 4051 | 3934.7 | 4270.4 | 0.0/0.0
+single 2000 range_direct | 1 [1,1] | 4051 | 3949.8 | 4341.5 | 0.0/0.0
+single 2000 range_dispatch | 1 [1,1] | 4051 | 3779.2 | 3926.4 | 0.0/0.0
+single 2000 range_scheduler | 1 [1,1] | 4051 | 3880.3 | 4156.5 | 0.0/0.0
+point 0 blockwise_scheduler | 1 [1,1] | 4051 | 0.0 | 58.4 | 58.4/419.0
+point 0 range_direct | 1 [1,1] | 4051 | 0.0 | 32.7 | 32.7/40.5
+point 0 range_dispatch | 1 [1,1] | 4051 | 0.0 | 57.8 | 57.8/65.5
+point 0 range_scheduler | 1 [1,1] | 4051 | 0.0 | 62.6 | 62.6/82.4
+point 2000 blockwise_scheduler | 1 [1,1] | 4051 | 0.0 | 3838.0 | 3838.0/4076.8
+point 2000 range_direct | 1 [1,1] | 4051 | 0.0 | 3710.4 | 3710.4/3952.7
+point 2000 range_dispatch | 1 [1,1] | 4051 | 0.0 | 3784.1 | 3784.1/4074.0
+point 2000 range_scheduler | 1 [1,1] | 4051 | 0.0 | 3856.8 | 3856.8/4228.7
+mixed 0 blockwise_scheduler | 2 [2,6] | 68733 | 205.5 | 1576.4 | 115.4/923.2
+mixed 0 range_direct | 2 [2,2] | 68733 | 151.5 | 1457.4 | 32.9/42.7
+mixed 0 range_dispatch | 2 [2,2] | 68733 | 223.0 | 1590.2 | 87.9/235.8
+mixed 0 range_scheduler | 2 [2,2] | 68733 | 186.3 | 1512.4 | 72.5/780.0
+mixed 2000 blockwise_scheduler | 2 [2,4] | 68733 | 3808.5 | 6184.7 | 3658.4/3899.1
+mixed 2000 range_direct | 2 [2,2] | 68733 | 3737.0 | 6232.5 | 3507.4/3549.5
+mixed 2000 range_dispatch | 2 [2,2] | 68733 | 3792.5 | 5940.2 | 3579.8/3659.4
+mixed 2000 range_scheduler | 2 [2,2] | 68733 | 3896.6 | 6111.2 | 3610.4/3750.1
+shared 0 blockwise_scheduler | 1 [1,3] | 64682 | 204.4 | 1569.8 | 151.6/864.2
+shared 0 range_direct | 2 [2,2] | 68734 | 154.2 | 1472.8 | 33.6/63.2
+shared 0 range_dispatch | 2 [2,2] | 68734 | 202.7 | 1553.2 | 85.4/1692.8
+shared 0 range_scheduler | 2 [1,2] | 68734 | 179.6 | 1486.4 | 65.4/85.4
+shared 2000 blockwise_scheduler | 1 [1,5] | 64682 | 3704.3 | 5751.8 | 3609.3/3684.2
+shared 2000 range_direct | 2 [2,2] | 68734 | 3700.9 | 5789.8 | 3496.8/3686.4
+shared 2000 range_dispatch | 2 [2,2] | 68734 | 3738.2 | 5712.7 | 3552.7/3681.2
+shared 2000 range_scheduler | 1 [1,2] | 64682 | 3838.9 | 5762.5 | 3596.0/3753.3
+existing_point 0 blockwise_scheduler | 3 [3,5] | 64682 | 186.6 | 1556.9 | 94.7/420.4
+existing_point 0 range_direct | 2 [2,2] | 68734 | 148.0 | 1478.6 | 33.7/67.7
+existing_point 0 range_dispatch | 2 [2,2] | 68734 | 191.3 | 1519.9 | 79.0/242.9
+existing_point 0 range_scheduler | 2 [2,2] | 68734 | 173.6 | 1476.6 | 60.7/101.6
+existing_point 2000 blockwise_scheduler | 3 [3,5] | 64682 | 3717.5 | 5608.0 | 3707.4/3856.9
+existing_point 2000 range_direct | 2 [2,2] | 68734 | 3630.5 | 5516.8 | 3519.8/3586.6
+existing_point 2000 range_dispatch | 2 [2,2] | 68734 | 3634.5 | 5470.7 | 3541.6/3647.5
+existing_point 2000 range_scheduler | 2 [2,2] | 68734 | 3683.4 | 5529.7 | 3607.2/3820.0
+warm_gaps 0 blockwise_scheduler | 8 [8,8] | 32222 | 77.7 | 1434.5 | 0.0/0.0
+warm_gaps 0 range_direct | 8 [8,8] | 32222 | 26.9 | 1684.1 | 0.0/0.0
+warm_gaps 0 range_dispatch | 8 [8,8] | 32222 | 34.4 | 1944.5 | 0.0/0.0
+warm_gaps 0 range_scheduler | 8 [8,8] | 32222 | 28.5 | 1903.0 | 0.0/0.0
+warm_gaps 2000 blockwise_scheduler | 8 [8,8] | 32222 | 445.7 | 8451.4 | 0.0/0.0
+warm_gaps 2000 range_direct | 8 [8,8] | 32222 | 330.9 | 37416.9 | 0.0/0.0
+warm_gaps 2000 range_dispatch | 8 [8,8] | 32222 | 300.4 | 37381.0 | 0.0/0.0
+warm_gaps 2000 range_scheduler | 8 [8,8] | 32222 | 311.2 | 38251.9 | 0.0/0.0
+stop_last 0 blockwise_scheduler | 1 [1,1] | 64682 | 602.7 | 3506.2 | 0.0/0.0
+stop_last 0 range_direct | 1 [1,1] | 64682 | 578.9 | 3564.8 | 0.0/0.0
+stop_last 0 range_dispatch | 1 [1,1] | 64682 | 647.1 | 3161.6 | 0.0/0.0
+stop_last 0 range_scheduler | 1 [1,1] | 64682 | 717.6 | 3713.6 | 0.0/0.0
+stop_last 2000 blockwise_scheduler | 1 [1,3] | 64682 | 4385.3 | 8233.5 | 0.0/0.0
+stop_last 2000 range_direct | 1 [1,1] | 64682 | 4421.7 | 8992.1 | 0.0/0.0
+stop_last 2000 range_dispatch | 1 [1,1] | 64682 | 4261.0 | 7270.5 | 0.0/0.0
+stop_last 2000 range_scheduler | 1 [1,1] | 64682 | 4351.6 | 7622.6 | 0.0/0.0
+
+小测解释
+
+- cold16：Range 三组在 0/2 ms 都稳定 1 GET；D 中位数也是 1，但 0 ms 最多 4、2 ms 最多 2。独立小窗容易凑齐，不代表受 exchange/算子背压影响的实际扫描也同样稳定。
+- 单冷读/单独点读没有可合并候选。0 ms 后端时独立点读 p50 A 约 33 us、B 58 us、C 63 us、D 58 us，增加调度/任务切换存在可见成本。2 ms 后端为 3.71/3.78/3.86/3.84 ms；注入 sleep 的实际完成时间还包含 Tokio 定时器粒度与 OS 调度，不是精确 2 ms 的网络模型。
+- mixed（扫描与另一 SST 点读）2 ms 时点读 p50 A/B/C/D 为 3.51/3.58/3.61/3.66 ms，p95 为 3.55/3.66/3.75/3.90 ms。本轮未显示 scheduler 的点读延迟优势。各 40 个样本的尾部只作局部观察，不作生产 SLA。
+- shared（扫描初始化首次 poll 后点读窗口内第 7 块）：Range A/B 2 GET、68,734 bytes；C/D 在 2 ms 时 GET 中位数 1、64,682 bytes，但均存在拆分样本。启动点与真实 iterator poll 绑定，不依赖 Blockwise 注册计数，不延迟生产代码。
+- existing_point（第 7 块点读已开始后再扫描）：Range 2 GET、68,734 bytes；D 通常 3 GET、64,682 bytes。Foyer 共享中间块后，剩下两段不能在 zero-gap 下跨过这个洞；少读一个 block 的字节，未必少一个 GET。这是设计取舍，不是缺失数据或共享失效。
+- warm_gaps（交替冷热，8 个冷块）：均为 8 GET、32,222 bytes；2 ms 时 A/B/C 扫描约 37.4/37.4/38.3 ms，D 8.45 ms。原 Range 的缓存启发式在下一个热块处截断，多个冷段逐次读取；Blockwise 提前提交冷块，收益是并发而非合并。
+- stop_last：逻辑上 32 块，读到第 16 块第一行停止。四组都只读取 64,682 bytes，没有提前读下一窗；保持现有有限窗口边界。
+
+补充机制对照（独立二进制，2 轮正反顺序，每项/延迟 40 样本）
+
+arm scenario delay_us | GET p50 | scan us p50 | merged 事件总数 | inflight_reused 总数
+blockwise_direct cold16 0 | 16 | 1490.8 | 0 | 0
+blockwise_direct cold16 2000 | 16 | 4947.6 | 0 | 0
+blockwise_direct warm_gaps 0 | 8 | 1402.4 | 0 | 0
+blockwise_direct warm_gaps 2000 | 8 | 8154.8 | 0 | 0
+blockwise_dispatch cold16 0 | 16 | 1584.7 | 0 | 0
+blockwise_dispatch cold16 2000 | 16 | 5181.7 | 0 | 0
+blockwise_dispatch warm_gaps 0 | 8 | 1392.6 | 0 | 0
+blockwise_dispatch warm_gaps 2000 | 8 | 8538.9 | 0 | 0
+blockwise_scheduler cold16 0 | 1 | 1618.0 | 591 | 0
+blockwise_scheduler cold16 2000 | 1 | 5100.8 | 600 | 0
+blockwise_scheduler warm_gaps 0 | 8 | 1403.6 | 0 | 0
+blockwise_scheduler warm_gaps 2000 | 8 | 8215.0 | 0 | 0
+range_scheduler existing_point 0 | 2 | 1515.6 | 0 | 0
+range_scheduler existing_point 2000 | 2 | 5026.9 | 0 | 0
+range_scheduler shared 0 | 1 | 1521.6 | 22 | 0
+range_scheduler shared 2000 | 1 | 5012.7 | 28 | 0
+
+补充结果：Blockwise 无 scheduler/仅 dispatch/完整 scheduler 在 warm_gaps+2ms 都是 8 GET，扫描约 8.16/8.54/8.22 ms。关闭合并并未丢失并发预读收益。全冷 16 块则分别 16/16/1 GET，显示 scheduler 合并能力确实有效，但 Range 原本已能直接发 1 GET。
+补计数也修正了中途的初步归因：Range shared 的合并样本记录 merged_requests，inflight_reused 为零。不能把这里少一个 GET 宣称成 inflight reuse 的收益；本次实际观察到的是派发前重叠合并。已有 inflight reuse 实现的独立价值还需更晚到达、确实处于 physical read 期间的 workload 证明，不能借这组数字下结论。
+
+CPU / 内存证据的边界
+
+完整进程的 user/sys CPU 和 max RSS 原始值已记录在 results.json 的 process_time；包括数据生成、SST 构建、初始化与收尾，不是 IO 阶段 CPU/内存峰值。
+inner 0 blockwise_scheduler: process user/sys p50 21.74/0.67 s; max_rss_raw p50 979484672; cache_usage_end p50 268365259 bytes
+inner 0 range_direct: process user/sys p50 21.49/0.65 s; max_rss_raw p50 984973312; cache_usage_end p50 268365267 bytes
+inner 0 range_dispatch: process user/sys p50 21.74/0.67 s; max_rss_raw p50 989462528; cache_usage_end p50 268365255 bytes
+inner 0 range_scheduler: process user/sys p50 24.87/0.91 s; max_rss_raw p50 997277696; cache_usage_end p50 268365101 bytes
+inner 2000 blockwise_scheduler: process user/sys p50 18.31/0.51 s; max_rss_raw p50 980893696; cache_usage_end p50 268365261 bytes
+inner 2000 range_direct: process user/sys p50 17.24/0.44 s; max_rss_raw p50 974192640; cache_usage_end p50 268365264 bytes
+inner 2000 range_dispatch: process user/sys p50 17.60/0.48 s; max_rss_raw p50 973783040; cache_usage_end p50 268365108 bytes
+inner 2000 range_scheduler: process user/sys p50 19.13/0.55 s; max_rss_raw p50 972128256; cache_usage_end p50 268365274 bytes
+semi 0 blockwise_scheduler: process user/sys p50 5.02/0.14 s; max_rss_raw p50 316932096; cache_usage_end p50 91557903 bytes
+semi 0 range_direct: process user/sys p50 5.95/0.18 s; max_rss_raw p50 315670528; cache_usage_end p50 91557903 bytes
+semi 0 range_dispatch: process user/sys p50 5.41/0.17 s; max_rss_raw p50 314556416; cache_usage_end p50 91557903 bytes
+semi 0 range_scheduler: process user/sys p50 5.86/0.15 s; max_rss_raw p50 315949056; cache_usage_end p50 91557903 bytes
+semi 2000 blockwise_scheduler: process user/sys p50 5.04/0.13 s; max_rss_raw p50 315670528; cache_usage_end p50 91557903 bytes
+semi 2000 range_direct: process user/sys p50 5.27/0.14 s; max_rss_raw p50 311115776; cache_usage_end p50 91557903 bytes
+semi 2000 range_dispatch: process user/sys p50 5.57/0.16 s; max_rss_raw p50 310558720; cache_usage_end p50 91557903 bytes
+semi 2000 range_scheduler: process user/sys p50 5.39/0.13 s; max_rss_raw p50 310886400; cache_usage_end p50 91557903 bytes
+
+Semi 终点 block cache usage 四组均为 91,557,903 bytes；Inner 约 268.37 MB，接近配置容量。Range buffer tracker 终点均为 0。这些终点值和整个测试进程 RSS 都不能证明哪个方案持有更少的 lookahead 峰值内存；本次不作该结论。
+
+建议的最小方向
+
+- 连续、已知范围的 Locality 扫描以原 Range 为基线，不继续用 timer 或更多 plug 状态弥补拆窗。
+- Blockwise 保留为需要逐块缓存共享、稀疏冷块并发预读的可选能力；本次证明的是场景差异，还没有提出/实现自动策略切换。
+- 不额外等待未来的串行 Join probe。当前 scheduler 的有条件合并收益与 admission/runtime 的必要性分开评估；此轮不支持为连续 Locality 路径保留复杂攒批。
+- 若准备缩减 scheduler，先明确是否真的需要跨 caller 的物理 IO 并发上限，再决定薄 dispatch 的职责。B 仍有完整队列成本，不能把它的性能等同于尚未实现的简化层。
+
+代码状态
+
+临时四组开关、额外计数和补充测试模块已按运行前副本撤回，实验 patch/脚本/全部原始数据归档到 docs/dev/src/design/read-optimization-evidence/range-dispatch-*。已有工作区修改保留。
+没有修改 Foyer、Range 算法、decode、生产 scheduler 或默认读取策略；没有 commit/push。测试未暴露新的结果正确性 bug。
+清理后的编译与相关测试结果见本报告末尾。
+
+清理后验证已完成：storage + stream 的 test 构建通过；iterator 13、SST store 11、路由 1、Locality 3、HashJoin 26、Semi/Inner 冒烟各 1，共 56 项通过。git diff --check 通过。恢复副本逐字节比对通过，SST store/iterator/scheduler/Cargo.lock 的运行前后哈希一致。

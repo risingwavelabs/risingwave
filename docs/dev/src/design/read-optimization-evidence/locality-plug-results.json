@@ -1,0 +1,2544 @@
+{
+  "base_commit": "c69c12b",
+  "foyer_revision": "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5",
+  "foyer_disk_cache": false,
+  "platform": "macOS ARM64, unoptimized Rust test build",
+  "runtimes": {
+    "cache_initialization": 8,
+    "streaming": 8,
+    "dedicated_io": 2
+  },
+  "limits": {
+    "G": 128,
+    "P": 32,
+    "max_blocks": 16,
+    "max_bytes": 1048576,
+    "max_gap_bytes": 0
+  },
+  "sst_block_target_bytes": 4096,
+  "first_16_blocks_physical_bytes": 64682,
+  "round_order": [
+    [
+      "yield",
+      "plan"
+    ],
+    [
+      "plan",
+      "yield"
+    ],
+    [
+      "yield",
+      "plan"
+    ]
+  ],
+  "samples_per_case_per_arm": 150,
+  "warmups_per_case_per_process": 5,
+  "method": "Same instrumented test binary; tracing disabled during measurements. Plan is a test-feature prototype selected per process. Each scan uses the Locality mode at HummockVersionReader, vnode-zero keys, committed SSTs, exact range and row/value assertions. No Locality/Join executor, row deserialization or real S3 backend is run. Point latency is timed independently at SstableStore. Cache initialization uses eight workers as an explicit local assumption; the SF10 record does not identify that runtime worker count.",
+  "binary_sha256": "8724806b8fc57aa78edfc1b4e27305e1b0a76947fa6051efdcfbc67e6bbf7607",
+  "decision": "Discard timer and range-plan prototypes. Keep current scheduling semantics, opt-in diagnostics, and ignored experiment. A preplanned range can duplicate bytes owned by an existing Foyer producer. No Foyer, Range or decode changes retained.",
+  "validation": {
+    "scheduler": 24,
+    "version_reader": 4,
+    "sst_iterator": 13,
+    "sstable_store": 11,
+    "final_ignored_experiment": 1
+  },
+  "summary": [
+    {
+      "delay_us": 0,
+      "scenario": "cold16",
+      "yield": {
+        "samples": 150,
+        "gets": 237,
+        "single_get_samples": 104,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1747,
+        "round_gets": [
+          64,
+          80,
+          93
+        ],
+        "first_us": {
+          "p50": 170.5205,
+          "p95": 258.375,
+          "round_p50": [
+            185.833,
+            156.60399999999998,
+            171.04149999999998
+          ]
+        },
+        "total_us": {
+          "p50": 1383.1455,
+          "p95": 1551.5,
+          "round_p50": [
+            1472.1875,
+            1365.9164999999998,
+            1374.125
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 6.2915,
+          "p95": 14.5,
+          "round_p50": [
+            8.249500000000001,
+            6.4585,
+            5.3955
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 151.3955,
+          "p95": 232.417,
+          "round_p50": [
+            149.125,
+            146.35399999999998,
+            157.02100000000002
+          ]
+        },
+        "total_us": {
+          "p50": 1355.2914999999998,
+          "p95": 1482.583,
+          "round_p50": [
+            1339.9164999999998,
+            1360.2705,
+            1365.938
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.1875,
+          "p95": 9.25,
+          "round_p50": [
+            3.8745000000000003,
+            3.042,
+            3.229
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "cold32",
+      "yield": {
+        "samples": 150,
+        "gets": 629,
+        "single_get_samples": 0,
+        "bytes": 19423950,
+        "unique_bytes": 19423950,
+        "duplicate_byte_samples": 0,
+        "collected": 2596,
+        "round_gets": [
+          220,
+          204,
+          205
+        ],
+        "first_us": {
+          "p50": 167.042,
+          "p95": 216.792,
+          "round_p50": [
+            166.5,
+            167.042,
+            167.58350000000002
+          ]
+        },
+        "total_us": {
+          "p50": 2725.875,
+          "p95": 2903.833,
+          "round_p50": [
+            2743.8540000000003,
+            2708.937,
+            2729.5209999999997
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 148.91649999999998,
+          "p95": 194.625,
+          "round_p50": [
+            151.542,
+            143.7705,
+            153.14600000000002
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 300,
+        "single_get_samples": 0,
+        "bytes": 19423950,
+        "unique_bytes": 19423950,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          100,
+          100,
+          100
+        ],
+        "first_us": {
+          "p50": 144.1045,
+          "p95": 212.583,
+          "round_p50": [
+            141.5,
+            148.14600000000002,
+            145.166
+          ]
+        },
+        "total_us": {
+          "p50": 2679.0209999999997,
+          "p95": 2801.5,
+          "round_p50": [
+            2661.25,
+            2690.416,
+            2679.0209999999997
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 125.708,
+          "p95": 173.542,
+          "round_p50": [
+            122.7295,
+            125.6255,
+            129.875
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "cold8",
+      "yield": {
+        "samples": 150,
+        "gets": 253,
+        "single_get_samples": 70,
+        "bytes": 4858350,
+        "unique_bytes": 4858350,
+        "duplicate_byte_samples": 0,
+        "collected": 764,
+        "round_gets": [
+          86,
+          83,
+          84
+        ],
+        "first_us": {
+          "p50": 126.209,
+          "p95": 167.917,
+          "round_p50": [
+            131.0005,
+            126.313,
+            123.292
+          ]
+        },
+        "total_us": {
+          "p50": 1325.5625,
+          "p95": 1420.625,
+          "round_p50": [
+            1334.9789999999998,
+            1315.6665,
+            1320.479
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 2.958,
+          "p95": 9.459,
+          "round_p50": [
+            2.917,
+            2.9795,
+            2.958
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 4858350,
+        "unique_bytes": 4858350,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 121.3955,
+          "p95": 160.292,
+          "round_p50": [
+            121.8745,
+            122.2085,
+            120.291
+          ]
+        },
+        "total_us": {
+          "p50": 1319.7715,
+          "p95": 1455.583,
+          "round_p50": [
+            1314.6875,
+            1323.917,
+            1317.167
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 2.875,
+          "p95": 10.625,
+          "round_p50": [
+            2.9585,
+            2.9375,
+            2.8125
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "existing_point",
+      "yield": {
+        "samples": 150,
+        "gets": 534,
+        "single_get_samples": 0,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1657,
+        "round_gets": [
+          174,
+          177,
+          183
+        ],
+        "first_us": {
+          "p50": 166.35399999999998,
+          "p95": 222.5,
+          "round_p50": [
+            159.54149999999998,
+            165.125,
+            171.25
+          ]
+        },
+        "total_us": {
+          "p50": 1376.75,
+          "p95": 1485.0,
+          "round_p50": [
+            1369.5414999999998,
+            1376.7915,
+            1383.437
+          ]
+        },
+        "point_us": {
+          "p50": 84.458,
+          "p95": 126.083,
+          "round_p50": [
+            85.25,
+            89.2915,
+            77.125
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.8545,
+          "p95": 10.208,
+          "round_p50": [
+            4.937,
+            5.1875,
+            2.896
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 303,
+        "single_get_samples": 0,
+        "bytes": 10297944,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 147,
+        "collected": 0,
+        "round_gets": [
+          102,
+          101,
+          100
+        ],
+        "first_us": {
+          "p50": 166.04149999999998,
+          "p95": 215.458,
+          "round_p50": [
+            169.70850000000002,
+            165.79149999999998,
+            160.8125
+          ]
+        },
+        "total_us": {
+          "p50": 1375.271,
+          "p95": 1489.833,
+          "round_p50": [
+            1388.458,
+            1370.729,
+            1364.375
+          ]
+        },
+        "point_us": {
+          "p50": 64.1255,
+          "p95": 119.917,
+          "round_p50": [
+            64.229,
+            63.6875,
+            64.229
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.4375,
+          "p95": 9.625,
+          "round_p50": [
+            4.875,
+            2.8545,
+            2.854
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "mixed",
+      "yield": {
+        "samples": 150,
+        "gets": 366,
+        "single_get_samples": 0,
+        "bytes": 10309950,
+        "unique_bytes": 10309950,
+        "duplicate_byte_samples": 0,
+        "collected": 1921,
+        "round_gets": [
+          121,
+          121,
+          124
+        ],
+        "first_us": {
+          "p50": 161.20850000000002,
+          "p95": 204.25,
+          "round_p50": [
+            163.66649999999998,
+            160.167,
+            159.958
+          ]
+        },
+        "total_us": {
+          "p50": 1377.604,
+          "p95": 1462.833,
+          "round_p50": [
+            1385.354,
+            1372.5210000000002,
+            1379.083
+          ]
+        },
+        "point_us": {
+          "p50": 92.521,
+          "p95": 132.167,
+          "round_p50": [
+            91.1045,
+            91.0,
+            95.312
+          ]
+        },
+        "max_next_us": {
+          "p50": 5.958,
+          "p95": 13.458,
+          "round_p50": [
+            6.458,
+            5.7915,
+            5.708
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 300,
+        "single_get_samples": 0,
+        "bytes": 10309950,
+        "unique_bytes": 10309950,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          100,
+          100,
+          100
+        ],
+        "first_us": {
+          "p50": 167.58350000000002,
+          "p95": 219.416,
+          "round_p50": [
+            164.7495,
+            166.16649999999998,
+            176.85399999999998
+          ]
+        },
+        "total_us": {
+          "p50": 1376.7085,
+          "p95": 1487.333,
+          "round_p50": [
+            1364.6665,
+            1378.4795,
+            1380.437
+          ]
+        },
+        "point_us": {
+          "p50": 93.0,
+          "p95": 135.666,
+          "round_p50": [
+            90.9795,
+            90.7705,
+            97.0415
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.8125,
+          "p95": 10.5,
+          "round_p50": [
+            5.042,
+            4.896,
+            2.896
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "point",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "total_us": {
+          "p50": 55.875,
+          "p95": 60.875,
+          "round_p50": [
+            56.167,
+            56.3335,
+            55.313
+          ]
+        },
+        "point_us": {
+          "p50": 55.875,
+          "p95": 60.875,
+          "round_p50": [
+            56.167,
+            56.3335,
+            55.313
+          ]
+        },
+        "max_next_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "total_us": {
+          "p50": 55.521,
+          "p95": 61.5,
+          "round_p50": [
+            56.8125,
+            55.7915,
+            54.604
+          ]
+        },
+        "point_us": {
+          "p50": 55.521,
+          "p95": 61.5,
+          "round_p50": [
+            56.8125,
+            55.7915,
+            54.604
+          ]
+        },
+        "max_next_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "racing_point",
+      "yield": {
+        "samples": 150,
+        "gets": 473,
+        "single_get_samples": 11,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1770,
+        "round_gets": [
+          159,
+          157,
+          157
+        ],
+        "first_us": {
+          "p50": 170.54149999999998,
+          "p95": 212.084,
+          "round_p50": [
+            171.3955,
+            164.45850000000002,
+            177.10399999999998
+          ]
+        },
+        "total_us": {
+          "p50": 1382.7915,
+          "p95": 1455.125,
+          "round_p50": [
+            1385.6875,
+            1373.854,
+            1389.0625
+          ]
+        },
+        "point_us": {
+          "p50": 80.0,
+          "p95": 160.709,
+          "round_p50": [
+            78.604,
+            78.7915,
+            90.417
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.792,
+          "p95": 10.875,
+          "round_p50": [
+            3.6455,
+            5.5835,
+            2.9375
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 157,
+        "single_get_samples": 143,
+        "bytes": 9730664,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 7,
+        "collected": 0,
+        "round_gets": [
+          53,
+          51,
+          53
+        ],
+        "first_us": {
+          "p50": 165.29149999999998,
+          "p95": 393.916,
+          "round_p50": [
+            186.7715,
+            159.3545,
+            154.79149999999998
+          ]
+        },
+        "total_us": {
+          "p50": 1388.313,
+          "p95": 1846.25,
+          "round_p50": [
+            1499.6455,
+            1372.416,
+            1370.6460000000002
+          ]
+        },
+        "point_us": {
+          "p50": 96.646,
+          "p95": 226.417,
+          "round_p50": [
+            105.792,
+            84.875,
+            99.271
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.959,
+          "p95": 16.083,
+          "round_p50": [
+            5.1875,
+            4.646,
+            5.021
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "shared",
+      "yield": {
+        "samples": 150,
+        "gets": 208,
+        "single_get_samples": 128,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1988,
+        "round_gets": [
+          73,
+          69,
+          66
+        ],
+        "first_us": {
+          "p50": 169.875,
+          "p95": 242.167,
+          "round_p50": [
+            181.0625,
+            165.458,
+            171.4375
+          ]
+        },
+        "total_us": {
+          "p50": 1389.6455,
+          "p95": 1500.375,
+          "round_p50": [
+            1425.875,
+            1378.729,
+            1387.8125
+          ]
+        },
+        "point_us": {
+          "p50": 127.292,
+          "p95": 173.666,
+          "round_p50": [
+            131.1245,
+            126.542,
+            123.229
+          ]
+        },
+        "max_next_us": {
+          "p50": 6.0,
+          "p95": 14.25,
+          "round_p50": [
+            6.354,
+            5.417,
+            6.0205
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 174.5205,
+          "p95": 212.541,
+          "round_p50": [
+            180.1875,
+            173.6045,
+            167.9375
+          ]
+        },
+        "total_us": {
+          "p50": 1379.8125,
+          "p95": 1478.291,
+          "round_p50": [
+            1374.25,
+            1388.9585,
+            1380.104
+          ]
+        },
+        "point_us": {
+          "p50": 94.8335,
+          "p95": 138.709,
+          "round_p50": [
+            99.2085,
+            88.4585,
+            93.1875
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.896,
+          "p95": 9.625,
+          "round_p50": [
+            3.0835,
+            5.417,
+            4.354
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "single",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 75.8755,
+          "p95": 93.833,
+          "round_p50": [
+            73.625,
+            77.0835,
+            77.208
+          ]
+        },
+        "total_us": {
+          "p50": 161.66649999999998,
+          "p95": 185.625,
+          "round_p50": [
+            159.708,
+            163.208,
+            162.25
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 1.291,
+          "p95": 1.875,
+          "round_p50": [
+            1.25,
+            1.292,
+            1.291
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 75.521,
+          "p95": 83.875,
+          "round_p50": [
+            75.2505,
+            75.375,
+            76.5
+          ]
+        },
+        "total_us": {
+          "p50": 161.313,
+          "p95": 176.667,
+          "round_p50": [
+            160.125,
+            161.313,
+            163.02100000000002
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 1.25,
+          "p95": 1.375,
+          "round_p50": [
+            1.25,
+            1.25,
+            1.25
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "warm_gaps",
+      "yield": {
+        "samples": 150,
+        "gets": 1200,
+        "single_get_samples": 0,
+        "bytes": 4833300,
+        "unique_bytes": 4833300,
+        "duplicate_byte_samples": 0,
+        "collected": 795,
+        "round_gets": [
+          400,
+          400,
+          400
+        ],
+        "first_us": {
+          "p50": 63.2085,
+          "p95": 76.541,
+          "round_p50": [
+            65.063,
+            62.167,
+            63.3745
+          ]
+        },
+        "total_us": {
+          "p50": 1281.9375,
+          "p95": 1362.5,
+          "round_p50": [
+            1285.4375,
+            1279.271,
+            1276.7705
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.583,
+          "p95": 12.708,
+          "round_p50": [
+            3.625,
+            4.208,
+            3.417
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 1200,
+        "single_get_samples": 0,
+        "bytes": 4833300,
+        "unique_bytes": 4833300,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          400,
+          400,
+          400
+        ],
+        "first_us": {
+          "p50": 69.0005,
+          "p95": 90.667,
+          "round_p50": [
+            69.8755,
+            69.146,
+            65.1875
+          ]
+        },
+        "total_us": {
+          "p50": 1289.375,
+          "p95": 1385.167,
+          "round_p50": [
+            1291.7914999999998,
+            1290.146,
+            1286.646
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.459,
+          "p95": 20.125,
+          "round_p50": [
+            3.5415,
+            3.417,
+            3.458
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "warm_head",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 611250,
+        "unique_bytes": 611250,
+        "duplicate_byte_samples": 0,
+        "collected": 150,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 57.667,
+          "p95": 64.333,
+          "round_p50": [
+            57.271,
+            57.875,
+            58.083
+          ]
+        },
+        "total_us": {
+          "p50": 1255.8335,
+          "p95": 1335.292,
+          "round_p50": [
+            1258.6455,
+            1251.3960000000002,
+            1252.125
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.042,
+          "p95": 8.625,
+          "round_p50": [
+            3.0625,
+            3.041,
+            3.0625
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 611250,
+        "unique_bytes": 611250,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 63.4165,
+          "p95": 71.958,
+          "round_p50": [
+            63.25,
+            64.75,
+            62.333
+          ]
+        },
+        "total_us": {
+          "p50": 1260.75,
+          "p95": 1326.042,
+          "round_p50": [
+            1252.6875,
+            1270.0210000000002,
+            1255.625
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.042,
+          "p95": 9.5,
+          "round_p50": [
+            3.042,
+            3.1455,
+            3.0
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 0,
+      "scenario": "warm_neighbors",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 110.25,
+          "p95": 117.375,
+          "round_p50": [
+            108.854,
+            110.896,
+            110.479
+          ]
+        },
+        "total_us": {
+          "p50": 1295.5210000000002,
+          "p95": 1390.125,
+          "round_p50": [
+            1299.0625,
+            1289.604,
+            1296.7914999999998
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 2.333,
+          "p95": 10.334,
+          "round_p50": [
+            2.3125,
+            2.291,
+            2.3545
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 112.833,
+          "p95": 122.75,
+          "round_p50": [
+            108.625,
+            116.2085,
+            109.8335
+          ]
+        },
+        "total_us": {
+          "p50": 1296.6045,
+          "p95": 1392.333,
+          "round_p50": [
+            1287.1455,
+            1311.1045,
+            1296.459
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 2.291,
+          "p95": 9.041,
+          "round_p50": [
+            2.25,
+            2.3125,
+            2.292
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "cold16",
+      "yield": {
+        "samples": 150,
+        "gets": 210,
+        "single_get_samples": 123,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1984,
+        "round_gets": [
+          77,
+          71,
+          62
+        ],
+        "first_us": {
+          "p50": 3601.042,
+          "p95": 3664.708,
+          "round_p50": [
+            3587.9790000000003,
+            3607.4165000000003,
+            3593.8540000000003
+          ]
+        },
+        "total_us": {
+          "p50": 5140.375,
+          "p95": 5490.583,
+          "round_p50": [
+            5115.688,
+            5211.5419999999995,
+            5187.6255
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.2295,
+          "p95": 11.291,
+          "round_p50": [
+            3.8125,
+            4.333,
+            4.4375
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 3643.0,
+          "p95": 3708.916,
+          "round_p50": [
+            3636.5,
+            3641.25,
+            3651.375
+          ]
+        },
+        "total_us": {
+          "p50": 5311.5625,
+          "p95": 5536.667,
+          "round_p50": [
+            5223.603999999999,
+            5260.2919999999995,
+            5453.4580000000005
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.166,
+          "p95": 10.667,
+          "round_p50": [
+            4.146,
+            4.0415,
+            4.167
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "cold32",
+      "yield": {
+        "samples": 150,
+        "gets": 363,
+        "single_get_samples": 0,
+        "bytes": 19423950,
+        "unique_bytes": 19423950,
+        "duplicate_byte_samples": 0,
+        "collected": 4244,
+        "round_gets": [
+          128,
+          116,
+          119
+        ],
+        "first_us": {
+          "p50": 3645.25,
+          "p95": 3711.625,
+          "round_p50": [
+            3637.813,
+            3644.688,
+            3650.375
+          ]
+        },
+        "total_us": {
+          "p50": 11361.25,
+          "p95": 11863.417,
+          "round_p50": [
+            11290.6875,
+            11541.604500000001,
+            11663.5625
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3615.5,
+          "p95": 3697.625,
+          "round_p50": [
+            3606.0215,
+            3625.3334999999997,
+            3617.542
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 300,
+        "single_get_samples": 0,
+        "bytes": 19423950,
+        "unique_bytes": 19423950,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          100,
+          100,
+          100
+        ],
+        "first_us": {
+          "p50": 3678.7915000000003,
+          "p95": 3738.958,
+          "round_p50": [
+            3664.8755,
+            3681.3955,
+            3685.167
+          ]
+        },
+        "total_us": {
+          "p50": 11367.708,
+          "p95": 11886.875,
+          "round_p50": [
+            11272.707999999999,
+            11537.5415,
+            11639.375
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3652.7290000000003,
+          "p95": 3721.292,
+          "round_p50": [
+            3643.8125,
+            3645.4584999999997,
+            3660.1665000000003
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "cold8",
+      "yield": {
+        "samples": 150,
+        "gets": 220,
+        "single_get_samples": 80,
+        "bytes": 4858350,
+        "unique_bytes": 4858350,
+        "duplicate_byte_samples": 0,
+        "collected": 1049,
+        "round_gets": [
+          71,
+          70,
+          79
+        ],
+        "first_us": {
+          "p50": 4164.3955,
+          "p95": 4472.333,
+          "round_p50": [
+            4138.458500000001,
+            4164.3955,
+            4189.271000000001
+          ]
+        },
+        "total_us": {
+          "p50": 9115.3125,
+          "p95": 11026.0,
+          "round_p50": [
+            8798.1045,
+            8933.8125,
+            9367.1665
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 29.1665,
+          "p95": 49.792,
+          "round_p50": [
+            29.436999999999998,
+            28.729,
+            29.125
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 4858350,
+        "unique_bytes": 4858350,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 4204.458500000001,
+          "p95": 4530.25,
+          "round_p50": [
+            4189.333500000001,
+            4231.833500000001,
+            4198.146000000001
+          ]
+        },
+        "total_us": {
+          "p50": 9201.5215,
+          "p95": 11052.375,
+          "round_p50": [
+            9066.0,
+            9263.2915,
+            9190.2915
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 28.375,
+          "p95": 47.666,
+          "round_p50": [
+            27.3955,
+            28.479,
+            29.5835
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "existing_point",
+      "yield": {
+        "samples": 150,
+        "gets": 544,
+        "single_get_samples": 0,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1268,
+        "round_gets": [
+          177,
+          182,
+          185
+        ],
+        "first_us": {
+          "p50": 3662.2915000000003,
+          "p95": 3731.708,
+          "round_p50": [
+            3667.1665000000003,
+            3646.792,
+            3670.3125
+          ]
+        },
+        "total_us": {
+          "p50": 5523.666499999999,
+          "p95": 5706.917,
+          "round_p50": [
+            5506.292,
+            5481.2915,
+            5654.125
+          ]
+        },
+        "point_us": {
+          "p50": 3671.7705,
+          "p95": 3742.75,
+          "round_p50": [
+            3668.0209999999997,
+            3651.583,
+            3684.4375
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.708,
+          "p95": 11.208,
+          "round_p50": [
+            4.646,
+            4.583,
+            5.0
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 300,
+        "single_get_samples": 0,
+        "bytes": 10310100,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 150,
+        "collected": 0,
+        "round_gets": [
+          100,
+          100,
+          100
+        ],
+        "first_us": {
+          "p50": 3658.5625,
+          "p95": 3723.916,
+          "round_p50": [
+            3662.9375,
+            3640.083,
+            3673.562
+          ]
+        },
+        "total_us": {
+          "p50": 5520.083500000001,
+          "p95": 5726.167,
+          "round_p50": [
+            5499.646000000001,
+            5495.791499999999,
+            5658.6875
+          ]
+        },
+        "point_us": {
+          "p50": 3623.6665000000003,
+          "p95": 3697.666,
+          "round_p50": [
+            3626.5209999999997,
+            3610.9584999999997,
+            3630.1040000000003
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.937,
+          "p95": 12.042,
+          "round_p50": [
+            4.604,
+            4.9795,
+            5.271
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "mixed",
+      "yield": {
+        "samples": 150,
+        "gets": 353,
+        "single_get_samples": 0,
+        "bytes": 10309950,
+        "unique_bytes": 10309950,
+        "duplicate_byte_samples": 0,
+        "collected": 1761,
+        "round_gets": [
+          120,
+          116,
+          117
+        ],
+        "first_us": {
+          "p50": 3650.2915000000003,
+          "p95": 3774.792,
+          "round_p50": [
+            3663.3745,
+            3655.7505,
+            3636.1040000000003
+          ]
+        },
+        "total_us": {
+          "p50": 5644.8125,
+          "p95": 6302.291,
+          "round_p50": [
+            5640.854,
+            5624.1465,
+            5663.104
+          ]
+        },
+        "point_us": {
+          "p50": 3633.3545,
+          "p95": 3740.792,
+          "round_p50": [
+            3626.3955,
+            3631.583,
+            3639.1875
+          ]
+        },
+        "max_next_us": {
+          "p50": 7.416,
+          "p95": 13.792,
+          "round_p50": [
+            5.9795,
+            7.1875,
+            7.6455
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 300,
+        "single_get_samples": 0,
+        "bytes": 10309950,
+        "unique_bytes": 10309950,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          100,
+          100,
+          100
+        ],
+        "first_us": {
+          "p50": 3700.583,
+          "p95": 3856.375,
+          "round_p50": [
+            3710.1459999999997,
+            3690.1245,
+            3710.0
+          ]
+        },
+        "total_us": {
+          "p50": 5545.916499999999,
+          "p95": 6282.417,
+          "round_p50": [
+            5639.1455,
+            5655.3955000000005,
+            5058.854
+          ]
+        },
+        "point_us": {
+          "p50": 3597.2084999999997,
+          "p95": 3683.292,
+          "round_p50": [
+            3611.5834999999997,
+            3593.5625,
+            3568.3540000000003
+          ]
+        },
+        "max_next_us": {
+          "p50": 6.104,
+          "p95": 32.417,
+          "round_p50": [
+            5.8755,
+            5.4165,
+            7.2705
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "point",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "total_us": {
+          "p50": 3660.4375,
+          "p95": 3909.875,
+          "round_p50": [
+            3670.6455,
+            3652.4165000000003,
+            3647.375
+          ]
+        },
+        "point_us": {
+          "p50": 3660.4375,
+          "p95": 3909.875,
+          "round_p50": [
+            3670.6455,
+            3652.4165000000003,
+            3647.375
+          ]
+        },
+        "max_next_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "total_us": {
+          "p50": 3657.875,
+          "p95": 3841.5,
+          "round_p50": [
+            3692.25,
+            3652.8334999999997,
+            3592.7705
+          ]
+        },
+        "point_us": {
+          "p50": 3657.875,
+          "p95": 3841.5,
+          "round_p50": [
+            3692.25,
+            3652.8334999999997,
+            3592.7705
+          ]
+        },
+        "max_next_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "racing_point",
+      "yield": {
+        "samples": 150,
+        "gets": 471,
+        "single_get_samples": 10,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 1624,
+        "round_gets": [
+          163,
+          157,
+          151
+        ],
+        "first_us": {
+          "p50": 3676.2290000000003,
+          "p95": 3750.583,
+          "round_p50": [
+            3677.4995,
+            3678.0,
+            3671.2285
+          ]
+        },
+        "total_us": {
+          "p50": 5523.6044999999995,
+          "p95": 5711.791,
+          "round_p50": [
+            5529.3125,
+            5619.625,
+            5507.7294999999995
+          ]
+        },
+        "point_us": {
+          "p50": 3637.6459999999997,
+          "p95": 3687.417,
+          "round_p50": [
+            3639.687,
+            3637.6045,
+            3635.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 4.917,
+          "p95": 11.708,
+          "round_p50": [
+            5.062,
+            5.0415,
+            4.521
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 164,
+        "single_get_samples": 136,
+        "bytes": 9759028,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 14,
+        "collected": 0,
+        "round_gets": [
+          54,
+          54,
+          56
+        ],
+        "first_us": {
+          "p50": 3679.1255,
+          "p95": 3774.375,
+          "round_p50": [
+            3668.9584999999997,
+            3673.8959999999997,
+            3712.0415000000003
+          ]
+        },
+        "total_us": {
+          "p50": 5542.5005,
+          "p95": 6101.416,
+          "round_p50": [
+            5510.791499999999,
+            5525.229,
+            5716.5005
+          ]
+        },
+        "point_us": {
+          "p50": 3590.5,
+          "p95": 3667.583,
+          "round_p50": [
+            3588.5,
+            3590.1455,
+            3594.6875
+          ]
+        },
+        "max_next_us": {
+          "p50": 5.1665,
+          "p95": 11.5,
+          "round_p50": [
+            4.8125,
+            4.875,
+            6.604
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "shared",
+      "yield": {
+        "samples": 150,
+        "gets": 177,
+        "single_get_samples": 138,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 2205,
+        "round_gets": [
+          65,
+          59,
+          53
+        ],
+        "first_us": {
+          "p50": 3653.3959999999997,
+          "p95": 3738.334,
+          "round_p50": [
+            3642.125,
+            3684.916,
+            3668.2290000000003
+          ]
+        },
+        "total_us": {
+          "p50": 5534.8955000000005,
+          "p95": 5719.5,
+          "round_p50": [
+            5502.938,
+            5592.7080000000005,
+            5597.479
+          ]
+        },
+        "point_us": {
+          "p50": 3614.0834999999997,
+          "p95": 3654.708,
+          "round_p50": [
+            3609.3125,
+            3618.5209999999997,
+            3619.0205
+          ]
+        },
+        "max_next_us": {
+          "p50": 7.146,
+          "p95": 11.542,
+          "round_p50": [
+            6.75,
+            7.3545,
+            6.604
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 9702300,
+        "unique_bytes": 9702300,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 3690.1459999999997,
+          "p95": 3790.334,
+          "round_p50": [
+            3694.9165000000003,
+            3690.7705,
+            3665.8959999999997
+          ]
+        },
+        "total_us": {
+          "p50": 5576.562,
+          "p95": 5770.166,
+          "round_p50": [
+            5671.583500000001,
+            5696.6245,
+            4951.6669999999995
+          ]
+        },
+        "point_us": {
+          "p50": 3594.208,
+          "p95": 3679.667,
+          "round_p50": [
+            3605.125,
+            3602.188,
+            3561.3545
+          ]
+        },
+        "max_next_us": {
+          "p50": 5.0,
+          "p95": 14.708,
+          "round_p50": [
+            4.896,
+            5.021,
+            5.3335
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "single",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 3587.4165000000003,
+          "p95": 3796.709,
+          "round_p50": [
+            3605.9584999999997,
+            3549.5,
+            3592.084
+          ]
+        },
+        "total_us": {
+          "p50": 3794.25,
+          "p95": 4069.458,
+          "round_p50": [
+            3852.4165000000003,
+            3677.9165000000003,
+            3800.6045
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.625,
+          "p95": 16.875,
+          "round_p50": [
+            3.9585,
+            2.771,
+            3.771
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 3600.208,
+          "p95": 3996.333,
+          "round_p50": [
+            3606.1040000000003,
+            3590.583,
+            3600.208
+          ]
+        },
+        "total_us": {
+          "p50": 3831.917,
+          "p95": 4299.584,
+          "round_p50": [
+            3849.3955,
+            3800.3955,
+            3845.0209999999997
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3.7295,
+          "p95": 20.959,
+          "round_p50": [
+            3.834,
+            3.396,
+            3.8125
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "warm_gaps",
+      "yield": {
+        "samples": 150,
+        "gets": 1200,
+        "single_get_samples": 0,
+        "bytes": 4833300,
+        "unique_bytes": 4833300,
+        "duplicate_byte_samples": 0,
+        "collected": 792,
+        "round_gets": [
+          400,
+          400,
+          400
+        ],
+        "first_us": {
+          "p50": 480.02099999999996,
+          "p95": 710.917,
+          "round_p50": [
+            478.27049999999997,
+            484.54200000000003,
+            479.875
+          ]
+        },
+        "total_us": {
+          "p50": 8188.0,
+          "p95": 10291.375,
+          "round_p50": [
+            8022.0205,
+            8221.479,
+            8228.146
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3413.3955,
+          "p95": 3675.417,
+          "round_p50": [
+            3443.958,
+            3383.1459999999997,
+            3413.8545
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 1200,
+        "single_get_samples": 0,
+        "bytes": 4833300,
+        "unique_bytes": 4833300,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          400,
+          400,
+          400
+        ],
+        "first_us": {
+          "p50": 506.4585,
+          "p95": 684.125,
+          "round_p50": [
+            512.562,
+            482.91650000000004,
+            514.1455
+          ]
+        },
+        "total_us": {
+          "p50": 8200.729500000001,
+          "p95": 9923.958,
+          "round_p50": [
+            8240.5415,
+            7540.353999999999,
+            8325.5415
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3368.813,
+          "p95": 3552.625,
+          "round_p50": [
+            3367.542,
+            3423.083,
+            3331.4584999999997
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "warm_head",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 611250,
+        "unique_bytes": 611250,
+        "duplicate_byte_samples": 0,
+        "collected": 150,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 468.375,
+          "p95": 620.125,
+          "round_p50": [
+            459.41650000000004,
+            466.25,
+            498.85400000000004
+          ]
+        },
+        "total_us": {
+          "p50": 8660.229500000001,
+          "p95": 10305.167,
+          "round_p50": [
+            8257.979,
+            8710.9165,
+            8778.8335
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3245.0,
+          "p95": 3454.166,
+          "round_p50": [
+            3289.7705,
+            3231.6455,
+            3209.2709999999997
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 611250,
+        "unique_bytes": 611250,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 513.771,
+          "p95": 697.583,
+          "round_p50": [
+            512.7915,
+            516.104,
+            510.9375
+          ]
+        },
+        "total_us": {
+          "p50": 8770.4165,
+          "p95": 10268.875,
+          "round_p50": [
+            8764.8335,
+            8715.0415,
+            8866.0625
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 3164.4795,
+          "p95": 3379.25,
+          "round_p50": [
+            3199.1875,
+            3169.9375,
+            3129.375
+          ]
+        }
+      }
+    },
+    {
+      "delay_us": 2000,
+      "scenario": "warm_neighbors",
+      "yield": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 4196.625,
+          "p95": 4512.625,
+          "round_p50": [
+            4221.3955000000005,
+            4163.6245,
+            4211.166499999999
+          ]
+        },
+        "total_us": {
+          "p50": 9193.813,
+          "p95": 10804.959,
+          "round_p50": [
+            9396.104,
+            9218.104,
+            9093.75
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 27.7915,
+          "p95": 53.375,
+          "round_p50": [
+            28.8125,
+            28.708,
+            26.7085
+          ]
+        }
+      },
+      "plan": {
+        "samples": 150,
+        "gets": 150,
+        "single_get_samples": 150,
+        "bytes": 607650,
+        "unique_bytes": 607650,
+        "duplicate_byte_samples": 0,
+        "collected": 0,
+        "round_gets": [
+          50,
+          50,
+          50
+        ],
+        "first_us": {
+          "p50": 4227.375,
+          "p95": 4572.959,
+          "round_p50": [
+            4220.25,
+            4212.1455,
+            4240.5205000000005
+          ]
+        },
+        "total_us": {
+          "p50": 9366.270499999999,
+          "p95": 10739.709,
+          "round_p50": [
+            9431.542000000001,
+            9304.3745,
+            9342.4375
+          ]
+        },
+        "point_us": {
+          "p50": 0.0,
+          "p95": 0.0,
+          "round_p50": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "max_next_us": {
+          "p50": 27.4795,
+          "p95": 45.708,
+          "round_p50": [
+            27.646,
+            25.8955,
+            28.521
+          ]
+        }
+      }
+    }
+  ]
+}

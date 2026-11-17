@@ -1,0 +1,37 @@
+[
+  {
+    "label": "iterator",
+    "passed": 13,
+    "result": "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 272 filtered out; finished in 0.62s"
+  },
+  {
+    "label": "store",
+    "passed": 11,
+    "result": "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 274 filtered out; finished in 0.26s"
+  },
+  {
+    "label": "cold-ranges",
+    "passed": 4,
+    "result": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 281 filtered out; finished in 0.26s"
+  },
+  {
+    "label": "legacy-routing",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 284 filtered out; finished in 0.17s"
+  },
+  {
+    "label": "mode-routing",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 284 filtered out; finished in 0.68s"
+  },
+  {
+    "label": "locality",
+    "passed": 3,
+    "result": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 544 filtered out; finished in 0.23s"
+  },
+  {
+    "label": "join",
+    "passed": 26,
+    "result": "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 521 filtered out; finished in 0.04s"
+  }
+]

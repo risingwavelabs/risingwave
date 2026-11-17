@@ -1,0 +1,2045 @@
+
+running 1 test
+test hummock::store::version::tests::locality_plug_experiment::locality_plug_experiment ... test is runner,hummock::store::version::tests::locality_plug_experiment::locality_plug_experiment
+LOCALITY scenario=cold16 delay_us=0 trial=0 gets=1 outer=16 registered=15 collected=3 flush_single=0 flush_multi=1 bytes=64682 unique_bytes=64682 first_us=384.417 total_us=1683.958 point_us=0.000 max_next_us=10.417 rows=993
+LOCALITY scenario=cold16 delay_us=0 trial=1 gets=5 outer=16 registered=15 collected=11 flush_single=0 flush_multi=1 bytes=64682 unique_bytes=64682 first_us=349.500 total_us=1588.958 point_us=0.000 max_next_us=7.292 rows=993
+LOCALITY scenario=cold16 delay_us=0 trial=2 gets=1 outer=16 registered=15 collected=11 flush_single=0 flush_multi=1 bytes=64682 unique_bytes=64682 first_us=233.625 total_us=1508.000 point_us=0.000 max_next_us=4.833 rows=993
+LOCALITY scenario=cold16 delay_us=2000 trial=0 gets=1 outer=16 registered=15 collected=9 flush_single=0 flush_multi=1 bytes=64682 unique_bytes=64682 first_us=3713.917 total_us=5487.292 point_us=0.000 max_next_us=42.083 rows=993
+LOCALITY scenario=cold16 delay_us=2000 trial=1 gets=1 outer=16 registered=15 collected=9 flush_single=0 flush_multi=1 bytes=64682 unique_bytes=64682 first_us=3853.125 total_us=5116.833 point_us=0.000 max_next_us=15.625 rows=993
+LOCALITY scenario=cold16 delay_us=2000 trial=2 gets=1 outer=16 registered=15 collected=15 flush_single=0 flush_multi=1 bytes=64682 unique_bytes=64682 first_us=3677.416 total_us=4888.041 point_us=0.000 max_next_us=5.625 rows=993
+TRACE us=0.000 span=1 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=8.750 span=2 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=44.750 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=51.750 span=3 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=58.458 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=60.833 span=4 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=64.750 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=66.625 span=5 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=70.583 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=72.083 span=6 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=74.708 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=76.750 span=7 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=79.041 span=8 name=object_read
+TRACE us=79.208 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=81.500 span=9 name=object_read
+TRACE us=81.916 span=10 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=84.000 span=11 name=object_read
+TRACE us=86.041 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=87.458 span=12 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=89.708 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=91.000 span=13 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=94.000 message=object read submitted request_id=1 route="scheduled" range=4051..8126
+TRACE us=94.750 message=object read submitted request_id=2 route="scheduled" range=8126..12207
+TRACE us=95.208 message=object read submitted request_id=3 route="scheduled" range=12207..16209
+TRACE us=95.500 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=97.333 span=14 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=99.916 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=101.208 span=15 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=103.875 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=105.125 span=16 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=132.833 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=136.125 span=17 name=object_read
+TRACE us=137.333 span=18 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=138.791 message=object read submitted request_id=4 route="scheduled" range=16209..20258
+TRACE us=143.000 span=19 name=object_read
+TRACE us=145.291 message=object read submitted request_id=5 route="scheduled" range=24266..28337
+TRACE us=145.458 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=147.958 span=20 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=149.625 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(3) range=12207..16209 members=1
+TRACE us=154.541 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=156.708 span=21 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=160.208 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=162.333 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=162.916 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(1) range=4051..8126 members=2
+TRACE us=164.500 span=22 name=object_read
+TRACE us=165.958 span=23 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=166.500 message=object read submitted request_id=6 route="scheduled" range=28337..32389
+TRACE us=169.583 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=170.291 span=24 name=object_read
+TRACE us=171.541 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(6) range=28337..32389 members=3
+TRACE us=172.250 message=object read submitted request_id=7 route="scheduled" range=36427..40462
+TRACE us=173.750 span=25 name=object_read
+TRACE us=174.875 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(7) range=36427..40462 members=4
+TRACE us=175.083 message=object read submitted request_id=8 route="scheduled" range=44501..48537
+TRACE us=179.458 span=26 name=object_read
+TRACE us=180.666 message=object read submitted request_id=9 route="scheduled" range=32389..36427
+TRACE us=182.000 span=27 name=object_read
+TRACE us=183.208 message=object read submitted request_id=10 route="scheduled" range=48537..52599
+TRACE us=192.333 span=28 name=object_read
+TRACE us=194.291 message=object read submitted request_id=11 route="scheduled" range=52599..56619
+TRACE us=194.958 span=29 name=object_read
+TRACE us=196.208 message=object read submitted request_id=12 route="scheduled" range=40462..44501
+TRACE us=198.291 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(2) range=8126..12207 members=5
+TRACE us=203.666 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(8) range=44501..48537 members=6
+TRACE us=204.750 span=30 name=object_read
+TRACE us=206.500 message=object read submitted request_id=13 route="scheduled" range=56619..60688
+TRACE us=209.125 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(13) range=56619..60688 members=7
+TRACE us=210.791 span=31 name=object_read
+TRACE us=212.458 message=object read submitted request_id=14 route="scheduled" range=60688..64682
+TRACE us=212.875 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(9) range=32389..36427 members=8
+TRACE us=215.125 span=32 name=object_read
+TRACE us=216.666 message=object read submitted request_id=15 route="scheduled" range=0..4051
+TRACE us=221.750 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(4) range=16209..20258 members=9
+TRACE us=223.041 span=33 name=object_read
+TRACE us=224.541 message=object read submitted request_id=16 route="scheduled" range=20258..24266
+TRACE us=227.166 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(16) range=20258..24266 members=10
+TRACE us=234.083 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(5) range=24266..28337 members=11
+TRACE us=242.000 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(12) range=40462..44501 members=12
+TRACE us=248.916 message=read plug flushed plug_id=0x783ecac0f0 members=12 reason="handoff"
+TRACE us=251.791 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(14) range=60688..64682
+TRACE us=260.083 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(10) range=48537..52599
+TRACE us=265.208 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(15) range=0..4051
+TRACE us=271.250 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(11) range=52599..56619
+TRACE us=366.541 span=34 name=object_read_group
+TRACE us=379.791 message=scheduler group selected group_id=Some(15) request_ids=[15, 1, 2, 3, 4, 16, 5, 6, 9, 7, 12, 8, 10, 11, 13, 14] ready=0 available_permits=31
+TRACE us=407.916 message=read scheduler group dispatch group_id=Some(15) request_ids=Some([15, 1, 2, 3, 4, 16, 5, 6, 9, 7, 12, 8, 10, 11, 13, 14]) start=0 end=64682
+TRACE us=409.625 message=scheduler physical read started group_id=Some(15) request_ids=Some([15, 1, 2, 3, 4, 16, 5, 6, 9, 7, 12, 8, 10, 11, 13, 14]) start=0 end=64682
+TRACE us=444.250 message=scheduler physical read completed group_id=Some(15) ok=true
+TRACE us=445.083 message=read scheduler group completed group_id=Some(15) ok=true
+TRACE us=468.666 span=35 name=object_read
+TRACE us=471.541 message=object read completed request_id=15 route="scheduled" ok=true
+TRACE us=475.166 span=36 name=object_read
+TRACE us=477.208 message=object read completed request_id=1 route="scheduled" ok=true
+TRACE us=483.666 span=37 name=object_read
+TRACE us=485.708 message=object read completed request_id=3 route="scheduled" ok=true
+TRACE us=487.500 span=38 name=object_read
+TRACE us=489.583 message=object read completed request_id=16 route="scheduled" ok=true
+TRACE us=508.500 span=39 name=object_read
+TRACE us=514.541 message=object read completed request_id=6 route="scheduled" ok=true
+TRACE us=515.750 span=40 name=object_read
+TRACE us=516.125 span=41 name=object_read
+TRACE us=517.875 span=42 name=object_read
+TRACE us=518.125 span=43 name=object_read
+TRACE us=518.291 message=object read completed request_id=12 route="scheduled" ok=true
+TRACE us=518.500 span=44 name=object_read
+TRACE us=519.750 message=object read completed request_id=2 route="scheduled" ok=true
+TRACE us=519.958 message=object read completed request_id=4 route="scheduled" ok=true
+TRACE us=520.333 message=object read completed request_id=5 route="scheduled" ok=true
+TRACE us=521.916 message=object read completed request_id=7 route="scheduled" ok=true
+TRACE us=532.625 span=45 name=object_read
+TRACE us=534.375 message=object read completed request_id=10 route="scheduled" ok=true
+TRACE us=535.458 span=46 name=object_read
+TRACE us=535.791 span=47 name=object_read
+TRACE us=537.125 message=object read completed request_id=11 route="scheduled" ok=true
+TRACE us=539.791 span=48 name=object_read
+TRACE us=540.541 message=object read completed request_id=8 route="scheduled" ok=true
+TRACE us=541.708 message=object read completed request_id=13 route="scheduled" ok=true
+TRACE us=545.500 span=49 name=object_read
+TRACE us=546.791 message=object read completed request_id=14 route="scheduled" ok=true
+TRACE us=548.208 span=50 name=object_read
+TRACE us=549.458 message=object read completed request_id=9 route="scheduled" ok=true
+TRACE us=2764.208 span=51 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=2767.541 span=52 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=2776.833 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=2779.708 span=53 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=2783.375 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=2785.208 span=54 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=2788.208 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=2789.875 span=55 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=2793.500 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=2795.041 span=56 name=object_read
+TRACE us=2795.166 span=57 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=2797.916 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=2798.083 message=object read submitted request_id=17 route="scheduled" range=4051..8126
+TRACE us=2799.500 span=58 name=object_read
+TRACE us=2800.000 span=59 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=2801.708 message=object read submitted request_id=18 route="scheduled" range=8126..12207
+TRACE us=2802.916 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=2804.083 message=read plug staged plug_id=0x783ecac780 trace_id=Some(17) range=4051..8126 members=1
+TRACE us=2804.458 span=60 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=2806.500 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=2807.750 span=61 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=2809.875 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=2810.708 message=read plug staged plug_id=0x783ecac780 trace_id=Some(18) range=8126..12207 members=2
+TRACE us=2811.125 span=62 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=2813.125 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=2814.750 span=63 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=2816.125 span=64 name=object_read
+TRACE us=2817.166 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=2817.500 message=object read submitted request_id=19 route="scheduled" range=12207..16209
+TRACE us=2818.458 span=66 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=2818.833 span=65 name=object_read
+TRACE us=2820.541 message=object read submitted request_id=20 route="scheduled" range=16209..20258
+TRACE us=2820.666 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=2821.916 message=read plug staged plug_id=0x783ecac780 trace_id=Some(19) range=12207..16209 members=3
+TRACE us=2823.000 span=67 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=2825.166 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=2826.416 span=68 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=2828.000 span=69 name=object_read
+TRACE us=2828.750 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=2829.125 message=object read submitted request_id=21 route="scheduled" range=20258..24266
+TRACE us=2830.041 span=70 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=2830.208 message=read plug staged plug_id=0x783ecac780 trace_id=Some(20) range=16209..20258 members=4
+TRACE us=2832.125 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=2833.333 span=71 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=2835.458 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=2835.791 span=72 name=object_read
+TRACE us=2836.541 message=read plug staged plug_id=0x783ecac780 trace_id=Some(21) range=20258..24266 members=5
+TRACE us=2837.083 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=2837.208 message=object read submitted request_id=22 route="scheduled" range=28337..32389
+TRACE us=2839.333 message=read plug staged plug_id=0x783ecac780 trace_id=Some(22) range=28337..32389 members=6
+TRACE us=2839.458 span=73 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=2841.041 span=74 name=object_read
+TRACE us=2842.083 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=2842.375 message=object read submitted request_id=23 route="scheduled" range=24266..28337
+TRACE us=2842.500 span=75 name=object_read
+TRACE us=2843.666 message=object read submitted request_id=24 route="scheduled" range=32389..36427
+TRACE us=2844.541 message=read plug staged plug_id=0x783ecac780 trace_id=Some(23) range=24266..28337 members=7
+TRACE us=2846.916 message=read plug staged plug_id=0x783ecac780 trace_id=Some(24) range=32389..36427 members=8
+TRACE us=2848.916 span=76 name=object_read
+TRACE us=2850.083 message=object read submitted request_id=25 route="scheduled" range=44501..48537
+TRACE us=2850.291 span=77 name=object_read
+TRACE us=2851.416 message=object read submitted request_id=26 route="scheduled" range=48537..52599
+TRACE us=2852.333 message=read plug staged plug_id=0x783ecac780 trace_id=Some(25) range=44501..48537 members=9
+TRACE us=2859.166 span=78 name=object_read
+TRACE us=2860.166 message=object read submitted request_id=27 route="scheduled" range=52599..56619
+TRACE us=2862.083 message=read plug staged plug_id=0x783ecac780 trace_id=Some(27) range=52599..56619 members=10
+TRACE us=2865.875 span=79 name=object_read
+TRACE us=2866.791 message=object read submitted request_id=28 route="scheduled" range=56619..60688
+TRACE us=2868.625 message=read plug staged plug_id=0x783ecac780 trace_id=Some(28) range=56619..60688 members=11
+TRACE us=2871.375 message=read plug flushed plug_id=0x783ecac780 members=11 reason="handoff"
+TRACE us=2871.541 span=80 name=object_read
+TRACE us=2872.375 span=81 name=object_read
+TRACE us=2872.750 message=object read submitted request_id=29 route="scheduled" range=0..4051
+TRACE us=2873.833 message=object read submitted request_id=30 route="scheduled" range=60688..64682
+TRACE us=2883.708 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(26) range=48537..52599
+TRACE us=2890.125 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(29) range=0..4051
+TRACE us=2909.333 span=82 name=object_read
+TRACE us=2910.500 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(30) range=60688..64682
+TRACE us=2912.666 message=object read submitted request_id=31 route="scheduled" range=36427..40462
+TRACE us=2914.625 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(31) range=36427..40462
+TRACE us=2915.125 span=83 name=object_read
+TRACE us=2916.833 message=object read submitted request_id=32 route="scheduled" range=40462..44501
+TRACE us=2919.125 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(32) range=40462..44501
+TRACE us=2923.916 span=84 name=object_read_group
+TRACE us=2928.750 message=scheduler group selected group_id=Some(29) request_ids=[29, 17, 18, 19, 20, 21, 23, 22, 24, 31] ready=6 available_permits=30
+TRACE us=2931.208 span=85 name=object_read_group
+TRACE us=2934.041 message=scheduler group selected group_id=Some(32) request_ids=[32, 25, 26, 27, 28, 30] ready=0 available_permits=30
+TRACE us=2940.375 message=read scheduler group dispatch group_id=Some(29) request_ids=Some([29, 17, 18, 19, 20, 21, 23, 22, 24, 31]) start=0 end=40462
+TRACE us=2942.125 message=scheduler physical read started group_id=Some(29) request_ids=Some([29, 17, 18, 19, 20, 21, 23, 22, 24, 31]) start=0 end=40462
+TRACE us=2944.375 message=read scheduler group dispatch group_id=Some(32) request_ids=Some([32, 25, 26, 27, 28, 30]) start=40462 end=64682
+TRACE us=2945.750 message=scheduler physical read started group_id=Some(32) request_ids=Some([32, 25, 26, 27, 28, 30]) start=40462 end=64682
+TRACE us=2955.000 message=scheduler physical read completed group_id=Some(29) ok=true
+TRACE us=2955.958 message=read scheduler group completed group_id=Some(29) ok=true
+TRACE us=2961.750 message=scheduler physical read completed group_id=Some(32) ok=true
+TRACE us=2962.500 message=read scheduler group completed group_id=Some(32) ok=true
+TRACE us=2970.166 span=86 name=object_read
+TRACE us=2971.666 message=object read completed request_id=29 route="scheduled" ok=true
+TRACE us=2989.625 span=87 name=object_read
+TRACE us=2991.000 message=object read completed request_id=18 route="scheduled" ok=true
+TRACE us=2993.083 span=88 name=object_read
+TRACE us=2993.833 span=89 name=object_read
+TRACE us=2994.458 message=object read completed request_id=20 route="scheduled" ok=true
+TRACE us=2995.041 message=object read completed request_id=17 route="scheduled" ok=true
+TRACE us=3003.333 span=90 name=object_read
+TRACE us=3004.541 message=object read completed request_id=19 route="scheduled" ok=true
+TRACE us=3006.208 span=91 name=object_read
+TRACE us=3007.500 span=92 name=object_read
+TRACE us=3008.250 message=object read completed request_id=32 route="scheduled" ok=true
+TRACE us=3008.666 message=object read completed request_id=21 route="scheduled" ok=true
+TRACE us=3013.333 span=93 name=object_read
+TRACE us=3014.916 span=94 name=object_read
+TRACE us=3015.958 message=object read completed request_id=25 route="scheduled" ok=true
+TRACE us=3018.833 span=95 name=object_read
+TRACE us=3018.958 span=96 name=object_read
+TRACE us=3020.583 message=object read completed request_id=23 route="scheduled" ok=true
+TRACE us=3021.083 message=object read completed request_id=26 route="scheduled" ok=true
+TRACE us=3021.708 span=97 name=object_read
+TRACE us=3026.250 span=98 name=object_read
+TRACE us=3026.958 message=object read completed request_id=31 route="scheduled" ok=true
+TRACE us=3028.291 message=object read completed request_id=28 route="scheduled" ok=true
+TRACE us=3030.000 span=99 name=object_read
+TRACE us=3030.500 message=object read completed request_id=24 route="scheduled" ok=true
+TRACE us=3033.291 span=100 name=object_read
+TRACE us=3034.875 message=object read completed request_id=22 route="scheduled" ok=true
+TRACE us=3035.708 message=object read completed request_id=27 route="scheduled" ok=true
+TRACE us=3036.500 span=101 name=object_read
+TRACE us=3038.000 message=object read completed request_id=30 route="scheduled" ok=true
+TRACE us=4871.000 span=102 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=4873.166 span=103 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=4880.708 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=4883.458 span=104 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=4886.916 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=4888.583 span=105 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=4891.541 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=4893.166 span=106 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=4895.916 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=4898.625 span=107 name=object_read
+TRACE us=4899.000 span=108 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=4901.541 message=object read submitted request_id=33 route="scheduled" range=4051..8126
+TRACE us=4902.000 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=4903.958 span=109 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=4906.583 message=read plug staged plug_id=0x783ecac400 trace_id=Some(33) range=4051..8126 members=1
+TRACE us=4910.041 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=4911.458 span=110 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=4913.916 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=4915.208 span=111 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=4917.250 span=112 name=object_read
+TRACE us=4917.458 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=4918.750 span=113 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=4919.000 message=object read submitted request_id=34 route="scheduled" range=12207..16209
+TRACE us=4920.875 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=4921.333 message=read plug staged plug_id=0x783ecac400 trace_id=Some(34) range=12207..16209 members=2
+TRACE us=4923.083 span=114 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=4925.333 span=115 name=object_read
+TRACE us=4925.500 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=4926.500 message=object read submitted request_id=35 route="scheduled" range=16209..20258
+TRACE us=4926.875 span=116 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=4928.458 message=read plug staged plug_id=0x783ecac400 trace_id=Some(35) range=16209..20258 members=3
+TRACE us=4929.208 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=4930.458 span=117 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=4933.875 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=4935.083 span=118 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=4935.750 span=119 name=object_read
+TRACE us=4936.791 message=object read submitted request_id=36 route="scheduled" range=24266..28337
+TRACE us=4937.750 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=4938.708 message=read plug staged plug_id=0x783ecac400 trace_id=Some(36) range=24266..28337 members=4
+TRACE us=4939.166 span=120 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=4941.708 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=4943.000 span=121 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=4945.375 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=4947.000 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=4948.416 span=122 name=object_read
+TRACE us=4950.083 span=123 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=4952.791 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=4954.541 span=124 name=object_read
+TRACE us=4956.333 message=object read submitted request_id=37 route="scheduled" range=8126..12207
+TRACE us=4957.000 message=object read submitted request_id=39 route="scheduled" range=32389..36427
+TRACE us=4960.125 span=125 name=object_read
+TRACE us=4962.833 message=read plug staged plug_id=0x783ecac400 trace_id=Some(39) range=32389..36427 members=5
+TRACE us=4965.291 message=object read submitted request_id=38 route="scheduled" range=28337..32389
+TRACE us=4967.000 span=126 name=object_read
+TRACE us=4969.083 message=object read submitted request_id=40 route="scheduled" range=20258..24266
+TRACE us=4973.791 message=read plug staged plug_id=0x783ecac400 trace_id=Some(38) range=28337..32389 members=6
+TRACE us=4978.083 span=127 name=object_read
+TRACE us=4980.333 span=128 name=object_read
+TRACE us=4982.958 message=object read submitted request_id=42 route="scheduled" range=40462..44501
+TRACE us=4984.125 message=object read submitted request_id=41 route="scheduled" range=36427..40462
+TRACE us=4985.708 span=130 name=object_read
+TRACE us=4986.750 span=129 name=object_read
+TRACE us=4987.875 message=read plug staged plug_id=0x783ecac400 trace_id=Some(40) range=20258..24266 members=7
+TRACE us=4989.708 message=object read submitted request_id=44 route="scheduled" range=48537..52599
+TRACE us=4992.041 message=object read submitted request_id=43 route="scheduled" range=44501..48537
+TRACE us=4994.000 message=read plug staged plug_id=0x783ecac400 trace_id=Some(44) range=48537..52599 members=8
+TRACE us=4994.458 span=131 name=object_read
+TRACE us=4998.125 message=object read submitted request_id=45 route="scheduled" range=52599..56619
+TRACE us=5001.500 message=read plug staged plug_id=0x783ecac400 trace_id=Some(43) range=44501..48537 members=9
+TRACE us=5002.000 span=133 name=object_read
+TRACE us=5002.791 span=132 name=object_read
+TRACE us=5004.125 message=object read submitted request_id=47 route="scheduled" range=0..4051
+TRACE us=5005.416 span=134 name=object_read
+TRACE us=5007.250 message=object read submitted request_id=46 route="scheduled" range=56619..60688
+TRACE us=5008.583 message=read plug staged plug_id=0x783ecac400 trace_id=Some(47) range=0..4051 members=10
+TRACE us=5009.750 message=object read submitted request_id=48 route="scheduled" range=60688..64682
+TRACE us=5014.541 message=read plug staged plug_id=0x783ecac400 trace_id=Some(46) range=56619..60688 members=11
+TRACE us=5021.000 message=read plug staged plug_id=0x783ecac400 trace_id=Some(41) range=36427..40462 members=12
+TRACE us=5025.333 message=read plug staged plug_id=0x783ecac400 trace_id=Some(37) range=8126..12207 members=13
+TRACE us=5037.750 message=read plug staged plug_id=0x783ecac400 trace_id=Some(45) range=52599..56619 members=14
+TRACE us=5048.041 message=read plug staged plug_id=0x783ecac400 trace_id=Some(42) range=40462..44501 members=15
+TRACE us=5061.333 message=read plug staged plug_id=0x783ecac400 trace_id=Some(48) range=60688..64682 members=16
+TRACE us=5064.875 message=read plug flushed plug_id=0x783ecac400 members=16 reason="capacity"
+TRACE us=5109.750 span=135 name=object_read_group
+TRACE us=5113.541 message=scheduler group selected group_id=Some(47) request_ids=[47, 33, 37, 34, 35, 40, 36, 38, 39, 41, 42, 43, 44, 45, 46, 48] ready=0 available_permits=31
+TRACE us=5125.125 message=read scheduler group dispatch group_id=Some(47) request_ids=Some([47, 33, 37, 34, 35, 40, 36, 38, 39, 41, 42, 43, 44, 45, 46, 48]) start=0 end=64682
+TRACE us=5126.750 message=scheduler physical read started group_id=Some(47) request_ids=Some([47, 33, 37, 34, 35, 40, 36, 38, 39, 41, 42, 43, 44, 45, 46, 48]) start=0 end=64682
+TRACE us=5136.125 message=scheduler physical read completed group_id=Some(47) ok=true
+TRACE us=5136.875 message=read scheduler group completed group_id=Some(47) ok=true
+TRACE us=5150.791 span=136 name=object_read
+TRACE us=5152.500 message=object read completed request_id=47 route="scheduled" ok=true
+TRACE us=5167.791 span=137 name=object_read
+TRACE us=5169.041 message=object read completed request_id=37 route="scheduled" ok=true
+TRACE us=5172.083 span=138 name=object_read
+TRACE us=5173.291 message=object read completed request_id=33 route="scheduled" ok=true
+TRACE us=5180.666 span=139 name=object_read
+TRACE us=5181.791 message=object read completed request_id=34 route="scheduled" ok=true
+TRACE us=5186.500 span=140 name=object_read
+TRACE us=5191.041 message=object read completed request_id=35 route="scheduled" ok=true
+TRACE us=5191.541 span=141 name=object_read
+TRACE us=5193.583 message=object read completed request_id=39 route="scheduled" ok=true
+TRACE us=5197.250 span=142 name=object_read
+TRACE us=5199.000 span=143 name=object_read
+TRACE us=5201.166 message=object read completed request_id=36 route="scheduled" ok=true
+TRACE us=5202.083 message=object read completed request_id=42 route="scheduled" ok=true
+TRACE us=5203.416 span=144 name=object_read
+TRACE us=5205.291 message=object read completed request_id=41 route="scheduled" ok=true
+TRACE us=5210.916 span=145 name=object_read
+TRACE us=5214.750 message=object read completed request_id=43 route="scheduled" ok=true
+TRACE us=5215.166 span=146 name=object_read
+TRACE us=5217.166 message=object read completed request_id=44 route="scheduled" ok=true
+TRACE us=5228.666 span=147 name=object_read
+TRACE us=5229.708 message=object read completed request_id=45 route="scheduled" ok=true
+TRACE us=5235.541 span=148 name=object_read
+TRACE us=5236.583 span=150 name=object_read
+TRACE us=5238.875 message=object read completed request_id=40 route="scheduled" ok=true
+TRACE us=5239.666 message=object read completed request_id=46 route="scheduled" ok=true
+TRACE us=5241.083 span=151 name=object_read
+TRACE us=5242.916 message=object read completed request_id=38 route="scheduled" ok=true
+TRACE us=5279.958 span=149 name=object_read
+TRACE us=5283.250 message=object read completed request_id=48 route="scheduled" ok=true
+TRACE us=7278.625 span=152 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=7283.208 span=153 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=7296.458 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=7299.583 span=154 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=7303.375 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=7305.041 span=155 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=7308.125 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=7309.708 span=156 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=7310.541 span=157 name=object_read
+TRACE us=7312.583 message=object read submitted request_id=49 route="scheduled" range=4051..8126
+TRACE us=7312.791 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=7314.208 span=158 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=7316.791 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=7317.083 message=read plug staged plug_id=0x783ecac400 trace_id=Some(49) range=4051..8126 members=1
+TRACE us=7318.625 span=159 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=7321.125 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=7322.583 span=160 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=7325.291 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=7326.708 span=161 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=7329.333 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=7330.833 span=162 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=7332.750 span=163 name=object_read
+TRACE us=7333.416 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=7333.916 message=object read submitted request_id=50 route="scheduled" range=16209..20258
+TRACE us=7335.250 span=164 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=7336.041 message=read plug staged plug_id=0x783ecac400 trace_id=Some(50) range=16209..20258 members=2
+TRACE us=7338.166 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=7339.458 span=165 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=7340.791 span=166 name=object_read
+TRACE us=7341.791 message=object read submitted request_id=53 route="scheduled" range=20258..24266
+TRACE us=7342.083 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=7343.791 message=read plug staged plug_id=0x783ecac400 trace_id=Some(53) range=20258..24266 members=3
+TRACE us=7343.958 span=169 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=7345.458 span=168 name=object_read
+TRACE us=7346.916 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=7347.875 span=167 name=object_read
+TRACE us=7348.583 span=171 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=7350.083 span=170 name=object_read
+TRACE us=7351.708 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=7352.375 message=object read submitted request_id=54 route="scheduled" range=28337..32389
+TRACE us=7353.291 span=172 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=7353.750 message=object read submitted request_id=51 route="scheduled" range=8126..12207
+TRACE us=7354.250 message=object read submitted request_id=52 route="scheduled" range=12207..16209
+TRACE us=7355.541 span=173 name=object_read
+TRACE us=7356.541 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=7358.208 span=174 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=7358.458 message=read plug flushed plug_id=0x783ecac400 members=3 reason="handoff"
+TRACE us=7360.750 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=7362.166 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=7364.916 message=object read submitted request_id=55 route="scheduled" range=24266..28337
+TRACE us=7365.208 span=175 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=7366.208 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(54) range=28337..32389
+TRACE us=7367.583 span=176 name=object_read
+TRACE us=7367.958 span=177 name=object_read
+TRACE us=7368.458 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=7370.458 message=object read submitted request_id=57 route="scheduled" range=36427..40462
+TRACE us=7372.208 message=object read submitted request_id=56 route="scheduled" range=32389..36427
+TRACE us=7372.666 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(55) range=24266..28337
+TRACE us=7379.833 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(52) range=12207..16209
+TRACE us=7382.916 span=178 name=object_read
+TRACE us=7384.791 span=179 name=object_read
+TRACE us=7386.666 message=object read submitted request_id=59 route="scheduled" range=44501..48537
+TRACE us=7391.083 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(57) range=36427..40462
+TRACE us=7393.708 message=object read submitted request_id=58 route="scheduled" range=40462..44501
+TRACE us=7396.166 span=180 name=object_read
+TRACE us=7399.375 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(58) range=40462..44501
+TRACE us=7400.458 message=object read submitted request_id=60 route="scheduled" range=48537..52599
+TRACE us=7410.250 span=181 name=object_read
+TRACE us=7413.625 span=182 name=object_read
+TRACE us=7414.166 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(60) range=48537..52599
+TRACE us=7420.125 message=object read submitted request_id=61 route="scheduled" range=52599..56619
+TRACE us=7421.958 span=183 name=object_read
+TRACE us=7422.708 message=object read submitted request_id=62 route="scheduled" range=56619..60688
+TRACE us=7423.833 span=184 name=object_read
+TRACE us=7425.708 message=object read submitted request_id=63 route="scheduled" range=60688..64682
+TRACE us=7426.208 message=object read submitted request_id=64 route="scheduled" range=0..4051
+TRACE us=7426.625 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(51) range=8126..12207
+TRACE us=7432.458 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(63) range=60688..64682
+TRACE us=7441.500 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(56) range=32389..36427
+TRACE us=7470.625 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(61) range=52599..56619
+TRACE us=7488.500 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(62) range=56619..60688
+TRACE us=7494.125 span=185 name=object_read_group
+TRACE us=7495.666 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(64) range=0..4051
+TRACE us=7499.916 message=read plug late arrival plug_id=0x783ecac400 trace_id=Some(59) range=44501..48537
+TRACE us=7514.916 message=scheduler group selected group_id=Some(49) request_ids=[49, 51, 52, 50, 53, 55, 54, 56, 57, 58] ready=4 available_permits=29
+TRACE us=7526.000 message=read scheduler group dispatch group_id=Some(49) request_ids=Some([49, 51, 52, 50, 53, 55, 54, 56, 57, 58]) start=4051 end=44501
+TRACE us=7527.541 message=scheduler physical read started group_id=Some(49) request_ids=Some([49, 51, 52, 50, 53, 55, 54, 56, 57, 58]) start=4051 end=44501
+TRACE us=7529.500 span=186 name=object_read_group
+TRACE us=7532.125 message=scheduler group selected group_id=Some(60) request_ids=[60, 61, 62, 63] ready=1 available_permits=29
+TRACE us=7538.666 message=scheduler physical read completed group_id=Some(49) ok=true
+TRACE us=7538.791 message=read scheduler group dispatch group_id=Some(60) request_ids=Some([60, 61, 62, 63]) start=48537 end=64682
+TRACE us=7539.750 message=read scheduler group completed group_id=Some(49) ok=true
+TRACE us=7540.416 message=scheduler physical read started group_id=Some(60) request_ids=Some([60, 61, 62, 63]) start=48537 end=64682
+TRACE us=7551.875 span=187 name=object_read
+TRACE us=7552.250 message=scheduler physical read completed group_id=Some(60) ok=true
+TRACE us=7553.041 message=read scheduler group completed group_id=Some(60) ok=true
+TRACE us=7553.333 span=188 name=object_read_group
+TRACE us=7555.458 message=scheduler group selected group_id=Some(64) request_ids=[64] ready=1 available_permits=31
+TRACE us=7555.833 message=object read completed request_id=49 route="scheduled" ok=true
+TRACE us=7559.583 message=read scheduler group dispatch group_id=Some(64) request_ids=Some([64]) start=0 end=4051
+TRACE us=7560.666 message=scheduler physical read started group_id=Some(64) request_ids=Some([64]) start=0 end=4051
+TRACE us=7562.666 span=189 name=object_read
+TRACE us=7566.250 message=scheduler physical read completed group_id=Some(64) ok=true
+TRACE us=7566.750 message=object read completed request_id=51 route="scheduled" ok=true
+TRACE us=7567.208 message=read scheduler group completed group_id=Some(64) ok=true
+TRACE us=7571.125 span=190 name=object_read_group
+TRACE us=7573.083 message=scheduler group selected group_id=Some(59) request_ids=[59] ready=0 available_permits=31
+TRACE us=7574.833 span=191 name=object_read
+TRACE us=7577.583 message=read scheduler group dispatch group_id=Some(59) request_ids=Some([59]) start=44501 end=48537
+TRACE us=7579.000 message=scheduler physical read started group_id=Some(59) request_ids=Some([59]) start=44501 end=48537
+TRACE us=7579.291 message=object read completed request_id=50 route="scheduled" ok=true
+TRACE us=7584.958 message=scheduler physical read completed group_id=Some(59) ok=true
+TRACE us=7585.625 message=read scheduler group completed group_id=Some(59) ok=true
+TRACE us=7587.375 span=192 name=object_read
+TRACE us=7591.166 message=object read completed request_id=55 route="scheduled" ok=true
+TRACE us=7595.375 span=193 name=object_read
+TRACE us=7597.625 message=object read completed request_id=58 route="scheduled" ok=true
+TRACE us=7601.500 span=194 name=object_read
+TRACE us=7602.708 span=195 name=object_read
+TRACE us=7604.708 message=object read completed request_id=60 route="scheduled" ok=true
+TRACE us=7606.041 message=object read completed request_id=56 route="scheduled" ok=true
+TRACE us=7609.416 span=196 name=object_read
+TRACE us=7610.833 span=197 name=object_read
+TRACE us=7611.166 message=object read completed request_id=61 route="scheduled" ok=true
+TRACE us=7614.291 span=198 name=object_read
+TRACE us=7616.041 message=object read completed request_id=52 route="scheduled" ok=true
+TRACE us=7618.083 span=200 name=object_read
+TRACE us=7618.541 span=199 name=object_read
+TRACE us=7619.916 message=object read completed request_id=53 route="scheduled" ok=true
+TRACE us=7620.250 message=object read completed request_id=63 route="scheduled" ok=true
+TRACE us=7622.291 span=201 name=object_read
+TRACE us=7623.458 message=object read completed request_id=62 route="scheduled" ok=true
+TRACE us=7624.458 span=202 name=object_read
+TRACE us=7630.041 span=203 name=object_read
+TRACE us=7630.416 message=object read completed request_id=64 route="scheduled" ok=true
+TRACE us=7631.000 message=object read completed request_id=54 route="scheduled" ok=true
+TRACE us=7633.708 message=object read completed request_id=59 route="scheduled" ok=true
+TRACE us=7639.375 span=204 name=object_read
+TRACE us=7641.250 message=object read completed request_id=57 route="scheduled" ok=true
+TRACE us=10475.666 span=205 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=10479.500 span=206 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=10493.416 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=10496.583 span=207 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=10499.750 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=10502.791 span=208 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=10505.541 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=10507.083 span=209 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=10509.750 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=10511.000 span=210 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=10513.333 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=10515.250 span=211 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=10518.083 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=10519.375 span=212 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=10521.875 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=10523.250 span=213 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=10526.000 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=10527.333 span=216 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=10528.875 span=214 name=object_read
+TRACE us=10530.333 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=10531.333 span=215 name=object_read
+TRACE us=10532.083 span=217 name=object_read
+TRACE us=10533.708 span=218 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=10536.916 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=10537.250 message=object read submitted request_id=67 route="scheduled" range=12207..16209
+TRACE us=10538.333 span=219 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=10538.666 message=object read submitted request_id=65 route="scheduled" range=8126..12207
+TRACE us=10539.291 span=220 name=object_read
+TRACE us=10543.000 message=object read submitted request_id=68 route="scheduled" range=16209..20258
+TRACE us=10543.666 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=10545.208 span=221 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=10548.083 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=10548.833 message=object read submitted request_id=66 route="scheduled" range=4051..8126
+TRACE us=10549.541 span=222 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=10550.000 message=read plug staged plug_id=0x783ecac470 trace_id=Some(67) range=12207..16209 members=1
+TRACE us=10550.833 span=223 name=object_read
+TRACE us=10553.166 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=10555.041 message=object read submitted request_id=69 route="scheduled" range=20258..24266
+TRACE us=10555.333 span=224 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=10557.875 span=225 name=object_read
+TRACE us=10558.416 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=10560.416 span=226 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=10561.666 message=object read submitted request_id=70 route="scheduled" range=24266..28337
+TRACE us=10563.166 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=10564.458 message=read plug staged plug_id=0x783ecac470 trace_id=Some(69) range=20258..24266 members=2
+TRACE us=10564.750 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=10567.458 span=227 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=10569.125 span=228 name=object_read
+TRACE us=10571.000 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=10572.708 message=object read submitted request_id=71 route="scheduled" range=28337..32389
+TRACE us=10575.541 span=229 name=object_read
+TRACE us=10577.333 span=230 name=object_read
+TRACE us=10578.500 message=read plug staged plug_id=0x783ecac470 trace_id=Some(71) range=28337..32389 members=3
+TRACE us=10579.833 span=231 name=object_read
+TRACE us=10582.083 message=object read submitted request_id=73 route="scheduled" range=40462..44501
+TRACE us=10583.000 message=object read submitted request_id=74 route="scheduled" range=44501..48537
+TRACE us=10586.833 message=object read submitted request_id=72 route="scheduled" range=32389..36427
+TRACE us=10588.375 message=read plug staged plug_id=0x783ecac470 trace_id=Some(73) range=40462..44501 members=4
+TRACE us=10594.750 message=read plug staged plug_id=0x783ecac470 trace_id=Some(66) range=4051..8126 members=5
+TRACE us=10595.458 span=232 name=object_read
+TRACE us=10598.375 message=object read submitted request_id=75 route="scheduled" range=48537..52599
+TRACE us=10601.125 span=233 name=object_read
+TRACE us=10604.125 message=object read submitted request_id=76 route="scheduled" range=52599..56619
+TRACE us=10609.291 message=read plug staged plug_id=0x783ecac470 trace_id=Some(76) range=52599..56619 members=6
+TRACE us=10612.375 span=234 name=object_read
+TRACE us=10614.708 message=object read submitted request_id=77 route="scheduled" range=56619..60688
+TRACE us=10620.916 span=235 name=object_read
+TRACE us=10623.416 message=read plug staged plug_id=0x783ecac470 trace_id=Some(68) range=16209..20258 members=7
+TRACE us=10623.833 message=object read submitted request_id=78 route="scheduled" range=60688..64682
+TRACE us=10629.458 message=read plug staged plug_id=0x783ecac470 trace_id=Some(78) range=60688..64682 members=8
+TRACE us=10630.708 span=236 name=object_read
+TRACE us=10632.458 message=object read submitted request_id=79 route="scheduled" range=0..4051
+TRACE us=10635.666 message=read plug staged plug_id=0x783ecac470 trace_id=Some(79) range=0..4051 members=9
+TRACE us=10642.375 span=237 name=object_read
+TRACE us=10645.250 message=object read submitted request_id=80 route="scheduled" range=36427..40462
+TRACE us=10650.000 message=read plug staged plug_id=0x783ecac470 trace_id=Some(72) range=32389..36427 members=10
+TRACE us=10662.000 message=read plug staged plug_id=0x783ecac470 trace_id=Some(65) range=8126..12207 members=11
+TRACE us=10673.541 message=read plug staged plug_id=0x783ecac470 trace_id=Some(75) range=48537..52599 members=12
+TRACE us=10685.166 message=read plug staged plug_id=0x783ecac470 trace_id=Some(70) range=24266..28337 members=13
+TRACE us=10696.458 message=read plug staged plug_id=0x783ecac470 trace_id=Some(77) range=56619..60688 members=14
+TRACE us=10709.750 message=read plug flushed plug_id=0x783ecac470 members=14 reason="handoff"
+TRACE us=10714.958 message=read plug late arrival plug_id=0x783ecac470 trace_id=Some(74) range=44501..48537
+TRACE us=10722.500 message=read plug late arrival plug_id=0x783ecac470 trace_id=Some(80) range=36427..40462
+TRACE us=10793.208 span=238 name=object_read_group
+TRACE us=10804.041 message=scheduler group selected group_id=Some(79) request_ids=[79, 66, 65, 67, 68, 69, 70, 71, 72, 80, 73, 74, 75, 76, 77, 78] ready=0 available_permits=31
+TRACE us=10832.125 message=read scheduler group dispatch group_id=Some(79) request_ids=Some([79, 66, 65, 67, 68, 69, 70, 71, 72, 80, 73, 74, 75, 76, 77, 78]) start=0 end=64682
+TRACE us=10836.958 message=scheduler physical read started group_id=Some(79) request_ids=Some([79, 66, 65, 67, 68, 69, 70, 71, 72, 80, 73, 74, 75, 76, 77, 78]) start=0 end=64682
+TRACE us=10858.583 message=scheduler physical read completed group_id=Some(79) ok=true
+TRACE us=10860.541 message=read scheduler group completed group_id=Some(79) ok=true
+TRACE us=10880.333 span=239 name=object_read
+TRACE us=10883.166 message=object read completed request_id=79 route="scheduled" ok=true
+TRACE us=10884.208 span=240 name=object_read
+TRACE us=10887.125 message=object read completed request_id=66 route="scheduled" ok=true
+TRACE us=10893.541 span=241 name=object_read
+TRACE us=10896.458 message=object read completed request_id=67 route="scheduled" ok=true
+TRACE us=10900.250 span=242 name=object_read
+TRACE us=10903.250 message=object read completed request_id=69 route="scheduled" ok=true
+TRACE us=10908.250 span=243 name=object_read
+TRACE us=10911.291 message=object read completed request_id=71 route="scheduled" ok=true
+TRACE us=10918.250 span=244 name=object_read
+TRACE us=10921.375 message=object read completed request_id=80 route="scheduled" ok=true
+TRACE us=10926.833 span=245 name=object_read
+TRACE us=10929.625 message=object read completed request_id=73 route="scheduled" ok=true
+TRACE us=10932.875 span=246 name=object_read
+TRACE us=10934.833 span=247 name=object_read
+TRACE us=10936.083 span=248 name=object_read
+TRACE us=10941.000 span=249 name=object_read
+TRACE us=10950.750 span=250 name=object_read
+TRACE us=10958.125 span=251 name=object_read
+TRACE us=10960.208 message=object read completed request_id=74 route="scheduled" ok=true
+TRACE us=10960.958 message=object read completed request_id=76 route="scheduled" ok=true
+TRACE us=10962.208 message=object read completed request_id=75 route="scheduled" ok=true
+TRACE us=10963.833 message=object read completed request_id=70 route="scheduled" ok=true
+TRACE us=10964.708 message=object read completed request_id=65 route="scheduled" ok=true
+TRACE us=10966.291 message=object read completed request_id=72 route="scheduled" ok=true
+TRACE us=10988.541 span=252 name=object_read
+TRACE us=10991.291 message=object read completed request_id=77 route="scheduled" ok=true
+TRACE us=10992.041 span=253 name=object_read
+TRACE us=10994.791 message=object read completed request_id=78 route="scheduled" ok=true
+TRACE us=10995.750 span=254 name=object_read
+TRACE us=10998.500 message=object read completed request_id=68 route="scheduled" ok=true
+TRACE us=12871.083 span=255 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=12876.083 span=256 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=12887.416 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=12890.375 span=257 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=12894.000 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=12895.625 span=258 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=12895.708 span=259 name=object_read
+TRACE us=12897.583 message=object read submitted request_id=81 route="scheduled" range=4051..8126
+TRACE us=12898.541 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=12900.000 span=260 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=12901.416 message=read plug staged plug_id=0x783ecac780 trace_id=Some(81) range=4051..8126 members=1
+TRACE us=12902.708 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=12904.041 span=261 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=12906.625 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=12908.166 span=262 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=12910.875 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=12911.333 span=263 name=object_read
+TRACE us=12912.333 span=264 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=12912.500 message=object read submitted request_id=82 route="scheduled" range=12207..16209
+TRACE us=12914.291 message=read plug staged plug_id=0x783ecac780 trace_id=Some(82) range=12207..16209 members=2
+TRACE us=12914.833 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=12916.375 span=265 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=12917.708 span=266 name=object_read
+TRACE us=12918.791 message=object read submitted request_id=83 route="scheduled" range=20258..24266
+TRACE us=12919.166 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=12920.583 message=read plug staged plug_id=0x783ecac780 trace_id=Some(83) range=20258..24266 members=3
+TRACE us=12922.000 span=267 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=12925.250 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=12926.250 span=268 name=object_read
+TRACE us=12927.333 message=object read submitted request_id=86 route="scheduled" range=28337..32389
+TRACE us=12928.125 span=269 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=12930.125 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(86) range=28337..32389
+TRACE us=12930.708 span=270 name=object_read
+TRACE us=12932.291 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=12933.208 span=272 name=object_read
+TRACE us=12934.208 span=273 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=12937.291 message=object read submitted request_id=84 route="scheduled" range=16209..20258
+TRACE us=12938.458 message=object read submitted request_id=87 route="scheduled" range=24266..28337
+TRACE us=12940.458 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=12942.208 span=275 name=object_read
+TRACE us=12942.500 span=274 name=object_read
+TRACE us=12943.000 span=276 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=12944.166 message=object read submitted request_id=89 route="scheduled" range=36427..40462
+TRACE us=12945.833 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=12946.291 span=271 name=object_read
+TRACE us=12946.958 message=object read submitted request_id=88 route="scheduled" range=32389..36427
+TRACE us=12947.541 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(84) range=16209..20258
+TRACE us=12949.083 message=read plug flushed plug_id=0x783ecac780 members=3 reason="handoff"
+TRACE us=12950.833 message=object read submitted request_id=85 route="scheduled" range=8126..12207
+TRACE us=12953.791 span=278 name=object_read
+TRACE us=12955.833 span=277 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=12957.125 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(85) range=8126..12207
+TRACE us=12957.625 message=object read submitted request_id=90 route="scheduled" range=40462..44501
+TRACE us=12960.583 span=279 name=object_read
+TRACE us=12963.166 message=object read submitted request_id=91 route="scheduled" range=44501..48537
+TRACE us=12965.041 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(90) range=40462..44501
+TRACE us=12967.875 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(89) range=36427..40462
+TRACE us=12974.583 span=280 name=object_read
+TRACE us=12976.291 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=12977.250 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(88) range=32389..36427
+TRACE us=12978.750 message=object read submitted request_id=92 route="scheduled" range=48537..52599
+TRACE us=12979.916 span=281 name=object_read
+TRACE us=12983.000 message=object read submitted request_id=93 route="scheduled" range=52599..56619
+TRACE us=12984.541 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(92) range=48537..52599
+TRACE us=12986.000 span=282 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=12988.333 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(93) range=52599..56619
+TRACE us=12996.416 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(91) range=44501..48537
+TRACE us=12997.791 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=13001.750 span=284 name=object_read
+TRACE us=13002.625 span=283 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=13003.875 message=object read submitted request_id=94 route="scheduled" range=56619..60688
+TRACE us=13005.666 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(87) range=24266..28337
+TRACE us=13016.416 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=13023.125 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(94) range=56619..60688
+TRACE us=13023.458 span=285 name=object_read
+TRACE us=13027.250 message=object read submitted request_id=95 route="scheduled" range=60688..64682
+TRACE us=13028.416 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=13031.791 span=286 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=13038.333 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(95) range=60688..64682
+TRACE us=13038.875 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=13045.416 span=287 name=object_read
+TRACE us=13046.916 message=object read submitted request_id=96 route="scheduled" range=0..4051
+TRACE us=13049.416 message=read plug late arrival plug_id=0x783ecac780 trace_id=Some(96) range=0..4051
+TRACE us=13071.750 span=288 name=object_read_group
+TRACE us=13076.250 message=scheduler group selected group_id=Some(96) request_ids=[96, 81, 85, 82, 84, 83, 87, 86, 88, 89, 90, 91, 92, 93, 94, 95] ready=0 available_permits=31
+TRACE us=13090.041 message=read scheduler group dispatch group_id=Some(96) request_ids=Some([96, 81, 85, 82, 84, 83, 87, 86, 88, 89, 90, 91, 92, 93, 94, 95]) start=0 end=64682
+TRACE us=13091.833 message=scheduler physical read started group_id=Some(96) request_ids=Some([96, 81, 85, 82, 84, 83, 87, 86, 88, 89, 90, 91, 92, 93, 94, 95]) start=0 end=64682
+TRACE us=13103.583 message=scheduler physical read completed group_id=Some(96) ok=true
+TRACE us=13104.375 message=read scheduler group completed group_id=Some(96) ok=true
+TRACE us=13114.708 span=289 name=object_read
+TRACE us=13116.250 message=object read completed request_id=96 route="scheduled" ok=true
+TRACE us=13118.458 span=290 name=object_read
+TRACE us=13119.750 message=object read completed request_id=81 route="scheduled" ok=true
+TRACE us=13130.916 span=291 name=object_read
+TRACE us=13134.875 message=object read completed request_id=82 route="scheduled" ok=true
+TRACE us=13138.625 span=293 name=object_read
+TRACE us=13139.250 span=294 name=object_read
+TRACE us=13140.750 message=object read completed request_id=86 route="scheduled" ok=true
+TRACE us=13140.916 message=object read completed request_id=83 route="scheduled" ok=true
+TRACE us=13143.208 span=292 name=object_read
+TRACE us=13146.208 span=295 name=object_read
+TRACE us=13147.333 message=object read completed request_id=85 route="scheduled" ok=true
+TRACE us=13148.125 message=object read completed request_id=89 route="scheduled" ok=true
+TRACE us=13151.708 span=296 name=object_read
+TRACE us=13152.916 message=object read completed request_id=88 route="scheduled" ok=true
+TRACE us=13154.250 span=297 name=object_read
+TRACE us=13155.458 message=object read completed request_id=87 route="scheduled" ok=true
+TRACE us=13158.416 span=298 name=object_read
+TRACE us=13159.541 message=object read completed request_id=90 route="scheduled" ok=true
+TRACE us=13162.625 span=299 name=object_read
+TRACE us=13163.791 message=object read completed request_id=91 route="scheduled" ok=true
+TRACE us=13165.666 span=300 name=object_read
+TRACE us=13166.958 message=object read completed request_id=92 route="scheduled" ok=true
+TRACE us=13168.625 span=301 name=object_read
+TRACE us=13169.791 message=object read completed request_id=93 route="scheduled" ok=true
+TRACE us=13173.375 span=302 name=object_read
+TRACE us=13174.500 message=object read completed request_id=95 route="scheduled" ok=true
+TRACE us=13178.833 span=304 name=object_read
+TRACE us=13179.125 span=303 name=object_read
+TRACE us=13180.375 message=object read completed request_id=84 route="scheduled" ok=true
+TRACE us=13183.416 message=object read completed request_id=94 route="scheduled" ok=true
+TRACE us=15206.791 span=305 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=15208.958 span=306 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=15215.708 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=15218.083 span=307 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=15220.666 span=308 name=object_read
+TRACE us=15221.291 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=15222.083 message=object read submitted request_id=97 route="scheduled" range=4051..8126
+TRACE us=15222.833 span=309 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=15224.791 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(97) range=4051..8126 members=1
+TRACE us=15225.416 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=15226.916 span=310 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=15228.208 span=311 name=object_read
+TRACE us=15229.458 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=15229.625 message=object read submitted request_id=98 route="scheduled" range=8126..12207
+TRACE us=15230.791 span=312 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=15231.916 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(98) range=8126..12207 members=2
+TRACE us=15233.166 span=313 name=object_read
+TRACE us=15233.291 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=15234.458 message=object read submitted request_id=99 route="scheduled" range=12207..16209
+TRACE us=15234.958 span=314 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=15235.166 span=315 name=object_read
+TRACE us=15236.500 message=object read submitted request_id=100 route="scheduled" range=16209..20258
+TRACE us=15236.750 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(99) range=12207..16209 members=3
+TRACE us=15237.416 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=15238.625 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(100) range=16209..20258 members=4
+TRACE us=15238.916 span=316 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=15239.916 span=317 name=object_read
+TRACE us=15241.000 message=object read submitted request_id=101 route="scheduled" range=20258..24266
+TRACE us=15241.416 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=15241.541 span=318 name=object_read
+TRACE us=15242.791 span=319 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=15243.250 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(101) range=20258..24266 members=5
+TRACE us=15244.541 message=object read submitted request_id=102 route="scheduled" range=24266..28337
+TRACE us=15246.625 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(102) range=24266..28337 members=6
+TRACE us=15246.791 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=15248.166 span=320 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=15249.541 span=321 name=object_read
+TRACE us=15250.458 message=object read submitted request_id=103 route="scheduled" range=32389..36427
+TRACE us=15251.666 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=15252.250 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(103) range=32389..36427 members=7
+TRACE us=15253.500 span=322 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=15256.208 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=15257.500 span=323 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=15258.041 span=324 name=object_read
+TRACE us=15259.375 message=object read submitted request_id=104 route="scheduled" range=36427..40462
+TRACE us=15259.833 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=15261.125 span=325 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=15261.333 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(104) range=36427..40462 members=8
+TRACE us=15263.666 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=15264.666 span=327 name=object_read
+TRACE us=15264.958 span=326 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=15265.833 message=object read submitted request_id=105 route="scheduled" range=40462..44501
+TRACE us=15267.541 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(105) range=40462..44501 members=9
+TRACE us=15267.875 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=15269.166 span=328 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=15271.583 span=329 name=object_read
+TRACE us=15272.041 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=15272.625 message=object read submitted request_id=106 route="scheduled" range=44501..48537
+TRACE us=15273.375 span=330 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=15274.416 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(106) range=44501..48537 members=10
+TRACE us=15277.750 span=331 name=object_read
+TRACE us=15278.666 message=object read submitted request_id=107 route="scheduled" range=52599..56619
+TRACE us=15279.708 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=15280.416 message=read plug staged plug_id=0x783ecac6a0 trace_id=Some(107) range=52599..56619 members=11
+TRACE us=15281.250 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=15283.416 span=332 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=15285.083 span=333 name=object_read
+TRACE us=15286.791 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=15287.833 message=read plug flushed plug_id=0x783ecac6a0 members=11 reason="handoff"
+TRACE us=15289.833 span=335 name=object_read
+TRACE us=15301.375 message=object read submitted request_id=110 route="scheduled" range=48537..52599
+TRACE us=15302.083 span=334 name=object_read
+TRACE us=15304.958 message=object read submitted request_id=108 route="scheduled" range=28337..32389
+TRACE us=15305.791 message=object read submitted request_id=109 route="scheduled" range=56619..60688
+TRACE us=15308.458 span=336 name=object_read
+TRACE us=15311.875 message=object read submitted request_id=111 route="scheduled" range=60688..64682
+TRACE us=15312.916 span=337 name=object_read_group
+TRACE us=15316.208 message=scheduler group selected group_id=Some(97) request_ids=[97, 98, 99, 100, 101, 102] ready=5 available_permits=29
+TRACE us=15317.125 message=read plug late arrival plug_id=0x783ecac6a0 trace_id=Some(110) range=48537..52599
+TRACE us=15318.416 span=338 name=object_read
+TRACE us=15322.166 message=object read submitted request_id=112 route="scheduled" range=0..4051
+TRACE us=15323.666 message=read scheduler group dispatch group_id=Some(97) request_ids=Some([97, 98, 99, 100, 101, 102]) start=4051 end=28337
+TRACE us=15325.708 message=read plug late arrival plug_id=0x783ecac6a0 trace_id=Some(108) range=28337..32389
+TRACE us=15327.708 span=339 name=object_read_group
+TRACE us=15333.708 message=read plug late arrival plug_id=0x783ecac6a0 trace_id=Some(109) range=56619..60688
+TRACE us=15335.583 message=scheduler physical read started group_id=Some(97) request_ids=Some([97, 98, 99, 100, 101, 102]) start=4051 end=28337
+TRACE us=15340.208 message=read plug late arrival plug_id=0x783ecac6a0 trace_id=Some(111) range=60688..64682
+TRACE us=15345.875 message=read plug late arrival plug_id=0x783ecac6a0 trace_id=Some(112) range=0..4051
+TRACE us=15356.375 message=scheduler group selected group_id=Some(103) request_ids=[103, 104, 105, 106] ready=3 available_permits=29
+TRACE us=15360.625 message=scheduler physical read completed group_id=Some(97) ok=true
+TRACE us=15362.791 message=read scheduler group completed group_id=Some(97) ok=true
+TRACE us=15363.875 message=read scheduler group dispatch group_id=Some(103) request_ids=Some([103, 104, 105, 106]) start=32389 end=48537
+TRACE us=15365.125 message=scheduler physical read started group_id=Some(103) request_ids=Some([103, 104, 105, 106]) start=32389 end=48537
+TRACE us=15373.708 message=scheduler physical read completed group_id=Some(103) ok=true
+TRACE us=15374.458 message=read scheduler group completed group_id=Some(103) ok=true
+TRACE us=15380.750 span=340 name=object_read
+TRACE us=15381.958 message=object read completed request_id=97 route="scheduled" ok=true
+TRACE us=15388.166 span=341 name=object_read
+TRACE us=15391.875 message=object read completed request_id=98 route="scheduled" ok=true
+TRACE us=15392.541 span=342 name=object_read
+TRACE us=15394.000 span=343 name=object_read
+TRACE us=15394.583 message=object read completed request_id=105 route="scheduled" ok=true
+TRACE us=15396.041 span=344 name=object_read_group
+TRACE us=15397.541 message=object read completed request_id=104 route="scheduled" ok=true
+TRACE us=15399.166 span=345 name=object_read
+TRACE us=15399.625 span=346 name=object_read
+TRACE us=15402.041 message=object read completed request_id=106 route="scheduled" ok=true
+TRACE us=15402.875 message=scheduler group selected group_id=Some(110) request_ids=[110, 107, 109, 111] ready=2 available_permits=31
+TRACE us=15403.416 message=object read completed request_id=103 route="scheduled" ok=true
+TRACE us=15404.500 span=347 name=object_read
+TRACE us=15406.416 message=object read completed request_id=101 route="scheduled" ok=true
+TRACE us=15410.458 span=348 name=object_read
+TRACE us=15413.250 span=349 name=object_read
+TRACE us=15414.375 message=object read completed request_id=100 route="scheduled" ok=true
+TRACE us=15415.291 message=object read completed request_id=102 route="scheduled" ok=true
+TRACE us=15416.416 span=350 name=object_read
+TRACE us=15418.166 message=object read completed request_id=99 route="scheduled" ok=true
+TRACE us=15420.333 message=read scheduler group dispatch group_id=Some(110) request_ids=Some([110, 107, 109, 111]) start=48537 end=64682
+TRACE us=15424.250 message=scheduler physical read started group_id=Some(110) request_ids=Some([110, 107, 109, 111]) start=48537 end=64682
+TRACE us=15438.041 span=351 name=object_read_group
+TRACE us=15441.000 message=scheduler physical read completed group_id=Some(110) ok=true
+TRACE us=15442.666 message=scheduler group selected group_id=Some(108) request_ids=[108] ready=1 available_permits=29
+TRACE us=15444.958 message=read scheduler group completed group_id=Some(110) ok=true
+TRACE us=15448.458 message=read scheduler group dispatch group_id=Some(108) request_ids=Some([108]) start=28337 end=32389
+TRACE us=15449.541 message=scheduler physical read started group_id=Some(108) request_ids=Some([108]) start=28337 end=32389
+TRACE us=15456.291 message=scheduler physical read completed group_id=Some(108) ok=true
+TRACE us=15457.041 message=read scheduler group completed group_id=Some(108) ok=true
+TRACE us=15461.416 span=352 name=object_read
+TRACE us=15462.791 message=object read completed request_id=110 route="scheduled" ok=true
+TRACE us=15464.416 span=353 name=object_read_group
+TRACE us=15466.041 message=scheduler group selected group_id=Some(112) request_ids=[112] ready=0 available_permits=31
+TRACE us=15469.458 message=read scheduler group dispatch group_id=Some(112) request_ids=Some([112]) start=0 end=4051
+TRACE us=15470.541 message=scheduler physical read started group_id=Some(112) request_ids=Some([112]) start=0 end=4051
+TRACE us=15472.000 span=354 name=object_read
+TRACE us=15473.041 message=object read completed request_id=107 route="scheduled" ok=true
+TRACE us=15473.875 span=355 name=object_read
+TRACE us=15475.166 message=scheduler physical read completed group_id=Some(112) ok=true
+TRACE us=15475.708 span=356 name=object_read
+TRACE us=15476.375 message=read scheduler group completed group_id=Some(112) ok=true
+TRACE us=15477.666 message=object read completed request_id=108 route="scheduled" ok=true
+TRACE us=15481.958 span=357 name=object_read
+TRACE us=15482.916 message=object read completed request_id=109 route="scheduled" ok=true
+TRACE us=15483.041 message=object read completed request_id=112 route="scheduled" ok=true
+TRACE us=15488.958 span=358 name=object_read
+TRACE us=15492.666 message=object read completed request_id=111 route="scheduled" ok=true
+TRACE us=17438.083 span=359 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=17439.875 span=360 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=17446.125 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=17448.083 span=361 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=17450.958 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=17452.416 span=362 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=17452.875 span=363 name=object_read
+TRACE us=17454.416 message=object read submitted request_id=113 route="scheduled" range=4051..8126
+TRACE us=17454.875 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=17455.125 span=364 name=object_read
+TRACE us=17456.291 span=365 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=17456.500 message=object read submitted request_id=114 route="scheduled" range=8126..12207
+TRACE us=17457.291 message=read plug staged plug_id=0x783ecac550 trace_id=Some(113) range=4051..8126 members=1
+TRACE us=17458.541 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=17459.833 span=366 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=17461.958 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=17463.416 span=367 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=17463.875 message=read plug staged plug_id=0x783ecac550 trace_id=Some(114) range=8126..12207 members=2
+TRACE us=17465.916 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=17466.333 span=368 name=object_read
+TRACE us=17467.250 span=369 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=17467.541 span=370 name=object_read
+TRACE us=17468.625 message=object read submitted request_id=115 route="scheduled" range=12207..16209
+TRACE us=17469.541 message=object read submitted request_id=116 route="scheduled" range=16209..20258
+TRACE us=17469.666 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=17470.916 message=read plug staged plug_id=0x783ecac550 trace_id=Some(115) range=12207..16209 members=3
+TRACE us=17471.000 span=371 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=17473.041 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=17474.416 span=372 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=17475.083 span=373 name=object_read
+TRACE us=17476.125 message=object read submitted request_id=117 route="scheduled" range=20258..24266
+TRACE us=17476.666 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=17478.250 message=read plug staged plug_id=0x783ecac550 trace_id=Some(117) range=20258..24266 members=4
+TRACE us=17479.583 span=374 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=17481.958 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=17483.333 span=375 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=17483.625 span=376 name=object_read
+TRACE us=17484.625 message=object read submitted request_id=118 route="scheduled" range=24266..28337
+TRACE us=17486.166 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=17486.375 message=read plug staged plug_id=0x783ecac550 trace_id=Some(118) range=24266..28337 members=5
+TRACE us=17487.458 span=377 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=17490.166 message=read plug staged plug_id=0x783ecac550 trace_id=Some(116) range=16209..20258 members=6
+TRACE us=17490.958 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=17492.333 span=378 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=17493.000 span=379 name=object_read
+TRACE us=17493.958 span=380 name=object_read
+TRACE us=17494.125 message=object read submitted request_id=119 route="scheduled" range=32389..36427
+TRACE us=17494.958 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=17495.125 message=object read submitted request_id=120 route="scheduled" range=36427..40462
+TRACE us=17496.083 message=read plug staged plug_id=0x783ecac550 trace_id=Some(119) range=32389..36427 members=7
+TRACE us=17496.291 span=381 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=17500.375 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=17501.083 span=382 name=object_read
+TRACE us=17501.750 span=383 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=17502.083 message=object read submitted request_id=121 route="scheduled" range=40462..44501
+TRACE us=17504.041 message=read plug staged plug_id=0x783ecac550 trace_id=Some(121) range=40462..44501 members=8
+TRACE us=17504.166 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=17505.541 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=17507.291 span=384 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=17507.500 span=385 name=object_read
+TRACE us=17508.416 message=object read submitted request_id=122 route="scheduled" range=48537..52599
+TRACE us=17508.583 span=386 name=object_read
+TRACE us=17509.708 message=object read submitted request_id=123 route="scheduled" range=44501..48537
+TRACE us=17509.833 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=17510.375 message=read plug staged plug_id=0x783ecac550 trace_id=Some(122) range=48537..52599 members=9
+TRACE us=17517.208 span=387 name=object_read
+TRACE us=17518.291 message=object read submitted request_id=124 route="scheduled" range=52599..56619
+TRACE us=17519.708 span=388 name=object_read
+TRACE us=17520.750 span=389 name=object_read
+TRACE us=17529.625 message=read plug staged plug_id=0x783ecac550 trace_id=Some(120) range=36427..40462 members=10
+TRACE us=17530.666 message=object read submitted request_id=126 route="scheduled" range=56619..60688
+TRACE us=17531.750 message=object read submitted request_id=125 route="scheduled" range=28337..32389
+TRACE us=17533.750 message=read plug staged plug_id=0x783ecac550 trace_id=Some(125) range=28337..32389 members=11
+TRACE us=17536.458 span=390 name=object_read
+TRACE us=17537.833 message=object read submitted request_id=128 route="scheduled" range=0..4051
+TRACE us=17538.166 span=391 name=object_read
+TRACE us=17540.750 message=read plug late arrival plug_id=0x783ecac550 trace_id=Some(128) range=0..4051
+TRACE us=17541.791 message=read plug flushed plug_id=0x783ecac550 members=11 reason="handoff"
+TRACE us=17542.708 message=object read submitted request_id=127 route="scheduled" range=60688..64682
+TRACE us=17545.541 message=read plug late arrival plug_id=0x783ecac550 trace_id=Some(124) range=52599..56619
+TRACE us=17562.791 message=read plug late arrival plug_id=0x783ecac550 trace_id=Some(123) range=44501..48537
+TRACE us=17575.958 message=read plug late arrival plug_id=0x783ecac550 trace_id=Some(127) range=60688..64682
+TRACE us=17589.458 message=read plug late arrival plug_id=0x783ecac550 trace_id=Some(126) range=56619..60688
+TRACE us=17593.875 span=392 name=object_read_group
+TRACE us=17596.708 message=scheduler group selected group_id=Some(128) request_ids=[128, 113, 114, 115, 116, 117, 118, 125, 119, 120, 121, 123, 122, 124, 126, 127] ready=0 available_permits=30
+TRACE us=17604.916 message=read scheduler group dispatch group_id=Some(128) request_ids=Some([128, 113, 114, 115, 116, 117, 118, 125, 119, 120, 121, 123, 122, 124, 126, 127]) start=0 end=64682
+TRACE us=17606.541 message=scheduler physical read started group_id=Some(128) request_ids=Some([128, 113, 114, 115, 116, 117, 118, 125, 119, 120, 121, 123, 122, 124, 126, 127]) start=0 end=64682
+TRACE us=17611.375 message=scheduler physical read completed group_id=Some(128) ok=true
+TRACE us=17612.083 message=read scheduler group completed group_id=Some(128) ok=true
+TRACE us=17618.208 span=393 name=object_read
+TRACE us=17619.500 message=object read completed request_id=128 route="scheduled" ok=true
+TRACE us=17622.500 span=394 name=object_read
+TRACE us=17623.791 message=object read completed request_id=113 route="scheduled" ok=true
+TRACE us=17632.416 span=395 name=object_read
+TRACE us=17633.625 message=object read completed request_id=116 route="scheduled" ok=true
+TRACE us=17633.875 span=396 name=object_read
+TRACE us=17635.083 message=object read completed request_id=118 route="scheduled" ok=true
+TRACE us=17635.416 span=397 name=object_read
+TRACE us=17639.041 message=object read completed request_id=114 route="scheduled" ok=true
+TRACE us=17642.208 span=398 name=object_read
+TRACE us=17643.291 span=399 name=object_read
+TRACE us=17644.000 span=400 name=object_read
+TRACE us=17645.458 message=object read completed request_id=117 route="scheduled" ok=true
+TRACE us=17646.208 message=object read completed request_id=119 route="scheduled" ok=true
+TRACE us=17648.375 span=401 name=object_read
+TRACE us=17650.666 message=object read completed request_id=125 route="scheduled" ok=true
+TRACE us=17651.666 message=object read completed request_id=121 route="scheduled" ok=true
+TRACE us=17654.875 span=402 name=object_read
+TRACE us=17658.208 message=object read completed request_id=123 route="scheduled" ok=true
+TRACE us=17658.583 span=403 name=object_read
+TRACE us=17660.125 span=404 name=object_read
+TRACE us=17660.416 message=object read completed request_id=124 route="scheduled" ok=true
+TRACE us=17661.500 message=object read completed request_id=126 route="scheduled" ok=true
+TRACE us=17663.708 span=405 name=object_read
+TRACE us=17667.000 message=object read completed request_id=122 route="scheduled" ok=true
+TRACE us=17674.958 span=407 name=object_read
+TRACE us=17675.375 span=406 name=object_read
+TRACE us=17676.833 message=object read completed request_id=115 route="scheduled" ok=true
+TRACE us=17679.000 span=408 name=object_read
+TRACE us=17679.500 message=object read completed request_id=127 route="scheduled" ok=true
+TRACE us=17681.958 message=object read completed request_id=120 route="scheduled" ok=true
+TRACE us=19622.416 span=409 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=19624.125 span=410 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=19629.250 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=19631.125 span=411 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=19633.625 span=412 name=object_read
+TRACE us=19633.875 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=19635.000 message=object read submitted request_id=129 route="scheduled" range=4051..8126
+TRACE us=19635.333 span=413 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=19637.416 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(129) range=4051..8126 members=1
+TRACE us=19642.625 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=19645.958 span=415 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=19646.333 span=416 name=object_read
+TRACE us=19647.375 message=object read submitted request_id=131 route="scheduled" range=12207..16209
+TRACE us=19649.208 message=read plug staged plug_id=0x783ecac0f0 trace_id=Some(131) range=12207..16209 members=2
+TRACE us=19654.625 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=19656.208 span=417 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=19656.500 message=read plug flushed plug_id=0x783ecac0f0 members=2 reason="handoff"
+TRACE us=19658.958 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=19659.916 span=414 name=object_read
+TRACE us=19660.750 span=418 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=19662.291 span=419 name=object_read
+TRACE us=19663.708 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=19664.291 message=object read submitted request_id=132 route="scheduled" range=20258..24266
+TRACE us=19665.375 span=420 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=19666.750 message=object read submitted request_id=130 route="scheduled" range=8126..12207
+TRACE us=19667.166 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(132) range=20258..24266
+TRACE us=19668.166 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=19669.125 span=421 name=object_read
+TRACE us=19669.875 span=422 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=19672.250 span=423 name=object_read
+TRACE us=19672.750 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=19673.416 message=object read submitted request_id=133 route="scheduled" range=16209..20258
+TRACE us=19674.000 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(130) range=8126..12207
+TRACE us=19674.208 message=object read submitted request_id=134 route="scheduled" range=28337..32389
+TRACE us=19674.375 span=424 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=19677.125 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=19678.333 span=425 name=object_read_group
+TRACE us=19679.166 span=426 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=19682.041 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=19682.708 span=427 name=object_read
+TRACE us=19683.666 span=428 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=19685.291 span=429 name=object_read_group
+TRACE us=19686.666 message=object read submitted request_id=135 route="scheduled" range=24266..28337
+TRACE us=19690.041 span=430 name=object_read
+TRACE us=19693.875 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=19695.833 message=scheduler group selected group_id=Some(131) request_ids=[131] ready=1 available_permits=29
+TRACE us=19696.750 span=432 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=19697.333 message=object read submitted request_id=136 route="scheduled" range=32389..36427
+TRACE us=19698.833 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(133) range=16209..20258
+TRACE us=19699.791 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=19701.375 span=431 name=object_read
+TRACE us=19703.291 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(136) range=32389..36427
+TRACE us=19704.375 span=434 name=object_read
+TRACE us=19706.333 message=object read submitted request_id=138 route="scheduled" range=44501..48537
+TRACE us=19708.666 span=433 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=19709.958 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(134) range=28337..32389
+TRACE us=19710.666 message=object read submitted request_id=137 route="scheduled" range=36427..40462
+TRACE us=19712.541 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=19714.750 span=435 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=19715.291 message=read scheduler group dispatch group_id=Some(131) request_ids=Some([131]) start=12207 end=16209
+TRACE us=19715.583 span=436 name=object_read
+TRACE us=19716.208 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(135) range=24266..28337
+TRACE us=19716.833 span=437 name=object_read
+TRACE us=19718.958 message=scheduler physical read started group_id=Some(131) request_ids=Some([131]) start=12207 end=16209
+TRACE us=19719.208 message=object read submitted request_id=139 route="scheduled" range=40462..44501
+TRACE us=19720.208 message=object read submitted request_id=140 route="scheduled" range=48537..52599
+TRACE us=19725.041 span=438 name=object_read
+TRACE us=19725.708 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=19728.291 message=object read submitted request_id=141 route="scheduled" range=52599..56619
+TRACE us=19728.875 span=439 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=19730.125 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(137) range=36427..40462
+TRACE us=19730.958 message=scheduler group selected group_id=Some(129) request_ids=[129] ready=4 available_permits=29
+TRACE us=19734.291 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(141) range=52599..56619
+TRACE us=19734.750 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=19735.958 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=19736.916 message=read scheduler group dispatch group_id=Some(129) request_ids=Some([129]) start=4051 end=8126
+TRACE us=19738.208 message=scheduler physical read started group_id=Some(129) request_ids=Some([129]) start=4051 end=8126
+TRACE us=19738.291 span=441 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=19738.833 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(138) range=44501..48537
+TRACE us=19740.291 span=442 name=object_read_group
+TRACE us=19740.500 span=443 name=object_read
+TRACE us=19742.125 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=19742.416 message=object read submitted request_id=143 route="scheduled" range=60688..64682
+TRACE us=19745.000 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(143) range=60688..64682
+TRACE us=19747.958 span=440 name=object_read
+TRACE us=19752.458 span=444 name=object_read
+TRACE us=19753.333 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(139) range=40462..44501
+TRACE us=19753.750 message=object read submitted request_id=142 route="scheduled" range=56619..60688
+TRACE us=19755.541 message=object read submitted request_id=144 route="scheduled" range=0..4051
+TRACE us=19766.041 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(142) range=56619..60688
+TRACE us=19771.583 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(144) range=0..4051
+TRACE us=19794.125 message=read plug late arrival plug_id=0x783ecac0f0 trace_id=Some(140) range=48537..52599
+TRACE us=19800.250 message=scheduler group selected group_id=Some(132) request_ids=[132] ready=10 available_permits=28
+TRACE us=19805.375 message=read scheduler group dispatch group_id=Some(132) request_ids=Some([132]) start=20258 end=24266
+TRACE us=19806.500 message=scheduler physical read started group_id=Some(132) request_ids=Some([132]) start=20258 end=24266
+TRACE us=19807.166 span=445 name=object_read_group
+TRACE us=19808.958 message=scheduler group selected group_id=Some(130) request_ids=[130] ready=12 available_permits=25
+TRACE us=19812.708 message=read scheduler group dispatch group_id=Some(130) request_ids=Some([130]) start=8126 end=12207
+TRACE us=19813.750 message=scheduler physical read started group_id=Some(130) request_ids=Some([130]) start=8126 end=12207
+TRACE us=19814.500 span=446 name=object_read_group
+TRACE us=19817.333 message=scheduler group selected group_id=Some(135) request_ids=[135, 134, 136, 137, 139, 138, 140, 141, 142, 143] ready=2 available_permits=25
+TRACE us=19820.625 span=447 name=object_read_group
+TRACE us=19822.291 message=scheduler group selected group_id=Some(133) request_ids=[133] ready=1 available_permits=25
+TRACE us=19824.291 message=read scheduler group dispatch group_id=Some(135) request_ids=Some([135, 134, 136, 137, 139, 138, 140, 141, 142, 143]) start=24266 end=64682
+TRACE us=19825.708 message=scheduler physical read started group_id=Some(135) request_ids=Some([135, 134, 136, 137, 139, 138, 140, 141, 142, 143]) start=24266 end=64682
+TRACE us=19825.833 message=read scheduler group dispatch group_id=Some(133) request_ids=Some([133]) start=16209 end=20258
+TRACE us=19826.833 message=scheduler physical read started group_id=Some(133) request_ids=Some([133]) start=16209 end=20258
+TRACE us=19832.083 span=448 name=object_read_group
+TRACE us=19833.750 message=scheduler group selected group_id=Some(144) request_ids=[144] ready=0 available_permits=25
+TRACE us=19837.166 message=read scheduler group dispatch group_id=Some(144) request_ids=Some([144]) start=0 end=4051
+TRACE us=19838.208 message=scheduler physical read started group_id=Some(144) request_ids=Some([144]) start=0 end=4051
+TRACE us=23193.708 message=scheduler physical read completed group_id=Some(144) ok=true
+TRACE us=23194.500 message=read scheduler group completed group_id=Some(144) ok=true
+TRACE us=23199.750 message=scheduler physical read completed group_id=Some(132) ok=true
+TRACE us=23200.750 message=read scheduler group completed group_id=Some(132) ok=true
+TRACE us=23203.583 span=449 name=object_read
+TRACE us=23205.000 message=object read completed request_id=144 route="scheduled" ok=true
+TRACE us=23207.708 message=scheduler physical read completed group_id=Some(130) ok=true
+TRACE us=23208.541 message=read scheduler group completed group_id=Some(130) ok=true
+TRACE us=23213.541 message=scheduler physical read completed group_id=Some(131) ok=true
+TRACE us=23214.291 message=read scheduler group completed group_id=Some(131) ok=true
+TRACE us=23218.333 message=scheduler physical read completed group_id=Some(135) ok=true
+TRACE us=23219.000 span=450 name=object_read
+TRACE us=23219.125 message=read scheduler group completed group_id=Some(135) ok=true
+TRACE us=23220.166 message=object read completed request_id=130 route="scheduled" ok=true
+TRACE us=23223.916 message=scheduler physical read completed group_id=Some(129) ok=true
+TRACE us=23224.625 message=read scheduler group completed group_id=Some(129) ok=true
+TRACE us=23229.500 span=451 name=object_read
+TRACE us=23230.500 message=object read completed request_id=131 route="scheduled" ok=true
+TRACE us=23231.375 message=scheduler physical read completed group_id=Some(133) ok=true
+TRACE us=23232.041 message=read scheduler group completed group_id=Some(133) ok=true
+TRACE us=23239.750 span=453 name=object_read
+TRACE us=23240.458 span=452 name=object_read
+TRACE us=23241.750 message=object read completed request_id=135 route="scheduled" ok=true
+TRACE us=23245.541 span=455 name=object_read
+TRACE us=23246.833 message=object read completed request_id=137 route="scheduled" ok=true
+TRACE us=23250.500 span=456 name=object_read
+TRACE us=23251.625 message=object read completed request_id=140 route="scheduled" ok=true
+TRACE us=23253.041 span=457 name=object_read
+TRACE us=23255.000 message=object read completed request_id=138 route="scheduled" ok=true
+TRACE us=23257.166 span=458 name=object_read
+TRACE us=23259.416 span=454 name=object_read
+TRACE us=23261.583 message=object read completed request_id=132 route="scheduled" ok=true
+TRACE us=23266.208 span=460 name=object_read
+TRACE us=23268.291 message=object read completed request_id=142 route="scheduled" ok=true
+TRACE us=23269.375 span=459 name=object_read
+TRACE us=23269.625 message=object read completed request_id=139 route="scheduled" ok=true
+TRACE us=23270.541 message=object read completed request_id=141 route="scheduled" ok=true
+TRACE us=23273.958 message=object read completed request_id=134 route="scheduled" ok=true
+TRACE us=23278.166 span=461 name=object_read
+TRACE us=23279.708 span=462 name=object_read
+TRACE us=23279.958 message=object read completed request_id=129 route="scheduled" ok=true
+TRACE us=23282.583 span=463 name=object_read
+TRACE us=23283.750 message=object read completed request_id=143 route="scheduled" ok=true
+TRACE us=23284.708 message=object read completed request_id=136 route="scheduled" ok=true
+TRACE us=23285.208 span=464 name=object_read
+TRACE us=23289.000 message=object read completed request_id=133 route="scheduled" ok=true
+TRACE us=24931.875 span=465 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=24934.125 span=466 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=24940.708 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=24942.958 span=467 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=24946.416 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=24948.125 span=468 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=24949.750 span=469 name=object_read
+TRACE us=24951.166 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=24952.208 message=object read submitted request_id=145 route="scheduled" range=4051..8126
+TRACE us=24953.041 span=470 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=24955.416 message=read plug staged plug_id=0x783ecac390 trace_id=Some(145) range=4051..8126 members=1
+TRACE us=24956.333 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=24957.833 span=472 name=object_read
+TRACE us=24958.083 span=471 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=24959.791 message=object read submitted request_id=146 route="scheduled" range=8126..12207
+TRACE us=24961.708 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=24963.166 span=473 name=object_read
+TRACE us=24963.500 message=read plug staged plug_id=0x783ecac390 trace_id=Some(146) range=8126..12207 members=2
+TRACE us=24964.375 span=474 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=24965.166 message=object read submitted request_id=147 route="scheduled" range=12207..16209
+TRACE us=24968.166 span=475 name=object_read
+TRACE us=24968.541 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=24968.875 message=read plug staged plug_id=0x783ecac390 trace_id=Some(147) range=12207..16209 members=3
+TRACE us=24970.291 message=object read submitted request_id=148 route="scheduled" range=16209..20258
+TRACE us=24971.083 span=476 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=24973.208 span=477 name=object_read
+TRACE us=24973.875 message=read plug staged plug_id=0x783ecac390 trace_id=Some(148) range=16209..20258 members=4
+TRACE us=24975.083 message=object read submitted request_id=149 route="scheduled" range=20258..24266
+TRACE us=24975.458 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=24977.500 span=478 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=24978.500 message=read plug staged plug_id=0x783ecac390 trace_id=Some(149) range=20258..24266 members=5
+TRACE us=24979.958 span=479 name=object_read
+TRACE us=24981.416 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=24981.583 message=object read submitted request_id=150 route="scheduled" range=28337..32389
+TRACE us=24982.875 span=480 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=24983.708 message=read plug staged plug_id=0x783ecac390 trace_id=Some(150) range=28337..32389 members=6
+TRACE us=24984.333 span=481 name=object_read
+TRACE us=24985.291 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=24985.541 message=object read submitted request_id=151 route="scheduled" range=32389..36427
+TRACE us=24986.666 span=483 name=object_read
+TRACE us=24986.958 span=482 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=24987.625 message=read plug staged plug_id=0x783ecac390 trace_id=Some(151) range=32389..36427 members=7
+TRACE us=24987.875 message=object read submitted request_id=152 route="scheduled" range=36427..40462
+TRACE us=24989.541 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=24989.833 message=read plug staged plug_id=0x783ecac390 trace_id=Some(152) range=36427..40462 members=8
+TRACE us=24990.833 span=484 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=24991.333 span=485 name=object_read
+TRACE us=24992.541 message=object read submitted request_id=153 route="scheduled" range=40462..44501
+TRACE us=24993.250 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=24994.500 message=read plug staged plug_id=0x783ecac390 trace_id=Some(153) range=40462..44501 members=9
+TRACE us=24994.625 span=486 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=24997.125 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=24997.625 span=487 name=object_read
+TRACE us=24998.500 span=488 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=24998.583 message=object read submitted request_id=154 route="scheduled" range=44501..48537
+TRACE us=25000.250 message=read plug staged plug_id=0x783ecac390 trace_id=Some(154) range=44501..48537 members=10
+TRACE us=25000.875 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=25002.083 span=489 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=25004.708 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=25005.083 span=490 name=object_read
+TRACE us=25006.041 message=object read submitted request_id=155 route="scheduled" range=48537..52599
+TRACE us=25006.375 span=491 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=25007.791 message=read plug late arrival plug_id=0x783ecac390 trace_id=Some(155) range=48537..52599
+TRACE us=25008.875 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=25010.166 span=492 name=object_read
+TRACE us=25010.500 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=25011.958 message=object read submitted request_id=156 route="scheduled" range=24266..28337
+TRACE us=25012.333 span=493 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=25012.625 span=494 name=object_read
+TRACE us=25015.125 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=25015.375 message=read plug late arrival plug_id=0x783ecac390 trace_id=Some(156) range=24266..28337
+TRACE us=25015.500 message=object read submitted request_id=157 route="scheduled" range=56619..60688
+TRACE us=25017.416 message=read plug late arrival plug_id=0x783ecac390 trace_id=Some(157) range=56619..60688
+TRACE us=25019.000 message=read plug flushed plug_id=0x783ecac390 members=10 reason="handoff"
+TRACE us=25020.291 span=495 name=object_read
+TRACE us=25021.541 span=496 name=object_read
+TRACE us=25021.875 message=object read submitted request_id=158 route="scheduled" range=60688..64682
+TRACE us=25022.708 message=object read submitted request_id=159 route="scheduled" range=0..4051
+TRACE us=25024.041 message=read plug late arrival plug_id=0x783ecac390 trace_id=Some(158) range=60688..64682
+TRACE us=25029.583 message=read plug late arrival plug_id=0x783ecac390 trace_id=Some(159) range=0..4051
+TRACE us=25034.000 span=497 name=object_read
+TRACE us=25035.458 message=object read submitted request_id=160 route="scheduled" range=52599..56619
+TRACE us=25037.500 message=read plug late arrival plug_id=0x783ecac390 trace_id=Some(160) range=52599..56619
+TRACE us=25050.541 span=498 name=object_read_group
+TRACE us=25054.208 message=scheduler group selected group_id=Some(159) request_ids=[159, 145, 146, 147, 148, 149, 156, 150, 151, 152, 153, 154, 155, 160, 157, 158] ready=0 available_permits=31
+TRACE us=25065.000 message=read scheduler group dispatch group_id=Some(159) request_ids=Some([159, 145, 146, 147, 148, 149, 156, 150, 151, 152, 153, 154, 155, 160, 157, 158]) start=0 end=64682
+TRACE us=25067.000 message=scheduler physical read started group_id=Some(159) request_ids=Some([159, 145, 146, 147, 148, 149, 156, 150, 151, 152, 153, 154, 155, 160, 157, 158]) start=0 end=64682
+TRACE us=28464.958 message=scheduler physical read completed group_id=Some(159) ok=true
+TRACE us=28465.791 message=read scheduler group completed group_id=Some(159) ok=true
+TRACE us=28482.000 span=499 name=object_read
+TRACE us=28483.541 message=object read completed request_id=159 route="scheduled" ok=true
+TRACE us=28489.750 span=500 name=object_read
+TRACE us=28491.750 message=object read completed request_id=146 route="scheduled" ok=true
+TRACE us=28494.375 span=501 name=object_read
+TRACE us=28496.291 message=object read completed request_id=147 route="scheduled" ok=true
+TRACE us=28501.166 span=502 name=object_read
+TRACE us=28502.458 message=object read completed request_id=149 route="scheduled" ok=true
+TRACE us=28506.000 span=503 name=object_read
+TRACE us=28507.083 message=object read completed request_id=156 route="scheduled" ok=true
+TRACE us=28508.333 span=504 name=object_read
+TRACE us=28509.458 message=object read completed request_id=148 route="scheduled" ok=true
+TRACE us=28511.416 span=505 name=object_read
+TRACE us=28512.583 message=object read completed request_id=145 route="scheduled" ok=true
+TRACE us=28516.000 span=506 name=object_read
+TRACE us=28517.041 message=object read completed request_id=150 route="scheduled" ok=true
+TRACE us=28521.000 span=507 name=object_read
+TRACE us=28521.333 span=508 name=object_read
+TRACE us=28522.291 message=object read completed request_id=153 route="scheduled" ok=true
+TRACE us=28522.541 message=object read completed request_id=154 route="scheduled" ok=true
+TRACE us=28525.500 span=509 name=object_read
+TRACE us=28527.708 message=object read completed request_id=155 route="scheduled" ok=true
+TRACE us=28531.333 span=510 name=object_read
+TRACE us=28531.416 span=511 name=object_read
+TRACE us=28532.500 message=object read completed request_id=160 route="scheduled" ok=true
+TRACE us=28532.666 message=object read completed request_id=157 route="scheduled" ok=true
+TRACE us=28536.125 span=512 name=object_read
+TRACE us=28537.208 message=object read completed request_id=158 route="scheduled" ok=true
+TRACE us=28543.375 span=514 name=object_read
+TRACE us=28544.500 message=object read completed request_id=152 route="scheduled" ok=true
+TRACE us=28546.958 span=513 name=object_read
+TRACE us=28557.166 message=object read completed request_id=151 route="scheduled" ok=true
+TRACE us=30176.625 span=515 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=30178.375 span=516 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=30183.583 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=30185.750 span=517 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=30188.958 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=30190.583 span=518 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=30193.375 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=30194.250 span=519 name=object_read
+TRACE us=30194.958 span=520 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=30195.625 message=object read submitted request_id=161 route="scheduled" range=4051..8126
+TRACE us=30197.333 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=30198.000 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(161) range=4051..8126 members=1
+TRACE us=30198.583 span=521 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=30200.750 span=522 name=object_read
+TRACE us=30201.916 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=30203.500 span=523 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=30204.250 span=524 name=object_read
+TRACE us=30205.125 message=object read submitted request_id=162 route="scheduled" range=8126..12207
+TRACE us=30205.416 message=object read submitted request_id=163 route="scheduled" range=12207..16209
+TRACE us=30205.875 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=30207.125 span=525 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=30207.708 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(162) range=8126..12207 members=2
+TRACE us=30209.208 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=30210.500 span=526 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=30211.833 span=527 name=object_read
+TRACE us=30212.833 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=30213.708 message=object read submitted request_id=164 route="scheduled" range=16209..20258
+TRACE us=30214.833 span=528 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=30215.708 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(163) range=12207..16209 members=3
+TRACE us=30217.041 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=30218.500 span=529 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=30219.833 span=530 name=object_read
+TRACE us=30220.833 message=object read submitted request_id=165 route="scheduled" range=20258..24266
+TRACE us=30221.583 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=30222.208 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(164) range=16209..20258 members=4
+TRACE us=30223.000 span=531 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=30224.458 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(165) range=20258..24266 members=5
+TRACE us=30225.500 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=30226.750 span=532 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=30227.791 span=533 name=object_read
+TRACE us=30228.750 message=object read submitted request_id=166 route="scheduled" range=24266..28337
+TRACE us=30228.958 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=30230.125 span=534 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=30230.583 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(166) range=24266..28337 members=6
+TRACE us=30232.833 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=30233.291 span=535 name=object_read
+TRACE us=30234.083 span=536 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=30234.250 message=object read submitted request_id=167 route="scheduled" range=28337..32389
+TRACE us=30235.916 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(167) range=28337..32389 members=7
+TRACE us=30236.291 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=30237.416 span=537 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=30238.583 span=538 name=object_read
+TRACE us=30239.500 message=object read submitted request_id=168 route="scheduled" range=32389..36427
+TRACE us=30239.958 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=30241.208 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=30241.291 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(168) range=32389..36427 members=8
+TRACE us=30241.916 span=539 name=object_read
+TRACE us=30242.750 span=540 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=30243.083 message=object read submitted request_id=169 route="scheduled" range=36427..40462
+TRACE us=30244.208 span=541 name=object_read
+TRACE us=30245.000 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(169) range=36427..40462 members=9
+TRACE us=30245.375 message=object read submitted request_id=170 route="scheduled" range=44501..48537
+TRACE us=30248.250 span=542 name=object_read
+TRACE us=30249.416 message=object read submitted request_id=171 route="scheduled" range=48537..52599
+TRACE us=30249.916 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(170) range=44501..48537 members=10
+TRACE us=30251.541 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(171) range=48537..52599 members=11
+TRACE us=30252.833 span=543 name=object_read
+TRACE us=30253.916 message=object read submitted request_id=172 route="scheduled" range=52599..56619
+TRACE us=30254.333 span=544 name=object_read
+TRACE us=30255.541 message=object read submitted request_id=173 route="scheduled" range=56619..60688
+TRACE us=30256.083 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(172) range=52599..56619 members=12
+TRACE us=30258.791 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(173) range=56619..60688 members=13
+TRACE us=30260.333 span=545 name=object_read
+TRACE us=30261.041 span=546 name=object_read
+TRACE us=30261.458 message=object read submitted request_id=174 route="scheduled" range=0..4051
+TRACE us=30262.375 message=object read submitted request_id=175 route="scheduled" range=60688..64682
+TRACE us=30263.625 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(174) range=0..4051 members=14
+TRACE us=30268.875 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(175) range=60688..64682 members=15
+TRACE us=30273.875 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=30282.708 span=547 name=object_read
+TRACE us=30283.791 message=object read submitted request_id=176 route="scheduled" range=40462..44501
+TRACE us=30285.833 message=read plug staged plug_id=0x783ecac4e0 trace_id=Some(176) range=40462..44501 members=16
+TRACE us=30287.166 message=read plug flushed plug_id=0x783ecac4e0 members=16 reason="capacity"
+TRACE us=30304.333 span=548 name=object_read_group
+TRACE us=30306.833 message=scheduler group selected group_id=Some(174) request_ids=[174, 161, 162, 163, 164, 165, 166, 167, 168, 169, 176, 170, 171, 172, 173, 175] ready=0 available_permits=31
+TRACE us=30314.708 message=read scheduler group dispatch group_id=Some(174) request_ids=Some([174, 161, 162, 163, 164, 165, 166, 167, 168, 169, 176, 170, 171, 172, 173, 175]) start=0 end=64682
+TRACE us=30316.333 message=scheduler physical read started group_id=Some(174) request_ids=Some([174, 161, 162, 163, 164, 165, 166, 167, 168, 169, 176, 170, 171, 172, 173, 175]) start=0 end=64682
+TRACE us=33717.458 message=scheduler physical read completed group_id=Some(174) ok=true
+TRACE us=33718.333 message=read scheduler group completed group_id=Some(174) ok=true
+TRACE us=33730.666 span=549 name=object_read
+TRACE us=33732.125 message=object read completed request_id=174 route="scheduled" ok=true
+TRACE us=33738.541 span=550 name=object_read
+TRACE us=33739.833 message=object read completed request_id=162 route="scheduled" ok=true
+TRACE us=33743.708 span=551 name=object_read
+TRACE us=33744.916 message=object read completed request_id=161 route="scheduled" ok=true
+TRACE us=33749.625 span=552 name=object_read
+TRACE us=33750.750 message=object read completed request_id=163 route="scheduled" ok=true
+TRACE us=33753.666 span=553 name=object_read
+TRACE us=33754.750 message=object read completed request_id=164 route="scheduled" ok=true
+TRACE us=33759.583 span=554 name=object_read
+TRACE us=33760.625 message=object read completed request_id=165 route="scheduled" ok=true
+TRACE us=33763.208 span=555 name=object_read
+TRACE us=33764.250 message=object read completed request_id=169 route="scheduled" ok=true
+TRACE us=33769.208 span=556 name=object_read
+TRACE us=33770.208 message=object read completed request_id=166 route="scheduled" ok=true
+TRACE us=33772.583 span=557 name=object_read
+TRACE us=33773.583 message=object read completed request_id=176 route="scheduled" ok=true
+TRACE us=33778.875 span=558 name=object_read
+TRACE us=33779.875 message=object read completed request_id=170 route="scheduled" ok=true
+TRACE us=33783.125 span=560 name=object_read
+TRACE us=33784.666 span=559 name=object_read
+TRACE us=33788.791 span=561 name=object_read
+TRACE us=33789.875 message=object read completed request_id=173 route="scheduled" ok=true
+TRACE us=33797.833 span=562 name=object_read
+TRACE us=33798.750 message=object read completed request_id=175 route="scheduled" ok=true
+TRACE us=33804.666 span=563 name=object_read
+TRACE us=33805.541 message=object read completed request_id=171 route="scheduled" ok=true
+TRACE us=33812.250 span=564 name=object_read
+TRACE us=33813.791 message=object read completed request_id=168 route="scheduled" ok=true
+TRACE us=33816.333 message=object read completed request_id=167 route="scheduled" ok=true
+TRACE us=33819.125 message=object read completed request_id=172 route="scheduled" ok=true
+TRACE us=35424.458 span=565 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=35426.500 span=566 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=35433.041 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=35435.375 span=567 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=35438.541 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=35440.291 span=568 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=35442.041 span=569 name=object_read
+TRACE us=35443.500 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=35444.333 message=object read submitted request_id=177 route="scheduled" range=4051..8126
+TRACE us=35445.500 span=570 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=35447.583 message=read plug staged plug_id=0x783ecac710 trace_id=Some(177) range=4051..8126 members=1
+TRACE us=35448.750 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=35449.583 span=571 name=object_read
+TRACE us=35450.708 span=572 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=35451.541 message=object read submitted request_id=178 route="scheduled" range=8126..12207
+TRACE us=35454.541 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=35454.791 message=read plug staged plug_id=0x783ecac710 trace_id=Some(178) range=8126..12207 members=2
+TRACE us=35455.875 span=573 name=object_read
+TRACE us=35457.875 span=574 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=35459.041 span=575 name=object_read
+TRACE us=35460.416 message=object read submitted request_id=180 route="scheduled" range=16209..20258
+TRACE us=35462.666 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=35463.166 message=read plug staged plug_id=0x783ecac710 trace_id=Some(180) range=16209..20258 members=3
+TRACE us=35463.500 message=object read submitted request_id=179 route="scheduled" range=12207..16209
+TRACE us=35464.916 span=576 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=35467.041 message=read plug staged plug_id=0x783ecac710 trace_id=Some(179) range=12207..16209 members=4
+TRACE us=35467.250 span=577 name=object_read
+TRACE us=35469.083 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=35469.375 message=object read submitted request_id=181 route="scheduled" range=20258..24266
+TRACE us=35471.458 span=579 name=object_read
+TRACE us=35471.666 span=578 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=35473.041 message=read plug staged plug_id=0x783ecac710 trace_id=Some(181) range=20258..24266 members=5
+TRACE us=35473.583 message=object read submitted request_id=182 route="scheduled" range=24266..28337
+TRACE us=35475.625 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=35477.125 message=read plug staged plug_id=0x783ecac710 trace_id=Some(182) range=24266..28337 members=6
+TRACE us=35477.583 span=581 name=object_read
+TRACE us=35478.208 span=580 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=35479.666 message=object read submitted request_id=183 route="scheduled" range=28337..32389
+TRACE us=35481.333 span=582 name=object_read
+TRACE us=35482.083 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=35482.583 message=read plug staged plug_id=0x783ecac710 trace_id=Some(183) range=28337..32389 members=7
+TRACE us=35482.750 message=object read submitted request_id=184 route="scheduled" range=32389..36427
+TRACE us=35483.791 span=583 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=35484.791 message=read plug staged plug_id=0x783ecac710 trace_id=Some(184) range=32389..36427 members=8
+TRACE us=35485.666 span=584 name=object_read
+TRACE us=35486.541 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=35486.916 message=object read submitted request_id=185 route="scheduled" range=36427..40462
+TRACE us=35487.583 span=586 name=object_read
+TRACE us=35487.833 span=585 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=35488.833 message=object read submitted request_id=186 route="scheduled" range=40462..44501
+TRACE us=35488.958 message=read plug staged plug_id=0x783ecac710 trace_id=Some(185) range=36427..40462 members=9
+TRACE us=35490.833 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=35492.000 message=read plug staged plug_id=0x783ecac710 trace_id=Some(186) range=40462..44501 members=10
+TRACE us=35492.833 span=587 name=object_read
+TRACE us=35493.208 span=588 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=35493.958 message=object read submitted request_id=187 route="scheduled" range=44501..48537
+TRACE us=35495.833 message=read plug staged plug_id=0x783ecac710 trace_id=Some(187) range=44501..48537 members=11
+TRACE us=35496.250 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=35497.458 span=589 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=35498.833 span=590 name=object_read
+TRACE us=35499.708 message=object read submitted request_id=188 route="scheduled" range=48537..52599
+TRACE us=35501.500 message=read plug staged plug_id=0x783ecac710 trace_id=Some(188) range=48537..52599 members=12
+TRACE us=35520.708 message=read plug flushed plug_id=0x783ecac710 members=12 reason="handoff"
+TRACE us=35530.875 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=35532.416 span=591 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=35535.083 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=35536.333 span=592 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=35536.750 span=593 name=object_read_group
+TRACE us=35538.291 span=594 name=object_read
+TRACE us=35538.750 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=35539.541 message=object read submitted request_id=189 route="scheduled" range=52599..56619
+TRACE us=35539.916 message=scheduler group selected group_id=Some(177) request_ids=[177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188] ready=0 available_permits=31
+TRACE us=35540.083 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=35541.416 message=read plug late arrival plug_id=0x783ecac710 trace_id=Some(189) range=52599..56619
+TRACE us=35541.708 span=595 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=35544.000 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=35545.625 span=596 name=object_read
+TRACE us=35546.708 message=object read submitted request_id=190 route="scheduled" range=56619..60688
+TRACE us=35547.666 message=read scheduler group dispatch group_id=Some(177) request_ids=Some([177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188]) start=4051 end=52599
+TRACE us=35548.333 message=read plug late arrival plug_id=0x783ecac710 trace_id=Some(190) range=56619..60688
+TRACE us=35549.208 message=scheduler physical read started group_id=Some(177) request_ids=Some([177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188]) start=4051 end=52599
+TRACE us=35554.166 span=597 name=object_read
+TRACE us=35555.541 message=object read submitted request_id=191 route="scheduled" range=0..4051
+TRACE us=35557.541 message=read plug late arrival plug_id=0x783ecac710 trace_id=Some(191) range=0..4051
+TRACE us=35568.541 span=598 name=object_read
+TRACE us=35569.875 message=object read submitted request_id=192 route="scheduled" range=60688..64682
+TRACE us=35571.875 message=read plug late arrival plug_id=0x783ecac710 trace_id=Some(192) range=60688..64682
+TRACE us=35577.708 span=599 name=object_read_group
+TRACE us=35579.416 span=600 name=object_read_group
+TRACE us=35579.666 message=scheduler group selected group_id=Some(189) request_ids=[189, 190, 192] ready=1 available_permits=29
+TRACE us=35581.500 message=scheduler group selected group_id=Some(191) request_ids=[191] ready=0 available_permits=29
+TRACE us=35584.458 message=read scheduler group dispatch group_id=Some(189) request_ids=Some([189, 190, 192]) start=52599 end=64682
+TRACE us=35585.916 message=read scheduler group dispatch group_id=Some(191) request_ids=Some([191]) start=0 end=4051
+TRACE us=35586.125 message=scheduler physical read started group_id=Some(189) request_ids=Some([189, 190, 192]) start=52599 end=64682
+TRACE us=35587.291 message=scheduler physical read started group_id=Some(191) request_ids=Some([191]) start=0 end=4051
+TRACE us=38981.000 message=scheduler physical read completed group_id=Some(191) ok=true
+TRACE us=38982.041 message=read scheduler group completed group_id=Some(191) ok=true
+TRACE us=38987.041 message=scheduler physical read completed group_id=Some(177) ok=true
+TRACE us=38988.041 message=read scheduler group completed group_id=Some(177) ok=true
+TRACE us=38994.666 span=601 name=object_read
+TRACE us=38996.500 message=object read completed request_id=191 route="scheduled" ok=true
+TRACE us=38997.583 message=scheduler physical read completed group_id=Some(189) ok=true
+TRACE us=38998.958 message=read scheduler group completed group_id=Some(189) ok=true
+TRACE us=39010.750 span=602 name=object_read
+TRACE us=39011.708 message=object read completed request_id=177 route="scheduled" ok=true
+TRACE us=39020.291 span=603 name=object_read
+TRACE us=39021.208 message=object read completed request_id=178 route="scheduled" ok=true
+TRACE us=39023.666 span=604 name=object_read
+TRACE us=39024.958 message=object read completed request_id=179 route="scheduled" ok=true
+TRACE us=39029.333 span=605 name=object_read
+TRACE us=39030.416 message=object read completed request_id=181 route="scheduled" ok=true
+TRACE us=39034.666 span=606 name=object_read
+TRACE us=39035.791 message=object read completed request_id=180 route="scheduled" ok=true
+TRACE us=39038.416 span=607 name=object_read
+TRACE us=39039.458 message=object read completed request_id=182 route="scheduled" ok=true
+TRACE us=39046.666 span=608 name=object_read
+TRACE us=39047.791 message=object read completed request_id=185 route="scheduled" ok=true
+TRACE us=39048.125 span=609 name=object_read
+TRACE us=39049.208 message=object read completed request_id=186 route="scheduled" ok=true
+TRACE us=39057.083 span=610 name=object_read
+TRACE us=39058.250 message=object read completed request_id=187 route="scheduled" ok=true
+TRACE us=39059.500 span=611 name=object_read
+TRACE us=39060.500 message=object read completed request_id=188 route="scheduled" ok=true
+TRACE us=39067.541 span=613 name=object_read
+TRACE us=39076.958 span=612 name=object_read
+TRACE us=39079.583 message=object read completed request_id=183 route="scheduled" ok=true
+TRACE us=39080.000 span=615 name=object_read
+TRACE us=39081.125 message=object read completed request_id=189 route="scheduled" ok=true
+TRACE us=39087.458 message=object read completed request_id=190 route="scheduled" ok=true
+TRACE us=39089.541 span=614 name=object_read
+TRACE us=39095.791 message=object read completed request_id=192 route="scheduled" ok=true
+TRACE us=39100.375 span=616 name=object_read
+TRACE us=39102.083 message=object read completed request_id=184 route="scheduled" ok=true
+TRACE us=40774.250 span=617 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=40776.916 span=618 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=40783.583 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=40786.083 span=619 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=40789.375 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=40791.041 span=620 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=40793.875 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=40794.250 span=621 name=object_read
+TRACE us=40795.916 span=622 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=40796.333 message=object read submitted request_id=193 route="scheduled" range=4051..8126
+TRACE us=40799.500 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=40800.791 message=read plug staged plug_id=0x783ecac240 trace_id=Some(193) range=4051..8126 members=1
+TRACE us=40801.250 span=624 name=object_read
+TRACE us=40801.541 span=623 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=40803.250 message=object read submitted request_id=194 route="scheduled" range=8126..12207
+TRACE us=40804.791 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=40806.500 message=read plug staged plug_id=0x783ecac240 trace_id=Some(194) range=8126..12207 members=2
+TRACE us=40806.958 span=625 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=40810.041 span=626 name=object_read
+TRACE us=40810.458 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=40810.916 span=627 name=object_read
+TRACE us=40811.416 message=object read submitted request_id=195 route="scheduled" range=12207..16209
+TRACE us=40811.875 span=628 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=40812.125 message=object read submitted request_id=196 route="scheduled" range=20258..24266
+TRACE us=40813.583 message=read plug staged plug_id=0x783ecac240 trace_id=Some(195) range=12207..16209 members=3
+TRACE us=40814.333 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=40815.541 span=629 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=40817.791 span=630 name=object_read
+TRACE us=40817.916 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=40818.833 message=object read submitted request_id=197 route="scheduled" range=24266..28337
+TRACE us=40819.250 span=631 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=40820.750 message=read plug staged plug_id=0x783ecac240 trace_id=Some(197) range=24266..28337 members=4
+TRACE us=40821.541 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=40822.875 span=633 name=object_read
+TRACE us=40823.083 span=632 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=40824.041 span=634 name=object_read
+TRACE us=40824.166 message=object read submitted request_id=198 route="scheduled" range=28337..32389
+TRACE us=40825.166 message=object read submitted request_id=199 route="scheduled" range=32389..36427
+TRACE us=40825.541 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=40827.083 span=635 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=40829.791 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=40831.125 span=636 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=40832.250 message=read plug staged plug_id=0x783ecac240 trace_id=Some(196) range=20258..24266 members=5
+TRACE us=40833.458 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=40834.750 span=637 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=40836.416 span=638 name=object_read
+TRACE us=40837.250 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=40838.166 message=object read submitted request_id=200 route="scheduled" range=16209..20258
+TRACE us=40838.791 span=639 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=40846.875 message=read plug staged plug_id=0x783ecac240 trace_id=Some(198) range=28337..32389 members=6
+TRACE us=40850.083 span=640 name=object_read
+TRACE us=40852.416 message=read plug staged plug_id=0x783ecac240 trace_id=Some(199) range=32389..36427 members=7
+TRACE us=40853.541 span=641 name=object_read
+TRACE us=40854.958 message=object read submitted request_id=201 route="scheduled" range=36427..40462
+TRACE us=40855.666 message=object read submitted request_id=202 route="scheduled" range=40462..44501
+TRACE us=40858.125 message=read plug staged plug_id=0x783ecac240 trace_id=Some(202) range=40462..44501 members=8
+TRACE us=40858.541 span=642 name=object_read
+TRACE us=40859.500 span=643 name=object_read
+TRACE us=40859.750 message=object read submitted request_id=203 route="scheduled" range=44501..48537
+TRACE us=40860.875 message=object read submitted request_id=204 route="scheduled" range=52599..56619
+TRACE us=40864.833 span=644 name=object_read
+TRACE us=40865.541 message=read plug staged plug_id=0x783ecac240 trace_id=Some(201) range=36427..40462 members=9
+TRACE us=40866.833 message=object read submitted request_id=205 route="scheduled" range=56619..60688
+TRACE us=40868.333 span=645 name=object_read
+TRACE us=40871.791 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=40873.500 message=object read submitted request_id=206 route="scheduled" range=48537..52599
+TRACE us=40877.833 message=read plug staged plug_id=0x783ecac240 trace_id=Some(203) range=44501..48537 members=10
+TRACE us=40885.166 message=read plug staged plug_id=0x783ecac240 trace_id=Some(206) range=48537..52599 members=11
+TRACE us=40889.750 span=646 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=40892.833 message=read plug staged plug_id=0x783ecac240 trace_id=Some(200) range=16209..20258 members=12
+TRACE us=40894.958 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=40896.583 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=40897.708 span=647 name=object_read
+TRACE us=40898.625 span=648 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=40898.875 message=object read submitted request_id=207 route="scheduled" range=60688..64682
+TRACE us=40902.708 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=40907.375 span=649 name=object_read
+TRACE us=40908.625 message=object read submitted request_id=208 route="scheduled" range=0..4051
+TRACE us=40915.333 message=read plug staged plug_id=0x783ecac240 trace_id=Some(205) range=56619..60688 members=13
+TRACE us=40923.375 message=read plug flushed plug_id=0x783ecac240 members=13 reason="handoff"
+TRACE us=40928.750 message=read plug late arrival plug_id=0x783ecac240 trace_id=Some(204) range=52599..56619
+TRACE us=40933.833 message=read plug late arrival plug_id=0x783ecac240 trace_id=Some(207) range=60688..64682
+TRACE us=40953.333 message=read plug late arrival plug_id=0x783ecac240 trace_id=Some(208) range=0..4051
+TRACE us=40964.625 span=650 name=object_read_group
+TRACE us=40968.791 message=scheduler group selected group_id=Some(208) request_ids=[208, 193, 194, 195, 200, 196, 197, 198, 199, 201, 202, 203, 206, 204, 205, 207] ready=0 available_permits=31
+TRACE us=40977.833 message=read scheduler group dispatch group_id=Some(208) request_ids=Some([208, 193, 194, 195, 200, 196, 197, 198, 199, 201, 202, 203, 206, 204, 205, 207]) start=0 end=64682
+TRACE us=40982.250 message=scheduler physical read started group_id=Some(208) request_ids=Some([208, 193, 194, 195, 200, 196, 197, 198, 199, 201, 202, 203, 206, 204, 205, 207]) start=0 end=64682
+TRACE us=44387.083 message=scheduler physical read completed group_id=Some(208) ok=true
+TRACE us=44387.958 message=read scheduler group completed group_id=Some(208) ok=true
+TRACE us=44400.083 span=651 name=object_read
+TRACE us=44401.500 message=object read completed request_id=208 route="scheduled" ok=true
+TRACE us=44408.125 span=652 name=object_read
+TRACE us=44410.041 message=object read completed request_id=194 route="scheduled" ok=true
+TRACE us=44413.458 span=653 name=object_read
+TRACE us=44415.375 message=object read completed request_id=200 route="scheduled" ok=true
+TRACE us=44422.041 span=654 name=object_read
+TRACE us=44423.875 message=object read completed request_id=193 route="scheduled" ok=true
+TRACE us=44424.583 span=655 name=object_read
+TRACE us=44426.500 message=object read completed request_id=195 route="scheduled" ok=true
+TRACE us=44433.791 span=656 name=object_read
+TRACE us=44434.916 message=object read completed request_id=198 route="scheduled" ok=true
+TRACE us=44435.625 span=657 name=object_read
+TRACE us=44436.250 span=658 name=object_read
+TRACE us=44436.708 message=object read completed request_id=201 route="scheduled" ok=true
+TRACE us=44437.333 message=object read completed request_id=202 route="scheduled" ok=true
+TRACE us=44443.875 span=659 name=object_read
+TRACE us=44445.000 message=object read completed request_id=199 route="scheduled" ok=true
+TRACE us=44445.875 span=660 name=object_read
+TRACE us=44446.916 message=object read completed request_id=203 route="scheduled" ok=true
+TRACE us=44447.250 span=661 name=object_read
+TRACE us=44448.250 message=object read completed request_id=206 route="scheduled" ok=true
+TRACE us=44453.541 span=662 name=object_read
+TRACE us=44454.583 span=663 name=object_read
+TRACE us=44455.833 message=object read completed request_id=204 route="scheduled" ok=true
+TRACE us=44455.958 span=664 name=object_read
+TRACE us=44457.083 message=object read completed request_id=205 route="scheduled" ok=true
+TRACE us=44464.125 message=object read completed request_id=196 route="scheduled" ok=true
+TRACE us=44466.875 span=665 name=object_read
+TRACE us=44470.125 message=object read completed request_id=207 route="scheduled" ok=true
+TRACE us=44474.500 span=666 name=object_read
+TRACE us=44475.625 message=object read completed request_id=197 route="scheduled" ok=true
+TRACE us=46144.208 span=667 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=46146.708 span=668 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=46153.750 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=46155.958 span=669 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=46158.916 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=46160.583 span=670 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=46163.416 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=46163.583 span=671 name=object_read
+TRACE us=46165.166 span=672 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=46165.458 message=object read submitted request_id=209 route="scheduled" range=4051..8126
+TRACE us=46168.208 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=46169.000 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(209) range=4051..8126 members=1
+TRACE us=46169.916 span=673 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=46170.416 span=674 name=object_read
+TRACE us=46172.208 message=object read submitted request_id=210 route="scheduled" range=8126..12207
+TRACE us=46172.708 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=46174.541 span=675 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=46175.000 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(210) range=8126..12207 members=2
+TRACE us=46177.500 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=46179.458 span=677 name=object_read
+TRACE us=46179.833 span=678 name=object_read
+TRACE us=46180.041 span=676 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=46181.500 message=object read submitted request_id=211 route="scheduled" range=12207..16209
+TRACE us=46181.958 message=object read submitted request_id=212 route="scheduled" range=16209..20258
+TRACE us=46183.583 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=46184.416 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(211) range=12207..16209 members=3
+TRACE us=46185.208 span=679 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=46187.708 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=46188.583 span=681 name=object_read
+TRACE us=46188.958 span=680 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=46189.583 message=object read submitted request_id=213 route="scheduled" range=20258..24266
+TRACE us=46191.500 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=46191.583 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(213) range=20258..24266 members=4
+TRACE us=46193.000 span=682 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=46194.458 span=683 name=object_read
+TRACE us=46195.375 message=object read submitted request_id=214 route="scheduled" range=28337..32389
+TRACE us=46195.458 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=46196.708 span=684 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=46197.166 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(214) range=28337..32389 members=5
+TRACE us=46199.000 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=46200.125 span=685 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=46201.916 span=686 name=object_read
+TRACE us=46202.416 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=46202.875 message=object read submitted request_id=215 route="scheduled" range=32389..36427
+TRACE us=46203.791 span=687 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=46206.083 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=46206.875 span=688 name=object_read
+TRACE us=46207.791 span=689 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=46208.583 message=object read submitted request_id=216 route="scheduled" range=36427..40462
+TRACE us=46210.541 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=46212.083 span=690 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=46214.875 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=46216.166 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=46217.666 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(212) range=16209..20258 members=6
+TRACE us=46228.041 span=692 name=object_read
+TRACE us=46229.291 span=691 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=46229.625 message=object read submitted request_id=217 route="scheduled" range=24266..28337
+TRACE us=46231.583 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(217) range=24266..28337 members=7
+TRACE us=46232.625 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=46236.375 span=693 name=object_read
+TRACE us=46237.500 span=695 name=object_read
+TRACE us=46237.583 message=object read submitted request_id=219 route="scheduled" range=44501..48537
+TRACE us=46237.958 span=694 name=object_read
+TRACE us=46238.791 message=object read submitted request_id=220 route="scheduled" range=48537..52599
+TRACE us=46239.833 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(219) range=44501..48537 members=8
+TRACE us=46242.625 message=object read submitted request_id=218 route="scheduled" range=40462..44501
+TRACE us=46243.750 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(216) range=36427..40462 members=9
+TRACE us=46245.666 span=696 name=object_read
+TRACE us=46246.666 message=object read submitted request_id=221 route="scheduled" range=56619..60688
+TRACE us=46248.458 span=697 name=object_read
+TRACE us=46250.541 span=698 name=object_read
+TRACE us=46250.958 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(218) range=40462..44501
+TRACE us=46251.666 message=read plug flushed plug_id=0x783ecac1d0 members=9 reason="handoff"
+TRACE us=46252.375 message=object read submitted request_id=223 route="scheduled" range=0..4051
+TRACE us=46253.375 message=object read submitted request_id=222 route="scheduled" range=52599..56619
+TRACE us=46253.750 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(215) range=32389..36427
+TRACE us=46259.833 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(222) range=52599..56619
+TRACE us=46260.208 span=699 name=object_read
+TRACE us=46263.625 message=object read submitted request_id=224 route="scheduled" range=60688..64682
+TRACE us=46267.833 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(223) range=0..4051
+TRACE us=46273.916 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(221) range=56619..60688
+TRACE us=46278.875 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(220) range=48537..52599
+TRACE us=46284.500 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(224) range=60688..64682
+TRACE us=46308.500 span=700 name=object_read_group
+TRACE us=46312.166 message=scheduler group selected group_id=Some(223) request_ids=[223, 209, 210, 211, 212, 213, 217, 214, 215, 216, 218, 219, 220, 222, 221, 224] ready=0 available_permits=31
+TRACE us=46322.875 message=read scheduler group dispatch group_id=Some(223) request_ids=Some([223, 209, 210, 211, 212, 213, 217, 214, 215, 216, 218, 219, 220, 222, 221, 224]) start=0 end=64682
+TRACE us=46324.416 message=scheduler physical read started group_id=Some(223) request_ids=Some([223, 209, 210, 211, 212, 213, 217, 214, 215, 216, 218, 219, 220, 222, 221, 224]) start=0 end=64682
+TRACE us=49733.375 message=scheduler physical read completed group_id=Some(223) ok=true
+TRACE us=49734.416 message=read scheduler group completed group_id=Some(223) ok=true
+TRACE us=49753.458 span=701 name=object_read
+TRACE us=49755.000 message=object read completed request_id=223 route="scheduled" ok=true
+TRACE us=49758.333 span=702 name=object_read
+TRACE us=49759.666 message=object read completed request_id=209 route="scheduled" ok=true
+TRACE us=49770.833 span=703 name=object_read
+TRACE us=49772.291 message=object read completed request_id=210 route="scheduled" ok=true
+TRACE us=49775.083 span=704 name=object_read
+TRACE us=49775.625 span=705 name=object_read
+TRACE us=49776.333 message=object read completed request_id=212 route="scheduled" ok=true
+TRACE us=49776.750 message=object read completed request_id=211 route="scheduled" ok=true
+TRACE us=49785.875 span=706 name=object_read
+TRACE us=49786.958 message=object read completed request_id=213 route="scheduled" ok=true
+TRACE us=49796.375 span=707 name=object_read
+TRACE us=49797.250 message=object read completed request_id=217 route="scheduled" ok=true
+TRACE us=49805.791 span=708 name=object_read
+TRACE us=49806.708 message=object read completed request_id=215 route="scheduled" ok=true
+TRACE us=49811.208 span=709 name=object_read
+TRACE us=49815.541 span=710 name=object_read
+TRACE us=49815.958 message=object read completed request_id=214 route="scheduled" ok=true
+TRACE us=49817.750 message=object read completed request_id=216 route="scheduled" ok=true
+TRACE us=49826.000 span=711 name=object_read
+TRACE us=49826.583 span=713 name=object_read
+TRACE us=49827.208 span=714 name=object_read
+TRACE us=49827.791 message=object read completed request_id=220 route="scheduled" ok=true
+TRACE us=49828.250 span=712 name=object_read
+TRACE us=49830.000 message=object read completed request_id=222 route="scheduled" ok=true
+TRACE us=49831.333 message=object read completed request_id=218 route="scheduled" ok=true
+TRACE us=49832.875 message=object read completed request_id=219 route="scheduled" ok=true
+TRACE us=49837.041 span=715 name=object_read
+TRACE us=49839.583 span=716 name=object_read
+TRACE us=49840.541 message=object read completed request_id=221 route="scheduled" ok=true
+TRACE us=49842.750 message=object read completed request_id=224 route="scheduled" ok=true
+TRACE us=52477.041 span=717 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=52482.791 span=718 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=52500.750 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=52505.041 span=719 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=52509.791 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=52511.666 span=720 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=52514.416 span=721 name=object_read
+TRACE us=52515.250 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=52517.125 span=722 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=52517.333 message=object read submitted request_id=225 route="scheduled" range=4051..8126
+TRACE us=52518.208 span=723 name=object_read
+TRACE us=52520.125 message=object read submitted request_id=226 route="scheduled" range=8126..12207
+TRACE us=52520.708 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=52522.500 span=724 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=52523.541 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(225) range=4051..8126 members=1
+TRACE us=52525.625 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=52527.458 span=725 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=52530.000 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=52530.333 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(226) range=8126..12207 members=2
+TRACE us=52531.333 span=726 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=52533.916 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=52535.000 span=728 name=object_read
+TRACE us=52535.625 span=727 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=52536.083 message=object read submitted request_id=227 route="scheduled" range=12207..16209
+TRACE us=52536.833 span=729 name=object_read
+TRACE us=52537.875 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(227) range=12207..16209 members=3
+TRACE us=52538.083 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=52540.208 span=730 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=52540.416 message=object read submitted request_id=228 route="scheduled" range=16209..20258
+TRACE us=52540.833 span=731 name=object_read
+TRACE us=52541.958 message=object read submitted request_id=229 route="scheduled" range=20258..24266
+TRACE us=52542.791 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(228) range=16209..20258 members=4
+TRACE us=52548.125 span=732 name=object_read
+TRACE us=52549.166 message=object read submitted request_id=230 route="scheduled" range=28337..32389
+TRACE us=52549.500 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=52550.500 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(229) range=20258..24266 members=5
+TRACE us=52551.958 span=733 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=52554.708 span=734 name=object_read
+TRACE us=52555.333 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=52555.750 message=object read submitted request_id=231 route="scheduled" range=32389..36427
+TRACE us=52556.583 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(230) range=28337..32389 members=6
+TRACE us=52556.750 span=735 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=52559.166 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=52560.541 span=736 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=52560.958 span=737 name=object_read
+TRACE us=52561.958 message=object read submitted request_id=232 route="scheduled" range=36427..40462
+TRACE us=52563.875 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(232) range=36427..40462 members=7
+TRACE us=52564.750 span=738 name=object_read
+TRACE us=52565.916 message=object read submitted request_id=233 route="scheduled" range=40462..44501
+TRACE us=52566.333 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=52566.791 span=739 name=object_read
+TRACE us=52567.833 span=740 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=52568.000 message=object read submitted request_id=234 route="scheduled" range=44501..48537
+TRACE us=52570.625 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=52571.916 span=741 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=52574.541 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=52576.416 span=742 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=52576.500 span=743 name=object_read
+TRACE us=52578.000 message=object read submitted request_id=235 route="scheduled" range=48537..52599
+TRACE us=52578.875 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=52580.375 span=744 name=object_read
+TRACE us=52580.500 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=52581.583 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(231) range=32389..36427 members=8
+TRACE us=52582.000 message=object read submitted request_id=236 route="scheduled" range=52599..56619
+TRACE us=52583.625 span=745 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=52586.250 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=52587.708 span=747 name=object_read
+TRACE us=52588.791 span=746 name=object_read
+TRACE us=52589.500 message=object read submitted request_id=238 route="scheduled" range=24266..28337
+TRACE us=52590.000 message=object read submitted request_id=237 route="scheduled" range=56619..60688
+TRACE us=52591.666 message=read plug staged plug_id=0x783ecac1d0 trace_id=Some(238) range=24266..28337 members=9
+TRACE us=52597.708 span=748 name=object_read
+TRACE us=52598.625 message=object read submitted request_id=239 route="scheduled" range=60688..64682
+TRACE us=52599.750 message=read plug flushed plug_id=0x783ecac1d0 members=9 reason="handoff"
+TRACE us=52600.791 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(239) range=60688..64682
+TRACE us=52607.333 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(233) range=40462..44501
+TRACE us=52614.583 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(234) range=44501..48537
+TRACE us=52619.333 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(236) range=52599..56619
+TRACE us=52621.000 span=749 name=object_read
+TRACE us=52626.000 message=object read submitted request_id=240 route="scheduled" range=0..4051
+TRACE us=52626.666 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(235) range=48537..52599
+TRACE us=52641.416 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(240) range=0..4051
+TRACE us=52646.541 message=read plug late arrival plug_id=0x783ecac1d0 trace_id=Some(237) range=56619..60688
+TRACE us=52660.500 span=750 name=object_read_group
+TRACE us=52665.458 message=scheduler group selected group_id=Some(240) request_ids=[240, 225, 226, 227, 228, 229, 238, 230, 231, 232, 233, 234, 235, 236, 237, 239] ready=0 available_permits=31
+TRACE us=52677.041 message=read scheduler group dispatch group_id=Some(240) request_ids=Some([240, 225, 226, 227, 228, 229, 238, 230, 231, 232, 233, 234, 235, 236, 237, 239]) start=0 end=64682
+TRACE us=52678.833 message=scheduler physical read started group_id=Some(240) request_ids=Some([240, 225, 226, 227, 228, 229, 238, 230, 231, 232, 233, 234, 235, 236, 237, 239]) start=0 end=64682
+TRACE us=56098.750 message=scheduler physical read completed group_id=Some(240) ok=true
+TRACE us=56099.958 message=read scheduler group completed group_id=Some(240) ok=true
+TRACE us=56123.125 span=751 name=object_read
+TRACE us=56125.166 message=object read completed request_id=240 route="scheduled" ok=true
+TRACE us=56138.541 span=752 name=object_read
+TRACE us=56140.041 message=object read completed request_id=227 route="scheduled" ok=true
+TRACE us=56152.541 span=753 name=object_read
+TRACE us=56154.041 span=754 name=object_read
+TRACE us=56154.583 message=object read completed request_id=225 route="scheduled" ok=true
+TRACE us=56155.291 message=object read completed request_id=228 route="scheduled" ok=true
+TRACE us=56164.083 span=755 name=object_read
+TRACE us=56164.833 span=756 name=object_read
+TRACE us=56165.208 message=object read completed request_id=226 route="scheduled" ok=true
+TRACE us=56166.083 message=object read completed request_id=238 route="scheduled" ok=true
+TRACE us=56174.333 span=757 name=object_read
+TRACE us=56175.416 message=object read completed request_id=231 route="scheduled" ok=true
+TRACE us=56176.416 span=758 name=object_read
+TRACE us=56177.625 message=object read completed request_id=230 route="scheduled" ok=true
+TRACE us=56179.041 span=759 name=object_read
+TRACE us=56184.208 message=object read completed request_id=229 route="scheduled" ok=true
+TRACE us=56184.666 span=760 name=object_read
+TRACE us=56185.041 span=761 name=object_read
+TRACE us=56187.041 span=762 name=object_read
+TRACE us=56187.333 message=object read completed request_id=232 route="scheduled" ok=true
+TRACE us=56188.666 message=object read completed request_id=234 route="scheduled" ok=true
+TRACE us=56189.291 message=object read completed request_id=233 route="scheduled" ok=true
+TRACE us=56197.000 span=763 name=object_read
+TRACE us=56198.416 message=object read completed request_id=236 route="scheduled" ok=true
+TRACE us=56200.958 span=764 name=object_read
+TRACE us=56205.041 message=object read completed request_id=235 route="scheduled" ok=true
+TRACE us=56208.125 span=765 name=object_read
+TRACE us=56209.875 message=object read completed request_id=237 route="scheduled" ok=true
+TRACE us=56219.291 span=766 name=object_read
+TRACE us=56221.291 message=object read completed request_id=239 route="scheduled" ok=true
+TRACE us=58267.375 span=767 name=block_read_ahead object_id=1 head=0 scan_end=16
+TRACE us=58270.041 span=768 name=block_read object_id=1 block=1 start=4051 end=8126
+TRACE us=58278.083 message=block cache request registered object_id=1 block=1 memory_hit=false
+TRACE us=58280.833 span=769 name=block_read object_id=1 block=2 start=8126 end=12207
+TRACE us=58284.166 message=block cache request registered object_id=1 block=2 memory_hit=false
+TRACE us=58285.958 span=770 name=block_read object_id=1 block=3 start=12207 end=16209
+TRACE us=58289.000 message=block cache request registered object_id=1 block=3 memory_hit=false
+TRACE us=58289.750 span=771 name=object_read
+TRACE us=58290.875 span=772 name=block_read object_id=1 block=4 start=16209 end=20258
+TRACE us=58291.875 message=object read submitted request_id=241 route="scheduled" range=4051..8126
+TRACE us=58294.125 message=block cache request registered object_id=1 block=4 memory_hit=false
+TRACE us=58296.041 message=read plug staged plug_id=0x783ecac160 trace_id=Some(241) range=4051..8126 members=1
+TRACE us=58296.208 span=773 name=block_read object_id=1 block=5 start=20258 end=24266
+TRACE us=58298.958 message=block cache request registered object_id=1 block=5 memory_hit=false
+TRACE us=58300.750 span=774 name=block_read object_id=1 block=6 start=24266 end=28337
+TRACE us=58301.333 span=775 name=object_read
+TRACE us=58303.458 message=block cache request registered object_id=1 block=6 memory_hit=false
+TRACE us=58303.666 message=object read submitted request_id=242 route="scheduled" range=8126..12207
+TRACE us=58305.083 span=776 name=block_read object_id=1 block=7 start=28337 end=32389
+TRACE us=58307.166 message=read plug staged plug_id=0x783ecac160 trace_id=Some(242) range=8126..12207 members=2
+TRACE us=58307.541 span=777 name=object_read
+TRACE us=58307.666 message=block cache request registered object_id=1 block=7 memory_hit=false
+TRACE us=58308.750 message=object read submitted request_id=243 route="scheduled" range=12207..16209
+TRACE us=58309.083 span=778 name=block_read object_id=1 block=8 start=32389 end=36427
+TRACE us=58310.833 message=read plug staged plug_id=0x783ecac160 trace_id=Some(243) range=12207..16209 members=3
+TRACE us=58311.416 message=block cache request registered object_id=1 block=8 memory_hit=false
+TRACE us=58312.458 span=779 name=object_read
+TRACE us=58312.916 span=780 name=block_read object_id=1 block=9 start=36427 end=40462
+TRACE us=58313.791 message=object read submitted request_id=244 route="scheduled" range=16209..20258
+TRACE us=58313.916 span=781 name=object_read
+TRACE us=58315.041 message=object read submitted request_id=245 route="scheduled" range=20258..24266
+TRACE us=58315.333 message=block cache request registered object_id=1 block=9 memory_hit=false
+TRACE us=58316.000 message=read plug staged plug_id=0x783ecac160 trace_id=Some(244) range=16209..20258 members=4
+TRACE us=58317.000 span=782 name=block_read object_id=1 block=10 start=40462 end=44501
+TRACE us=58319.458 message=block cache request registered object_id=1 block=10 memory_hit=false
+TRACE us=58320.666 span=783 name=block_read object_id=1 block=11 start=44501 end=48537
+TRACE us=58321.583 span=784 name=object_read
+TRACE us=58322.625 message=object read submitted request_id=246 route="scheduled" range=24266..28337
+TRACE us=58323.000 message=block cache request registered object_id=1 block=11 memory_hit=false
+TRACE us=58323.583 message=read plug staged plug_id=0x783ecac160 trace_id=Some(245) range=20258..24266 members=5
+TRACE us=58324.375 span=785 name=block_read object_id=1 block=12 start=48537 end=52599
+TRACE us=58326.750 message=block cache request registered object_id=1 block=12 memory_hit=false
+TRACE us=58328.000 span=786 name=block_read object_id=1 block=13 start=52599 end=56619
+TRACE us=58328.250 span=787 name=object_read
+TRACE us=58329.250 message=object read submitted request_id=247 route="scheduled" range=32389..36427
+TRACE us=58329.791 message=read plug staged plug_id=0x783ecac160 trace_id=Some(246) range=24266..28337 members=6
+TRACE us=58330.750 message=block cache request registered object_id=1 block=13 memory_hit=false
+TRACE us=58332.000 span=788 name=block_read object_id=1 block=14 start=56619 end=60688
+TRACE us=58334.291 message=block cache request registered object_id=1 block=14 memory_hit=false
+TRACE us=58335.500 span=790 name=object_read
+TRACE us=58335.625 span=789 name=block_read object_id=1 block=15 start=60688 end=64682
+TRACE us=58336.833 message=object read submitted request_id=248 route="scheduled" range=36427..40462
+TRACE us=58337.541 message=read plug staged plug_id=0x783ecac160 trace_id=Some(247) range=32389..36427 members=7
+TRACE us=58337.875 message=block cache request registered object_id=1 block=15 memory_hit=false
+TRACE us=58339.458 message=blockwise read-ahead window object_id=1 head=0 end=16 scan_end=16
+TRACE us=58340.291 message=read plug staged plug_id=0x783ecac160 trace_id=Some(248) range=36427..40462 members=8
+TRACE us=58341.541 span=791 name=block_read object_id=1 block=0 start=0 end=4051
+TRACE us=58341.833 span=792 name=object_read
+TRACE us=58342.958 message=object read submitted request_id=249 route="scheduled" range=40462..44501
+TRACE us=58344.041 span=793 name=object_read
+TRACE us=58344.958 message=read plug staged plug_id=0x783ecac160 trace_id=Some(249) range=40462..44501 members=9
+TRACE us=58345.041 message=block cache request registered object_id=1 block=0 memory_hit=false
+TRACE us=58345.791 message=object read submitted request_id=250 route="scheduled" range=44501..48537
+TRACE us=58347.916 message=read plug staged plug_id=0x783ecac160 trace_id=Some(250) range=44501..48537 members=10
+TRACE us=58348.833 span=794 name=object_read
+TRACE us=58349.916 message=object read submitted request_id=251 route="scheduled" range=48537..52599
+TRACE us=58351.458 span=795 name=object_read
+TRACE us=58351.833 message=read plug staged plug_id=0x783ecac160 trace_id=Some(251) range=48537..52599 members=11
+TRACE us=58352.666 message=object read submitted request_id=252 route="scheduled" range=52599..56619
+TRACE us=58354.541 message=read plug staged plug_id=0x783ecac160 trace_id=Some(252) range=52599..56619 members=12
+TRACE us=58355.083 span=796 name=object_read
+TRACE us=58356.250 message=object read submitted request_id=253 route="scheduled" range=56619..60688
+TRACE us=58358.208 message=read plug staged plug_id=0x783ecac160 trace_id=Some(253) range=56619..60688 members=13
+TRACE us=58358.583 span=797 name=object_read
+TRACE us=58359.750 message=object read submitted request_id=254 route="scheduled" range=60688..64682
+TRACE us=58361.208 span=798 name=object_read
+TRACE us=58361.750 message=read plug staged plug_id=0x783ecac160 trace_id=Some(254) range=60688..64682 members=14
+TRACE us=58362.416 message=object read submitted request_id=255 route="scheduled" range=0..4051
+TRACE us=58364.333 message=read plug staged plug_id=0x783ecac160 trace_id=Some(255) range=0..4051 members=15
+TRACE us=58367.166 span=799 name=object_read
+TRACE us=58368.458 message=object read submitted request_id=256 route="scheduled" range=28337..32389
+TRACE us=58370.833 message=read plug late arrival plug_id=0x783ecac160 trace_id=Some(256) range=28337..32389
+TRACE us=58377.416 message=read plug flushed plug_id=0x783ecac160 members=15 reason="handoff"
+TRACE us=58402.000 span=800 name=object_read_group
+TRACE us=58407.291 message=scheduler group selected group_id=Some(255) request_ids=[255, 241, 242, 243, 244, 245, 246, 256, 247, 248, 249, 250, 251, 252, 253, 254] ready=0 available_permits=31
+TRACE us=58418.166 message=read scheduler group dispatch group_id=Some(255) request_ids=Some([255, 241, 242, 243, 244, 245, 246, 256, 247, 248, 249, 250, 251, 252, 253, 254]) start=0 end=64682
+TRACE us=58419.708 message=scheduler physical read started group_id=Some(255) request_ids=Some([255, 241, 242, 243, 244, 245, 246, 256, 247, 248, 249, 250, 251, 252, 253, 254]) start=0 end=64682
+TRACE us=61832.125 message=scheduler physical read completed group_id=Some(255) ok=true
+TRACE us=61833.208 message=read scheduler group completed group_id=Some(255) ok=true
+TRACE us=61846.166 span=801 name=object_read
+TRACE us=61847.708 message=object read completed request_id=255 route="scheduled" ok=true
+TRACE us=61854.666 span=802 name=object_read
+TRACE us=61856.000 message=object read completed request_id=241 route="scheduled" ok=true
+TRACE us=61861.250 span=803 name=object_read
+TRACE us=61862.333 message=object read completed request_id=243 route="scheduled" ok=true
+TRACE us=61866.000 span=804 name=object_read
+TRACE us=61867.041 message=object read completed request_id=242 route="scheduled" ok=true
+TRACE us=61871.208 span=805 name=object_read
+TRACE us=61872.250 message=object read completed request_id=245 route="scheduled" ok=true
+TRACE us=61876.041 span=806 name=object_read
+TRACE us=61877.125 message=object read completed request_id=246 route="scheduled" ok=true
+TRACE us=61880.750 span=807 name=object_read
+TRACE us=61881.791 message=object read completed request_id=244 route="scheduled" ok=true
+TRACE us=61885.875 span=808 name=object_read
+TRACE us=61887.000 message=object read completed request_id=249 route="scheduled" ok=true
+TRACE us=61890.125 span=809 name=object_read
+TRACE us=61891.166 message=object read completed request_id=250 route="scheduled" ok=true
+TRACE us=61895.500 span=810 name=object_read
+TRACE us=61896.583 message=object read completed request_id=256 route="scheduled" ok=true
+TRACE us=61899.541 span=811 name=object_read
+TRACE us=61900.583 message=object read completed request_id=251 route="scheduled" ok=true
+TRACE us=61906.083 span=813 name=object_read
+TRACE us=61907.333 message=object read completed request_id=252 route="scheduled" ok=true
+TRACE us=61908.625 span=812 name=object_read
+TRACE us=61916.208 span=815 name=object_read
+TRACE us=61917.083 message=object read completed request_id=248 route="scheduled" ok=true
+TRACE us=61920.166 span=814 name=object_read
+TRACE us=61923.541 span=816 name=object_read
+TRACE us=61925.916 message=object read completed request_id=254 route="scheduled" ok=true
+TRACE us=61928.000 message=object read completed request_id=253 route="scheduled" ok=true
+TRACE us=61929.625 message=object read completed request_id=247 route="scheduled" ok=true
+test is drop,hummock::store::version::tests::locality_plug_experiment::locality_plug_experiment
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 278 filtered out; finished in 0.11s

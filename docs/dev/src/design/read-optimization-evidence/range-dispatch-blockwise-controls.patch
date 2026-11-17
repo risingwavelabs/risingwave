@@ -1,0 +1,25 @@
+--- a/src/storage/src/hummock/store/version/tests/range_scheduler_experiment.rs
++++ b/src/storage/src/hummock/store/version/tests/range_scheduler_experiment.rs
+@@ -131,10 +131,10 @@
+     let arm = std::env::var("RW_RANGE_ARM").unwrap_or_else(|_| "blockwise_scheduler".to_owned());
+     assert!(matches!(
+         arm.as_str(),
+-        "range_direct" | "range_dispatch" | "range_scheduler" | "blockwise_scheduler"
++        "range_direct" | "range_dispatch" | "range_scheduler" | "blockwise_scheduler" | "blockwise_direct" | "blockwise_dispatch"
+     ));
+-    let blockwise = arm == "blockwise_scheduler";
+-    let dispatch_only = arm == "range_dispatch";
++    let blockwise = arm.starts_with("blockwise_");
++    let dispatch_only = arm.ends_with("_dispatch");
+     let registry = Registry::new();
+     let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
+     let backend = InMemObjectStore::for_test();
+@@ -155,7 +155,7 @@
+             ..Default::default()
+         }),
+     ));
+-    let object = Arc::new(if arm == "range_direct" {
++    let object = Arc::new(if arm.ends_with("_direct") {
+         object
+     } else {
+         object.with_read_coalescing()

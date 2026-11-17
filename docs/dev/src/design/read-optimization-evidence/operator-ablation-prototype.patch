@@ -1,0 +1,40 @@
+--- a/src/storage/src/hummock/store/version.rs
++++ b/src/storage/src/hummock/store/version.rs
+@@ -1163,6 +1163,13 @@
+             PrefetchMode::SnapshotBackfill | PrefetchMode::LocalityBackfill => PrefetchMode::Range,
+             mode => mode,
+         };
++        // Test-only ablation: disable Locality read-ahead without selecting legacy Range.
++        #[cfg(feature = "test")]
++        if read_options.prefetch_options.mode == PrefetchMode::LocalityBackfill
++            && std::env::var_os("RW_CHAIN_NO_LOCALITY_PREFETCH").is_some()
++        {
++            sst_read_options.prefetch = PrefetchMode::Disabled;
++        }
+         let sst_read_options = Arc::new(sst_read_options);
+         let metadata = crate::hummock::SstMetaBatch::current();
+         for sstable_info in &uncommitted_ssts {
+--- a/src/object_store/src/object/mod.rs
++++ b/src/object_store/src/object/mod.rs
+@@ -328,6 +328,10 @@
+     }
+ 
+     pub fn read_plug(&self, max_reads: usize) -> Option<ReadPlug> {
++        #[cfg(feature = "test")]
++        if std::env::var_os("RW_CHAIN_NO_PLUG").is_some() {
++            return None;
++        }
+         dispatch_object_store_enum!(self, |store| store.read_plug(max_reads))
+     }
+ 
+--- a/src/stream/src/executor/locality_provider/read_pattern_experiment.rs
++++ b/src/stream/src/executor/locality_provider/read_pattern_experiment.rs
+@@ -187,7 +187,7 @@
+         prefetch_buffer_capacity: 64 << 20,
+         max_prefetch_block_number: 16,
+         blockwise_prefetch: BlockwisePrefetchConfig {
+-            enabled: true,
++            enabled: std::env::var_os("RW_CHAIN_NO_PREFIX_PREFETCH").is_none(),
+             locality_backfill_enabled: true,
+             snapshot_backfill_enabled: true,
+             max_blocks: 16.try_into().unwrap(),

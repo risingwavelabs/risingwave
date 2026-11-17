@@ -1,0 +1,107 @@
+--- a/src/storage/src/hummock/store/version/tests/locality_plug_experiment.rs
++++ b/src/storage/src/hummock/store/version/tests/locality_plug_experiment.rs
+@@ -75,6 +75,7 @@
+     sst: TableHolder,
+     info: SstableInfo,
+     blocks: usize,
++    stop_in_last_block: bool,
+ ) -> (f64, f64, usize, f64) {
+     let first = test_key_of(0);
+     let table_id = first.user_key.table_id;
+@@ -111,8 +112,13 @@
+         assert_eq!(key, test_key_of(rows).to_ref());
+         assert_eq!(value, test_value_of(rows));
+         rows += 1;
+-    }
+-    assert_eq!(test_key_of(rows).user_key.table_key.as_ref(), end.as_ref());
++        if stop_in_last_block && key >= FullKey::decode(&sst.meta.block_metas[15].smallest_key) {
++            break;
++        }
++    }
++    if !stop_in_last_block {
++        assert_eq!(test_key_of(rows).user_key.table_key.as_ref(), end.as_ref());
++    }
+     (
+         first_us,
+         start.elapsed().as_secs_f64() * 1e6,
+@@ -233,6 +239,7 @@
+         for scenario in [
+             "cold16",
+             "cold32",
++            "stop_last",
+             "single",
+             "warm_neighbors",
+             "warm_head",
+@@ -252,7 +259,7 @@
+             }
+             let blocks = if scenario == "single" {
+                 1
+-            } else if scenario == "cold32" {
++            } else if matches!(scenario, "cold32" | "stop_last") {
+                 32
+             } else {
+                 16
+@@ -300,8 +307,13 @@
+                     } else {
+                         None
+                     };
+-                    let scan =
+-                        streaming.spawn(scan(store.clone(), sst.clone(), info.clone(), blocks));
++                    let scan = streaming.spawn(scan(
++                        store.clone(),
++                        sst.clone(),
++                        info.clone(),
++                        blocks,
++                        scenario == "stop_last",
++                    ));
+                     let point_task = if matches!(scenario, "mixed" | "shared" | "racing_point") {
+                         let store = store.clone();
+                         let sst = if scenario != "mixed" {
+@@ -328,6 +340,16 @@
+                     }
+                     sample
+                 };
++                // Count all speculative work after dropping the scan, outside latency samples.
++                if scenario == "stop_last" {
++                    tokio::time::sleep(Duration::from_millis(20)).await;
++                }
++                let pipelined = std::env::var_os("RW_LOCALITY_PIPELINE").is_some();
++                let fetched_blocks = if scenario == "stop_last" && !pipelined {
++                    16
++                } else {
++                    blocks
++                };
+                 let gets = physical.get_sample_count() - before_gets;
+                 let outer = store.read_metrics.block_cache_outer_fetch.get() - before_outer;
+                 let registered = store.read_metrics.prefetch_registered_ready.get()
+@@ -337,7 +359,7 @@
+                     "single" | "warm_neighbors" | "warm_head" | "point" => 1,
+                     "warm_gaps" | "cold8" => 8,
+                     "mixed" => 17,
+-                    _ => blocks as u64,
++                    _ => fetched_blocks as u64,
+                 };
+                 assert_eq!(outer, expected_outer, "{scenario}");
+                 assert_eq!(
+@@ -345,14 +367,19 @@
+                     if scenario == "point" {
+                         0
+                     } else {
+-                        (blocks - blocks.div_ceil(16)) as u64
++                        (fetched_blocks
++                            - if pipelined {
++                                1
++                            } else {
++                                fetched_blocks.div_ceil(16)
++                            }) as u64
+                     }
+                 );
+                 assert!(gets > 0 && gets <= outer);
+                 let unique_bytes: u64 = if scenario == "point" {
+                     u64::from(point_sst.meta.block_metas[0].len)
+                 } else {
+-                    sst.meta.block_metas[..blocks]
++                    sst.meta.block_metas[..fetched_blocks]
+                         .iter()
+                         .enumerate()
+                         .filter(|(idx, _)| match scenario {

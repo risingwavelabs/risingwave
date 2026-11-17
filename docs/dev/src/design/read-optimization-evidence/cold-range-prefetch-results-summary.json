@@ -1,0 +1,482 @@
+[
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 1741,
+      "min": 1728,
+      "max": 1745,
+      "p95": 1745
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144900547.0,
+      "min": 144900547.0,
+      "max": 144900547.0,
+      "p95": 144900547.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 7106268.958000001,
+      "min": 1926474.084,
+      "max": 7484775.917,
+      "p95": 7484775.917
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365112,
+      "min": 268365101,
+      "max": 268365259,
+      "p95": 268365259
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "cold_ranges_direct",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145031515.0,
+      "min": 144966031.0,
+      "max": 145031515.0,
+      "p95": 145031515.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 4940098.542,
+      "min": 3963141.541,
+      "max": 5158211.958,
+      "p95": 5158211.958
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365391,
+      "min": 268365096,
+      "max": 268365391,
+      "p95": 268365391
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144966031.0,
+      "min": 144966031.0,
+      "max": 145031515.0,
+      "p95": 145031515.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3550700.458,
+      "min": 1606219.75,
+      "max": 4602674.25,
+      "p95": 4602674.25
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365267,
+      "min": 268365255,
+      "max": 268365570,
+      "p95": 268365570
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 1724,
+      "min": 1723,
+      "max": 1731,
+      "p95": 1731
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144900547.0,
+      "min": 144900547.0,
+      "max": 144900547.0,
+      "p95": 144900547.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 4521335.167,
+      "min": 3077085.041,
+      "max": 6447471.0,
+      "p95": 6447471.0
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365111,
+      "min": 268364954,
+      "max": 268365250,
+      "p95": 268365250
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "cold_ranges_direct",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145031515.0,
+      "min": 144966031.0,
+      "max": 145031515.0,
+      "p95": 145031515.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 5347922.5,
+      "min": 4655602.584000001,
+      "max": 6425188.75,
+      "p95": 6425188.75
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365242,
+      "min": 268365242,
+      "max": 268365252,
+      "p95": 268365252
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145031515.0,
+      "min": 145031515.0,
+      "max": 145096999.0,
+      "p95": 145096999.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 4232952.292,
+      "min": 4119016.0,
+      "max": 7104534.375,
+      "p95": 7104534.375
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365264,
+      "min": 268365117,
+      "max": 268365274,
+      "p95": 268365274
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 202,
+      "min": 199,
+      "max": 205,
+      "p95": 205
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45248719.0,
+      "min": 45248719.0,
+      "max": 45248719.0,
+      "p95": 45248719.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 1192541.042,
+      "min": 426649.41699999996,
+      "max": 2246163.917,
+      "p95": 2246163.917
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "cold_ranges_direct",
+    "get": {
+      "n": 3,
+      "median": 189,
+      "min": 188,
+      "max": 189,
+      "p95": 189
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45313982.0,
+      "p95": 45313982.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 889264.542,
+      "min": 429948.167,
+      "max": 1368944.25,
+      "p95": 1368944.25
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45313982.0,
+      "p95": 45313982.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 1061787.5420000001,
+      "min": 403449.0,
+      "max": 2437773.959,
+      "p95": 2437773.959
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 194,
+      "min": 192,
+      "max": 197,
+      "p95": 197
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45248719.0,
+      "min": 45248719.0,
+      "max": 45248719.0,
+      "p95": 45248719.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 900632.458,
+      "min": 502501.375,
+      "max": 1161852.25,
+      "p95": 1161852.25
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "cold_ranges_direct",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45379182.0,
+      "p95": 45379182.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 850752.167,
+      "min": 551138.0,
+      "max": 1106599.375,
+      "p95": 1106599.375
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45379182.0,
+      "min": 45379182.0,
+      "max": 45444454.0,
+      "p95": 45444454.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 773162.792,
+      "min": 485935.083,
+      "max": 1326519.917,
+      "p95": 1326519.917
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    }
+  }
+]

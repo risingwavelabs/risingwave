@@ -1,0 +1,91 @@
+--- a/src/storage/src/hummock/sstable/forward_sstable_iterator.rs
++++ b/src/storage/src/hummock/sstable/forward_sstable_iterator.rs
+@@ -288,7 +288,10 @@
+             }
+         }
+         let mut read_plug = None;
+-        if prefetched_block.is_none() && self.options.prefetch == PrefetchMode::Blockwise {
++        let blockwise = self.options.prefetch == PrefetchMode::Blockwise;
++        #[cfg(feature = "test")]
++        let blockwise = blockwise || self.options.prefetch == PrefetchMode::LocalityBackfill;
++        if prefetched_block.is_none() && blockwise {
+             if idx >= self.read_ahead_end
+                 && let Some(register) = self.register_read_ahead(idx)
+             {
+@@ -352,6 +355,8 @@
+                 }
+             }
+         }
++        #[cfg(feature = "test")]
++        let consumed_prefetch = prefetched_block.is_some();
+         let block = match prefetched_block {
+             Some(block) => block,
+             None => {
+@@ -386,6 +391,16 @@
+ 
+         self.cur_idx = idx;
+ 
++        // Start the next bounded window while the caller still has this block to
++        // consume. Every candidate still registers separately with Foyer.
++        #[cfg(feature = "test")]
++        if self.options.prefetch == PrefetchMode::LocalityBackfill
++            && consumed_prefetch
++            && self.read_ahead.is_empty()
++            && idx + 1 < self.block_end_idx_exclusive
++        {
++            Box::pin(self.register_next_window(idx + 1)).await;
++        }
+         Ok(())
+     }
+ 
+@@ -510,6 +525,32 @@
+                 plug
+             }
+         }))
++    }
++
++    #[cfg(feature = "test")]
++    async fn register_next_window(&mut self, head: usize) {
++        let plug = match self.register_read_ahead(head) {
++            Some(register) => register.await,
++            None => None,
++        };
++        let response = self
++            .sstable_store
++            .get_block_response_with_plug(&self.sst, head, self.options.cache_policy, plug.as_ref())
++            .await;
++        drop(plug);
++        let event = match &response {
++            Ok(BlockResponse::Fetch(fetch)) if !fetch.need_await() => {
++                &self.sstable_store.read_metrics.prefetch_registered_ready
++            }
++            Ok(_) => &self.sstable_store.read_metrics.prefetch_registered_pending,
++            Err(_) => &self.sstable_store.read_metrics.prefetch_registration_error,
++        };
++        event.inc();
++        self.sstable_store
++            .read_metrics
++            .prefetch_registered_bytes
++            .inc_by(u64::from(self.sst.meta.block_metas[head].len));
++        self.read_ahead.push_front(response);
+     }
+ 
+     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
+--- a/src/storage/src/hummock/store/version.rs
++++ b/src/storage/src/hummock/store/version.rs
+@@ -1163,6 +1163,15 @@
+             PrefetchMode::SnapshotBackfill | PrefetchMode::LocalityBackfill => PrefetchMode::Range,
+             mode => mode,
+         };
++        // Experimental Locality-only prefetch timing; normal production routing is unchanged.
++        #[cfg(feature = "test")]
++        if read_options.prefetch_options.mode == PrefetchMode::LocalityBackfill
++            && prefetch_config.locality_backfill_enabled
++            && !self.sstable_store.block_cache().is_hybrid()
++            && std::env::var_os("RW_LOCALITY_PIPELINE").is_some()
++        {
++            sst_read_options.prefetch = PrefetchMode::LocalityBackfill;
++        }
+         let sst_read_options = Arc::new(sst_read_options);
+         let metadata = crate::hummock::SstMetaBatch::current();
+         for sstable_info in &uncommitted_ssts {

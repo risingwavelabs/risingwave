@@ -1,0 +1,1650 @@
+[
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 1726,
+      "min": 1726,
+      "max": 1748,
+      "p95": 1748
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144900547.0,
+      "min": 144900547.0,
+      "max": 144900547.0,
+      "p95": 144900547.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 2923195.8329999996,
+      "min": 1443252.583,
+      "max": 4313509.291,
+      "p95": 4313509.291
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365259,
+      "min": 268365250,
+      "max": 268365415,
+      "p95": 268365415
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 2222.0,
+      "min": 2222.0,
+      "max": 2222.0,
+      "p95": 2222.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 496.0,
+      "min": 474.0,
+      "max": 496.0,
+      "p95": 496.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 11.86,
+      "min": 6.14,
+      "max": 12.24,
+      "p95": 12.24
+    },
+    "process_user": {
+      "n": 3,
+      "median": 21.74,
+      "min": 11.25,
+      "max": 24.8,
+      "p95": 24.8
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.67,
+      "min": 0.24,
+      "max": 0.81,
+      "p95": 0.81
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 979484672,
+      "min": 972963840,
+      "max": 997556224,
+      "p95": 997556224
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144966031.0,
+      "min": 144966031.0,
+      "max": 145031515.0,
+      "p95": 145031515.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3475663.0409999997,
+      "min": 1515936.6670000001,
+      "max": 4558476.875,
+      "p95": 4558476.875
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365267,
+      "min": 268365100,
+      "max": 268365276,
+      "p95": 268365276
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "direct": {
+      "n": 3,
+      "median": 1718.0,
+      "min": 1718.0,
+      "max": 1718.0,
+      "p95": 1718.0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 10.65,
+      "min": 6.25,
+      "max": 13.11,
+      "p95": 13.11
+    },
+    "process_user": {
+      "n": 3,
+      "median": 21.49,
+      "min": 11.59,
+      "max": 25.4,
+      "p95": 25.4
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.65,
+      "min": 0.19,
+      "max": 0.86,
+      "p95": 0.86
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 984973312,
+      "min": 978632704,
+      "max": 996425728,
+      "p95": 996425728
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "range_dispatch",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145031515.0,
+      "min": 145031515.0,
+      "max": 145096999.0,
+      "p95": 145096999.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3202860.167,
+      "min": 1666453.959,
+      "max": 4021170.3749999995,
+      "p95": 4021170.3749999995
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365255,
+      "min": 268364952,
+      "max": 268365257,
+      "p95": 268365257
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 1718.0,
+      "min": 1718.0,
+      "max": 1718.0,
+      "p95": 1718.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 11.21,
+      "min": 6.45,
+      "max": 14.77,
+      "p95": 14.77
+    },
+    "process_user": {
+      "n": 3,
+      "median": 21.74,
+      "min": 12.26,
+      "max": 27.01,
+      "p95": 27.01
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.67,
+      "min": 0.26,
+      "max": 1.0,
+      "p95": 1.0
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 989462528,
+      "min": 977944576,
+      "max": 991723520,
+      "p95": 991723520
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 0,
+    "arm": "range_scheduler",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1717,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145031515.0,
+      "min": 144966031.0,
+      "max": 145096999.0,
+      "p95": 145096999.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 4613715.667,
+      "min": 4352120.5,
+      "max": 4681719.791,
+      "p95": 4681719.791
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365101,
+      "min": 268364950,
+      "max": 268365259,
+      "p95": 268365259
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 1718.0,
+      "min": 1718.0,
+      "max": 1718.0,
+      "p95": 1718.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 1.0,
+      "p95": 1.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 11.96,
+      "min": 10.18,
+      "max": 11.99,
+      "p95": 11.99
+    },
+    "process_user": {
+      "n": 3,
+      "median": 24.87,
+      "min": 22.85,
+      "max": 25.0,
+      "p95": 25.0
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.91,
+      "min": 0.88,
+      "max": 0.92,
+      "p95": 0.92
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 997277696,
+      "min": 995508224,
+      "max": 998031360,
+      "p95": 998031360
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 1734,
+      "min": 1728,
+      "max": 1735,
+      "p95": 1735
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144900547.0,
+      "min": 144900547.0,
+      "max": 144900547.0,
+      "p95": 144900547.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3959695.917,
+      "min": 3667822.208,
+      "max": 4516636.25,
+      "p95": 4516636.25
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365261,
+      "min": 268365112,
+      "max": 268365401,
+      "p95": 268365401
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 2222.0,
+      "min": 2222.0,
+      "max": 2222.0,
+      "p95": 2222.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 488.0,
+      "min": 487.0,
+      "max": 494.0,
+      "p95": 494.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 10.63,
+      "min": 10.18,
+      "max": 12.52,
+      "p95": 12.52
+    },
+    "process_user": {
+      "n": 3,
+      "median": 18.31,
+      "min": 16.79,
+      "max": 20.89,
+      "p95": 20.89
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.51,
+      "min": 0.46,
+      "max": 0.73,
+      "p95": 0.73
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 980893696,
+      "min": 979992576,
+      "max": 987283456,
+      "p95": 987283456
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 144966031.0,
+      "min": 144966031.0,
+      "max": 145031515.0,
+      "p95": 145031515.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3704683.0,
+      "min": 3381004.125,
+      "max": 4091171.0,
+      "p95": 4091171.0
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365264,
+      "min": 268365126,
+      "max": 268365274,
+      "p95": 268365274
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "direct": {
+      "n": 3,
+      "median": 1718.0,
+      "min": 1718.0,
+      "max": 1718.0,
+      "p95": 1718.0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 10.43,
+      "min": 10.35,
+      "max": 13.92,
+      "p95": 13.92
+    },
+    "process_user": {
+      "n": 3,
+      "median": 17.24,
+      "min": 15.86,
+      "max": 21.26,
+      "p95": 21.26
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.44,
+      "min": 0.42,
+      "max": 0.62,
+      "p95": 0.62
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 974192640,
+      "min": 972849152,
+      "max": 976502784,
+      "p95": 976502784
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "range_dispatch",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145031515.0,
+      "min": 144966031.0,
+      "max": 145096999.0,
+      "p95": 145096999.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3697549.0840000003,
+      "min": 3437661.9590000003,
+      "max": 4594881.0,
+      "p95": 4594881.0
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365108,
+      "min": 268365106,
+      "max": 268365266,
+      "p95": 268365266
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 1718.0,
+      "min": 1718.0,
+      "max": 1718.0,
+      "p95": 1718.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 11.18,
+      "min": 10.5,
+      "max": 14.04,
+      "p95": 14.04
+    },
+    "process_user": {
+      "n": 3,
+      "median": 17.6,
+      "min": 17.32,
+      "max": 22.96,
+      "p95": 22.96
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.48,
+      "min": 0.46,
+      "max": 0.88,
+      "p95": 0.88
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 973783040,
+      "min": 968916992,
+      "max": 977616896,
+      "p95": 977616896
+    }
+  },
+  {
+    "join": "inner",
+    "delay_us": 2000,
+    "arm": "range_scheduler",
+    "get": {
+      "n": 3,
+      "median": 1718,
+      "min": 1718,
+      "max": 1718,
+      "p95": 1718
+    },
+    "bytes": {
+      "n": 3,
+      "median": 145097000.0,
+      "min": 145031515.0,
+      "max": 145097000.0,
+      "p95": 145097000.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 3771579.75,
+      "min": 3491661.4159999997,
+      "max": 4172864.5,
+      "p95": 4172864.5
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 268365274,
+      "min": 268365098,
+      "max": 268365412,
+      "p95": 268365412
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 1718.0,
+      "min": 1718.0,
+      "max": 1718.0,
+      "p95": 1718.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 11.83,
+      "min": 10.02,
+      "max": 12.63,
+      "p95": 12.63
+    },
+    "process_user": {
+      "n": 3,
+      "median": 19.13,
+      "min": 16.17,
+      "max": 20.69,
+      "p95": 20.69
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.55,
+      "min": 0.4,
+      "max": 0.69,
+      "p95": 0.69
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 972128256,
+      "min": 971423744,
+      "max": 977174528,
+      "p95": 977174528
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 215,
+      "min": 198,
+      "max": 216,
+      "p95": 216
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45248719.0,
+      "min": 45248719.0,
+      "max": 45248719.0,
+      "p95": 45248719.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 664703.417,
+      "min": 373739.333,
+      "max": 1721591.25,
+      "p95": 1721591.25
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 699.0,
+      "min": 699.0,
+      "max": 699.0,
+      "p95": 699.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 484.0,
+      "min": 483.0,
+      "max": 501.0,
+      "p95": 501.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 2.68,
+      "min": 1.78,
+      "max": 5.24,
+      "p95": 5.24
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.02,
+      "min": 3.14,
+      "max": 10.16,
+      "p95": 10.16
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.14,
+      "min": 0.06,
+      "max": 0.41,
+      "p95": 0.41
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 316932096,
+      "min": 315981824,
+      "max": 339361792,
+      "p95": 339361792
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45313982.0,
+      "p95": 45313982.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 734522.709,
+      "min": 369066.875,
+      "max": 934466.25,
+      "p95": 934466.25
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "direct": {
+      "n": 3,
+      "median": 188.0,
+      "min": 188.0,
+      "max": 188.0,
+      "p95": 188.0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 3.43,
+      "min": 1.76,
+      "max": 3.59,
+      "p95": 3.59
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.95,
+      "min": 3.11,
+      "max": 6.63,
+      "p95": 6.63
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.18,
+      "min": 0.05,
+      "max": 0.18,
+      "p95": 0.18
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 315670528,
+      "min": 314736640,
+      "max": 317669376,
+      "p95": 317669376
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "range_dispatch",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45379254.0,
+      "p95": 45379254.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 713144.2919999999,
+      "min": 373736.08400000003,
+      "max": 2148854.75,
+      "p95": 2148854.75
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 188.0,
+      "min": 188.0,
+      "max": 188.0,
+      "p95": 188.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 2.96,
+      "min": 1.78,
+      "max": 4.92,
+      "p95": 4.92
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.41,
+      "min": 3.1,
+      "max": 9.84,
+      "p95": 9.84
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.17,
+      "min": 0.05,
+      "max": 0.36,
+      "p95": 0.36
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 314556416,
+      "min": 314458112,
+      "max": 334413824,
+      "p95": 334413824
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 0,
+    "arm": "range_scheduler",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45444454.0,
+      "p95": 45444454.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 778638.0,
+      "min": 369306.209,
+      "max": 872943.292,
+      "p95": 872943.292
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 188.0,
+      "min": 188.0,
+      "max": 188.0,
+      "p95": 188.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 3.03,
+      "min": 1.77,
+      "max": 3.23,
+      "p95": 3.23
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.86,
+      "min": 3.13,
+      "max": 6.02,
+      "p95": 6.02
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.15,
+      "min": 0.05,
+      "max": 0.17,
+      "p95": 0.17
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 315949056,
+      "min": 314736640,
+      "max": 325517312,
+      "p95": 325517312
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "blockwise_scheduler",
+    "get": {
+      "n": 3,
+      "median": 199,
+      "min": 194,
+      "max": 204,
+      "p95": 204
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45248719.0,
+      "min": 45248719.0,
+      "max": 45248719.0,
+      "p95": 45248719.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 747644.25,
+      "min": 470147.0,
+      "max": 796863.75,
+      "p95": 796863.75
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 699.0,
+      "min": 699.0,
+      "max": 699.0,
+      "p95": 699.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 500.0,
+      "min": 495.0,
+      "max": 505.0,
+      "p95": 505.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 2.96,
+      "min": 1.86,
+      "max": 3.12,
+      "p95": 3.12
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.04,
+      "min": 3.0,
+      "max": 5.33,
+      "p95": 5.33
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.13,
+      "min": 0.06,
+      "max": 0.16,
+      "p95": 0.16
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 315670528,
+      "min": 313999360,
+      "max": 316129280,
+      "p95": 316129280
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "range_direct",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45379182.0,
+      "min": 45379182.0,
+      "max": 45379182.0,
+      "p95": 45379182.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 808966.375,
+      "min": 473215.91699999996,
+      "max": 820462.625,
+      "p95": 820462.625
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "direct": {
+      "n": 3,
+      "median": 188.0,
+      "min": 188.0,
+      "max": 188.0,
+      "p95": 188.0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 3.0,
+      "min": 1.88,
+      "max": 3.01,
+      "p95": 3.01
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.27,
+      "min": 2.97,
+      "max": 5.31,
+      "p95": 5.31
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.14,
+      "min": 0.05,
+      "max": 0.14,
+      "p95": 0.14
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 311115776,
+      "min": 303562752,
+      "max": 314507264,
+      "p95": 314507264
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "range_dispatch",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45313982.0,
+      "min": 45313982.0,
+      "max": 45379245.0,
+      "p95": 45379245.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 774432.333,
+      "min": 473113.542,
+      "max": 1340328.7079999999,
+      "p95": 1340328.7079999999
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 188.0,
+      "min": 188.0,
+      "max": 188.0,
+      "p95": 188.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 3.42,
+      "min": 1.88,
+      "max": 4.34,
+      "p95": 4.34
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.57,
+      "min": 2.99,
+      "max": 7.97,
+      "p95": 7.97
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.16,
+      "min": 0.05,
+      "max": 0.3,
+      "p95": 0.3
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 310558720,
+      "min": 308084736,
+      "max": 316981248,
+      "p95": 316981248
+    }
+  },
+  {
+    "join": "semi",
+    "delay_us": 2000,
+    "arm": "range_scheduler",
+    "get": {
+      "n": 3,
+      "median": 188,
+      "min": 188,
+      "max": 188,
+      "p95": 188
+    },
+    "bytes": {
+      "n": 3,
+      "median": 45379182.0,
+      "min": 45313982.0,
+      "max": 45379182.0,
+      "p95": 45379182.0
+    },
+    "total_us": {
+      "n": 3,
+      "median": 814151.875,
+      "min": 461900.125,
+      "max": 860512.416,
+      "p95": 860512.416
+    },
+    "cache_usage_end": {
+      "n": 3,
+      "median": 91557903,
+      "min": 91557903,
+      "max": 91557903,
+      "p95": 91557903
+    },
+    "range_buffer_usage_end": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "scheduled": {
+      "n": 3,
+      "median": 188.0,
+      "min": 188.0,
+      "max": 188.0,
+      "p95": 188.0
+    },
+    "direct": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "oversized": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "unbounded": {
+      "n": 3,
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "p95": 0
+    },
+    "merged": {
+      "n": 3,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0
+    },
+    "process_real": {
+      "n": 3,
+      "median": 3.08,
+      "min": 1.88,
+      "max": 3.7,
+      "p95": 3.7
+    },
+    "process_user": {
+      "n": 3,
+      "median": 5.39,
+      "min": 2.98,
+      "max": 5.95,
+      "p95": 5.95
+    },
+    "process_sys": {
+      "n": 3,
+      "median": 0.13,
+      "min": 0.05,
+      "max": 0.24,
+      "p95": 0.24
+    },
+    "process_max_rss_raw": {
+      "n": 3,
+      "median": 310886400,
+      "min": 310083584,
+      "max": 311410688,
+      "p95": 311410688
+    }
+  }
+]

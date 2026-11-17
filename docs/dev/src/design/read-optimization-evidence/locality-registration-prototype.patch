@@ -1,0 +1,63 @@
+--- a/src/object_store/src/object/read_scheduler/batch.rs
++++ b/src/object_store/src/object/read_scheduler/batch.rs
+@@ -40,6 +40,9 @@
+     // Some(empty) is idle; Some(nonempty) is collecting; None is closed.
+     reads: Mutex<Option<Vec<StagedRead>>>,
+     max_reads: usize,
++    // Test-only registration-boundary experiment. Access under the reads lock.
++    #[cfg(feature = "test")]
++    registering: std::sync::atomic::AtomicBool,
+ }
+ 
+ impl ReadPlug {
+@@ -47,6 +50,10 @@
+         Self {
+             token: ReadPlugToken(Arc::new(ReadPlugInner {
+                 reads: Mutex::new(Some(Vec::new())),
++                #[cfg(feature = "test")]
++                registering: std::sync::atomic::AtomicBool::new(
++                    std::env::var_os("RW_PLUG_REGISTRATION").is_some(),
++                ),
+                 max_reads: max_reads.min(scheduler.config.max_batch_requests.get()),
+                 scheduler,
+             })),
+@@ -55,6 +62,30 @@
+ 
+     pub fn token(&self) -> ReadPlugToken {
+         self.token.clone()
++    }
++}
++
++#[cfg(feature = "test")]
++impl Drop for ReadPlug {
++    fn drop(&mut self) {
++        let inner = &self.token.0;
++        let state = inner.reads.lock().unwrap();
++        if !inner
++            .registering
++            .swap(false, std::sync::atomic::Ordering::Relaxed)
++        {
++            return;
++        }
++        let pending = state.as_ref().is_some_and(|reads| !reads.is_empty());
++        drop(state);
++        if pending {
++            let flush = PendingFlush(inner.clone());
++            inner.scheduler.spawn_background(async move {
++                tokio::task::yield_now().await;
++                flush.0.flush();
++                drop(flush);
++            });
++        }
+     }
+ }
+ 
+@@ -105,6 +136,8 @@
+         tracing::debug!(target: "state_store_read_batch", plug_id = ?Arc::as_ptr(&self.0), ?trace_id, ?range, members = reads.len() + 1, "read plug staged");
+         let (read, receiver) = scheduler.stage_read(path, range, trace_id);
+         let first = reads.is_empty();
++        #[cfg(feature = "test")]
++        let first = first && !plug.registering.load(std::sync::atomic::Ordering::Relaxed);
+         reads.push(read);
+         let full = reads.len() >= plug.max_reads
+             || reads

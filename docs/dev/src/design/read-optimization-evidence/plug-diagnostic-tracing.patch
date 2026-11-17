@@ -1,0 +1,36 @@
+diff --git a/src/object_store/src/object/read_scheduler/batch.rs b/src/object_store/src/object/read_scheduler/batch.rs
+index b73c872..62e36e6 100644
+--- a/src/object_store/src/object/read_scheduler/batch.rs
++++ b/src/object_store/src/object/read_scheduler/batch.rs
+@@ -75,6 +75,7 @@ impl ReadPlugInner {
+         if let Some(reads) = reads
+             && !reads.is_empty()
+         {
++            tracing::debug!(target: "state_store_read_batch", plug_id = ?std::ptr::from_ref(self), members = reads.len(), reason = "handoff", "read plug flushed");
+             self.scheduler.plug_flushes[usize::from(reads.len() > 1)].inc();
+             self.scheduler.submit_batch(reads);
+         }
+@@ -94,10 +95,14 @@ impl ReadPlugToken {
+             return None;
+         }
+         let mut state = plug.reads.lock().unwrap();
+-        let reads = state.as_mut()?;
++        let Some(reads) = state.as_mut() else {
++            tracing::debug!(target: "state_store_read_batch", plug_id = ?Arc::as_ptr(&self.0), ?trace_id, ?range, "read plug late arrival");
++            return None;
++        };
+         if reads.len() >= plug.max_reads {
+             return None;
+         }
++        tracing::debug!(target: "state_store_read_batch", plug_id = ?Arc::as_ptr(&self.0), ?trace_id, ?range, members = reads.len() + 1, "read plug staged");
+         let (read, receiver) = scheduler.stage_read(path, range, trace_id);
+         let first = reads.is_empty();
+         reads.push(read);
+@@ -111,6 +116,7 @@ impl ReadPlugToken {
+         let ready = full.then(|| state.take().unwrap());
+         drop(state);
+         if let Some(reads) = ready {
++            tracing::debug!(target: "state_store_read_batch", plug_id = ?Arc::as_ptr(&self.0), members = reads.len(), reason = "capacity", "read plug flushed");
+             plug.scheduler.plug_flushes[usize::from(reads.len() > 1)].inc();
+             plug.scheduler.submit_batch(reads);
+         } else if first {

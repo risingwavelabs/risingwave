@@ -1,0 +1,7 @@
+{
+  "range_implementation_unchanged": true,
+  "range_function_sha256": "2fc226a7ad6c26c6b965d491ad3fc53a88d5d14d7f0eda9f5cea0bc0139b06e8",
+  "foyer_lock_and_object_store_unchanged": true,
+  "storage_stream_tests": 59,
+  "configuration_tests": 15
+}

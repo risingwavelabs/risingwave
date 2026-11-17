@@ -1,0 +1,362 @@
+[
+  {
+    "case": "cold16",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 1435.291,
+      "point_us": 0.0,
+      "total_us_p95": 1504.333,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 1383.396,
+      "point_us": 0.0,
+      "total_us_p95": 1446.958,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "cold16",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 5419.75,
+      "point_us": 0.0,
+      "total_us_p95": 5598.0,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 5430.084,
+      "point_us": 0.0,
+      "total_us_p95": 5634.334,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "cold32",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 5.0,
+      "bytes": 129493.0,
+      "total_us": 2859.375,
+      "point_us": 0.0,
+      "total_us_p95": 2938.875,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 2.0,
+      "bytes": 129493.0,
+      "total_us": 2774.688,
+      "point_us": 0.0,
+      "total_us_p95": 2854.666,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "cold32",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 2.0,
+      "bytes": 129493.0,
+      "total_us": 12508.438,
+      "point_us": 0.0,
+      "total_us_p95": 12614.25,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 2.0,
+      "bytes": 129493.0,
+      "total_us": 12461.104,
+      "point_us": 0.0,
+      "total_us_p95": 12813.75,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "stop_last",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 5571.354,
+      "point_us": 0.0,
+      "total_us_p95": 6240.416,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 5616.979,
+      "point_us": 0.0,
+      "total_us_p95": 6323.875,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "stop_last",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 10440.458,
+      "point_us": 0.0,
+      "total_us_p95": 12172.041,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 10277.105,
+      "point_us": 0.0,
+      "total_us_p95": 11938.334,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "single",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 308.729,
+      "point_us": 0.0,
+      "total_us_p95": 740.25,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 348.25,
+      "point_us": 0.0,
+      "total_us_p95": 578.875,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "single",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 4597.041,
+      "point_us": 0.0,
+      "total_us_p95": 4946.125,
+      "point_us_p95": 0.0
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 4537.25,
+      "point_us": 0.0,
+      "total_us_p95": 4821.167,
+      "point_us_p95": 0.0
+    }
+  },
+  {
+    "case": "point",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 54.98,
+      "point_us": 54.98,
+      "total_us_p95": 61.333,
+      "point_us_p95": 61.333
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 55.208,
+      "point_us": 55.208,
+      "total_us_p95": 60.917,
+      "point_us_p95": 60.917
+    }
+  },
+  {
+    "case": "point",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 4032.249,
+      "point_us": 4032.249,
+      "total_us_p95": 4223.791,
+      "point_us_p95": 4223.791
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 4051.0,
+      "total_us": 4105.791,
+      "point_us": 4105.791,
+      "total_us_p95": 4291.166,
+      "point_us_p95": 4291.166
+    }
+  },
+  {
+    "case": "mixed",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 2.0,
+      "bytes": 68733.0,
+      "total_us": 1447.771,
+      "point_us": 97.833,
+      "total_us_p95": 1513.792,
+      "point_us_p95": 142.958
+    },
+    "registration": {
+      "gets": 2.0,
+      "bytes": 68733.0,
+      "total_us": 1404.188,
+      "point_us": 85.083,
+      "total_us_p95": 1448.625,
+      "point_us_p95": 127.958
+    }
+  },
+  {
+    "case": "mixed",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 2.0,
+      "bytes": 68733.0,
+      "total_us": 6705.459,
+      "point_us": 4077.771,
+      "total_us_p95": 8047.708,
+      "point_us_p95": 4223.375
+    },
+    "registration": {
+      "gets": 2.0,
+      "bytes": 68733.0,
+      "total_us": 6638.812,
+      "point_us": 4039.417,
+      "total_us_p95": 7674.792,
+      "point_us_p95": 4120.709
+    }
+  },
+  {
+    "case": "shared",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 1454.979,
+      "point_us": 119.73,
+      "total_us_p95": 1501.875,
+      "point_us_p95": 158.167
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 1418.396,
+      "point_us": 104.167,
+      "total_us_p95": 1493.459,
+      "point_us_p95": 134.0
+    }
+  },
+  {
+    "case": "shared",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 6294.791,
+      "point_us": 3990.562,
+      "total_us_p95": 6386.666,
+      "point_us_p95": 4049.208
+    },
+    "registration": {
+      "gets": 1.0,
+      "bytes": 64682.0,
+      "total_us": 6264.541,
+      "point_us": 3998.313,
+      "total_us_p95": 6378.375,
+      "point_us_p95": 4042.75
+    }
+  },
+  {
+    "case": "racing_point",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 1454.688,
+      "point_us": 75.833,
+      "total_us_p95": 1505.417,
+      "point_us_p95": 166.916
+    },
+    "registration": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 1438.0,
+      "point_us": 74.25,
+      "total_us_p95": 1476.416,
+      "point_us_p95": 84.583
+    }
+  },
+  {
+    "case": "racing_point",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 6314.188,
+      "point_us": 4029.375,
+      "total_us_p95": 6540.875,
+      "point_us_p95": 4081.958
+    },
+    "registration": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 6080.042,
+      "point_us": 4019.354,
+      "total_us_p95": 6349.416,
+      "point_us_p95": 4056.167
+    }
+  },
+  {
+    "case": "existing_point",
+    "delay_us": 0,
+    "baseline": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 1438.521,
+      "point_us": 81.188,
+      "total_us_p95": 1500.583,
+      "point_us_p95": 119.334
+    },
+    "registration": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 1427.583,
+      "point_us": 79.688,
+      "total_us_p95": 1489.833,
+      "point_us_p95": 111.875
+    }
+  },
+  {
+    "case": "existing_point",
+    "delay_us": 2000,
+    "baseline": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 6303.688,
+      "point_us": 4079.083,
+      "total_us_p95": 6384.833,
+      "point_us_p95": 4163.541
+    },
+    "registration": {
+      "gets": 3.0,
+      "bytes": 64682.0,
+      "total_us": 6306.375,
+      "point_us": 4074.958,
+      "total_us_p95": 6377.583,
+      "point_us_p95": 4109.417
+    }
+  }
+]

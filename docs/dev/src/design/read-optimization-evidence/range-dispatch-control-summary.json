@@ -1,0 +1,770 @@
+[
+  {
+    "arm": "blockwise_direct",
+    "scenario": "cold16",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 16.0,
+      "min": 16.0,
+      "max": 16.0,
+      "p95": 16.0,
+      "sum": 640.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 64682.0,
+      "p95": 64682.0,
+      "sum": 2587280.0
+    },
+    "total_us": {
+      "median": 1490.8125,
+      "min": 1438.0,
+      "max": 1727.375,
+      "p95": 1564.917,
+      "sum": 59841.752
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_direct",
+    "scenario": "cold16",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 16.0,
+      "min": 16.0,
+      "max": 16.0,
+      "p95": 16.0,
+      "sum": 640.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 64682.0,
+      "p95": 64682.0,
+      "sum": 2587280.0
+    },
+    "total_us": {
+      "median": 4947.562,
+      "min": 4644.583,
+      "max": 5112.667,
+      "p95": 5085.084,
+      "sum": 197832.12499999997
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_direct",
+    "scenario": "warm_gaps",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 8.0,
+      "min": 8.0,
+      "max": 8.0,
+      "p95": 8.0,
+      "sum": 320.0
+    },
+    "bytes": {
+      "median": 32222.0,
+      "min": 32222.0,
+      "max": 32222.0,
+      "p95": 32222.0,
+      "sum": 1288880.0
+    },
+    "total_us": {
+      "median": 1402.4375,
+      "min": 1364.125,
+      "max": 1505.5,
+      "p95": 1465.958,
+      "sum": 56289.74799999999
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_direct",
+    "scenario": "warm_gaps",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 8.0,
+      "min": 8.0,
+      "max": 8.0,
+      "p95": 8.0,
+      "sum": 320.0
+    },
+    "bytes": {
+      "median": 32222.0,
+      "min": 32222.0,
+      "max": 32222.0,
+      "p95": 32222.0,
+      "sum": 1288880.0
+    },
+    "total_us": {
+      "median": 8154.771000000001,
+      "min": 6330.666,
+      "max": 10877.0,
+      "p95": 10576.375,
+      "sum": 334908.8330000001
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_dispatch",
+    "scenario": "cold16",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 16.0,
+      "min": 16.0,
+      "max": 16.0,
+      "p95": 16.0,
+      "sum": 640.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 64682.0,
+      "p95": 64682.0,
+      "sum": 2587280.0
+    },
+    "total_us": {
+      "median": 1584.6875,
+      "min": 1513.334,
+      "max": 1760.667,
+      "p95": 1694.5,
+      "sum": 63659.66299999999
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_dispatch",
+    "scenario": "cold16",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 16.0,
+      "min": 16.0,
+      "max": 16.0,
+      "p95": 16.0,
+      "sum": 640.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 64682.0,
+      "p95": 64682.0,
+      "sum": 2587280.0
+    },
+    "total_us": {
+      "median": 5181.666499999999,
+      "min": 4150.209,
+      "max": 5352.292,
+      "p95": 5298.417,
+      "sum": 206104.881
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_dispatch",
+    "scenario": "warm_gaps",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 8.0,
+      "min": 8.0,
+      "max": 8.0,
+      "p95": 8.0,
+      "sum": 320.0
+    },
+    "bytes": {
+      "median": 32222.0,
+      "min": 32222.0,
+      "max": 32222.0,
+      "p95": 32222.0,
+      "sum": 1288880.0
+    },
+    "total_us": {
+      "median": 1392.646,
+      "min": 1365.209,
+      "max": 1536.584,
+      "p95": 1454.25,
+      "sum": 55982.292
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_dispatch",
+    "scenario": "warm_gaps",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 8.0,
+      "min": 8.0,
+      "max": 8.0,
+      "p95": 8.0,
+      "sum": 320.0
+    },
+    "bytes": {
+      "median": 32222.0,
+      "min": 32222.0,
+      "max": 32222.0,
+      "p95": 32222.0,
+      "sum": 1288880.0
+    },
+    "total_us": {
+      "median": 8538.8745,
+      "min": 5190.083,
+      "max": 10738.584,
+      "p95": 10128.542,
+      "sum": 333355.536
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_scheduler",
+    "scenario": "cold16",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 5.0,
+      "p95": 3.0,
+      "sum": 49.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 64682.0,
+      "p95": 64682.0,
+      "sum": 2587280.0
+    },
+    "total_us": {
+      "median": 1617.9585,
+      "min": 1456.208,
+      "max": 3145.458,
+      "p95": 2161.833,
+      "sum": 68424.123
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 15.0,
+      "min": 11.0,
+      "max": 15.0,
+      "p95": 15.0,
+      "sum": 591.0
+    }
+  },
+  {
+    "arm": "blockwise_scheduler",
+    "scenario": "cold16",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 1.0,
+      "p95": 1.0,
+      "sum": 40.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 64682.0,
+      "p95": 64682.0,
+      "sum": 2587280.0
+    },
+    "total_us": {
+      "median": 5100.791499999999,
+      "min": 4626.667,
+      "max": 5372.958,
+      "p95": 5304.208,
+      "sum": 203649.74700000003
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 15.0,
+      "min": 15.0,
+      "max": 15.0,
+      "p95": 15.0,
+      "sum": 600.0
+    }
+  },
+  {
+    "arm": "blockwise_scheduler",
+    "scenario": "warm_gaps",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 8.0,
+      "min": 8.0,
+      "max": 8.0,
+      "p95": 8.0,
+      "sum": 320.0
+    },
+    "bytes": {
+      "median": 32222.0,
+      "min": 32222.0,
+      "max": 32222.0,
+      "p95": 32222.0,
+      "sum": 1288880.0
+    },
+    "total_us": {
+      "median": 1403.562,
+      "min": 1364.208,
+      "max": 1702.333,
+      "p95": 1503.417,
+      "sum": 56761.498
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "blockwise_scheduler",
+    "scenario": "warm_gaps",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 8.0,
+      "min": 8.0,
+      "max": 8.0,
+      "p95": 8.0,
+      "sum": 320.0
+    },
+    "bytes": {
+      "median": 32222.0,
+      "min": 32222.0,
+      "max": 32222.0,
+      "p95": 32222.0,
+      "sum": 1288880.0
+    },
+    "total_us": {
+      "median": 8214.9785,
+      "min": 5175.208,
+      "max": 10753.333,
+      "p95": 9525.834,
+      "sum": 325914.791
+    },
+    "point_us": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "range_scheduler",
+    "scenario": "existing_point",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 2.0,
+      "min": 2.0,
+      "max": 2.0,
+      "p95": 2.0,
+      "sum": 80.0
+    },
+    "bytes": {
+      "median": 68734.0,
+      "min": 68734.0,
+      "max": 68734.0,
+      "p95": 68734.0,
+      "sum": 2749360.0
+    },
+    "total_us": {
+      "median": 1515.5625,
+      "min": 1463.041,
+      "max": 1600.042,
+      "p95": 1581.375,
+      "sum": 60669.835
+    },
+    "point_us": {
+      "median": 70.0,
+      "min": 54.291,
+      "max": 126.083,
+      "p95": 107.25,
+      "sum": 3005.29
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "range_scheduler",
+    "scenario": "existing_point",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 2.0,
+      "min": 2.0,
+      "max": 2.0,
+      "p95": 2.0,
+      "sum": 80.0
+    },
+    "bytes": {
+      "median": 68734.0,
+      "min": 68734.0,
+      "max": 68734.0,
+      "p95": 68734.0,
+      "sum": 2749360.0
+    },
+    "total_us": {
+      "median": 5026.8965,
+      "min": 4873.5,
+      "max": 5229.833,
+      "p95": 5155.333,
+      "sum": 201353.12500000003
+    },
+    "point_us": {
+      "median": 3549.3959999999997,
+      "min": 2216.833,
+      "max": 3682.625,
+      "p95": 3617.375,
+      "sum": 138910.50000000003
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    }
+  },
+  {
+    "arm": "range_scheduler",
+    "scenario": "shared",
+    "delay_us": 0.0,
+    "n": 40,
+    "gets": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 2.0,
+      "p95": 2.0,
+      "sum": 58.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 68734.0,
+      "p95": 68734.0,
+      "sum": 2660216.0
+    },
+    "total_us": {
+      "median": 1521.5835,
+      "min": 1463.542,
+      "max": 2120.25,
+      "p95": 1922.958,
+      "sum": 62967.333999999995
+    },
+    "point_us": {
+      "median": 80.0835,
+      "min": 53.167,
+      "max": 376.167,
+      "p95": 157.375,
+      "sum": 3934.0790000000006
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 1.0,
+      "min": 0.0,
+      "max": 1.0,
+      "p95": 1.0,
+      "sum": 22.0
+    }
+  },
+  {
+    "arm": "range_scheduler",
+    "scenario": "shared",
+    "delay_us": 2000.0,
+    "n": 40,
+    "gets": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 2.0,
+      "p95": 2.0,
+      "sum": 52.0
+    },
+    "bytes": {
+      "median": 64682.0,
+      "min": 64682.0,
+      "max": 68734.0,
+      "p95": 68734.0,
+      "sum": 2635904.0
+    },
+    "total_us": {
+      "median": 5012.6875,
+      "min": 4814.458,
+      "max": 5249.75,
+      "p95": 5209.958,
+      "sum": 201289.49599999998
+    },
+    "point_us": {
+      "median": 3527.8540000000003,
+      "min": 3239.208,
+      "max": 3592.625,
+      "p95": 3575.125,
+      "sum": 140920.16499999998
+    },
+    "reused": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p95": 0.0,
+      "sum": 0.0
+    },
+    "merged": {
+      "median": 1.0,
+      "min": 0.0,
+      "max": 1.0,
+      "p95": 1.0,
+      "sum": 28.0
+    }
+  }
+]

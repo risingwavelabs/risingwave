@@ -1,0 +1,37 @@
+[
+  {
+    "label": "iterator",
+    "passed": 13,
+    "result": "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 267 filtered out; finished in 1.03s"
+  },
+  {
+    "label": "store",
+    "passed": 11,
+    "result": "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 269 filtered out; finished in 0.37s"
+  },
+  {
+    "label": "routing",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 279 filtered out; finished in 0.13s"
+  },
+  {
+    "label": "locality",
+    "passed": 3,
+    "result": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 544 filtered out; finished in 0.23s"
+  },
+  {
+    "label": "join",
+    "passed": 26,
+    "result": "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 521 filtered out; finished in 0.06s"
+  },
+  {
+    "label": "semi-smoke",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 546 filtered out; finished in 0.16s"
+  },
+  {
+    "label": "inner-smoke",
+    "passed": 1,
+    "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 546 filtered out; finished in 0.15s"
+  }
+]

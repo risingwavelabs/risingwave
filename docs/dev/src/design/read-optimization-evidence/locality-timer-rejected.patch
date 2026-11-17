@@ -1,0 +1,11 @@
+--- a/src/object_store/src/object/read_scheduler/batch.rs
++++ b/src/object_store/src/object/read_scheduler/batch.rs
+@@ -122,7 +122,7 @@
+         } else if first {
+             let flush = PendingFlush(plug.clone());
+             scheduler.spawn_background(async move {
+-                tokio::task::yield_now().await;
++                tokio::time::sleep(std::time::Duration::from_micros(100)).await;
+                 flush.0.flush();
+                 drop(flush);
+             });
