@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::VecDeque;
 #[cfg(test)]
@@ -23,11 +22,13 @@ use std::sync::{Arc, Mutex};
 use risingwave_common::catalog::{CdcKeyComparison, Schema, TableId};
 use risingwave_common::id::SourceId;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableConfig, ExternalTableReader,
     ExternalTableReaderImpl, SchemaTableName,
 };
+use risingwave_connector::source::cdc::table_options::refresh_cdc_table_connect_properties;
 use tokio::sync::watch;
 
 use crate::executor::Mutation;
@@ -38,7 +39,10 @@ pub struct ExternalStorageTable {
     /// Id for this table.
     table_id: TableId,
 
-    /// The normalized name of the table, e.g. `dbname.schema_name.table_name`.
+    /// The persisted, possibly quoted identifier from the CDC table's TABLE clause.
+    external_table_name: String,
+
+    /// The unqualified table name used by snapshot readers.
     table_name: String,
 
     schema_name: String,
@@ -85,6 +89,7 @@ impl ExternalStorageTable {
     pub fn new(
         table_id: TableId,
         source_id: SourceId,
+        external_table_name: String,
         SchemaTableName {
             table_name,
             schema_name,
@@ -103,6 +108,7 @@ impl ExternalStorageTable {
         }
         Self {
             table_id,
+            external_table_name,
             table_name,
             schema_name,
             database_name,
@@ -126,10 +132,14 @@ impl ExternalStorageTable {
     pub fn for_test_undefined(source_id: SourceId) -> Self {
         Self {
             table_id: 1.into(),
+            external_table_name: "for_test_schema_name.for_test_table_name".into(),
             table_name: "for_test_table_name".into(),
             schema_name: "for_test_schema_name".into(),
             database_name: "for_test_database_name".into(),
-            config: watch::Sender::new(ExternalTableConfig::default()),
+            config: watch::Sender::new(ExternalTableConfig {
+                connector: "postgres-cdc".into(),
+                ..Default::default()
+            }),
             source_id,
             table_type: ExternalCdcTableType::Unspecified,
             schema: Schema::empty().to_owned(),
@@ -177,13 +187,17 @@ impl ExternalStorageTable {
         if let Mutation::ConnectorPropsChange(props) = mutation
             && let Some(props) = props.get(&self.source_id.as_raw_id())
         {
-            // The mutation contains resolved source properties. Retain the identity of
-            // this particular table, rather than the source's table/database filters.
-            let mut props: BTreeMap<_, _> = props.clone().into_iter().collect();
-            props.insert("database.name".into(), self.database_name.clone());
-            props.insert("schema.name".into(), self.schema_name.clone());
-            props.insert("table.name".into(), self.table_name.clone());
-            let config = ExternalTableConfig::try_from_btreemap(props, BTreeMap::new())?;
+            let source_properties =
+                WithOptionsSecResolved::without_secrets(props.clone().into_iter().collect());
+            let (properties, _) = refresh_cdc_table_connect_properties(
+                &source_properties,
+                self.external_table_name.clone(),
+                &self.config.borrow().connector,
+                &self.database_name,
+                &self.schema_table_name(),
+            )?;
+            let (properties, secret_refs) = properties.into_parts();
+            let config = ExternalTableConfig::try_from_btreemap(properties, secret_refs)?;
             self.config.send_replace(config);
         }
         Ok(())
@@ -281,5 +295,83 @@ impl ExternalStorageTable {
     ) -> ConnectorResult<Option<CdcOffset>> {
         let binlog = table_reader.current_cdc_offset().await?;
         Ok(Some(binlog))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_connector::source::cdc::table_options::derive_connect_properties_for_cdc_table;
+
+    use super::*;
+
+    #[test]
+    fn test_connector_refresh_preserves_identity_and_rejects_invalid_changes() {
+        for (connector, database, name) in [
+            ("mysql-cdc", "other_db, orders_db", "orders_db.orders"),
+            ("mariadb-cdc", "other_db, orders_db", "orders_db.orders"),
+            (
+                "postgres-cdc",
+                "orders_db",
+                "\"Sales.Schema\".\"Order.Table\"",
+            ),
+            (
+                "sqlserver-cdc",
+                "orders_db",
+                "[Sales.Schema].[Order]]Table]",
+            ),
+        ] {
+            let mut source = WithOptionsSecResolved::without_secrets(
+                [
+                    ("connector".into(), connector.into()),
+                    ("database.name".into(), database.into()),
+                    ("hostname".into(), "localhost".into()),
+                    ("port".into(), "1234".into()),
+                    ("username".into(), "user".into()),
+                    ("password".into(), "old_password".into()),
+                ]
+                .into(),
+            );
+            let (properties, name) =
+                derive_connect_properties_for_cdc_table(&source, name.into()).unwrap();
+            let identity = SchemaTableName::from_properties(&properties);
+            let table_type = ExternalCdcTableType::from_properties(&properties);
+            let (properties, secrets) = properties.into_parts();
+            let config = ExternalTableConfig::try_from_btreemap(properties, secrets).unwrap();
+            let table = ExternalStorageTable::new(
+                1.into(),
+                42.into(),
+                name,
+                identity.clone(),
+                config.database.clone(),
+                config,
+                table_type,
+                Schema::empty().to_owned(),
+                vec![],
+                Some(vec![]),
+                vec![],
+            );
+            let clone = table.clone();
+            let mut observer = clone.subscribe_config();
+            source.insert("password".into(), "new_password".into());
+            let mutation = |source: &WithOptionsSecResolved| {
+                Mutation::ConnectorPropsChange(
+                    [(42, source.as_plaintext().clone().into_iter().collect())].into(),
+                )
+            };
+            table.update_connector_props(&mutation(&source)).unwrap();
+            assert!(observer.has_changed().unwrap());
+            let config = observer.borrow_and_update().clone();
+            assert_eq!(config.password, "new_password");
+            assert_eq!(config.database, "orders_db");
+            assert_eq!(config.table, identity.table_name);
+            assert_eq!(clone.schema_table_name(), identity);
+
+            source.insert("database.name".into(), "other_db".into());
+            source.insert("password".into(), "invalid_update_password".into());
+            assert!(table.update_connector_props(&mutation(&source)).is_err());
+            assert!(!observer.has_changed().unwrap());
+            assert_eq!(observer.borrow().password, "new_password");
+            assert_eq!(observer.borrow().database, "orders_db");
+        }
     }
 }

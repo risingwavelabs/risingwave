@@ -143,7 +143,8 @@ mod tests {
         assert_eq!(table.mock_reader_create_count(), 1);
 
         let props = [
-            ("connector".into(), "mysql-cdc".into()),
+            ("connector".into(), "postgres-cdc".into()),
+            ("database.name".into(), "for_test_database_name".into()),
             ("hostname".into(), "new_host".into()),
             ("port".into(), "3306".into()),
             ("username".into(), "user".into()),

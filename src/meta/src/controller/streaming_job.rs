@@ -38,6 +38,8 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::cdc::external::SchemaTableName;
+use risingwave_connector::source::cdc::table_options::refresh_cdc_table_connect_properties;
 use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
@@ -4220,11 +4222,14 @@ async fn update_cdc_table_props_fragments(
 
     for (fragment_id, stream_node) in fragments {
         let mut stream_node = stream_node.to_protobuf();
-        let mut changed = false;
+        let mut changed = Ok(false);
         visit_stream_node_mut(&mut stream_node, |node| {
-            changed |= update_cdc_table_node_props(node, source_id, options);
+            if let Ok(previously_changed) = changed {
+                changed = update_cdc_table_node_props(node, source_id, options)
+                    .map(|node_changed| previously_changed || node_changed);
+            }
         });
-        if changed {
+        if changed? {
             Fragment::update(fragment::ActiveModel {
                 fragment_id: Set(fragment_id),
                 stream_node: Set(StreamNode::from(&stream_node)),
@@ -4241,28 +4246,33 @@ fn update_cdc_table_node_props(
     node: &mut PbNodeBody,
     source_id: SourceId,
     options: &WithOptionsSecResolved,
-) -> bool {
+) -> MetaResult<bool> {
     let PbNodeBody::StreamCdcScan(node) = node else {
-        return false;
+        return Ok(false);
     };
     let Some(desc) = &mut node.cdc_table_desc else {
-        return false;
+        return Ok(false);
     };
     if desc.source_id != source_id {
-        return false;
+        return Ok(false);
     }
 
-    let mut properties = options.as_plaintext().clone();
-    // These identify the individual table, including a single database selected from a
-    // MySQL source's database list. They must not be replaced by source-level values.
-    for key in ["database.name", "schema.name", "table.name"] {
-        if let Some(value) = desc.connect_properties.get(key) {
-            properties.insert(key.to_owned(), value.clone());
-        }
-    }
-    desc.connect_properties = properties;
-    desc.secret_refs = options.as_secret().clone();
-    true
+    let (properties, table_name) = refresh_cdc_table_connect_properties(
+        options,
+        desc.table_name.clone(),
+        desc.connect_properties
+            .get("connector")
+            .map(String::as_str)
+            .unwrap_or_default(),
+        desc.connect_properties
+            .get("database.name")
+            .map(String::as_str)
+            .unwrap_or_default(),
+        &SchemaTableName::from_properties(&desc.connect_properties),
+    )?;
+    (desc.connect_properties, desc.secret_refs) = properties.into_parts();
+    desc.table_name = table_name;
+    Ok(true)
 }
 
 async fn update_connector_props_fragments<F>(
@@ -4345,7 +4355,9 @@ mod tests {
         let source_id = 42.into();
         let original = ExternalTableDesc {
             source_id,
+            table_name: "sales.orders".into(),
             connect_properties: BTreeMap::from([
+                ("connector".into(), "postgres-cdc".into()),
                 ("database.name".into(), "orders_db".into()),
                 ("schema.name".into(), "sales".into()),
                 ("table.name".into(), "orders".into()),
@@ -4364,7 +4376,8 @@ mod tests {
         };
         let options = WithOptionsSecResolved::new(
             BTreeMap::from([
-                ("database.name".into(), "orders_db,other_db".into()),
+                ("connector".into(), "postgres-cdc".into()),
+                ("database.name".into(), "orders_db".into()),
                 ("schema.name".into(), "public".into()),
                 ("table.name".into(), "source_filter".into()),
                 ("hostname".into(), "new_host".into()),
@@ -4373,13 +4386,13 @@ mod tests {
         );
 
         // Another shared source must not change this table's plan.
-        assert!(!update_cdc_table_node_props(&mut node, 43.into(), &options));
+        assert!(!update_cdc_table_node_props(&mut node, 43.into(), &options).unwrap());
         let PbNodeBody::StreamCdcScan(scan) = &node else {
             unreachable!()
         };
         assert_eq!(scan.cdc_table_desc.as_ref().unwrap(), &original);
 
-        assert!(update_cdc_table_node_props(&mut node, source_id, &options));
+        assert!(update_cdc_table_node_props(&mut node, source_id, &options).unwrap());
         let PbNodeBody::StreamCdcScan(scan) = &node else {
             unreachable!()
         };
@@ -4396,16 +4409,53 @@ mod tests {
 
         // Replacing a secret with plaintext must remove the stale secret reference.
         let options = WithOptionsSecResolved::new(
-            BTreeMap::from([("password".into(), "new_password".into())]),
+            {
+                let mut props = options.as_plaintext().clone();
+                props.insert("password".into(), "new_password".into());
+                props
+            },
             BTreeMap::new(),
         );
-        assert!(update_cdc_table_node_props(&mut node, source_id, &options));
+        assert!(update_cdc_table_node_props(&mut node, source_id, &options).unwrap());
         let PbNodeBody::StreamCdcScan(scan) = &node else {
             unreachable!()
         };
         let desc = scan.cdc_table_desc.as_ref().unwrap();
         assert_eq!(desc.connect_properties["password"], "new_password");
         assert!(desc.secret_refs.is_empty());
+    }
+
+    #[test]
+    fn test_update_cdc_table_props_rejects_identity_change_without_mutating_node() {
+        let original = ExternalTableDesc {
+            source_id: 42.into(),
+            table_name: "sales.orders".into(),
+            connect_properties: BTreeMap::from([
+                ("connector".into(), "postgres-cdc".into()),
+                ("database.name".into(), "orders_db".into()),
+                ("schema.name".into(), "sales".into()),
+                ("table.name".into(), "orders".into()),
+            ]),
+            ..Default::default()
+        };
+        let mut options = original.connect_properties.clone();
+        options.insert("database.name".into(), "other_db".into());
+        let mut node = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
+            cdc_table_desc: Some(original.clone()),
+            ..Default::default()
+        }));
+        assert!(
+            update_cdc_table_node_props(
+                &mut node,
+                42.into(),
+                &WithOptionsSecResolved::without_secrets(options)
+            )
+            .is_err()
+        );
+        let PbNodeBody::StreamCdcScan(scan) = node else {
+            unreachable!()
+        };
+        assert_eq!(scan.cdc_table_desc.unwrap(), original);
     }
 
     #[test]

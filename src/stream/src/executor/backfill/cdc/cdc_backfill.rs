@@ -1522,12 +1522,16 @@ mod tests {
         let external_storage_table = ExternalStorageTable::new(
             table_id,
             42.into(),
+            "public.missing_table".into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "missing_table".to_owned(),
             },
             "mydb".to_owned(),
-            ExternalTableConfig::default(),
+            ExternalTableConfig {
+                connector: "postgres-cdc".into(),
+                ..Default::default()
+            },
             ExternalCdcTableType::Unspecified,
             Schema::new(vec![Field::with_name(DataType::Int64, "O_ORDERKEY")]),
             vec![OrderType::ascending()],
@@ -1683,12 +1687,12 @@ mod tests {
                 [(
                     42,
                     [
-                        ("connector".into(), "mysql-cdc".into()),
+                        ("connector".into(), "postgres-cdc".into()),
                         ("hostname".into(), "new_host".into()),
                         ("port".into(), "3306".into()),
                         ("username".into(), "user".into()),
                         ("password".into(), "new_password".into()),
-                        ("database.name".into(), "mydb,other_db".into()),
+                        ("database.name".into(), "mydb".into()),
                     ]
                     .into_iter()
                     .collect(),
@@ -1886,12 +1890,16 @@ mod tests {
         let external_storage_table = ExternalStorageTable::new(
             TableId::new(1234),
             42.into(),
+            "public.orders".into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "orders".to_owned(),
             },
             "db".to_owned(),
-            ExternalTableConfig::default(),
+            ExternalTableConfig {
+                connector: "postgres-cdc".into(),
+                ..Default::default()
+            },
             ExternalCdcTableType::Unspecified,
             Schema::new(vec![Field::with_name(DataType::Int64, "id")]),
             vec![OrderType::ascending()],
@@ -2016,12 +2024,16 @@ mod tests {
         ExternalStorageTable::new(
             TableId::new(1234),
             42.into(),
+            "public.mock_table".into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "mock_table".to_owned(),
             },
             "mydb".to_owned(),
-            ExternalTableConfig::default(),
+            ExternalTableConfig {
+                connector: "postgres-cdc".into(),
+                ..Default::default()
+            },
             ExternalCdcTableType::Mock,
             Schema::new(vec![
                 Field::with_name(DataType::Int64, "id"),

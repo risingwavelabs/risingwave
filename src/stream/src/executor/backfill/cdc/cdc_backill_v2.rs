@@ -1201,12 +1201,16 @@ mod tests {
         let external_table = ExternalStorageTable::new(
             TableId::new(1234),
             42.into(),
+            "public.mock_table".into(),
             SchemaTableName {
                 schema_name: "public".to_owned(),
                 table_name: "mock_table".to_owned(),
             },
             "mydb".to_owned(),
-            ExternalTableConfig::default(),
+            ExternalTableConfig {
+                connector: "postgres-cdc".into(),
+                ..Default::default()
+            },
             ExternalCdcTableType::Mock,
             Schema::new(vec![
                 Field::with_name(DataType::Int64, "id"),
@@ -1294,7 +1298,8 @@ mod tests {
                         [(
                             42,
                             [
-                                ("connector".into(), "mysql-cdc".into()),
+                                ("connector".into(), "postgres-cdc".into()),
+                                ("database.name".into(), "mydb".into()),
                                 ("hostname".into(), "new_host".into()),
                                 ("port".into(), "3306".into()),
                                 ("username".into(), "user".into()),

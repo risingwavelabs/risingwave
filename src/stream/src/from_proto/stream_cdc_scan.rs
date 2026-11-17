@@ -149,6 +149,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let external_table = ExternalStorageTable::new(
             table_desc.table_id,
             table_desc.source_id,
+            table_desc.table_name.clone(),
             schema_table_name,
             database_name,
             table_config,

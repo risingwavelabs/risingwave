@@ -32,6 +32,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::cdc::table_options::derive_connect_properties_for_cdc_table;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_sqlparser::ast::AsOf;
 use thiserror_ext::AsReport;
@@ -45,7 +46,6 @@ use crate::binder::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
-use crate::handler::cdc::derive_connect_properties_for_cdc_table;
 use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;

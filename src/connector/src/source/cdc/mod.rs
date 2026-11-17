@@ -23,6 +23,7 @@ pub mod postgres;
 pub mod source;
 pub mod split;
 pub mod sql_server;
+pub mod table_options;
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
