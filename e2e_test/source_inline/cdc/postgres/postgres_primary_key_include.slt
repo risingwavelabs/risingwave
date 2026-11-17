@@ -44,6 +44,16 @@ create source postgres_primary_key_include_source with (
     slot.name = 'postgres_primary_key_include_slot'
 );
 
+# Explicitly including the payload in the primary key must still fail validation.
+statement error Primary key mismatch: the SQL schema defines 3 primary key columns, but the source table in Postgres has 2 columns.
+create table postgres_primary_key_include_rw (
+    order_id int,
+    tenant_id int,
+    payload varchar,
+    primary key (tenant_id, order_id, payload)
+)
+from postgres_primary_key_include_source table 'public.postgres_primary_key_include';
+
 statement ok
 create table postgres_primary_key_include_rw (*)
 from postgres_primary_key_include_source table 'public.postgres_primary_key_include';
