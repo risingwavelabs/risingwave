@@ -25,6 +25,90 @@ use iceberg::{
     Catalog as CatalogV2, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
 };
 
+#[cfg(test)]
+pub use self::test_tables::MockTableGuard;
+
+#[cfg(test)]
+mod test_tables {
+    use std::collections::HashMap;
+    use std::collections::hash_map::Entry;
+    use std::sync::LazyLock;
+
+    use iceberg::table::Table;
+    use iceberg::{TableCommit, TableIdent};
+    use parking_lot::Mutex;
+
+    use super::MockCatalog;
+
+    static TABLES: LazyLock<Mutex<HashMap<TableIdent, Table>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    /// A registered table that is removed from the mock catalog when dropped.
+    #[must_use]
+    pub struct MockTableGuard {
+        ident: TableIdent,
+    }
+
+    impl Drop for MockTableGuard {
+        fn drop(&mut self) {
+            TABLES.lock().remove(&self.ident);
+        }
+    }
+
+    impl MockCatalog {
+        /// Register a table shared by mock catalog instances. Use distinct identifiers in parallel tests.
+        pub fn register(table: Table) -> MockTableGuard {
+            let ident = table.identifier().clone();
+            match TABLES.lock().entry(ident.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(table);
+                }
+                Entry::Occupied(_) => panic!("mock table {ident} is already registered"),
+            }
+            MockTableGuard { ident }
+        }
+
+        pub(super) fn registered_table(ident: &TableIdent) -> Option<Table> {
+            TABLES.lock().get(ident).cloned()
+        }
+
+        /// Apply a commit to a registered table. Returns the commit back if the table is not
+        /// registered.
+        pub(super) fn update_test_table(
+            commit: TableCommit,
+        ) -> Result<iceberg::Result<Table>, Box<TableCommit>> {
+            let mut tables = TABLES.lock();
+            let Some(table) = tables.get_mut(commit.identifier()) else {
+                return Err(Box::new(commit));
+            };
+            Ok(apply_commit(table, commit))
+        }
+    }
+
+    fn apply_commit(table: &mut Table, mut commit: TableCommit) -> iceberg::Result<Table> {
+        for requirement in commit.take_requirements() {
+            requirement.check(Some(table.metadata()))?;
+        }
+        let mut metadata_builder = table
+            .metadata()
+            .clone()
+            .into_builder(table.metadata_location().map(str::to_owned));
+        for update in commit.take_updates() {
+            metadata_builder = update.apply(metadata_builder)?;
+        }
+        let mut builder = Table::builder()
+            .identifier(table.identifier().clone())
+            .file_io(table.file_io().clone())
+            .metadata(metadata_builder.build()?.metadata);
+        if let Some(location) = table.metadata_location() {
+            builder = builder.metadata_location(location);
+        }
+        let updated = builder.build()?;
+        *table = updated.clone();
+        Ok(updated)
+    }
+}
+
 /// A mock catalog for iceberg used for plan test.
 #[derive(Debug)]
 pub struct MockCatalog;
@@ -215,6 +299,10 @@ impl CatalogV2 for MockCatalog {
 
     /// Load table from the catalog.
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
+        #[cfg(test)]
+        if let Some(table) = Self::registered_table(table) {
+            return Ok(table);
+        }
         match table.name.as_ref() {
             Self::SPARSE_TABLE => Ok(Self::sparse_table()),
             Self::RANGE_TABLE => Ok(Self::range_table()),
@@ -229,6 +317,10 @@ impl CatalogV2 for MockCatalog {
 
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
+        #[cfg(test)]
+        if Self::registered_table(table).is_some() {
+            return Ok(true);
+        }
         match table.name.as_ref() {
             Self::SPARSE_TABLE => Ok(true),
             Self::RANGE_TABLE => Ok(true),
@@ -242,7 +334,13 @@ impl CatalogV2 for MockCatalog {
     }
 
     /// Update a table to the catalog.
-    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
+    async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        #[cfg(test)]
+        let commit = match Self::update_test_table(commit) {
+            Ok(result) => return result,
+            Err(commit) => *commit,
+        };
+        let _ = commit;
         todo!()
     }
 
