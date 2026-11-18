@@ -227,3 +227,50 @@ drop table correlated_ref_t2;
 
 statement ok
 drop table correlated_ref_t3;
+
+statement ok
+create table exists_agg_a(x int);
+
+statement ok
+create table exists_agg_b(x int, y int);
+
+statement ok
+insert into exists_agg_a values (1), (2), (null);
+
+statement ok
+insert into exists_agg_b values (1, 1);
+
+query I rowsort
+select * from exists_agg_a where exists (select max(y) from exists_agg_b where exists_agg_b.x = exists_agg_a.x);
+----
+1
+2
+NULL
+
+query I rowsort
+select * from exists_agg_a where not exists (select max(y) from exists_agg_b where exists_agg_b.x = exists_agg_a.x);
+----
+
+query I rowsort
+select * from exists_agg_a where x in (select max(y) from exists_agg_b where exists_agg_b.x = exists_agg_a.x);
+----
+1
+
+query I rowsort
+select * from exists_agg_a where 0 in (select approx_count_distinct(y) from exists_agg_b where exists_agg_b.x = exists_agg_a.x);
+----
+2
+NULL
+
+query II rowsort
+select x, (select approx_count_distinct(y) from exists_agg_b where exists_agg_b.x = exists_agg_a.x) from exists_agg_a;
+----
+1 1
+2 0
+NULL 0
+
+statement ok
+drop table exists_agg_a;
+
+statement ok
+drop table exists_agg_b;

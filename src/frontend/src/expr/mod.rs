@@ -30,6 +30,7 @@ use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::current;
 
 mod agg_call;
+mod asynchronous;
 mod correlated_input_ref;
 mod function_call;
 mod function_call_with_lambda;
@@ -291,6 +292,10 @@ impl ExprImpl {
 
     pub fn is_impure(&self) -> bool {
         is_impure(self)
+    }
+
+    pub fn needs_materialization(&self) -> bool {
+        needs_materialization(self)
     }
 
     /// Count `Now`s in the expression.

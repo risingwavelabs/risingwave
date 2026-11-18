@@ -372,7 +372,6 @@ state_store_event_handler_pending_event	gauge	event_type	The number of sent but 
 state_store_get_shared_buffer_hit_counts	counter	table_id	Total number of get requests that have been fulfilled by shared buffer		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_iter_fetch_meta_cache_unhits	gauge		Number of SST meta cache unhit during one iterator meta fetch		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_iter_fetch_meta_duration	histogram	table_id	Histogram of iterator fetch SST meta time that have been issued to state store		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_iter_init_profile_duration_seconds	histogram	table_id,latency,phase	Sampled durations within forward local iterator initialization		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_iter_merge_sstable_counts	histogram	table_id,type	Number of child iterators merged into one MergeIterator		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_iter_scan_key_counts	counter	table_id,type	Total number of keys read by iterator		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_iter_slow_fetch_meta_cache_unhits	gauge		Number of SST meta cache unhit during a iterator meta fetch which is slow (costs >5 seconds)		src/storage/src/monitor/hummock_state_store_metrics.rs

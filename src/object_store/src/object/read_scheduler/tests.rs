@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use super::super::{InMemObjectStore, ObjectErrorInner, ObjectStore, ObjectStoreConfig};
-use super::execution::{PhysicalReadReservation, acquire_physical};
+use super::execution::PhysicalReadReservation;
 use super::*;
 
 fn bounded_scheduler<F, R>(
@@ -40,9 +40,8 @@ impl ReadScheduler {
         &self,
         path: &str,
         range: Range<usize>,
-        trace_id: Option<u64>,
     ) -> ObjectResult<oneshot::Receiver<ReadResult>> {
-        self.submit_plan(path, self.plan(&range).1, trace_id).await
+        self.submit_plan(path, self.plan(&range).1).await
     }
 }
 
@@ -71,13 +70,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
         }
     }
 
-    // Each worker count is tested in a fresh process because the pool
-    // belongs to the process, including between scheduler lifetimes.
     let config = ReadSchedulerConfig {
-        dedicated_io_runtime_workers: std::env::var("RW_TEST_DEDICATED_IO_WORKERS").map_or_else(
-            |_| ReadSchedulerConfig::default().dedicated_io_runtime_workers,
-            |workers| workers.parse().unwrap(),
-        ),
         use_dedicated_io_runtime: true,
         max_admitted_groups: 1.try_into().unwrap(),
         max_inflight_reads: 1.try_into().unwrap(),
@@ -145,7 +138,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             };
 
             // Direct admission runs on this block_on thread, not the parked scan worker.
-            let response = scheduler.submit("scan", 0..4, None).await.unwrap();
+            let response = scheduler.submit("scan", 0..4).await.unwrap();
             check(reads.recv().await.unwrap(), "scan", 0..4)
                 .send(Ok(Bytes::from_static(b"abcd")))
                 .unwrap();
@@ -154,9 +147,9 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             // Ordinary admission waits on this block_on thread while physical dispatch
             // continues on the dedicated runtime, even with the scan worker parked.
             {
-                let holder = scheduler.submit("holder", 0..1, None).await.unwrap();
+                let holder = scheduler.submit("holder", 0..1).await.unwrap();
                 let release_holder = check(reads.recv().await.unwrap(), "holder", 0..1);
-                let deferred = scheduler.submit("deferred", 0..4, None);
+                let deferred = scheduler.submit("deferred", 0..4);
                 tokio::pin!(deferred);
                 assert!(futures::poll!(&mut deferred).is_pending());
                 release_holder.send(Ok(Bytes::from_static(b"a"))).unwrap();
@@ -168,10 +161,10 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
                 assert_eq!(response.await.unwrap().unwrap(), "abcd");
             }
 
-            let read = scheduler.submit("cancel", 0..1, None).await.unwrap();
+            let read = scheduler.submit("cancel", 0..1).await.unwrap();
             let cancelled_gate = check(reads.recv().await.unwrap(), "cancel", 0..1);
             let next_read = {
-                let next = scheduler.submit("next", 4..6, None);
+                let next = scheduler.submit("next", 4..6);
                 tokio::pin!(next);
                 assert!(
                     futures::poll!(&mut next).is_pending(),
@@ -231,7 +224,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             });
             assert_eq!(
                 second
-                    .submit("other", 0..1, None)
+                    .submit("other", 0..1)
                     .await
                     .unwrap()
                     .await
@@ -270,7 +263,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             read,
         );
         assert_eq!(
-            off.submit("off", 0..1, None)
+            off.submit("off", 0..1)
                 .await
                 .unwrap()
                 .await
@@ -297,9 +290,6 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
                 .downcast_ref::<String>()
                 .unwrap()
                 .contains("conflicting dedicated_io_runtime_workers"),
-        );
-        eprintln!(
-            "Dedicated reads used {expected_workers} I/O workers; OFF used the caller runtime"
         );
     });
 }
@@ -546,14 +536,14 @@ async fn contained_read_shares_a_started_get_until_its_last_waiter_leaves() {
                 }
             },
         );
-        let leader = scheduler.submit("file", 0..4, None).await.unwrap();
+        let leader = scheduler.submit("file", 0..4).await.unwrap();
         assert_eq!(reads.recv().await.unwrap(), 0..4);
         assert_eq!(scheduler.groups.slots.available_permits(), 0);
-        let follower = scheduler.submit("file", 1..3, None).await.unwrap();
+        let follower = scheduler.submit("file", 1..3).await.unwrap();
         assert_eq!(reserved.get(), 0);
         assert_eq!(active.get(), 1);
         assert_eq!(dispatch.get_sample_count(), 1);
-        let partial = scheduler.submit("file", 3..5, None);
+        let partial = scheduler.submit("file", 3..5);
         tokio::pin!(partial);
         assert!(futures::poll!(&mut partial).is_pending());
         drop(leader);
@@ -570,9 +560,9 @@ async fn contained_read_shares_a_started_get_until_its_last_waiter_leaves() {
             1,
         );
 
-        let leader = scheduler.submit("file", 0..4, None).await.unwrap();
+        let leader = scheduler.submit("file", 0..4).await.unwrap();
         assert_eq!(reads.recv().await.unwrap(), 0..4);
-        let follower = scheduler.submit("file", 1..3, None).await.unwrap();
+        let follower = scheduler.submit("file", 1..3).await.unwrap();
         drop(leader);
         drop(follower);
         drop(
@@ -628,8 +618,8 @@ async fn covered_group_waiter_joins_a_new_flight_without_a_credit() {
         );
         // Queue the follower before the first physical task runs. The pending group
         // is already full, so the follower must initially wait for a group credit.
-        let leader = scheduler.submit("file", 0..4, None).await.unwrap();
-        let follower = scheduler.submit("file", 1..3, None);
+        let leader = scheduler.submit("file", 0..4).await.unwrap();
+        let follower = scheduler.submit("file", 1..3);
         tokio::pin!(follower);
         struct WaitingTask(Notify);
         impl std::task::Wake for WaitingTask {
@@ -696,7 +686,7 @@ async fn queued_group_stays_mergeable_until_physical_task_starts() {
                     range: ReadRange::Mergeable(range.clone()),
                     response,
                     queued_at: Instant::now(),
-                    trace_id: None,
+
                     _pending: ReadGauge::new(&pending),
                     _queued: None,
                 };
@@ -832,7 +822,7 @@ async fn stopping_dispatcher_cancels_physical_reads() {
                 range: ReadRange::Mergeable(0..1),
                 response,
                 queued_at: Instant::now(),
-                trace_id: None,
+
                 _pending: ReadGauge::new(&pending),
                 _queued: None,
             }],
@@ -859,14 +849,14 @@ async fn stopping_dispatcher_cancels_physical_reads() {
     tokio::time::timeout(Duration::from_secs(5), async {
         started.notified().await;
         assert_eq!(active.get(), 1);
-        let waiting = scheduler.submit("queued", 0..1, None);
+        let waiting = scheduler.submit("queued", 0..1);
         tokio::pin!(waiting);
         assert!(futures::poll!(&mut waiting).is_pending());
         dispatcher.abort();
         assert!(dispatcher.await.unwrap_err().is_cancelled());
         assert!(result.await.is_err());
         assert!(waiting.await.is_err());
-        assert!(scheduler.submit("after-stop", 0..1, None).await.is_err());
+        assert!(scheduler.submit("after-stop", 0..1).await.is_err());
         assert!(groups.pending.lock().unwrap().waiting.is_empty());
         assert_eq!(active.get(), 0);
         assert_eq!(pending.get(), 0);
@@ -900,7 +890,7 @@ async fn cancellation_after_planning_is_accounted_before_dispatch() {
                 range: ReadRange::Mergeable(start..start + 4),
                 response,
                 queued_at: Instant::now(),
-                trace_id: None,
+
                 _pending: ReadGauge::new(&pending),
                 _queued: None,
             });
@@ -929,7 +919,7 @@ async fn cancellation_after_planning_is_accounted_before_dispatch() {
                 &read,
                 &physical_slots,
                 PhysicalReadReservation {
-                    permit: acquire_physical(physical_slots.clone()).await.unwrap(),
+                    permit: physical_slots.clone().acquire_owned().await.unwrap(),
                     reserved: ReadGauge::new(&reserved),
                     reserved_at: Instant::now(),
                     dispatch_wait: dispatch.clone(),
@@ -979,8 +969,8 @@ async fn non_range_error_is_shared_without_individual_retries() {
             }
         },
     );
-    let first = scheduler.submit("file", 0..2, None).await.unwrap();
-    let second = scheduler.submit("file", 2..4, None).await.unwrap();
+    let first = scheduler.submit("file", 0..2).await.unwrap();
+    let second = scheduler.submit("file", 2..4).await.unwrap();
     for response in [first, second] {
         let error = response.await.unwrap().unwrap_err();
         assert!(matches!(error.inner(), ObjectErrorInner::SharedRead(_)));
@@ -1014,9 +1004,9 @@ async fn out_of_bounds_read_does_not_block_adjacent_valid_reads() {
             }
         },
     );
-    let slow = scheduler.submit("file", 0..2, None).await.unwrap();
-    let valid = scheduler.submit("file", 2..4, None).await.unwrap();
-    let invalid = scheduler.submit("file", 4..6, None).await.unwrap();
+    let slow = scheduler.submit("file", 0..2).await.unwrap();
+    let valid = scheduler.submit("file", 2..4).await.unwrap();
+    let invalid = scheduler.submit("file", 4..6).await.unwrap();
     // Normal shutdown drains already admitted work, including range fallback.
     drop(scheduler);
     assert_eq!(
@@ -1067,23 +1057,23 @@ async fn bridge_reuses_group_credit_at_capacity() {
             },
         );
         let groups = &scheduler.groups;
-        let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
+        let busy = scheduler.submit("busy", 0..1).await.unwrap();
         started.notified().await;
-        let a = scheduler.submit("file", 0..2, None).await.unwrap();
-        let c = scheduler.submit("file", 4..6, None).await.unwrap();
+        let a = scheduler.submit("file", 0..2).await.unwrap();
+        let c = scheduler.submit("file", 4..6).await.unwrap();
         assert_eq!(groups.admitted.get(), 3);
-        let other = scheduler.submit("aaa", 0..1, None);
+        let other = scheduler.submit("aaa", 0..1);
         tokio::pin!(other);
         assert!(futures::poll!(&mut other).is_pending());
 
-        let b = scheduler.submit("file", 2..4, None).await.unwrap();
+        let b = scheduler.submit("file", 2..4).await.unwrap();
         let other = other.await.unwrap();
         assert_eq!(groups.admitted.get(), 3);
         assert_eq!(groups.queued.get(), 2);
         assert_eq!(groups.ready_groups.get(), 2);
 
         drop(other);
-        let newer = scheduler.submit("newer", 0..1, None).await.unwrap();
+        let newer = scheduler.submit("newer", 0..1).await.unwrap();
         release.notify_one();
         assert_eq!(busy.await.unwrap().unwrap(), "a");
         assert_eq!(a.await.unwrap().unwrap(), "ab");
@@ -1140,19 +1130,19 @@ async fn covered_waiter_can_join_pending_group_when_flight_is_full() {
                     }
                 },
             );
-            let leader = scheduler.submit("file", 0..4, None).await.unwrap();
+            let leader = scheduler.submit("file", 0..4).await.unwrap();
             assert_eq!(reads.recv().await.unwrap(), 0..4);
             let mut followers = Vec::new();
             for _ in 0..3 {
-                followers.push(scheduler.submit("file", 0..1, None).await.unwrap());
+                followers.push(scheduler.submit("file", 0..1).await.unwrap());
             }
-            let tail = scheduler.submit("file", 4..5, None).await.unwrap();
-            let mut waiter = std::pin::pin!(scheduler.submit("file", 1..2, None));
+            let tail = scheduler.submit("file", 4..5).await.unwrap();
+            let mut waiter = std::pin::pin!(scheduler.submit("file", 1..2));
             assert!(futures::poll!(&mut waiter).is_pending());
             if free_follower {
                 drop(followers.pop().unwrap());
             }
-            let bridge = scheduler.submit("file", 2..5, None).await.unwrap();
+            let bridge = scheduler.submit("file", 2..5).await.unwrap();
             let Poll::Ready(result) = futures::poll!(&mut waiter) else {
                 panic!("a mergeable waiter should be admitted before the leader finishes");
             };
@@ -1218,10 +1208,10 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                     },
                 ));
                 let groups = &scheduler.groups;
-                let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
+                let busy = scheduler.submit("busy", 0..1).await.unwrap();
                 assert_eq!(reads.recv().await.unwrap(), ("busy".to_owned(), 0..1));
 
-                let mut a = std::pin::pin!(scheduler.submit("file", 0..1, None));
+                let mut a = std::pin::pin!(scheduler.submit("file", 0..1));
                 let admitted_a = match futures::poll!(&mut a) {
                     Poll::Ready(result) if extend => Some(result.unwrap()),
                     Poll::Pending if !extend => None,
@@ -1229,7 +1219,7 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                 };
                 let held = grant.then(|| groups.slots.clone().try_acquire_owned().unwrap());
                 let c_range = if extend { 2..3 } else { 1..2 };
-                let mut submit = Box::pin(scheduler.submit("file", c_range, None));
+                let mut submit = Box::pin(scheduler.submit("file", c_range));
                 assert!(futures::poll!(&mut submit).is_pending());
                 let mut ordinary = Some(submit);
                 assert_eq!(groups.slots.available_permits(), 0);
@@ -1240,7 +1230,7 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                         tokio::task::yield_now().await;
                     }
                 }
-                let mut unrelated = std::pin::pin!(scheduler.submit("other", 0..1, None));
+                let mut unrelated = std::pin::pin!(scheduler.submit("other", 0..1));
                 if grant {
                     assert!(futures::poll!(&mut unrelated).is_pending());
                     // The semaphore assigns the returned credit to C, which is
@@ -1249,7 +1239,7 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                     assert_eq!(groups.slots.available_permits(), 0);
                 }
                 let b = if extend {
-                    let b = scheduler.submit("file", 1..2, None).await.unwrap();
+                    let b = scheduler.submit("file", 1..2).await.unwrap();
                     assert_eq!(groups.slots.available_permits(), 0);
                     assert!(!groups.pending.lock().unwrap().waiting.contains_key("file"));
                     Some(b)
@@ -1367,9 +1357,9 @@ async fn range_fallback_shares_the_physical_limit() {
                 }
             },
         );
-        let a = scheduler.submit("file", 0..2, None).await.unwrap();
-        let b = scheduler.submit("file", 2..4, None).await.unwrap();
-        let c = scheduler.submit("file", 4..6, None).await.unwrap();
+        let a = scheduler.submit("file", 0..2).await.unwrap();
+        let b = scheduler.submit("file", 2..4).await.unwrap();
+        let c = scheduler.submit("file", 4..6).await.unwrap();
         assert_eq!(a.await.unwrap().unwrap(), "da");
         assert_eq!(b.await.unwrap().unwrap(), "ta");
         assert!(c.await.unwrap().unwrap_err().is_read_range_error());
@@ -1377,7 +1367,7 @@ async fn range_fallback_shares_the_physical_limit() {
         assert_eq!(active.get(), 0);
         assert_eq!(scheduler.pending.get(), 0);
         assert_eq!(scheduler.queued.get(), 0);
-        let next = scheduler.submit("next", 0..1, None).await.unwrap();
+        let next = scheduler.submit("next", 0..1).await.unwrap();
         assert_eq!(next.await.unwrap().unwrap(), "d");
     })
     .await
@@ -1416,14 +1406,14 @@ async fn fallback_holds_group_credit_while_physical_capacity_is_available() {
                 }
             },
         );
-        let a = scheduler.submit("file", 0..2, None).await.unwrap();
-        let b = scheduler.submit("file", 2..4, None).await.unwrap();
+        let a = scheduler.submit("file", 0..2).await.unwrap();
+        let b = scheduler.submit("file", 2..4).await.unwrap();
         assert_eq!(calls.recv().await.unwrap(), ("file".to_owned(), 0..4));
         assert_eq!(calls.recv().await.unwrap(), ("file".to_owned(), 0..2));
         assert_eq!(calls.recv().await.unwrap(), ("file".to_owned(), 2..4));
         assert!(b.await.unwrap().unwrap_err().is_read_range_error());
 
-        let other = scheduler.submit("other", 0..1, None);
+        let other = scheduler.submit("other", 0..1);
         tokio::pin!(other);
         assert!(futures::poll!(&mut other).is_pending());
         assert_eq!(
@@ -1478,11 +1468,11 @@ async fn merged_read_is_cancelled_after_both_waiters_drop() {
             }
         },
     );
-    let first = scheduler.submit("file", 0..2, None).await.unwrap();
-    let second = scheduler.submit("file", 2..4, None).await.unwrap();
+    let first = scheduler.submit("file", 0..2).await.unwrap();
+    let second = scheduler.submit("file", 2..4).await.unwrap();
     started.notified().await;
     {
-        let blocked = scheduler.submit("file", 4..6, None);
+        let blocked = scheduler.submit("file", 4..6);
         tokio::pin!(blocked);
         assert!(futures::poll!(&mut blocked).is_pending());
         assert_eq!(scheduler.waiting.get(), 1);
@@ -1576,17 +1566,17 @@ async fn partial_overlap_metrics_exclude_single_flight_reuse_and_other_objects()
         let bytes = metrics
             .read_scheduler_partial_overlap_bytes
             .with_label_values(&["test"]);
-        let leader = scheduler.submit("sst", 0..4, None).await.unwrap();
+        let leader = scheduler.submit("sst", 0..4).await.unwrap();
         assert_eq!(reads.recv().await.unwrap(), ("sst".into(), 0..4));
-        let follower = scheduler.submit("sst", 1..3, None).await.unwrap();
+        let follower = scheduler.submit("sst", 1..3).await.unwrap();
         assert!(reads.try_recv().is_err());
         assert_eq!(count.get(), 0);
-        let partial = scheduler.submit("sst", 3..7, None).await.unwrap();
+        let partial = scheduler.submit("sst", 3..7).await.unwrap();
         assert_eq!(partial.await.unwrap().unwrap(), "defg");
         assert_eq!(reads.recv().await.unwrap(), ("sst".into(), 3..7));
         assert_eq!(count.get(), 1);
         assert_eq!(bytes.get(), 1);
-        let other = scheduler.submit("other", 3..7, None).await.unwrap();
+        let other = scheduler.submit("other", 3..7).await.unwrap();
         assert_eq!(other.await.unwrap().unwrap(), "defg");
         assert_eq!(reads.recv().await.unwrap(), ("other".into(), 3..7));
         assert_eq!(count.get(), 1);
@@ -1594,7 +1584,7 @@ async fn partial_overlap_metrics_exclude_single_flight_reuse_and_other_objects()
         assert_eq!(leader.await.unwrap().unwrap(), "abcd");
         assert_eq!(follower.await.unwrap().unwrap(), "bc");
         // Completion removes the old flight; a later read is not an in-flight overlap.
-        let later = scheduler.submit("sst", 2..6, None).await.unwrap();
+        let later = scheduler.submit("sst", 2..6).await.unwrap();
         assert_eq!(later.await.unwrap().unwrap(), "cdef");
         assert_eq!(count.get(), 1);
         assert_eq!(bytes.get(), 1);

@@ -19,11 +19,10 @@ package com.risingwave.connector.source.core;
 import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
-import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
-import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
@@ -36,28 +35,27 @@ public class DbzCdcEngine implements Runnable {
 
     /** If config is not valid will throw exceptions */
     public DbzCdcEngine(
-            SourceTypeE connector,
-            long sourceId,
-            Properties config,
-            DebeziumEngine.CompletionCallback completionCallback) {
-        var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
-        var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
+            DbzConnectorConfig config, DebeziumEngine.CompletionCallback completionCallback) {
+        var dbzProps = config.getResolvedDebeziumProps();
+        var heartbeatTopicPrefix = dbzProps.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
+        var topicPrefix = dbzProps.getProperty(TOPIC_PREFIX.name());
         var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
                 new DbzChangeEventConsumer(
-                        connector,
-                        sourceId,
+                        config.getSourceType(),
+                        config.getSourceId(),
                         heartbeatTopicPrefix,
                         transactionTopic,
                         topicPrefix,
+                        config.isBackfillSource(),
                         new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it
-        this.id = sourceId;
+        this.id = config.getSourceId();
         this.changeEventConsumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
-                        .using(config)
+                        .using(dbzProps)
                         .using(completionCallback)
                         .notifying(consumer)
                         .build();

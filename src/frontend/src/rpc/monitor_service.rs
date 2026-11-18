@@ -13,18 +13,20 @@
 // limitations under the License.
 
 use risingwave_common::config::ServerConfig;
+use risingwave_common::util::tracing::log_filter;
 use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
-    GetStreamingStatsRequest, GetStreamingStatsResponse, GetTableCacheRefillStatsRequest,
-    GetTableCacheRefillStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetLogFilterRequest, GetProfileStatsRequest,
+    GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
+    GetTableCacheRefillStatsRequest, GetTableCacheRefillStatsResponse, HeapProfilingRequest,
+    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, LogFilterState,
+    ProfilingRequest, ProfilingResponse, SetLogFilterRequest, StackTraceRequest,
+    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use tonic::{Request, Response, Status};
 
-/// Frontend implementation of monitor RPCs, currently reusing the profile service only.
+/// Frontend implementation of monitor RPCs, including profiling and runtime log filters.
 pub struct MonitorServiceImpl {
     profile_service: ProfileServiceImpl,
 }
@@ -39,6 +41,20 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
+    async fn set_log_filter(
+        &self,
+        request: Request<SetLogFilterRequest>,
+    ) -> Result<Response<LogFilterState>, Status> {
+        log_filter::set_log_filter_rpc(request)
+    }
+
+    async fn get_log_filter(
+        &self,
+        request: Request<GetLogFilterRequest>,
+    ) -> Result<Response<LogFilterState>, Status> {
+        log_filter::get_log_filter_rpc(request)
+    }
+
     async fn stack_trace(
         &self,
         _request: Request<StackTraceRequest>,

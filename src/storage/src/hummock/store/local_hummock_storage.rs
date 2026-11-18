@@ -31,7 +31,6 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tracing::{Instrument, warn};
 
-use super::iter_init_profile::{IterInitProfile, measure_polls};
 use super::version::VersionUpdate;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
@@ -222,45 +221,20 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<LocalHummockStorageIterator<'_>> {
-        let mut profile = IterInitProfile::sample(self.table_id);
-        let start = profile.as_ref().map(|_| std::time::Instant::now());
-        let init = async {
-            let snapshot_start = profile.as_ref().map(|_| std::time::Instant::now());
-            let (table_key_range, read_snapshot) =
-                read_filter_for_version(epoch, self.table_id, table_key_range, &self.read_version)?;
-            if let Some((profile, start)) = profile.as_mut().zip(snapshot_start) {
-                profile.snapshot = start.elapsed();
-            }
+        let (table_key_range, read_snapshot) =
+            read_filter_for_version(epoch, self.table_id, table_key_range, &self.read_version)?;
 
-            self.hummock_version_reader
-                .iter_with_memtable(
-                    table_key_range,
-                    epoch,
-                    self.table_id,
-                    self.table_option,
-                    read_options,
-                    read_snapshot,
-                    Some(self.mem_table_iter()),
-                    profile.as_mut(),
-                )
-                .await
-        };
-        if let Some(start) = start {
-            let (result, poll) = measure_polls(init).await;
-            if let Some(profile) = profile
-                && result.is_ok()
-            {
-                profile.report(
-                    self.hummock_version_reader.stats(),
-                    self.table_id,
-                    start.elapsed(),
-                    poll,
-                );
-            }
-            result
-        } else {
-            init.await
-        }
+        self.hummock_version_reader
+            .iter_with_memtable(
+                table_key_range,
+                epoch,
+                self.table_id,
+                self.table_option,
+                read_options,
+                read_snapshot,
+                Some(self.mem_table_iter()),
+            )
+            .await
     }
 
     async fn rev_iter_all(
@@ -360,11 +334,6 @@ impl StateStoreGet for LocalHummockStorage {
         let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
         let config = self.read_batch_config();
         let metadata = crate::hummock::sst_meta_batch::SstMetaBatch::new(config);
-        let batch_span =
-            tracing::debug_span!(target: "state_store_read_batch", "native_point_batch");
-        tracing::debug!(target: "state_store_read_batch", parent: &batch_span,
-            keys = requests.len(), concurrency = config.concurrency.get(), "native point batch");
-        drop(batch_span);
         // Prepare versions only when a key is admitted. Completed keys release their slots
         // immediately; neither input order nor shared metadata requires waiting for a batch.
         let mut reads = stream::iter(requests.into_iter().enumerate().map(

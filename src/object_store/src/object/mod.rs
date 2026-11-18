@@ -50,9 +50,6 @@ mod read_scheduler;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use read_scheduler::ReadScheduler;
-#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-#[doc(hidden)]
-pub use read_scheduler::replay;
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -165,12 +162,9 @@ pub trait ObjectStore: Send + Sync {
         MonitoredObjectStore::new(self, metrics, config)
     }
 
-    async fn list(
-        &self,
-        prefix: &str,
-        start_after: Option<String>,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter>;
+    /// Lists objects under `prefix`. Keep consuming the returned stream to advance
+    /// through backend pages; each new call starts a fresh listing.
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
 }
@@ -387,13 +381,8 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, delete_objects(paths).await)
     }
 
-    pub async fn list(
-        &self,
-        prefix: &str,
-        start_after: Option<String>,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
-        object_store_impl_method_body!(self, list(prefix, start_after, limit).await)
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        object_store_impl_method_body!(self, list(prefix).await)
     }
 
     pub fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
@@ -730,11 +719,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         use std::ops::Bound::{Excluded, Included};
 
-        static NEXT_TRACE_REQUEST: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(1);
-        let trace_id = (tracing::enabled!(target: "state_store_read_batch", tracing::Level::DEBUG)
-            || tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG))
-        .then(|| NEXT_TRACE_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let media_type = self.media_type();
         let mut read_guard = self.object_store_metrics.begin_read(media_type, "logical");
         let (route, scheduled) = match &self.read_scheduler {
@@ -744,11 +728,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 (route, Some((scheduler, read_range)))
             }
         };
-        if let Some(request_id) = trace_id {
-            let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
-            tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,
-                range = ?range, "object read submitted");
-        }
         let labels = &[media_type, route];
         self.object_store_metrics
             .read_requests
@@ -766,17 +745,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .observe(end.saturating_sub(start) as f64);
         }
         let result = match scheduled {
-            Some((scheduler, range)) => match scheduler.submit_plan(path, range, trace_id).await {
+            Some((scheduler, range)) => match scheduler.submit_plan(path, range).await {
                 Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
                 Err(error) => Err(error),
             },
             None => self.read_direct(path, range).await,
         };
-        if let Some(request_id) = trace_id {
-            let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
-            tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,
-                ok = result.is_ok(), "object read completed");
-        }
         read_guard.finish(&result);
         result
     }
@@ -803,8 +777,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
             let builder = || async {
                 let mut attempt = self.object_store_metrics.begin_read(media_type, "attempt");
-                #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-                replay::backend_attempt();
                 let result = self
                     .inner
                     .read(path, range.clone())
@@ -983,12 +955,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn list(
-        &self,
-        prefix: &str,
-        start_after: Option<String>,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = OperationType::List;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
@@ -1001,7 +968,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
         let builder = || async {
             self.inner
-                .list(prefix, start_after.clone(), limit)
+                .list(prefix)
                 .instrument_await(operation_type_str.verbose())
                 .await
         };

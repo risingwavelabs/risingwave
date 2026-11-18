@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod hummock_storage;
-pub(super) mod iter_init_profile;
 pub mod local_hummock_storage;
 pub(crate) mod table_change_log_manager;
 mod vector_writer;

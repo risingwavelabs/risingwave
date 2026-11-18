@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 use std::ops::Deref as _;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
@@ -28,7 +27,6 @@ use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer as _};
 use risingwave_storage::StateStore;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use tracing::Instrument;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -170,16 +168,7 @@ impl MaterializeCache {
 
         // Populate the LRU cache with the keys in input chunk.
         // For new keys, row values are set to None.
-        static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(0);
-        let span = tracing::debug_span!(
-            target: "state_store_read_batch",
-            "materialize_read_batch",
-            batch_id = NEXT_BATCH_ID.fetch_add(1, Ordering::Relaxed),
-            table_id = %table.table_id(),
-            keys = key_set.len(),
-        );
         self.fetch_keys(key_set.iter().map(|v| v.deref()), table)
-            .instrument(span)
             .await?;
 
         let mut change_buffer = ChangeBuffer::new();

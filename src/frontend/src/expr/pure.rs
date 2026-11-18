@@ -44,8 +44,12 @@ impl ImpureAnalyzer {
 
 impl ExprVisitor for ImpureAnalyzer {
     fn visit_user_defined_function(&mut self, func_call: &super::UserDefinedFunction) {
-        let name = &func_call.catalog.name;
-        self.impure = Some(format!("user-defined function `{name}`").into());
+        if func_call.catalog.is_immutable {
+            func_call.args.iter().for_each(|expr| self.visit_expr(expr));
+        } else {
+            let name = &func_call.catalog.name;
+            self.impure = Some(format!("user-defined function `{name}`").into());
+        }
     }
 
     fn visit_table_function(&mut self, func_call: &super::TableFunction) {
@@ -414,10 +418,23 @@ impl ExprVisitor for ImpureAnalyzer {
     }
 }
 
+/// Returns whether every function in the expression always produces the same result for the same
+/// inputs, so that the expression can be re-evaluated or moved by the optimizer.
+///
+/// - Built-in scalar and table functions are pure when they are deterministic, as classified by
+///   [`ImpureAnalyzer`]. `NOW`, `PROCTIME` and secret references are impure.
+/// - User-defined scalar functions are pure when they are declared `IMMUTABLE`. The planner
+///   trusts the declaration; it cannot verify the implementation. User-defined table functions
+///   are always impure.
+///
+/// A pure expression may still have its evaluated results materialized on retract streams: a UDF
+/// keeps materialization unless it sets `unsafe_skip_materializing_exprs`. Whether an expression
+/// needs materialization is decided by [`needs_materialization`].
 pub fn is_pure(expr: &ExprImpl) -> bool {
     !is_impure(expr)
 }
 
+/// The inverse of [`is_pure`].
 pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer::default();
     a.visit_expr(expr);
@@ -436,6 +453,32 @@ pub fn impure_expr_desc(expr: &ExprImpl) -> Option<String> {
     let mut a = ImpureAnalyzer::default();
     a.visit_expr(expr);
     a.impure_expr_desc().map(|s| s.to_owned())
+}
+
+/// Finds UDFs that keep their evaluated results materialized on retract streams, that is, UDFs
+/// without `unsafe_skip_materializing_exprs`.
+#[derive(Default)]
+struct MaterializationAnalyzer {
+    needs_materialization: bool,
+}
+
+impl ExprVisitor for MaterializationAnalyzer {
+    fn visit_user_defined_function(&mut self, func_call: &super::UserDefinedFunction) {
+        self.needs_materialization |= !func_call.catalog.unsafe_skip_materializing_exprs;
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
+    }
+}
+
+/// Returns whether a streaming project on a retract stream must materialize the evaluated results
+/// of the expression: when the expression is impure, or when it calls a UDF without
+/// `unsafe_skip_materializing_exprs`.
+pub fn needs_materialization(expr: &ExprImpl) -> bool {
+    if is_impure(expr) {
+        return true;
+    }
+    let mut a = MaterializationAnalyzer::default();
+    a.visit_expr(expr);
+    a.needs_materialization
 }
 
 #[cfg(test)]

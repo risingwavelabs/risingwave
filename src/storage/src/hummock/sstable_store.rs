@@ -42,7 +42,6 @@ use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
-use tracing::Instrument;
 
 use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
@@ -429,45 +428,49 @@ impl SstableStore {
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         // future: fetch block if hybrid cache miss
-        let span = tracing::debug_span!(target: "state_store_read_batch", "block_read",
-            object_id = %object_id, block = block_index, start = range.start, end = range.end);
         let fetch_range = range.clone();
         let fetch_block = || {
             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
             let buffered_ranges = self.buffered_cold_ranges.clone();
             let read_metrics = self.read_metrics.clone();
             async move {
-            outer_fetch.inc();
-            // Only a polled external fallback counts: cache hits and Foyer followers
-            // never reach this point. Scheduler reuse can still avoid a physical GET.
-            if buffered_ranges.contains(object_id, &fetch_range) {
-                let policy = match policy {
-                    CachePolicy::Fill(_) => "fill",
-                    CachePolicy::NotFill => "not_fill",
-                    CachePolicy::Disable => "disable",
-                };
-                read_metrics.cold_range_buffered_overlap_reads.with_label_values(&[policy]).inc();
-                read_metrics.cold_range_buffered_overlap_bytes.with_label_values(&[policy]).inc_by(fetch_range.len() as u64);
-            }
-            let block_data = match store
-                .read(&data_path, fetch_range.clone())
-                .instrument_await("get_block_response".verbose())
-                .await
-            {
-                Ok(data) => data,
-                Err(e) => {
-                    tracing::error!(
-                        "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                        fetch_range,
-                        object_id,
-                        file_size
-                    );
-                    return Err(HummockError::from(e));
+                outer_fetch.inc();
+                // Only a polled external fallback counts: cache hits and Foyer followers
+                // never reach this point. Scheduler reuse can still avoid a physical GET.
+                if buffered_ranges.contains(object_id, &fetch_range) {
+                    let policy = match policy {
+                        CachePolicy::Fill(_) => "fill",
+                        CachePolicy::NotFill => "not_fill",
+                        CachePolicy::Disable => "disable",
+                    };
+                    read_metrics
+                        .cold_range_buffered_overlap_reads
+                        .with_label_values(&[policy])
+                        .inc();
+                    read_metrics
+                        .cold_range_buffered_overlap_bytes
+                        .with_label_values(&[policy])
+                        .inc_by(fetch_range.len() as u64);
                 }
-            };
-            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
-            Ok(block)
-        }.instrument(span.clone())
+                let block_data = match store
+                    .read(&data_path, fetch_range.clone())
+                    .instrument_await("get_block_response".verbose())
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(e) => {
+                        tracing::error!(
+                            "get_block_response meet error when read {:?} from sst-{}, total length: {}",
+                            fetch_range,
+                            object_id,
+                            file_size
+                        );
+                        return Err(HummockError::from(e));
+                    }
+                };
+                let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+                Ok(block)
+            }
         };
 
         match policy {
@@ -483,8 +486,7 @@ impl SstableStore {
                 } else {
                     self.read_metrics.block_cache_memory_hit.inc();
                 }
-                tracing::debug!(target: "state_store_read_batch", parent: &span, object_id = %object_id,
-                    block = block_index, memory_hit = !fetch.need_await(), "block cache request registered");
+
                 Ok(BlockResponse::Fetch(fetch))
             }
             CachePolicy::NotFill => {
@@ -709,11 +711,9 @@ impl SstableStore {
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
-        start_after: Option<String>,
-        limit: Option<usize>,
     ) -> HummockResult<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
+        let raw_iter = self.store.list(&list_path).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", SST_OBJECT_SUFFIX))),
             Err(_) => future::ready(true),

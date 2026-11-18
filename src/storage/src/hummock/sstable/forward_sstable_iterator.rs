@@ -14,7 +14,6 @@
 
 use std::ops::Bound::*;
 use std::sync::Arc;
-use std::time::Instant;
 
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -24,7 +23,6 @@ use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::ColdRangePrefetch;
-use crate::hummock::store::iter_init_profile::SeekAwait;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 use crate::store::PrefetchMode;
@@ -189,10 +187,7 @@ impl SstableIterator {
         // When all data are in block cache, it is highly possible that this iterator will stay on a
         // worker thread for a full time. Therefore, we use tokio's unstable API consume_budget to
         // do cooperative scheduling.
-        let profile_seek = SeekAwait::active();
-        let start = profile_seek.then(Instant::now);
         tokio::task::consume_budget().await;
-        SeekAwait::CooperativeBudget.record(start);
 
         if idx >= self.block_end_idx_exclusive {
             self.block_iter = None;
@@ -208,20 +203,15 @@ impl SstableIterator {
                     self.block_end_idx_exclusive,
                 ))
         {
-            let start = profile_seek.then(Instant::now);
-            let result = Box::pin(self.read_cold_range_block(idx)).await;
-            SeekAwait::Prefetch.record(start);
-            prefetched_block = result?;
+            prefetched_block = Box::pin(self.read_cold_range_block(idx)).await?;
         }
         let block = match prefetched_block {
             Some(block) => block,
             None => {
-                let start = profile_seek.then(Instant::now);
                 let result = self
                     .sstable_store
                     .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
                     .await;
-                SeekAwait::DemandBlock.record(start);
                 match result {
                     Ok(block) => block,
                     Err(error) => {
@@ -373,14 +363,6 @@ impl SstableIteratorType for SstableIterator {
         SstableIterator::new(sstable, sstable_store, options, sstable_info_ref)
     }
 }
-
-#[cfg(all(
-    test,
-    target_os = "linux",
-    not(madsim),
-    feature = "read-scheduler-replay"
-))]
-mod linux_replay;
 
 #[cfg(test)]
 mod tests {

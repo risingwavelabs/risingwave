@@ -26,6 +26,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, ResolverTaskInput};
 use risingwave_storage::memory::MemoryStateStore;
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::common::table::test_utils::gen_pbtable;
@@ -112,10 +113,11 @@ impl IcebergWriter for IcebergWriterMock {
 async fn create_pk_index_state_table(
     store: MemoryStateStore,
     table_id: TableId,
+    data_file_type: DataType,
 ) -> StateTable<MemoryStateStore> {
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-        ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar),
+        ColumnDesc::unnamed(ColumnId::new(1), data_file_type),
         ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
     ];
     let order_types = vec![OrderType::ascending()];
@@ -171,9 +173,29 @@ impl WriterTestHarness {
     /// Build a harness with a custom input schema. The PK is always the first column (Int64)
     /// so the shared `create_pk_index_state_table` schema applies.
     async fn with_options(input_schema: Schema, max_batch_rows: usize) -> Self {
+        Self::build(input_schema, max_batch_rows, TEST_FILE_PATH, None).await
+    }
+
+    /// Build a harness whose PK index stores data file uuids, with the mock writer writing every
+    /// row to `file_path`.
+    async fn with_data_file_locator(locator: PkIndexDataFileLocator, file_path: &str) -> Self {
+        Self::build(input_schema(), MAX_BATCH_ROWS, file_path, Some(locator)).await
+    }
+
+    async fn build(
+        input_schema: Schema,
+        max_batch_rows: usize,
+        file_path: &str,
+        data_file_locator: Option<PkIndexDataFileLocator>,
+    ) -> Self {
+        let data_file_type = match data_file_locator {
+            Some(_) => DataType::Bytea,
+            None => DataType::Varchar,
+        };
         let store = MemoryStateStore::new();
-        let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
-        let writer = IcebergWriterMock::new(TEST_FILE_PATH);
+        let state_table =
+            create_pk_index_state_table(store, TableId::new(1), data_file_type.clone()).await;
+        let writer = IcebergWriterMock::new(file_path);
         let written_chunks = writer.written_chunks();
 
         let (left_tx, left_source) = MockSource::channel();
@@ -182,7 +204,7 @@ impl WriterTestHarness {
         let right_input = right_source.into_executor(
             Schema::new(vec![
                 Field::with_name(DataType::Int64, "pk"),
-                Field::with_name(DataType::Varchar, "file_path"),
+                Field::with_name(data_file_type, "data_file"),
                 Field::with_name(DataType::Int64, "position"),
             ]),
             vec![0],
@@ -194,6 +216,7 @@ impl WriterTestHarness {
             vec![0],
             state_table,
             writer,
+            data_file_locator,
             CHUNK_SIZE,
             LOOKUP_CONCURRENCY,
             max_batch_rows,
@@ -851,6 +874,79 @@ async fn test_writer_executor_compaction_applies_resolver_survivors_before_resum
 }
 
 #[tokio::test]
+async fn test_writer_executor_stores_data_file_uuid() {
+    let locator = PkIndexDataFileLocator::with_data_location("s3://bucket/t/data");
+    let written_file = locator.file_path(Uuid::now_v7());
+    let output_uuid = Uuid::now_v7();
+    let mut harness =
+        WriterTestHarness::with_data_file_locator(locator.clone(), &written_file).await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          + 1 10
+          + 2 20",
+    );
+    harness.push_barrier(2);
+    harness.expect_barrier().await;
+
+    // The resolver moves pk 2 into a compaction output file, identified by its uuid.
+    harness.push_compaction_begin(3, 7);
+    harness.expect_barrier().await;
+    harness.right_tx.push_chunk(StreamChunk::from_rows(
+        &[(
+            Op::Insert,
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(2)),
+                Some(ScalarImpl::Bytea(output_uuid.as_bytes().to_vec().into())),
+                Some(ScalarImpl::Int64(100)),
+            ]),
+        )],
+        &[DataType::Int64, DataType::Bytea, DataType::Int64],
+    ));
+    harness.push_compaction_seal(4, 7);
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          - 1 10
+          - 2 20",
+    );
+    harness.push_barrier(5);
+
+    harness
+        .expect_position_chunk(vec![
+            (written_file, 0),
+            (locator.file_path(output_uuid), 100),
+        ])
+        .await;
+    harness.expect_barrier().await;
+}
+
+#[tokio::test]
+async fn test_writer_executor_rejects_data_file_outside_uuid_layout() {
+    let locator = PkIndexDataFileLocator::with_data_location("s3://bucket/t/data");
+    let mut harness =
+        WriterTestHarness::with_data_file_locator(locator, "s3://bucket/t/data/p=1/f.parquet")
+            .await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          + 1 10",
+    );
+    harness.push_barrier(2);
+
+    let err = harness.executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_report_string()
+            .contains("does not match the pk-index layout"),
+        "unexpected error: {}",
+        err.to_report_string()
+    );
+}
+
+#[tokio::test]
 async fn test_writer_executor_compaction_rejects_replacement_input_chunk_before_b2() {
     let mut harness = WriterTestHarness::new().await;
     harness.init().await;
@@ -913,7 +1009,7 @@ async fn test_writer_executor_compaction_rejects_mismatched_left_and_right_b2() 
 #[tokio::test]
 async fn test_writer_executor_compaction_rejects_right_eof_before_b2() {
     let store = MemoryStateStore::new();
-    let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
+    let state_table = create_pk_index_state_table(store, TableId::new(1), DataType::Varchar).await;
     let writer = IcebergWriterMock::new(TEST_FILE_PATH);
     let (mut left_tx, left_source) = MockSource::channel();
     let (mut right_tx, right_source) = MockSource::channel();
@@ -928,6 +1024,7 @@ async fn test_writer_executor_compaction_rejects_right_eof_before_b2() {
         vec![0],
         state_table,
         writer,
+        None,
         CHUNK_SIZE,
         LOOKUP_CONCURRENCY,
         MAX_BATCH_ROWS,
@@ -959,7 +1056,7 @@ async fn test_writer_executor_compaction_rejects_right_eof_before_b2() {
 #[tokio::test]
 async fn test_writer_executor_compaction_rejects_left_eof_before_b2() {
     let store = MemoryStateStore::new();
-    let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
+    let state_table = create_pk_index_state_table(store, TableId::new(1), DataType::Varchar).await;
     let writer = IcebergWriterMock::new(TEST_FILE_PATH);
     let (mut left_tx, left_source) = MockSource::channel();
     let (mut right_tx, right_source) = MockSource::channel();
@@ -974,6 +1071,7 @@ async fn test_writer_executor_compaction_rejects_left_eof_before_b2() {
         vec![0],
         state_table,
         writer,
+        None,
         CHUNK_SIZE,
         LOOKUP_CONCURRENCY,
         MAX_BATCH_ROWS,

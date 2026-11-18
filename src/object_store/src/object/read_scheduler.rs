@@ -32,13 +32,6 @@ use tokio::sync::{AcquireError, Notify, OwnedSemaphorePermit, Semaphore, oneshot
 
 use super::{ObjectError, ObjectRangeBounds, ObjectResult, ObjectStoreMetrics};
 
-#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-pub mod replay;
-#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-use replay::PhysicalPermit;
-#[cfg(not(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay")))]
-type PhysicalPermit = OwnedSemaphorePermit;
-
 mod execution;
 
 use execution::run;
@@ -105,7 +98,7 @@ struct StagedRead {
     path: String,
     range: ReadRange,
     response: oneshot::Sender<ReadResult>,
-    trace_id: Option<u64>,
+
     _waiting: ReadGauge,
     _admission: prometheus::HistogramTimer,
 }
@@ -121,7 +114,7 @@ impl StagedRead {
             range: self.range,
             response: self.response,
             queued_at: Instant::now(),
-            trace_id: self.trace_id,
+
             _pending: ReadGauge::new(pending),
             _queued: queued.map(ReadGauge::new),
         }
@@ -133,7 +126,7 @@ struct ReadRequest {
     range: ReadRange,
     response: oneshot::Sender<ReadResult>,
     queued_at: Instant,
-    trace_id: Option<u64>,
+
     _pending: ReadGauge,
     _queued: Option<ReadGauge>,
 }
@@ -505,8 +498,6 @@ impl GroupQueue {
         let group = index.map(|index| pending.groups.swap_remove(index).group);
         pending.update_ready(self);
         let mut group = group?;
-        #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-        replay::queue(&pending, "selected");
         group
             .requests
             .sort_unstable_by_key(|r| r.range.mergeable().map(|range| range.start));
@@ -565,8 +556,6 @@ impl ReadScheduler {
             metrics.clone(),
             media_type,
         );
-        #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-        let worker = replay::dispatcher(worker);
         // The dispatcher spawns physical reads on its current runtime.
         // Range fallback stays inside the same read task.
         #[cfg(not(madsim))]
@@ -601,11 +590,10 @@ impl ReadScheduler {
         &'a self,
         path: &'a str,
         range: ReadRange,
-        trace_id: Option<u64>,
     ) -> impl Future<Output = ObjectResult<oneshot::Receiver<ReadResult>>> + Send + 'a {
         Box::pin(async move {
             let groups = &self.groups;
-            let (read, response) = self.stage_read(path, range, trace_id);
+            let (read, response) = self.stage_read(path, range);
             let waiter = {
                 let mut state = groups.pending.lock().unwrap();
                 let Some(read) = self.try_submit(&mut state, read, None) else {
@@ -622,7 +610,6 @@ impl ReadScheduler {
         &self,
         path: &str,
         range: ReadRange,
-        trace_id: Option<u64>,
     ) -> (StagedRead, oneshot::Receiver<ReadResult>) {
         let (response, receiver) = oneshot::channel();
         (
@@ -630,7 +617,7 @@ impl ReadScheduler {
                 path: path.to_owned(),
                 range,
                 response,
-                trace_id,
+
                 _waiting: ReadGauge::new(&self.waiting),
                 _admission: self.admission_duration.start_timer(),
             },
@@ -686,8 +673,6 @@ impl ReadScheduler {
         }
         state.groups.push(group);
         state.update_ready(&self.groups);
-        #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-        replay::queue(state, "installed");
         self.groups.ready.notify_one();
         None
     }

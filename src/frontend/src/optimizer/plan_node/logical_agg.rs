@@ -1347,12 +1347,7 @@ impl PredicatePushdown for LogicalAgg {
         // from once per group to once per input row.
         let mut agg_call_columns = FixedBitSet::with_capacity(num_group_key + num_agg_calls);
         agg_call_columns.insert_range(num_group_key..num_group_key + num_agg_calls);
-        let [agg_call_pred, pushed_predicate] = predicate.group_by::<_, 2>(|expr| {
-            (expr.is_pure()
-                && expr
-                    .collect_input_refs(self.schema().len())
-                    .is_disjoint(&agg_call_columns)) as usize
-        });
+        let (agg_call_pred, pushed_predicate) = predicate.split_pushable(&agg_call_columns);
 
         // convert the predicate to one that references the child of the agg
         let mut subst = Substitute {

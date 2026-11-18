@@ -33,6 +33,8 @@ struct RwFunction {
     link: Option<String>,
     acl: Vec<String>,
     always_retry_on_network_error: bool,
+    unsafe_skip_materializing_exprs: bool,
+    is_immutable: bool,
     created_at: Option<Timestamptz>,
     created_at_cluster_version: Option<String>,
 }
@@ -64,6 +66,8 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
                     link: function.link.clone(),
                     acl: get_acl_items(function.id, false, &users, username_map),
                     always_retry_on_network_error: function.always_retry_on_network_error,
+                    unsafe_skip_materializing_exprs: function.unsafe_skip_materializing_exprs,
+                    is_immutable: function.is_immutable,
                     created_at: function.created_at_epoch.map(|e| e.as_timestamptz()),
                     created_at_cluster_version: function.created_at_cluster_version.clone(),
                 })

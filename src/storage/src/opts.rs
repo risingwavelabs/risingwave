@@ -71,6 +71,8 @@ pub struct StorageOpts {
     pub scan_prefetch: risingwave_common::config::storage::ScanPrefetchConfig,
     pub read_batch: risingwave_common::config::storage::ReadBatchConfig,
 
+    pub sstable_meta_fetch_concurrency: usize,
+
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
@@ -254,6 +256,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             scan_prefetch: c.storage.scan_prefetch,
             read_batch: c.storage.read_batch,
+            sstable_meta_fetch_concurrency: c.storage.sstable_meta_fetch_concurrency,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,

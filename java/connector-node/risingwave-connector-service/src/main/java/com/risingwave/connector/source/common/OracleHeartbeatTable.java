@@ -16,9 +16,6 @@
 
 package com.risingwave.connector.source.common;
 
-import java.util.Locale;
-import java.util.regex.Pattern;
-
 final class OracleHeartbeatTable {
     static final String ID_COLUMN = "ID";
     static final String HEARTBEAT_COLUMN = "HEARTBEAT";
@@ -28,9 +25,6 @@ final class OracleHeartbeatTable {
         SEED_ROW,
         ACCESS_GRANTS
     }
-
-    private static final Pattern ORACLE_UNQUOTED_IDENTIFIER =
-            Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
 
     private final String owner;
     private final String table;
@@ -46,20 +40,16 @@ final class OracleHeartbeatTable {
         }
 
         var parts = value.split("\\.", -1);
-        if (parts.length != 2
-                || !ORACLE_UNQUOTED_IDENTIFIER.matcher(parts[0]).matches()
-                || !ORACLE_UNQUOTED_IDENTIFIER.matcher(parts[1]).matches()) {
+        if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
             throw invalidName();
         }
 
-        return new OracleHeartbeatTable(
-                parts[0].toUpperCase(Locale.ROOT), parts[1].toUpperCase(Locale.ROOT));
+        return new OracleHeartbeatTable(parts[0], parts[1]);
     }
 
     private static RuntimeException invalidName() {
         return ValidatorUtils.invalidArgument(
-                "'heartbeat.table.name' must use the unquoted Oracle identifier format "
-                        + "'<schema>.<table>'");
+                "'heartbeat.table.name' must use the format '<schema>.<table>'");
     }
 
     String owner() {
@@ -71,7 +61,9 @@ final class OracleHeartbeatTable {
     }
 
     String qualifiedName() {
-        return owner + "." + table;
+        return OracleValidator.quoteIdentifier(owner)
+                + "."
+                + OracleValidator.quoteIdentifier(table);
     }
 
     String actionQuery() {
@@ -95,15 +87,17 @@ final class OracleHeartbeatTable {
     /** Builds setup SQL for a DBA; {@code sessionUser} is the connector login and grantee. */
     String manualSetupSql(String pdbName, String sessionUser, ManualSetup setup) {
         var sql = new StringBuilder();
-        sql.append("ALTER SESSION SET CONTAINER = ").append(pdbName).append(";\n");
+        sql.append("ALTER SESSION SET CONTAINER = ")
+                .append(OracleValidator.quoteIdentifier(pdbName))
+                .append(";\n");
         if (setup == ManualSetup.TABLE_AND_SEED_ROW) {
             sql.append(createTableSql()).append(";\n");
         }
         if (setup != ManualSetup.ACCESS_GRANTS) {
             sql.append(insertSeedRowSql()).append(";\nCOMMIT;\n");
         }
-        if (!owner.equalsIgnoreCase(sessionUser)) {
-            var grantee = quoteIdentifier(sessionUser);
+        if (!owner.equals(sessionUser)) {
+            var grantee = OracleValidator.quoteIdentifier(sessionUser);
             sql.append("GRANT UPDATE (")
                     .append(HEARTBEAT_COLUMN)
                     .append(") ON ")
@@ -113,9 +107,5 @@ final class OracleHeartbeatTable {
                     .append(';');
         }
         return sql.toString().stripTrailing();
-    }
-
-    private static String quoteIdentifier(String value) {
-        return '"' + value.replace("\"", "\"\"") + '"';
     }
 }

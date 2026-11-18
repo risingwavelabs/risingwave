@@ -14,7 +14,7 @@
 
 use super::*;
 
-pub fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool)>) -> bool {
+pub fn json_schema_infer_use_schema_registry(schema_config: &Option<(String, bool)>) -> bool {
     match schema_config {
         None => false,
         Some((_, use_registry)) => *use_registry,
@@ -23,7 +23,7 @@ pub fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, 
 
 /// Map a JSON schema to a relational schema
 pub async fn extract_json_table_schema(
-    schema_config: &Option<(AstString, bool)>,
+    schema_config: &Option<(String, bool)>,
     with_properties: &BTreeMap<String, String>,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<Vec<ColumnCatalog>>> {
@@ -38,7 +38,7 @@ pub async fn extract_json_table_schema(
             });
             Ok(Some(
                 fetch_json_schema_and_map_to_columns(
-                    &schema_location.0,
+                    schema_location,
                     schema_registry_auth,
                     with_properties,
                 )
@@ -78,7 +78,7 @@ pub async fn extract_pulsar_json_table_schema(
 
 pub fn get_json_schema_location(
     format_encode_options: &mut BTreeMap<String, String>,
-) -> Result<Option<(AstString, bool)>> {
+) -> Result<Option<(String, bool)>> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
     match (schema_location, schema_registry) {

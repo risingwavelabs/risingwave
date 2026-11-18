@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod layer;
+pub mod log_filter;
 
 use std::collections::HashMap;
 use std::pin::Pin;

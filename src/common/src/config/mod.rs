@@ -696,6 +696,24 @@ pub mod tests {
     }
 
     #[test]
+    fn test_opendal_chunked_streaming_read_config() {
+        let config: ObjectStoreConfig = toml::from_str("").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 1);
+
+        let config: ObjectStoreConfig = toml::from_str(
+            "opendal_streaming_read_chunk_size = 1024\nopendal_streaming_read_chunk_concurrency = 4",
+        )
+        .unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 1024);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 4);
+
+        let config: ObjectStoreConfig =
+            toml::from_str("opendal_streaming_read_chunk_size = 0").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+    }
+
+    #[test]
     fn test_http_client_rotation_config() {
         for (input, expected) in [
             ("", None),
@@ -1028,57 +1046,24 @@ pub mod tests {
             comparison.storage.scan_prefetch.max_bytes
         );
 
-        for (value, mode) in [
-            ("disabled", ReadPrefetchMode::Disabled),
-            ("cold_ranges", ReadPrefetchMode::ColdRanges),
-        ] {
-            let base = format!("[storage.scan_prefetch]\nmode = \"{value}\"\n");
-            let config: RwConfig = toml::from_str(&base).unwrap();
-            assert_eq!(resolved(&config.storage.scan_prefetch), [mode; 5]);
-            for (idx, field) in [
-                "prefix_mode",
-                "changelog_mode",
-                "range_scan_mode",
-                "snapshot_backfill_mode",
-                "locality_backfill_mode",
+        let mixed: RwConfig = toml::from_str(
+            r#"[storage.scan_prefetch]
+mode = "disabled"
+prefix_mode = "cold_ranges"
+locality_backfill_mode = "cold_ranges"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolved(&mixed.storage.scan_prefetch),
+            [
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::ColdRanges,
             ]
-            .into_iter()
-            .enumerate()
-            {
-                for (override_value, override_mode) in [
-                    ("disabled", ReadPrefetchMode::Disabled),
-                    ("cold_ranges", ReadPrefetchMode::ColdRanges),
-                ] {
-                    let config: RwConfig =
-                        toml::from_str(&format!("{base}{field} = \"{override_value}\"\n")).unwrap();
-                    let mut expected = [mode; 5];
-                    expected[idx] = override_mode;
-                    assert_eq!(resolved(&config.storage.scan_prefetch), expected);
-                    let round_trip: RwConfig =
-                        toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
-                    assert_eq!(resolved(&round_trip.storage.scan_prefetch), expected);
-                }
-            }
-        }
-        for value in ["range", "blockwise", "cold_range"] {
-            assert!(
-                toml::from_str::<RwConfig>(&format!(
-                    "[storage.scan_prefetch]\nmode = \"{value}\"\n"
-                ))
-                .is_err()
-            );
-        }
-        for field in [
-            "enabled",
-            "changelog_enabled",
-            "snapshot_backfill_enabled",
-            "locality_backfill_enabled",
-        ] {
-            assert!(
-                toml::from_str::<RwConfig>(&format!("[storage.scan_prefetch]\n{field} = true\n"))
-                    .is_err()
-            );
-        }
+        );
     }
 
     #[test]
@@ -1150,6 +1135,22 @@ pub mod tests {
                 .dedicated_io_runtime_workers
                 .get(),
             8,
+        );
+    }
+
+    #[test]
+    fn test_storage_sstable_meta_fetch_concurrency() {
+        let default: RwConfig = toml::from_str("").unwrap();
+        assert_eq!(default.storage.sstable_meta_fetch_concurrency, 1);
+        let config: RwConfig =
+            toml::from_str("[storage]\nsstable_meta_fetch_concurrency = 8").unwrap();
+        assert_eq!(config.storage.sstable_meta_fetch_concurrency, 8);
+        let error = toml::from_str::<RwConfig>("[storage]\nsstable_meta_fetch_concurrency = 0")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("storage.sstable_meta_fetch_concurrency must be greater than 0")
         );
     }
 

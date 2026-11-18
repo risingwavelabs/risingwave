@@ -15,6 +15,13 @@ create materialized view mv1 with (backfill_rate_limit = 1000, backfill_rate_lim
 statement error unexpected options in WITH clause
 create materialized view mv1 with (backfill_rate_limit = 1000, unknown_field = 2000) as select * from t1;
 
+# create with invalid backfill_rate_limit
+statement error `backfill_rate_limit` must be a non-negative integer, but got `abc`
+create materialized view mv1 with (backfill_rate_limit = 'abc') as select * from t1;
+
+statement error `backfill_rate_limit` must be a non-negative integer, but got `-1`
+create materialized view mv1 with (backfill_rate_limit = '-1') as select * from t1;
+
 statement ok
 create materialized view mv1 with (backfill_rate_limit = 1000) as select * from t1;
 

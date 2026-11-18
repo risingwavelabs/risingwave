@@ -17,8 +17,6 @@ use std::env;
 use std::path::PathBuf;
 
 use either::Either;
-#[cfg(not(madsim))]
-use fastrace::collector::{Reporter, SpanRecord};
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::trace::TracerProvider;
@@ -29,6 +27,10 @@ use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::query_log::*;
 use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
+use risingwave_common::util::tracing::log_filter::{
+    LogFilterControl, LogFilterError, set_log_filter_control,
+};
+use risingwave_pb::monitor_service::LogFilterState;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::Targets;
@@ -187,22 +189,67 @@ fn disabled_filter() -> filter::Targets {
     filter::Targets::new()
 }
 
-#[cfg(not(madsim))]
-struct FastraceBatchReporter {
-    reporter: OpenTelemetryReporter,
-    max_batch_size: std::num::NonZeroUsize,
+fn apply_log_filter(mut defaults: Targets, overrides: Targets) -> Targets {
+    // Targets carries its fallback level separately from its named target rules.
+    // Iteration (and therefore with_targets) copies only the named rules.
+    if let Some(level) = overrides.default_level() {
+        defaults = defaults.with_default(level);
+    }
+    defaults.with_targets(overrides)
 }
 
-#[cfg(not(madsim))]
-impl Reporter for FastraceBatchReporter {
-    fn report(&mut self, spans: Vec<SpanRecord>) {
-        // Fastrace passes all completed spans to the reporter at once. Split the
-        // export on the collector thread to avoid oversized OTLP messages.
-        let mut spans = spans.into_iter();
-        while spans.len() > 0 {
-            self.reporter
-                .report(spans.by_ref().take(self.max_batch_size.get()).collect());
+struct LogFilterController {
+    // Built-in defaults plus LoggerSettings, excluding RUST_LOG.
+    defaults: Targets,
+    // Effective console filter at startup, restored by reset.
+    startup: Targets,
+    handle: reload::Handle<Targets, tracing_subscriber::Registry>,
+    // Serialize updates, including interest-cache rebuilds, and state reads.
+    state: parking_lot::Mutex<LogFilterState>,
+}
+
+impl LogFilterController {
+    fn new(
+        defaults: Targets,
+        startup: Targets,
+        handle: reload::Handle<Targets, tracing_subscriber::Registry>,
+    ) -> Self {
+        let startup_filter = startup.to_string();
+        Self {
+            defaults,
+            startup,
+            handle,
+            state: parking_lot::Mutex::new(LogFilterState {
+                startup_filter: startup_filter.clone(),
+                current_filter: startup_filter,
+            }),
         }
+    }
+}
+
+impl LogFilterControl for LogFilterController {
+    fn get(&self) -> LogFilterState {
+        self.state.lock().clone()
+    }
+
+    fn set(&self, filter: Option<&str>) -> Result<LogFilterState, LogFilterError> {
+        let next = match filter {
+            Some(filter) => apply_log_filter(
+                self.defaults.clone(),
+                filter
+                    .parse::<Targets>()
+                    .map_err(|error| LogFilterError::InvalidFilter(error.to_report_string()))?,
+            )
+            // Keep tracing-only events out of stdout/stderr after applying overrides.
+            .with_target("rw_tracing", Level::OFF),
+            None => self.startup.clone(),
+        };
+        let mut state = self.state.lock();
+        self.handle
+            .reload(next.clone())
+            .map_err(|error| LogFilterError::Reload(error.to_report_string()))?;
+        state.current_filter = next.to_string();
+        Ok(state.clone())
     }
 }
 
@@ -254,16 +301,6 @@ impl Reporter for FastraceBatchReporter {
 /// ```
 pub fn init_risingwave_logger(settings: LoggerSettings) {
     let deployment = Deployment::current();
-    let io_fastrace = cfg!(not(madsim)) && env_var_is_true("RW_STORAGE_IO_FASTRACE");
-    assert!(
-        !io_fastrace || settings.tracing_endpoint.is_some(),
-        "RW_STORAGE_IO_FASTRACE requires a tracing endpoint"
-    );
-    let io_targets = |filter: Targets, level| {
-        filter
-            .with_target("object_store_read_scheduler", level)
-            .with_target("state_store_read_batch", level)
-    };
 
     // Default timer for logging with local time offset.
     let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
@@ -291,9 +328,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target(PGWIRE_QUERY_LOG, Level::OFF)
             // debug-purposed events are disabled unless `RUST_LOG` overrides
             .with_target("events", Level::OFF);
-        // These events are DEBUG so release binaries retain them. Keep them
-        // opt-in even when the default log level is DEBUG.
-        filter = io_targets(filter, Level::OFF);
 
         // Configure levels for external crates. Can still be overridden by `RUST_LOG`.
         // Other external crates will follow the default level.
@@ -330,34 +364,35 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 }
             }
         };
-        filter = filter.with_default(default_level);
-
-        // Overrides from settings.
-        filter = filter.with_targets(settings.targets);
-        if let Some(default_level) = settings.default_level {
-            filter = filter.with_default(default_level);
-        }
-
-        // Overrides from env var.
-        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV)
-            && !rust_log.is_empty()
-        {
-            let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
-            if let Some(default_level) = rust_log_targets.default_level() {
-                filter = filter.with_default(default_level);
-            }
-            filter = filter.with_targets(rust_log_targets)
-        };
-
-        filter
+        filter.with_default(default_level)
     };
+
+    let mut settings_filter = Targets::new().with_targets(settings.targets);
+    if let Some(default_level) = settings.default_level {
+        settings_filter = settings_filter.with_default(default_level);
+    }
+
+    let fmt_defaults = apply_log_filter(default_filter.clone(), settings_filter.clone());
+
+    // Preserve defaults separately so each runtime set replaces RUST_LOG, while
+    // reset restores the exact startup filter. Keep the exporter filter independent.
+    let rust_log_filter = match std::env::var(EnvFilter::DEFAULT_ENV) {
+        Ok(rust_log) if !rust_log.is_empty() => {
+            rust_log.parse().expect("failed to parse `RUST_LOG`")
+        }
+        _ => Targets::new(),
+    };
+    // Exclude tracing-only instrumentation after all console overrides. The
+    // exporter keeps its own filter without this exclusion.
+    let fmt_startup = apply_log_filter(fmt_defaults.clone(), rust_log_filter.clone())
+        .with_target("rw_tracing", Level::OFF);
+    #[cfg(not(madsim))]
+    let otel_startup_filter = apply_log_filter(
+        apply_log_filter(default_filter, settings_filter),
+        rust_log_filter,
+    );
 
     let mut layers = vec![];
-    let log_filter = if io_fastrace {
-        io_targets(default_filter, Level::OFF)
-    } else {
-        default_filter
-    };
 
     // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
@@ -388,11 +423,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             }
         };
 
-        layers.push(
-            fmt_layer
-                .with_filter(log_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
-                .boxed(),
-        );
+        let (filter, handle) = reload::Layer::new(fmt_startup.clone());
+        set_log_filter_control(LogFilterController::new(fmt_defaults, fmt_startup, handle));
+        layers.push(fmt_layer.with_filter(filter).boxed());
     };
 
     // If `RW_QUERY_LOG_PATH` env var is set to a directory, turn on query log files.
@@ -581,7 +614,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         set_toggle_otel_layer_fn(move |enabled: bool| {
             let result = reload_handle.modify(|f| {
                 *f = if enabled {
-                    log_filter.clone()
+                    otel_startup_filter.clone()
                 } else {
                     disabled_filter()
                 }
@@ -632,29 +665,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             ),
             InstrumentationScope::builder("opentelemetry-instrumentation-foyer").build(),
         );
-        let config = fastrace::collector::Config::default();
-        if io_fastrace {
-            let max_batch_size = env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(std::num::NonZeroUsize::new(512).unwrap());
-            fastrace::set_reporter(
-                FastraceBatchReporter {
-                    reporter,
-                    max_batch_size,
-                },
-                config,
-            );
-            layers.push(
-                fastrace_tracing::FastraceCompatLayer::new()
-                    .with_location(false)
-                    .with_threads(false)
-                    .with_filter(io_targets(Targets::new(), Level::DEBUG))
-                    .boxed(),
-            );
-        } else {
-            fastrace::set_reporter(reporter, config);
-        }
+        fastrace::set_reporter(reporter, fastrace::collector::Config::default());
         tracing::info!("opentelemetry exporter for fastrace is set at {endpoint}");
     }
 
@@ -665,6 +676,111 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dynamic_log_filter() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        fn emit(evaluations: &AtomicUsize) {
+            tracing::debug!(target: "dynamic_log_test", value = {
+                evaluations.fetch_add(1, Ordering::Relaxed);
+                "expensive value"
+            });
+        }
+
+        fn emit_tracing(evaluations: &AtomicUsize) {
+            tracing::info!(target: "rw_tracing", value = {
+                evaluations.fetch_add(1, Ordering::Relaxed);
+                "tracing-only event"
+            });
+        }
+
+        // Explicit LoggerSettings and RUST_LOG directives cannot enable the
+        // tracing-only target on the console.
+        let defaults = Targets::new()
+            .with_default(Level::INFO)
+            .with_target("quiet_dependency", Level::WARN)
+            .with_target("rw_tracing", Level::DEBUG);
+        let startup = apply_log_filter(
+            defaults.clone(),
+            "warn,startup_only=debug,rw_tracing=info".parse().unwrap(),
+        );
+        // The shared merge still allows this target for OpenTelemetry.
+        assert!(startup.would_enable("rw_tracing", &tracing::Level::INFO));
+        let startup = startup.with_target("rw_tracing", Level::OFF);
+        assert!(!startup.would_enable("rw_tracing", &tracing::Level::ERROR));
+        let (filter, handle) = reload::Layer::new(startup.clone());
+        let controller = LogFilterController::new(defaults, startup, handle);
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::sink)
+                .with_filter(filter),
+        );
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let evaluations = AtomicUsize::new(0);
+        let tracing_evaluations = AtomicUsize::new(0);
+
+        emit(&evaluations);
+        assert_eq!(evaluations.load(Ordering::Relaxed), 0);
+        emit_tracing(&tracing_evaluations);
+        assert_eq!(tracing_evaluations.load(Ordering::Relaxed), 0);
+
+        // Runtime directives replace startup RUST_LOG, retaining only the defaults.
+        let state = controller.set(Some("info")).unwrap();
+        let current: Targets = state.current_filter.parse().unwrap();
+        assert!(!current.would_enable("startup_only", &tracing::Level::DEBUG));
+        emit_tracing(&tracing_evaluations);
+        assert_eq!(tracing_evaluations.load(Ordering::Relaxed), 0);
+
+        // A global level change alone does not enable tracing-only events.
+        controller.set(Some("debug")).unwrap();
+        emit_tracing(&tracing_evaluations);
+        assert_eq!(tracing_evaluations.load(Ordering::Relaxed), 0);
+
+        let state = controller.set(Some("dynamic_log_test=debug")).unwrap();
+        let current: Targets = state.current_filter.parse().unwrap();
+        assert_eq!(current.default_level(), Some(Level::INFO));
+        emit(&evaluations);
+        assert_eq!(evaluations.load(Ordering::Relaxed), 1);
+
+        // Invalid directives must leave both the active filter and reported state intact.
+        assert!(matches!(
+            controller.set(Some("dynamic_log_test=invalid")),
+            Err(LogFilterError::InvalidFilter(_))
+        ));
+        assert_eq!(controller.get(), state);
+        emit(&evaluations);
+        assert_eq!(evaluations.load(Ordering::Relaxed), 2);
+
+        // A new update replaces previous directives but cannot enable rw_tracing.
+        let state = controller
+            .set(Some("warn,other_target=debug,rw_tracing=debug"))
+            .unwrap();
+        emit(&evaluations);
+        assert_eq!(evaluations.load(Ordering::Relaxed), 2);
+        let current: Targets = state.current_filter.parse().unwrap();
+        assert_eq!(current.default_level(), Some(Level::WARN));
+        assert!(current.would_enable("other_target", &tracing::Level::DEBUG));
+        assert!(!current.would_enable("rw_tracing", &tracing::Level::ERROR));
+        assert!(!current.would_enable("quiet_dependency", &tracing::Level::INFO));
+        emit_tracing(&tracing_evaluations);
+        assert_eq!(tracing_evaluations.load(Ordering::Relaxed), 0);
+
+        controller.set(Some("dynamic_log_test=debug")).unwrap();
+        emit(&evaluations);
+        assert_eq!(evaluations.load(Ordering::Relaxed), 3);
+        emit_tracing(&tracing_evaluations);
+        assert_eq!(tracing_evaluations.load(Ordering::Relaxed), 0);
+        let reset = controller.set(None).unwrap();
+        assert_eq!(reset.current_filter, reset.startup_filter);
+        emit(&evaluations);
+        assert_eq!(evaluations.load(Ordering::Relaxed), 3);
+        let current: Targets = reset.current_filter.parse().unwrap();
+        assert_eq!(current.default_level(), Some(Level::WARN));
+        assert!(current.would_enable("startup_only", &tracing::Level::DEBUG));
+        emit_tracing(&tracing_evaluations);
+        assert_eq!(tracing_evaluations.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn test_parse_extra_tracing_attributes_normal() {

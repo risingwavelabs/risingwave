@@ -15,5 +15,7 @@
 mod context;
 mod hummock_service;
 mod meta_service;
+mod worker;
 pub use context::*;
 pub use hummock_service::HummockServiceOpts;
+pub use worker::WorkerTypeArg;

@@ -30,6 +30,7 @@ use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
@@ -375,6 +376,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -686,31 +688,44 @@ impl HummockManager {
         Ok((pick_tasks, unschedule_groups))
     }
 
-    /// Cancels a compaction task no matter it's assigned or unassigned.
+    /// Cancels a compaction task in meta. Manual cancellation also notifies its assigned compactor
+    /// on a best-effort basis after committing the removal.
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         fail_point!("fp_cancel_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore err")
         )));
         let ret = self
-            .cancel_compact_task_impl(vec![task_id], task_status)
+            .cancel_compact_tasks(vec![task_id], task_status)
             .await?;
         Ok(ret[0])
     }
 
     pub async fn cancel_compact_tasks(
         &self,
-        tasks: Vec<u64>,
-        task_status: TaskStatus,
-    ) -> Result<Vec<bool>> {
-        self.cancel_compact_task_impl(tasks, task_status).await
-    }
-
-    async fn cancel_compact_task_impl(
-        &self,
         task_ids: Vec<u64>,
         task_status: TaskStatus,
     ) -> Result<Vec<bool>> {
         assert!(CANCEL_STATUS_SET.contains(&task_status));
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("cancel_compact_tasks")
+            .await;
+        // Capture ownership under the same lock used to remove the assignments.
+        let assignments_to_notify = (task_status == TaskStatus::ManualCanceled).then(|| {
+            task_ids
+                .iter()
+                .map(|task_id| {
+                    compaction_guard
+                        .compact_task_assignment
+                        .get(task_id)
+                        .map(|assignment| (assignment.context_id, *task_id))
+                })
+                .collect_vec()
+        });
+        let versioning_guard = self
+            .versioning
+            .write_with_process_name("cancel_compact_tasks")
+            .await;
         let tasks = task_ids
             .into_iter()
             .map(|task_id| ReportTask {
@@ -721,7 +736,27 @@ impl HummockManager {
                 object_timestamps: HashMap::default(),
             })
             .collect_vec();
-        let rets = self.report_compact_tasks(tasks).await?;
+        let rets = self
+            .report_compact_tasks_impl(tasks, compaction_guard, versioning_guard)
+            .await?;
+        // Notify only after the cancellation is durable. Heartbeats retry notification if the
+        // compactor is disconnected or still reports the canceled task after reconnecting.
+        if let Some(assignments) = assignments_to_notify {
+            for (assignment, reported) in assignments.into_iter().zip_eq_fast(&rets) {
+                if *reported
+                    && let Some((context_id, task_id)) = assignment
+                    && let Some(compactor) = self.compactor_manager.get_compactor(context_id)
+                    && let Err(error) = compactor.cancel_task(task_id)
+                {
+                    tracing::warn!(
+                        error = %error.as_report(),
+                        %context_id,
+                        task_id,
+                        "Failed to notify compactor of task cancellation; retrying on heartbeat",
+                    );
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.check_state_consistency().await;
@@ -874,6 +909,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             None,
             &self.metrics,

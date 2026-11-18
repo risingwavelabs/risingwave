@@ -848,7 +848,7 @@ impl SubscriptionCursor {
     ) -> Result<RwBatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let context = OptimizerContext::from_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args)?;
         let version_id = {
             let version = session.env.hummock_snapshot_manager.acquire();
             let version = version.version();

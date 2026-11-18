@@ -12,37 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Instant;
+
 use anyhow::{Context, anyhow};
-use hashbrown::{HashMap, HashSet};
+use futures::TryStreamExt;
+use hashbrown::{Equivalent, HashMap, HashSet};
 use iceberg::delete_vector::DeleteVector;
-use iceberg::io::FileIO;
-use iceberg::spec::{DataContentType, ManifestContentType, SnapshotRef};
+use iceberg::io::{FileIO, FileMetadata};
+use iceberg::spec::{DataContentType, DataFile, ManifestContentType, SnapshotRef};
 use iceberg::table::Table;
 use iceberg::writer::file_writer::location_generator::DefaultLocationGenerator;
+use parquet::arrow::arrow_reader::ArrowReaderMetadata;
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::schema::types::SchemaDescriptor;
-use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::{ArrayImpl, BytesArray, DataChunk, I64Array, Utf8Array};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::id::SinkId;
-use risingwave_common::row::RowExt;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::sink::SinkError;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergPositionDeleteCommitResult, PositionDeleteFileNameGenerators,
-    read_position_deletes_from_file, serialize_data_files_default_spec, write_position_delete_file,
+    IcebergConfig, IcebergPositionDeleteCommitResult, PkIndexDataFileLocator,
+    PositionDeleteFileNameGenerators, read_position_deletes_from_file,
+    serialize_data_files_default_spec, write_position_delete_file,
 };
 use risingwave_connector::source::iceberg::ParquetFileReader;
+use risingwave_expr::expr::{
+    BoxedExpression, InputRefExpression, SyncExpressionBoxExt, build_func,
+};
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, ResolverTaskInput};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{Semaphore, mpsc};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::load_table_at_least;
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
+
+/// Concurrent manifest loads when collecting the delete files of a snapshot.
+const MANIFEST_LOAD_CONCURRENCY: usize = 16;
+/// Concurrent input files whose delete diff is read and re-scanned.
+const DELETE_DIFF_CONCURRENCY: usize = 16;
+/// Concurrent output data files whose parquet footers are loaded to plan the scan.
+const OUTPUT_FILE_OPEN_CONCURRENCY: usize = 16;
+/// Concurrent row-group scans of the output data files while rebuilding the pk index.
+const OUTPUT_SCAN_CONCURRENCY: usize = 8;
+const OUTPUT_SCAN_CHANNEL_CAPACITY: usize = 16;
 
 /// Leaf executor for the iceberg pk-index coordinated compaction.
 ///
@@ -57,10 +78,11 @@ use crate::task::LocalBarrierManager;
 ///
 /// # Output chunk contract
 ///
-/// Schema: `[pk_columns.., file_path: Varchar, position: Int64]`. Every emitted row is
-/// a SURVIVOR: `Writer` upserts `pk -> (file_path, position)` in the index (index-only; the data
-/// already lives in the compaction output file). Conflicts (rows killed during the window) are NOT
-/// emitted here.
+/// Schema: `[pk_columns.., data_file, position: Int64]`, where `data_file` is the output file
+/// path (Varchar) in the legacy layout, or its uuid (Bytea) otherwise, matching the writer's PK
+/// index. Every emitted row is a SURVIVOR: `Writer` upserts `pk -> (data_file, position)` in the
+/// index (index-only; the data already lives in the compaction output file). Conflicts (rows
+/// killed during the window) are NOT emitted here.
 pub struct CompactionResolverExecutor {
     ctx: ActorContextRef,
     sink_id: SinkId,
@@ -152,10 +174,14 @@ impl CompactionResolverExecutor {
         }
     }
 
-    /// Data types of the survivor output chunk: `[pk_columns.., file_path, position]`.
+    /// Data types of the survivor output chunk: `[pk_columns.., data_file, position]`.
     fn output_data_types(&self) -> Vec<DataType> {
         let mut types = self.pk_data_types.clone();
-        types.push(DataType::Varchar);
+        types.push(if self.iceberg_config.pk_index_stores_file_uuid() {
+            DataType::Bytea
+        } else {
+            DataType::Varchar
+        });
         types.push(DataType::Int64);
         types
     }
@@ -167,7 +193,9 @@ impl CompactionResolverExecutor {
         expected_snapshot: Option<i64>,
         conflict_delete_metadata: &'a mut Option<SinkMetadata>,
     ) {
-        let table = load_table_at_least(&self.iceberg_config, expected_snapshot).await?;
+        let table = load_table_at_least(&self.iceberg_config, expected_snapshot)
+            .instrument_await("compaction_resolver_load_table")
+            .await?;
         let file_io = table.file_io();
         let snapshot_r = table
             .metadata()
@@ -183,82 +211,158 @@ impl CompactionResolverExecutor {
             .current_snapshot()
             .context("table has no current snapshot to resolve compaction against")?;
 
-        let input_paths: HashSet<&str> = task_input
-            .input_data_file_paths
-            .iter()
-            .map(String::as_str)
-            .collect();
+        // The primary keys deleted during the compaction window, recovered from the input data files.
+        // Without a commit after R, nothing was deleted during the window.
+        let delete_diff_started = Instant::now();
+        let delete_diff_pk_set = if snapshot_r.snapshot_id() == snapshot_n.snapshot_id() {
+            HashSet::new()
+        } else {
+            collect_delete_diff_pks(
+                &table,
+                snapshot_r,
+                snapshot_n,
+                &task_input.input_data_file_paths,
+                &self.pk_indices,
+            )
+            .instrument_await("compaction_resolver_collect_delete_diff")
+            .await?
+        };
+        tracing::info!(
+            sink_id = %self.sink_id,
+            read_snapshot_id = snapshot_r.snapshot_id(),
+            current_snapshot_id = snapshot_n.snapshot_id(),
+            delete_diff_pks = delete_diff_pk_set.len(),
+            elapsed_ms = delete_diff_started.elapsed().as_millis() as u64,
+            "compaction resolver collected delete diff"
+        );
 
-        // Deletion-vector positions per input data file, at R (baseline) and at N (post-window).
-        let dv_r = collect_input_dvs(&table, snapshot_r, &input_paths).await?;
-        let dv_n = collect_input_dvs(&table, snapshot_n, &input_paths).await?;
-
-        // Selectively re-read the input data files at the delete-diff positions to recover the primary
-        // keys deleted during the window. `pk` datums are keyed by an `OwnedRow` so membership tests
-        // against the output scan below are exact.
-        let mut delete_diff_pk_set: HashSet<OwnedRow> = HashSet::new();
-        let stream = futures::stream::iter(task_input.input_data_file_paths.iter().map(
-            |input_path| async {
-                let Some(n_positions) = dv_n.get(input_path) else {
-                    return Ok(Vec::new());
-                };
-                let r_positions = dv_r.get(input_path);
-                let mut diff = n_positions.clone();
-                if let Some(r_positions) = r_positions {
-                    diff -= r_positions;
-                }
-                if diff.is_empty() {
-                    return Ok(Vec::new());
-                }
-                scan_input_pks_at_positions(file_io, input_path, &self.pk_indices, &diff).await
-            },
-        ))
-        .buffer_unordered(8);
-        #[for_await]
-        for pks in stream {
-            delete_diff_pk_set.extend(pks?);
-        }
-
-        // Scan every output data file once per actor.
+        let data_file_locator = if self.iceberg_config.pk_index_stores_file_uuid() {
+            Some(PkIndexDataFileLocator::new(table.metadata())?)
+        } else {
+            None
+        };
+        let scan_started = Instant::now();
+        let mut survivor_rows = 0;
         let mut conflicts: HashMap<String, DeleteVector> = HashMap::new();
         #[for_await]
-        for chunk in self.scan_output_file(
+        for chunk in self.scan_output_files(
             file_io,
+            data_file_locator.as_ref(),
             &task_input.output_data_file_paths,
-            &delete_diff_pk_set,
+            Arc::new(delete_diff_pk_set),
             &mut conflicts,
         ) {
-            yield chunk?;
+            let chunk = chunk?;
+            survivor_rows += chunk.cardinality();
+            yield chunk;
         }
+        tracing::info!(
+            sink_id = %self.sink_id,
+            output_files = task_input.output_data_file_paths.len(),
+            survivor_rows,
+            conflict_files = conflicts.len(),
+            elapsed_ms = scan_started.elapsed().as_millis() as u64,
+            "compaction resolver scanned output files"
+        );
 
         *conflict_delete_metadata =
-            write_conflict_delete_files(&self.iceberg_config, &table, conflicts).await?;
+            write_conflict_delete_files(&self.iceberg_config, &table, conflicts)
+                .instrument_await("compaction_resolver_write_conflict_deletes")
+                .await?;
     }
 
+    /// Scans the output data files on spawned tasks, one per row group. Decoding them is
+    /// CPU-bound, so scanning them inside the actor would rebuild the whole pk index on a single
+    /// core, and scanning a file sequentially would pay the object store latency once per row
+    /// group.
     #[try_stream(ok = DataChunk, error = SinkError)]
-    async fn scan_output_file<'a>(
+    async fn scan_output_files<'a>(
         &'a self,
         file_io: &'a FileIO,
+        data_file_locator: Option<&'a PkIndexDataFileLocator>,
         output_data_file_paths: &'a [String],
-        delete_diff_pk_set: &'a HashSet<OwnedRow>,
+        delete_diff_pk_set: Arc<HashSet<CompactionPk>>,
         conflicts: &'a mut HashMap<String, DeleteVector>,
     ) {
-        let mut buffer = DataChunkBuilder::new(self.output_data_types(), self.chunk_size);
-        for file in output_data_file_paths {
-            #[for_await]
-            for chunk in scan_output_file_inner(
-                file_io,
-                file,
-                &self.pk_indices,
-                delete_diff_pk_set,
-                &mut buffer,
-                conflicts,
-            ) {
-                yield chunk?;
+        let splits: Vec<OutputScanSplit> = futures::stream::iter(
+            output_data_file_paths
+                .iter()
+                .map(|path| plan_output_file_splits(file_io, path, data_file_locator)),
+        )
+        .buffered(OUTPUT_FILE_OPEN_CONCURRENCY)
+        .try_collect::<Vec<_>>()
+        .instrument_await("compaction_resolver_plan_output_scan")
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
+        tracing::info!(
+            sink_id = %self.sink_id,
+            output_files = output_data_file_paths.len(),
+            row_groups = splits.len(),
+            "compaction resolver planned output scan"
+        );
+
+        let pk_indices: Arc<[usize]> = self.pk_indices.as_slice().into();
+        let (chunk_tx, mut chunk_rx) = mpsc::channel(OUTPUT_SCAN_CHANNEL_CAPACITY);
+        let permits = Arc::new(Semaphore::new(OUTPUT_SCAN_CONCURRENCY));
+        let split_paths: Vec<Arc<str>> = splits.iter().map(|split| split.path.clone()).collect();
+        let mut tasks = AbortOnDrop(
+            splits
+                .into_iter()
+                .map(|split| {
+                    let scan = scan_output_split(
+                        file_io.clone(),
+                        split,
+                        pk_indices.clone(),
+                        self.chunk_size,
+                        delete_diff_pk_set.clone(),
+                        chunk_tx.clone(),
+                    );
+                    let permits = permits.clone();
+                    tokio::spawn(async move {
+                        let _permit = permits
+                            .acquire_owned()
+                            .await
+                            .expect("output scan semaphore is never closed");
+                        scan.await
+                    })
+                })
+                .collect(),
+        );
+        // The channel closes once every scan task has finished and dropped its sender.
+        drop(chunk_tx);
+
+        let output_data_types = self.output_data_types();
+        let mut output_projection = None;
+        while let Some(chunk) = chunk_rx
+            .recv()
+            .instrument_await("compaction_resolver_scan_output_files")
+            .await
+        {
+            let chunk = chunk?;
+            if output_projection.is_none() {
+                output_projection = Some(OutputTypeProjection::new(
+                    chunk.data_types(),
+                    &output_data_types,
+                    self.pk_data_types.len(),
+                )?);
             }
+            yield output_projection
+                .as_ref()
+                .expect("initialized from the first output chunk")
+                .execute(chunk)
+                .await?;
         }
-        if let Some(chunk) = buffer.consume_all() {
-            yield chunk;
+
+        for (path, task) in split_paths.iter().zip_eq_fast(tasks.0.iter_mut()) {
+            let split_conflicts = task
+                .await
+                .with_context(|| format!("output scan task for {path} failed"))
+                .map_err(SinkError::Iceberg)?;
+            if let Some(delete_vector) = split_conflicts {
+                *conflicts.entry(path.to_string()).or_default() |= delete_vector;
+            }
         }
     }
 
@@ -278,6 +382,7 @@ impl CompactionResolverExecutor {
         let expected_snapshot = self
             .meta_client
             .wait_iceberg_pk_index_sink_epoch(self.sink_id, begin_barrier.epoch.prev)
+            .instrument_await("compaction_resolver_wait_sink_commit")
             .await?;
 
         let mut conflict_delete_metadata = None;
@@ -319,27 +424,130 @@ impl Execute for CompactionResolverExecutor {
     }
 }
 
-/// Walks the manifests of `snapshot` and collects, per input data file, the merged set of deleted
-/// positions from every live position-delete file referencing it.
-async fn collect_input_dvs(
+/// Aborts the spawned tasks when dropped, e.g. when the resolver stream fails or is dropped early.
+struct AbortOnDrop<T>(Vec<JoinHandle<T>>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        for task in &self.0 {
+            task.abort();
+        }
+    }
+}
+
+/// Recovers the primary keys deleted between snapshots R and N from the input data files.
+///
+/// Only the input files whose position-delete file changed between R and N are read: an unchanged
+/// delete file means no new deletes on that file during the window.
+async fn collect_delete_diff_pks(
+    table: &Table,
+    snapshot_r: &SnapshotRef,
+    snapshot_n: &SnapshotRef,
+    input_data_file_paths: &[String],
+    pk_indices: &[usize],
+) -> Result<HashSet<CompactionPk>, SinkError> {
+    let file_io = table.file_io();
+    let input_paths: HashSet<&str> = input_data_file_paths.iter().map(String::as_str).collect();
+    let (deletes_r, deletes_n) = futures::future::try_join(
+        collect_input_delete_files(table, snapshot_r, &input_paths),
+        collect_input_delete_files(table, snapshot_n, &input_paths),
+    )
+    .await?;
+    let changed = changed_input_delete_files(input_data_file_paths, &deletes_r, &deletes_n);
+    tracing::info!(
+        input_files = input_data_file_paths.len(),
+        delete_files_r = deletes_r.len(),
+        delete_files_n = deletes_n.len(),
+        changed_delete_files = changed.len(),
+        "compaction resolver collecting delete diff"
+    );
+
+    let pks: Vec<Vec<OwnedRow>> = futures::stream::iter(changed.into_iter().map(
+        |(input_path, delete_r, delete_n)| async move {
+            let (positions_n, positions_r) = futures::future::try_join(
+                read_position_deletes_from_file(file_io, delete_n),
+                async {
+                    match delete_r {
+                        Some(delete_r) => read_position_deletes_from_file(file_io, delete_r)
+                            .await
+                            .map(Some),
+                        None => Ok(None),
+                    }
+                },
+            )
+            .await
+            .map_err(SinkError::Iceberg)?;
+            let mut diff = positions_n;
+            if let Some(positions_r) = &positions_r {
+                diff -= positions_r;
+            }
+            if diff.is_empty() {
+                return Ok(Vec::new());
+            }
+            scan_input_pks_at_positions(file_io, input_path, pk_indices, &diff).await
+        },
+    ))
+    .buffer_unordered(DELETE_DIFF_CONCURRENCY)
+    .try_collect()
+    .await?;
+    Ok(pks.into_iter().flatten().map(CompactionPk).collect())
+}
+
+/// Returns `(input path, delete file at R, delete file at N)` for every input data file whose live
+/// position-delete file at N differs from the one at R.
+fn changed_input_delete_files<'a>(
+    input_data_file_paths: &'a [String],
+    deletes_r: &'a HashMap<String, DataFile>,
+    deletes_n: &'a HashMap<String, DataFile>,
+) -> Vec<(&'a str, Option<&'a DataFile>, &'a DataFile)> {
+    input_data_file_paths
+        .iter()
+        .filter_map(|input_path| {
+            let delete_n = deletes_n.get(input_path.as_str())?;
+            let delete_r = deletes_r.get(input_path.as_str());
+            if delete_r.is_some_and(|delete_r| is_same_delete_file(delete_r, delete_n)) {
+                return None;
+            }
+            Some((input_path.as_str(), delete_r, delete_n))
+        })
+        .collect()
+}
+
+/// Delete files are immutable, so the same location identifies the same deleted positions. A
+/// deletion vector is a blob inside a Puffin file, so its offset and length are part of its location.
+fn is_same_delete_file(a: &DataFile, b: &DataFile) -> bool {
+    a.file_path() == b.file_path()
+        && a.content_offset() == b.content_offset()
+        && a.content_size_in_bytes() == b.content_size_in_bytes()
+}
+
+/// Walks the delete manifests of `snapshot` and returns, per input data file, the live
+/// position-delete file referencing it.
+async fn collect_input_delete_files(
     table: &Table,
     snapshot: &SnapshotRef,
     input_paths: &HashSet<&str>,
-) -> Result<HashMap<String, DeleteVector>, SinkError> {
+) -> Result<HashMap<String, DataFile>, SinkError> {
     let file_io = table.file_io();
-    let mut map: HashMap<String, DeleteVector> = HashMap::new();
-
     let manifest_list = table
         .object_cache()
         .get_manifest_list(snapshot, &table.metadata_ref())
         .await?;
 
-    for manifest_file in manifest_list.entries() {
-        // Only delete manifests can carry position-delete files.
-        if manifest_file.content != ManifestContentType::Deletes {
-            continue;
-        }
-        let manifest = manifest_file.load_manifest(file_io).await?;
+    // Only delete manifests can carry position-delete files.
+    let manifests: Vec<_> = futures::stream::iter(
+        manifest_list
+            .entries()
+            .iter()
+            .filter(|manifest_file| manifest_file.content == ManifestContentType::Deletes)
+            .map(|manifest_file| manifest_file.load_manifest(file_io)),
+    )
+    .buffer_unordered(MANIFEST_LOAD_CONCURRENCY)
+    .try_collect()
+    .await?;
+
+    let mut map: HashMap<String, DataFile> = HashMap::new();
+    for manifest in &manifests {
         for entry in manifest.entries() {
             if !entry.is_alive() {
                 continue;
@@ -348,17 +556,13 @@ async fn collect_input_dvs(
             if data_file.content_type() == DataContentType::PositionDeletes
                 && let Some(referenced) = data_file.referenced_data_file()
                 && input_paths.contains(referenced.as_str())
+                && map.insert(referenced, data_file.clone()).is_some()
             {
-                let positions = read_position_deletes_from_file(file_io, data_file)
-                    .await
-                    .map_err(SinkError::Iceberg)?;
-                if map.insert(referenced, positions).is_some() {
-                    return Err(SinkError::Iceberg(anyhow!(
-                        "input data file {} has multiple live position-delete files in snapshot {}",
-                        data_file.referenced_data_file().unwrap(),
-                        snapshot.snapshot_id()
-                    )));
-                }
+                return Err(SinkError::Iceberg(anyhow!(
+                    "input data file {} has multiple live position-delete files in snapshot {}",
+                    data_file.referenced_data_file().unwrap(),
+                    snapshot.snapshot_id()
+                )));
             }
         }
     }
@@ -444,54 +648,280 @@ async fn scan_input_pks_at_positions(
     Ok(results)
 }
 
-#[try_stream(ok = DataChunk, error = SinkError)]
-async fn scan_output_file_inner<'a>(
-    file_io: &'a FileIO,
-    path: &'a str,
-    pk_indices: &'a [usize],
-    delete_diff_pk_set: &'a HashSet<OwnedRow>,
-    buffer: &'a mut DataChunkBuilder,
-    conflicts: &'a mut HashMap<String, DeleteVector>,
-) {
+type OutputChunkSender = mpsc::Sender<Result<DataChunk, SinkError>>;
+
+/// Like the cast projection after an Iceberg engine-table scan, restores the writer's
+/// declared PK types using SQL casts. Metadata columns must match exactly.
+/// Build expressions once and reuse unchanged columns.
+/// Delete-diff comparisons remain in physical types on both sides.
+struct OutputTypeProjection {
+    input_types: Vec<DataType>,
+    casts: Vec<Option<BoxedExpression>>,
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "PK index rebuilds must fail on cast errors instead of substituting NULL keys"
+)]
+impl OutputTypeProjection {
+    fn new(
+        input_types: Vec<DataType>,
+        output_types: &[DataType],
+        pk_column_count: usize,
+    ) -> Result<Self, SinkError> {
+        if input_types.len() != output_types.len() {
+            return Err(SinkError::Iceberg(anyhow!(
+                "compaction resolver output column count mismatch: expected {}, got {}",
+                output_types.len(),
+                input_types.len()
+            )));
+        }
+        let casts = input_types
+            .iter()
+            .zip_eq_fast(output_types)
+            .enumerate()
+            .map(|(index, (source, target))| {
+                if source == target {
+                    return Ok(None);
+                }
+                if index >= pk_column_count {
+                    return Err(SinkError::Iceberg(anyhow!(
+                        "compaction resolver metadata column {index} type mismatch: expected {target}, got {source}"
+                    )));
+                }
+                build_func(
+                    PbType::Cast,
+                    target.clone(),
+                    vec![InputRefExpression::new(source.clone(), index).boxed()],
+                )
+                .map(Some)
+                .with_context(|| {
+                    format!("build compaction resolver cast from {source} to {target}")
+                })
+                .map_err(SinkError::Iceberg)
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self { input_types, casts })
+    }
+
+    async fn execute(&self, chunk: DataChunk) -> Result<DataChunk, SinkError> {
+        if chunk.data_types() != self.input_types {
+            return Err(SinkError::Iceberg(anyhow!(
+                "compaction resolver output schema changed between chunks"
+            )));
+        }
+        if self.casts.iter().all(Option::is_none) {
+            return Ok(chunk);
+        }
+        let mut columns = Vec::with_capacity(self.casts.len());
+        for (cast, column) in self.casts.iter().zip_eq_fast(chunk.columns()) {
+            columns.push(match cast {
+                Some(cast) => cast
+                    .eval(&chunk)
+                    .await
+                    .context("restore compaction resolver output types")
+                    .map_err(SinkError::Iceberg)?,
+                None => column.clone(),
+            });
+        }
+        Ok(DataChunk::new(columns, chunk.into_parts_v2().1))
+    }
+}
+
+/// One row group of an output data file, scanned by its own task.
+struct OutputScanSplit {
+    path: Arc<str>,
+    /// UUID stored in the PK index, or `None` for legacy file paths.
+    file_uuid: Option<Uuid>,
+    file_size: u64,
+    /// The parquet footer, loaded once per file and shared by all of its splits.
+    reader_metadata: ArrowReaderMetadata,
+    row_group: usize,
+    /// Position of the first row of the row group in the file.
+    first_row_position: i64,
+}
+
+/// Loads the parquet footer of an output data file and splits the file into its row groups.
+async fn plan_output_file_splits(
+    file_io: &FileIO,
+    path: &str,
+    data_file_locator: Option<&PkIndexDataFileLocator>,
+) -> Result<Vec<OutputScanSplit>, SinkError> {
+    let file_uuid = data_file_locator
+        .map(|locator| locator.file_uuid(path))
+        .transpose()?;
     let input_file = file_io.new_input(path)?;
-    let metadata = input_file.metadata().await?;
-    let reader = input_file.reader().await?;
-    let builder = ParquetRecordBatchStreamBuilder::new(ParquetFileReader::new(metadata, reader))
+    let file_metadata = input_file.metadata().await?;
+    let file_size = file_metadata.size;
+    let mut reader = ParquetFileReader::new(file_metadata, input_file.reader().await?);
+    let reader_metadata = ArrowReaderMetadata::load_async(&mut reader, Default::default())
         .await
-        .map_err(|e| anyhow!(e).context(format!("open parquet reader for {path}")))?;
+        .map_err(|e| anyhow!(e).context(format!("load parquet metadata of {path}")))?;
+
+    let path: Arc<str> = path.into();
+    let mut first_row_position = 0;
+    let splits = (reader_metadata.metadata().row_groups().iter().enumerate())
+        .map(|(row_group, row_group_metadata)| {
+            let split = OutputScanSplit {
+                path: path.clone(),
+                file_uuid,
+                file_size,
+                reader_metadata: reader_metadata.clone(),
+                row_group,
+                first_row_position,
+            };
+            first_row_position += row_group_metadata.num_rows();
+            split
+        })
+        .collect();
+    Ok(splits)
+}
+
+/// Scans one row group of an output data file, sends its survivor rows to `chunk_tx`, and returns
+/// the positions of its conflict rows. A scan error is sent to `chunk_tx` too, so the resolver
+/// fails without waiting for the other scans.
+async fn scan_output_split(
+    file_io: FileIO,
+    split: OutputScanSplit,
+    pk_indices: Arc<[usize]>,
+    chunk_size: usize,
+    delete_diff_pk_set: Arc<HashSet<CompactionPk>>,
+    chunk_tx: OutputChunkSender,
+) -> Option<DeleteVector> {
+    match scan_output_split_inner(
+        &file_io,
+        split,
+        &pk_indices,
+        chunk_size,
+        &delete_diff_pk_set,
+        &chunk_tx,
+    )
+    .await
+    {
+        Ok(conflicts) => conflicts,
+        Err(e) => {
+            // The receiver is gone only if the resolver already stopped.
+            let _ = chunk_tx.send(Err(e)).await;
+            None
+        }
+    }
+}
+
+async fn scan_output_split_inner(
+    file_io: &FileIO,
+    split: OutputScanSplit,
+    pk_indices: &[usize],
+    chunk_size: usize,
+    delete_diff_pk_set: &HashSet<CompactionPk>,
+    chunk_tx: &OutputChunkSender,
+) -> Result<Option<DeleteVector>, SinkError> {
+    let path = &*split.path;
+    let reader = ParquetFileReader::new(
+        FileMetadata {
+            size: split.file_size,
+        },
+        file_io.new_input(path)?.reader().await?,
+    );
+    let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(reader, split.reader_metadata);
     let (projection, pk_order) = pk_projection(builder.parquet_schema(), pk_indices)?;
-    let stream = builder
+    let mut stream = builder
         .with_projection(projection)
+        .with_row_groups(vec![split.row_group])
+        .with_batch_size(chunk_size)
         .build()
         .map_err(|e| anyhow!(e).context(format!("build parquet stream for {path}")))?;
 
-    let mut position: i64 = 0;
-
-    #[for_await]
-    for batch in stream {
+    let mut conflicts = DeleteVector::default();
+    let mut position = split.first_row_position;
+    while let Some(batch) = stream.next().await {
         let batch =
             batch.map_err(|e| anyhow!(e).context(format!("read parquet batch of {path}")))?;
-        let chunk = IcebergArrowConvert
+        let pk_chunk = IcebergArrowConvert
             .chunk_from_record_batch(&batch)
             .map_err(|e| anyhow!(e).context(format!("convert parquet batch of {path}")))?
             .project(&pk_order);
-        for row_idx in 0..chunk.capacity() {
-            let pk = chunk.row_at(row_idx).0.into_owned_row();
-            let row_position = position + row_idx as i64;
-            if delete_diff_pk_set.contains(&pk) {
-                conflicts
-                    .entry_ref(path)
-                    .or_default()
-                    .insert(row_position as u64);
-            } else if let Some(full_chunk) = buffer.append_one_row(pk.chain([
-                Some(ScalarRefImpl::Utf8(path)),
-                Some(ScalarRefImpl::Int64(row_position)),
-            ])) {
-                yield full_chunk;
-            }
+        let row_count = pk_chunk.capacity();
+        if let Some(chunk) = survivor_chunk(
+            pk_chunk,
+            path,
+            split.file_uuid,
+            position,
+            delete_diff_pk_set,
+            &mut conflicts,
+        ) && chunk_tx.send(Ok(chunk)).await.is_err()
+        {
+            return Ok(None);
         }
-        position += chunk.capacity() as i64;
+        position += row_count as i64;
     }
+
+    Ok((!conflicts.is_empty()).then_some(conflicts))
+}
+
+/// An owned compaction key hashed like `RowRef` for allocation-free borrowed lookups.
+#[derive(Clone, PartialEq, Eq)]
+struct CompactionPk(OwnedRow);
+
+impl std::hash::Hash for CompactionPk {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash_datums_into(state);
+    }
+}
+
+impl Equivalent<CompactionPk> for RowRef<'_> {
+    fn equivalent(&self, key: &CompactionPk) -> bool {
+        Row::eq(self, &key.0)
+    }
+}
+
+/// Builds the survivor chunk `[pk_columns.., data_file, position]` of a batch of output rows whose
+/// first row is at `first_position` in `path`. Rows whose pk was deleted during the compaction
+/// window are recorded in `conflicts` instead. Returns `None` if no row survives.
+/// `data_file` is the UUID in UUID mode, or the path in legacy mode.
+///
+/// The chunk is assembled column by column: the pk columns are reused as-is, so the common case
+/// where nothing was deleted never touches individual rows.
+fn survivor_chunk(
+    pk_chunk: DataChunk,
+    path: &str,
+    file_uuid: Option<Uuid>,
+    first_position: i64,
+    delete_diff_pk_set: &HashSet<CompactionPk>,
+    conflicts: &mut DeleteVector,
+) -> Option<DataChunk> {
+    let row_count = pk_chunk.capacity();
+    let positions = first_position..first_position + row_count as i64;
+    let visibility: Bitmap = if delete_diff_pk_set.is_empty() {
+        row_count.into()
+    } else {
+        (0..row_count)
+            .map(|row_idx| {
+                let conflict = delete_diff_pk_set.contains(&pk_chunk.row_at(row_idx).0);
+                if conflict {
+                    conflicts.insert((first_position + row_idx as i64) as u64);
+                }
+                !conflict
+            })
+            .collect()
+    };
+    if !visibility.any() {
+        return None;
+    }
+
+    let (mut columns, _) = pk_chunk.into_parts();
+    columns.push(Arc::new(match file_uuid {
+        Some(uuid) => ArrayImpl::Bytea(
+            std::iter::repeat_n(uuid.as_bytes().as_slice(), row_count).collect::<BytesArray>(),
+        ),
+        None => ArrayImpl::Utf8(std::iter::repeat_n(path, row_count).collect::<Utf8Array>()),
+    }));
+    columns.push(Arc::new(ArrayImpl::Int64(positions.collect::<I64Array>())));
+    let chunk = DataChunk::new(columns, visibility);
+    Some(if chunk.is_vis_compacted() {
+        chunk
+    } else {
+        chunk.compact_vis()
+    })
 }
 
 async fn write_conflict_delete_files(
@@ -543,9 +973,14 @@ async fn write_conflict_delete_files(
 mod tests {
     use std::sync::Arc;
 
+    use iceberg::spec::{DataFileBuilder, DataFileFormat, Struct};
+    use parquet::arrow::ArrowWriter;
     use parquet::basic::Type as PhysicalType;
+    use parquet::file::properties::WriterProperties;
     use parquet::schema::types::{SchemaDescriptor, Type};
-    use risingwave_common::array::DataChunkTestExt;
+    use risingwave_common::array::arrow::arrow_schema_58 as arrow_schema;
+    use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunkTestExt};
+    use risingwave_common::types::{MapType, StructType};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 
@@ -599,6 +1034,425 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_survivor_chunk_assigns_positions_and_skips_conflicts() {
+        let pk_chunk = DataChunk::from_pretty(
+            "I
+             1
+             2
+             3",
+        );
+        let pk = |id: i64| CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int64(id))]));
+        let mut conflicts = DeleteVector::default();
+
+        let chunk = survivor_chunk(
+            pk_chunk.clone(),
+            "f",
+            None,
+            10,
+            &HashSet::new(),
+            &mut conflicts,
+        )
+        .unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                "I T I
+                 1 f 10
+                 2 f 11
+                 3 f 12",
+            )
+        );
+        assert!(conflicts.is_empty());
+
+        let deleted = HashSet::from([pk(2)]);
+        let chunk =
+            survivor_chunk(pk_chunk.clone(), "f", None, 10, &deleted, &mut conflicts).unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                "I T I
+                 1 f 10
+                 3 f 12",
+            )
+        );
+        assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![11]);
+
+        let all_deleted = HashSet::from([pk(1), pk(2), pk(3)]);
+        let mut conflicts = DeleteVector::default();
+        assert!(survivor_chunk(pk_chunk, "f", None, 0, &all_deleted, &mut conflicts).is_none());
+        assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_restores_smallint_keys() {
+        let chunk = DataChunk::from_pretty(
+            "i T I
+             -32768 f 10
+             32767 f 11",
+        );
+        let path_column = chunk.column_at(1).clone();
+        let position_column = chunk.column_at(2).clone();
+        let chunk = restore_output_types(
+            chunk,
+            &[DataType::Int16, DataType::Varchar, DataType::Int64],
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            chunk.data_types(),
+            vec![DataType::Int16, DataType::Varchar, DataType::Int64]
+        );
+        assert_eq!(
+            chunk.column_at(0).as_int16().iter().collect::<Vec<_>>(),
+            vec![Some(i16::MIN), Some(i16::MAX)]
+        );
+        assert!(Arc::ptr_eq(chunk.column_at(1), &path_column));
+        assert!(Arc::ptr_eq(chunk.column_at(2), &position_column));
+    }
+
+    #[test]
+    fn test_survivor_chunk_matches_composite_keys_and_nulls() {
+        let pk_chunk = DataChunk::from_pretty(
+            "i T
+             1 alpha
+             1 alphabet
+             2 alpha
+             1 .
+             2 .
+             1 alpha",
+        );
+        let deleted = HashSet::from([
+            CompactionPk(OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some("alpha".into()),
+            ])),
+            CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int32(1)), None])),
+        ]);
+        let mut conflicts = DeleteVector::default();
+        let chunk = survivor_chunk(pk_chunk, "f", None, 10, &deleted, &mut conflicts).unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                "i T T I
+                 1 alphabet f 11
+                 2 alpha f 12
+                 2 . f 14",
+            )
+        );
+        assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![10, 13, 15]);
+    }
+
+    #[test]
+    fn test_compaction_pk_matches_row_ref_hash_and_equality() {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+
+        let mut values = Vec::new();
+        let columns = [
+            (DataType::Boolean, "true"),
+            (DataType::Int16, "-7"),
+            (DataType::Int32, "123"),
+            (DataType::Int64, "4294967297"),
+            (DataType::Float32, "NaN"),
+            (DataType::Float64, "-0"),
+            (DataType::Decimal, "1234.50"),
+            (DataType::Varchar, "borrowed primary key"),
+            (DataType::Bytea, r"\x00aabbff"),
+            (DataType::Jsonb, r#"{"key": [1, null, true]}"#),
+            (DataType::Interval, "2 days 03:04:05"),
+            (DataType::Serial, "123"),
+            (DataType::list(DataType::Int16), "{-3,7,NULL}"),
+            (
+                DataType::Struct(StructType::new(vec![
+                    ("id", DataType::Int16),
+                    ("name", DataType::Varchar),
+                ])),
+                "(7,hello)",
+            ),
+            (
+                DataType::Map(MapType::from_kv(DataType::Int16, DataType::Int16)),
+                "{1:2,3:NULL}",
+            ),
+        ]
+        .into_iter()
+        .map(|(data_type, text)| {
+            let value = ScalarImpl::from_text_for_test(text, &data_type).unwrap();
+            let mut builder = ArrayBuilderImpl::with_type(2, data_type);
+            builder.append(Some(value.clone()));
+            builder.append(None::<ScalarImpl>);
+            values.push(Some(value));
+            Arc::new(builder.finish())
+        })
+        .collect();
+        let original = CompactionPk(OwnedRow::new(values));
+        let nulls = CompactionPk(OwnedRow::new(vec![None; original.0.len()]));
+        let chunk = DataChunk::new(columns, 2);
+        let borrowed = chunk.row_at(0).0;
+        let borrowed_nulls = chunk.row_at(1).0;
+        let hash_builder = BuildHasherDefault::<DefaultHasher>::default();
+        for (borrowed, owned) in [(&borrowed, &original), (&borrowed_nulls, &nulls)] {
+            assert_eq!(
+                hash_builder.hash_one(borrowed),
+                hash_builder.hash_one(owned)
+            );
+            let keys = HashSet::<CompactionPk>::from([owned.clone()]);
+            assert!(keys.contains(borrowed));
+        }
+        assert!(!borrowed.equivalent(&nulls));
+        assert!(!borrowed_nulls.equivalent(&original));
+        assert!(!borrowed.equivalent(&CompactionPk(OwnedRow::empty())));
+
+        let keys: HashSet<_> = [original.clone(), original.clone(), nulls.clone(), nulls]
+            .into_iter()
+            .collect();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&borrowed));
+        assert!(keys.contains(&borrowed_nulls));
+
+        let empty_chunk = DataChunk::new(vec![], 1);
+        let empty = empty_chunk.row_at(0).0;
+        assert_eq!(
+            hash_builder.hash_one(empty),
+            hash_builder.hash_one(CompactionPk(OwnedRow::empty()))
+        );
+        assert!(HashSet::<CompactionPk>::from([CompactionPk(OwnedRow::empty())]).contains(&empty));
+        assert!(!empty.equivalent(&original));
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_rejects_metadata_casts() {
+        for (input_types, output_types) in [
+            (
+                vec![DataType::Int32, DataType::Varchar, DataType::Int64],
+                vec![DataType::Int16, DataType::Bytea, DataType::Int64],
+            ),
+            (
+                vec![DataType::Int32, DataType::Bytea, DataType::Int64],
+                vec![DataType::Int16, DataType::Varchar, DataType::Int64],
+            ),
+            (
+                vec![DataType::Int32, DataType::Varchar, DataType::Int32],
+                vec![DataType::Int16, DataType::Varchar, DataType::Int64],
+            ),
+        ] {
+            assert!(
+                OutputTypeProjection::new(input_types.clone(), &output_types, 1).is_err(),
+                "must reject metadata casts from {input_types:?} to {output_types:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_rejects_mismatches() {
+        for value in [-32769, 32768] {
+            let chunk = DataChunk::from_pretty(&format!("i\n{value}"));
+            assert!(
+                restore_output_types(chunk, &[DataType::Int16], 1)
+                    .await
+                    .is_err()
+            );
+        }
+        let chunk = DataChunk::from_pretty("i\n1");
+        assert!(
+            restore_output_types(chunk.clone(), &[DataType::Bytea], 1)
+                .await
+                .is_err()
+        );
+        assert!(restore_output_types(chunk.clone(), &[], 1).await.is_err());
+        assert_eq!(
+            restore_output_types(chunk.clone(), &[DataType::Int32], 1)
+                .await
+                .unwrap(),
+            chunk
+        );
+        let projection =
+            OutputTypeProjection::new(vec![DataType::Int32], &[DataType::Int16], 1).unwrap();
+        assert!(
+            projection
+                .execute(DataChunk::from_pretty("T\nx"))
+                .await
+                .is_err()
+        );
+    }
+
+    async fn restore_output_types(
+        chunk: DataChunk,
+        output_types: &[DataType],
+        pk_column_count: usize,
+    ) -> Result<DataChunk, SinkError> {
+        OutputTypeProjection::new(chunk.data_types(), output_types, pk_column_count)?
+            .execute(chunk)
+            .await
+    }
+
+    #[tokio::test]
+    async fn test_restore_output_types_round_trips_iceberg_type_mappings() {
+        for (data_type, text) in [
+            (DataType::Int16, "-7"),
+            (DataType::Jsonb, r#"{"key": [1, null, true]}"#),
+            (DataType::Interval, "2 days 03:04:05"),
+            (DataType::Serial, "123"),
+            (DataType::list(DataType::Int16), "{-3,7,NULL}"),
+            (
+                DataType::Struct(StructType::new(vec![
+                    ("id", DataType::Int16),
+                    ("name", DataType::Varchar),
+                ])),
+                "(7,hello)",
+            ),
+            (
+                DataType::Map(MapType::from_kv(DataType::Int16, DataType::Int16)),
+                "{1:2,3:NULL}",
+            ),
+        ] {
+            let value = ScalarImpl::from_text_for_test(text, &data_type).unwrap();
+            let mut builder = ArrayBuilderImpl::with_type(2, data_type.clone());
+            builder.append(Some(value));
+            builder.append(None::<ScalarImpl>);
+            let original = DataChunk::new(vec![Arc::new(builder.finish())], 2);
+            let schema = Arc::new(arrow_schema::Schema::new(vec![
+                IcebergArrowConvert
+                    .to_arrow_field("pk", &data_type)
+                    .unwrap(),
+            ]));
+            let batch = IcebergArrowConvert
+                .to_record_batch(schema, &original)
+                .unwrap();
+            let physical = IcebergArrowConvert.chunk_from_record_batch(&batch).unwrap();
+            assert_ne!(physical.data_types(), original.data_types(), "{data_type}");
+            assert_eq!(
+                restore_output_types(physical, std::slice::from_ref(&data_type), 1)
+                    .await
+                    .unwrap(),
+                original,
+                "{data_type}"
+            );
+        }
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_output_scan_preserves_positions_across_row_groups() {
+        check_output_scan_preserves_positions_across_row_groups(false).await;
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_output_scan_preserves_file_uuids_across_row_groups() {
+        check_output_scan_preserves_positions_across_row_groups(true).await;
+    }
+
+    async fn check_output_scan_preserves_positions_across_row_groups(stores_file_uuid: bool) {
+        let pk_chunk = DataChunk::from_pretty(
+            "i
+             1
+             2
+             3
+             4
+             5
+             6",
+        );
+        let schema = Arc::new(arrow_schema::Schema::new(vec![
+            IcebergArrowConvert
+                .to_arrow_field("id", &DataType::Int32)
+                .unwrap(),
+        ]));
+        let batch = IcebergArrowConvert
+            .to_record_batch(schema.clone(), &pk_chunk)
+            .unwrap();
+        let mut bytes = Vec::new();
+        let props = WriterProperties::builder()
+            .set_max_row_group_row_count(Some(2))
+            .build();
+        let mut writer = ArrowWriter::try_new(&mut bytes, schema, Some(props)).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let file_io = FileIO::new_with_memory();
+        let path = "memory:/data/00112233-4455-6677-8899-aabbccddeeff.parquet";
+        let locator =
+            stores_file_uuid.then(|| PkIndexDataFileLocator::with_data_location("memory:/data"));
+        file_io
+            .new_output(path)
+            .unwrap()
+            .write(bytes.into())
+            .await
+            .unwrap();
+        let splits = plan_output_file_splits(&file_io, path, locator.as_ref())
+            .await
+            .unwrap();
+        assert_eq!(
+            splits
+                .iter()
+                .map(|s| s.first_row_position)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 4]
+        );
+
+        // Conflicts in both later row groups must use file-relative positions, even when
+        // splits finish out of order and each row group spans multiple batches.
+        let deleted = Arc::new(HashSet::from([
+            CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int32(4))])),
+            CompactionPk(OwnedRow::new(vec![Some(ScalarImpl::Int32(5))])),
+        ]));
+        let (tx, mut rx) = mpsc::channel(OUTPUT_SCAN_CHANNEL_CAPACITY);
+        let mut conflicts = DeleteVector::default();
+        for split in splits.into_iter().rev() {
+            if let Some(dv) = scan_output_split(
+                file_io.clone(),
+                split,
+                Arc::from([0]),
+                1,
+                deleted.clone(),
+                tx.clone(),
+            )
+            .await
+            {
+                conflicts |= dv;
+            }
+        }
+        drop(tx);
+        let mut survivors = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            let chunk = chunk.unwrap();
+            let data_file_column = chunk.column_at(1).clone();
+            let data_file_type = if stores_file_uuid {
+                DataType::Bytea
+            } else {
+                DataType::Varchar
+            };
+            let chunk = restore_output_types(
+                chunk,
+                &[DataType::Int16, data_file_type, DataType::Int64],
+                1,
+            )
+            .await
+            .unwrap();
+            assert!(Arc::ptr_eq(chunk.column_at(1), &data_file_column));
+            for row in chunk.rows() {
+                survivors.push((
+                    row.datum_at(0).unwrap().into_int16(),
+                    row.datum_at(2).unwrap().into_int64(),
+                ));
+                if stores_file_uuid {
+                    assert_eq!(
+                        row.datum_at(1).unwrap().into_bytea(),
+                        &[
+                            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+                            0xcc, 0xdd, 0xee, 0xff,
+                        ]
+                    );
+                } else {
+                    assert_eq!(row.datum_at(1).unwrap().into_utf8(), path);
+                }
+            }
+        }
+        survivors.sort_unstable();
+        assert_eq!(survivors, vec![(1, 0), (2, 1), (3, 2), (6, 5)]);
+        assert_eq!(conflicts.iter().collect::<Vec<_>>(), vec![3, 4]);
+    }
+
     fn compaction_barrier(
         epoch: u64,
         phase: Phase,
@@ -627,6 +1481,70 @@ mod tests {
             resolver_task_from_initial_barrier(SinkId::new(7), &barrier).unwrap();
         assert_eq!(task_id, IcebergCompactionTaskId::from(11));
         assert_eq!(actual, task_input);
+    }
+
+    fn delete_file(path: &str, referenced: &str, content_offset: i64) -> DataFile {
+        DataFileBuilder::default()
+            .content(DataContentType::PositionDeletes)
+            .file_path(path.to_owned())
+            .file_format(DataFileFormat::Puffin)
+            .file_size_in_bytes(100)
+            .record_count(1)
+            .partition(Struct::empty())
+            .referenced_data_file(Some(referenced.to_owned()))
+            .content_offset(Some(content_offset))
+            .content_size_in_bytes(Some(10))
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_changed_input_delete_files_skips_unchanged_delete_files() {
+        let input_paths: Vec<String> = ["unchanged", "new_blob", "new_dv", "only_r", "no_dv"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let deletes_r = HashMap::from([
+            (
+                "unchanged".to_owned(),
+                delete_file("r.puffin", "unchanged", 4),
+            ),
+            (
+                "new_blob".to_owned(),
+                delete_file("r.puffin", "new_blob", 14),
+            ),
+            ("only_r".to_owned(), delete_file("r.puffin", "only_r", 24)),
+        ]);
+        let deletes_n = HashMap::from([
+            (
+                "unchanged".to_owned(),
+                delete_file("r.puffin", "unchanged", 4),
+            ),
+            // Same Puffin file, but a different blob in it.
+            (
+                "new_blob".to_owned(),
+                delete_file("r.puffin", "new_blob", 34),
+            ),
+            ("new_dv".to_owned(), delete_file("n.puffin", "new_dv", 4)),
+        ]);
+
+        let changed: Vec<_> = changed_input_delete_files(&input_paths, &deletes_r, &deletes_n)
+            .into_iter()
+            .map(|(path, delete_r, delete_n)| {
+                (
+                    path,
+                    delete_r.map(|file| file.content_offset()),
+                    delete_n.content_offset(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            changed,
+            vec![
+                ("new_blob", Some(Some(14)), Some(34)),
+                ("new_dv", None, Some(4)),
+            ]
+        );
     }
 
     #[test]

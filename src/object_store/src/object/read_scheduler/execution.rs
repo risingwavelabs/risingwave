@@ -27,15 +27,12 @@ use bytes::Bytes;
 use futures::future::join_all;
 use futures::stream::{FuturesUnordered, StreamExt};
 use risingwave_common::config::storage::ReadSchedulerConfig;
-use tokio::sync::{AcquireError, Semaphore, oneshot};
-use tracing::Instrument;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use super::super::ObjectErrorInner;
-#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-use super::replay;
 use super::{
-    ActiveRead, GroupQueue, GroupQueueWorker, ObjectError, ObjectStoreMetrics, PhysicalPermit,
-    ReadGauge, ReadGroup, ReadRange, ReadRequest, ReadResult, ReadTask, WaitingRead,
+    ActiveRead, GroupQueue, GroupQueueWorker, ObjectError, ObjectStoreMetrics, ReadGauge,
+    ReadGroup, ReadRange, ReadRequest, ReadResult, ReadTask, WaitingRead,
 };
 
 struct ActiveReadGuard<'a> {
@@ -84,29 +81,19 @@ impl Drop for QueuedDispatch {
 
 pub(super) struct PhysicalReadReservation {
     pub(super) reserved: ReadGauge,
-    pub(super) permit: PhysicalPermit,
+    pub(super) permit: OwnedSemaphorePermit,
     pub(super) reserved_at: Instant,
     pub(super) dispatch_wait: prometheus::Histogram,
 }
 
 impl PhysicalReadReservation {
-    fn start(self) -> PhysicalPermit {
+    fn start(self) -> OwnedSemaphorePermit {
         drop(self.reserved);
         self.dispatch_wait
             .observe(self.reserved_at.elapsed().as_secs_f64());
         self.permit
     }
 }
-
-#[cfg(not(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay")))]
-pub(super) fn acquire_physical(
-    slots: Arc<Semaphore>,
-) -> impl Future<Output = Result<PhysicalPermit, AcquireError>> {
-    slots.acquire_owned()
-}
-
-#[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-pub(super) use replay::acquire_physical;
 
 pub(super) async fn run<F, R>(
     mut shutdown: oneshot::Receiver<()>,
@@ -147,8 +134,6 @@ pub(super) async fn run<F, R>(
                 }
             });
             pending.update_ready(groups);
-            #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-            replay::queue(&pending, "dispatch_check");
             (!pending.groups.is_empty(), pending.ready_count() > 0)
         };
         if closed && !has_pending && in_flight.is_empty() {
@@ -171,7 +156,7 @@ pub(super) async fn run<F, R>(
                 }
                 Poll::Pending
             }), if has_pending => {}
-            permit = acquire_physical(physical_slots.clone()), if can_start => {
+            permit = physical_slots.clone().acquire_owned(), if can_start => {
                 let permit = permit.expect("scheduler physical semaphore is never closed");
                 let reserved_at = Instant::now();
                 let reservation = PhysicalReadReservation {
@@ -187,8 +172,6 @@ pub(super) async fn run<F, R>(
                     }
                     pending.starting += 1;
                     pending.update_ready(groups);
-                    #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-                    replay::queue(&pending, "reserved");
                     QueuedDispatch { queue: groups.clone(), selected: false }
                 };
                 let read = read.clone();
@@ -200,25 +183,8 @@ pub(super) async fn run<F, R>(
                         return;
                     };
                     let groups = &*queued_dispatch.queue;
-                    let group_span = tracing::debug_span!(
-                        target: "object_store_read_scheduler", parent: None, "object_read_group"
-                    );
-                    if tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG) {
-                        let request_ids: Vec<_> = group.requests.iter().filter_map(|r| r.trace_id).collect();
-                        let ready: usize = groups.pending.lock().unwrap().groups.iter()
-                            .map(|group| group.group.requests.len()).sum();
-                        tracing::debug!(target: "object_store_read_scheduler", parent: &group_span,
-                            group_id = ?request_ids.first(), ?request_ids, ready,
-                            available_permits = physical_slots.available_permits(), "scheduler group selected");
-                    }
                     let sharing = config.reuse_inflight_reads.then_some((groups, &config));
-                    #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-                    let id = reservation.permit.id();
-                    let read = group.execute(&*read, &physical_slots, reservation, &metrics, media_type, sharing)
-                        .instrument(group_span);
-                    #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-                    let read = replay::read_scope(id, read);
-                    read.await;
+                    group.execute(&*read, &physical_slots, reservation, &metrics, media_type, sharing).await;
                 };
                 in_flight.push(ReadTask(tokio::spawn(execute)));
             }
@@ -318,21 +284,6 @@ impl ReadGroup {
         } else {
             None
         };
-        // Tokens identify actual outer reads. Build this list only for trace collection,
-        // and emit dispatch inside the polled read future (not merely at dequeue).
-        let trace_members =
-            (tracing::enabled!(target: "state_store_read_batch", tracing::Level::DEBUG)
-                || tracing::enabled!(target: "object_store_read_scheduler", tracing::Level::DEBUG))
-            .then(|| {
-                self.requests
-                    .iter()
-                    .filter_map(|request| request.trace_id)
-                    .collect::<Vec<_>>()
-            });
-        let group_id = trace_members
-            .as_ref()
-            .and_then(|members| members.first())
-            .copied();
         let physical = async {
             let _permit = reservation.start();
             if partial_overlap_bytes > 0 {
@@ -345,32 +296,17 @@ impl ReadGroup {
                     .with_label_values(&[media_type])
                     .inc_by(partial_overlap_bytes as u64);
             }
-            #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
-            _permit.backend_begin();
             let _in_flight = ReadGauge::new(
                 &metrics
                     .read_scheduler_in_flight
                     .with_label_values(&[media_type]),
             );
-            tracing::debug!(target: "state_store_read_batch",?group_id, request_ids = ?trace_members, start = span.mergeable().map(|r| r.start), end = span.mergeable().map(|r| r.end), "read scheduler group dispatch");
-            tracing::debug!(target: "object_store_read_scheduler", ?group_id,
-                request_ids = ?trace_members, start = span.mergeable().map(|r| r.start), end = span.mergeable().map(|r| r.end),
-                "scheduler physical read started");
-            let result = {
-                let _timer = metrics
-                    .read_scheduler_physical_duration
-                    .with_label_values(&[media_type, "group"])
-                    .start_timer();
-                read(path, span.clone()).await
-            };
-            tracing::debug!(target: "object_store_read_scheduler", ?group_id,
-                ok = result.is_ok(), "scheduler physical read completed");
-            tracing::debug!(target: "state_store_read_batch",
-                ?group_id,
-                ok = result.is_ok(),
-                "read scheduler group completed"
-            );
-            result
+
+            let _timer = metrics
+                .read_scheduler_physical_duration
+                .with_label_values(&[media_type, "group"])
+                .start_timer();
+            read(path, span.clone()).await
         };
         let initial_members = self.requests.len();
         let result = if let Some(flight) = flight {
@@ -406,7 +342,7 @@ impl ReadGroup {
                 .read_scheduler_events
                 .with_label_values(&[media_type, "group_cancelled"])
                 .inc();
-            tracing::debug!(target: "state_store_read_batch",?group_id, "read scheduler group cancelled");
+
             return;
         };
         let result = result.and_then(|bytes| {
@@ -469,26 +405,30 @@ impl ReadGroup {
             join_all(self.requests.into_iter().map(|mut request| async move {
                 let path = request.path.clone();
                 let range = request.range.clone();
-                let trace_id = request.trace_id;
                 let future = async {
                     // The merged read released its permit before fallback. Each child
                     // shares the same physical budget and can be cancelled while waiting.
                     let _permit = {
-                        let _timer = metrics.read_scheduler_physical_duration
-                            .with_label_values(&[media_type, "fallback_wait"]).start_timer();
-                        physical_slots.acquire().await.expect("scheduler physical semaphore is never closed")
+                        let _timer = metrics
+                            .read_scheduler_physical_duration
+                            .with_label_values(&[media_type, "fallback_wait"])
+                            .start_timer();
+                        physical_slots
+                            .acquire()
+                            .await
+                            .expect("scheduler physical semaphore is never closed")
                     };
-                    let _in_flight = ReadGauge::new(&metrics.read_scheduler_in_flight.with_label_values(&[media_type]));
-                    tracing::debug!(target: "state_store_read_batch",?group_id, request_id = ?trace_id,
-                        "read scheduler range fallback dispatch");
-                    let result = {
-                        let _timer = metrics.read_scheduler_physical_duration
-                            .with_label_values(&[media_type, "fallback"]).start_timer();
-                        read(path, range).await
-                    };
-                    tracing::debug!(target: "state_store_read_batch",?group_id, request_id = ?trace_id, ok = result.is_ok(),
-                        "read scheduler range fallback completed");
-                    result
+                    let _in_flight = ReadGauge::new(
+                        &metrics
+                            .read_scheduler_in_flight
+                            .with_label_values(&[media_type]),
+                    );
+
+                    let _timer = metrics
+                        .read_scheduler_physical_duration
+                        .with_label_values(&[media_type, "fallback"])
+                        .start_timer();
+                    read(path, range).await
                 };
                 if let Some(result) =
                     read_while_wanted(std::slice::from_mut(&mut request), future).await
