@@ -46,8 +46,6 @@ pub struct HummockStateStoreMetrics {
     pub(crate) block_cache_pending: IntCounter,
     pub(crate) block_cache_outer_fetch: IntCounter,
     pub block_cache_read_events: IntCounterVec,
-    pub cold_range_buffered_overlap_reads: IntCounterVec,
-    pub cold_range_buffered_overlap_bytes: IntCounterVec,
     pub cold_range_prefetch_window_runs: Histogram,
     pub cold_range_prefetch_read_bytes: Histogram,
     pub cold_range_prefetch_gap_bytes: Histogram,
@@ -129,16 +127,6 @@ pub fn global_hummock_state_store_metrics(metric_level: MetricLevel) -> HummockS
 impl HummockStateStoreMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 10ms ~ max 2.7h
-        let cold_range_buffered_overlap_reads = register_int_counter_vec_with_registry!(
-            "state_store_cold_range_buffered_overlap_reads",
-            "External block-read fallbacks whose bytes are already returned but not yet decoded/published by a ColdRanges window; counted once per fallback, not physical GETs",
-            &["cache_policy"], registry
-        ).unwrap();
-        let cold_range_buffered_overlap_bytes = register_int_counter_vec_with_registry!(
-            "state_store_cold_range_buffered_overlap_bytes",
-            "Compressed block bytes of cold_range_buffered_overlap_reads; not physical duplicate GET bytes",
-            &["cache_policy"], registry
-        ).unwrap();
         let cold_range_prefetch_window_runs = register_histogram_with_registry!(
             "state_store_cold_range_prefetch_window_runs",
             "Cold segments registered per window, including shared singleton fetches and zero for fully cached windows; not physical GETs",
@@ -717,8 +705,6 @@ impl HummockStateStoreMetrics {
             block_cache_pending,
             block_cache_outer_fetch,
 
-            cold_range_buffered_overlap_reads,
-            cold_range_buffered_overlap_bytes,
             cold_range_prefetch_window_runs,
             cold_range_prefetch_read_bytes,
             cold_range_prefetch_gap_bytes,

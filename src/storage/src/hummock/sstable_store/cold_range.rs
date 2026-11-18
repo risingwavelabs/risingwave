@@ -30,12 +30,7 @@ enum Part {
     Read(Range<usize>, PendingRead),
 }
 
-struct ReadOutput {
-    data: Bytes,
-    observation: Option<BufferedRangeGuard>,
-}
-
-struct PendingRead(tokio::task::JoinHandle<ObjectResult<ReadOutput>>);
+struct PendingRead(tokio::task::JoinHandle<ObjectResult<Bytes>>);
 
 impl Drop for PendingRead {
     fn drop(&mut self) {
@@ -49,7 +44,6 @@ struct BufferedRun {
     data: Bytes,
     blocks: Range<usize>,
     offset: usize,
-    observation: Option<BufferedRangeGuard>,
 }
 
 pub(crate) struct ColdRangePrefetch {
@@ -68,15 +62,8 @@ impl ColdRangePrefetch {
         blocks: &[PlannedBlock],
         planning_capacity: usize,
         policy: CachePolicy,
-        observe_buffered_overlap: bool,
     ) -> Option<usize> {
-        let overhead = size_of::<Part>()
-            .checked_add(size_of::<SstableBlockIndex>())?
-            .checked_add(if observe_buffered_overlap {
-                BufferedRangeGuard::estimated_overhead()
-            } else {
-                0
-            })?;
+        let overhead = size_of::<Part>() + size_of::<SstableBlockIndex>();
         let mut bytes = size_of::<Self>()
             .checked_add(size_of::<MemoryUsageTracker>())?
             .checked_add(2 * size_of::<usize>())? // Arc reference counts.
@@ -112,13 +99,7 @@ impl ColdRangePrefetch {
     #[cfg(test)]
     fn reservation_bytes(metas: &[BlockMeta]) -> Option<usize> {
         let blocks: Vec<_> = metas.iter().map(|_| PlannedBlock::Cold).collect();
-        Self::planned_reservation_bytes(
-            metas,
-            &blocks,
-            blocks.capacity(),
-            CachePolicy::default(),
-            false,
-        )
+        Self::planned_reservation_bytes(metas, &blocks, blocks.capacity(), CachePolicy::default())
     }
 
     pub(crate) async fn next(
@@ -170,19 +151,19 @@ impl ColdRangePrefetch {
                 let result = (&mut read.0)
                     .await
                     .map_err(|error| HummockError::other(format!("cold-range read task: {error}")))?
-                    .and_then(|output| {
+                    .and_then(|data| {
                         let expected = sst.meta.block_metas[range.clone()]
                             .iter()
                             .map(|meta| meta.len as usize)
                             .sum::<usize>();
-                        if output.data.len() != expected {
+                        if data.len() != expected {
                             return Err(ObjectError::read_length_mismatch(
                                 "unexpected cold-range read length",
                             ));
                         }
-                        Ok(output)
+                        Ok(data)
                     });
-                let output = match result {
+                let data = match result {
                     Err(error) if range.len() > 1 && error.is_read_range_error() => {
                         // A speculative neighbor can extend past EOF while the head is valid.
                         // Discard the window so the iterator retries the current block alone.
@@ -192,10 +173,9 @@ impl ColdRangePrefetch {
                     other => other?,
                 };
                 self.buffered = Some(BufferedRun {
-                    data: output.data,
+                    data,
                     blocks: range,
                     offset: 0,
-                    observation: output.observation,
                 });
                 self.decode_next(store, sst, policy).map(Some)
             }
@@ -236,9 +216,6 @@ impl ColdRangePrefetch {
         } else {
             BlockHolder::from_owned_block(Box::new(block))
         };
-        if let Some(observation) = &run.observation {
-            observation.consumed_to(meta.offset as usize + meta.len as usize);
-        }
         run.offset = end;
         run.blocks.start += 1;
         if run.blocks.is_empty() {
@@ -337,7 +314,6 @@ impl SstableStore {
                 &plan,
                 plan.capacity(),
                 policy,
-                self.scan_prefetch.observe_buffered_overlap,
             )
             .and_then(|bytes| {
                 MemoryUsageTracker::try_new(
@@ -451,17 +427,9 @@ impl SstableStore {
             .cold_range_prefetch_read_bytes
             .observe(range.len() as f64);
         // Spawn while constructing the window, before awaiting any read or consuming any row.
-        let observations = self.buffered_overlap_index();
-        let sst_id = sst.id;
         let task = tokio::spawn(async move {
             let _tracker = tracker;
-            let data = object.read(&path, range.clone()).await?;
-            // Register on IO completion, including completed tasks not yet consumed.
-            // Invalid short responses are not reusable buffered data.
-            let observation = observations
-                .filter(|_| data.len() == range.len())
-                .map(|index| index.register(sst_id, range));
-            Ok(ReadOutput { data, observation })
+            object.read(&path, range).await
         });
         window
             .parts

@@ -55,9 +55,7 @@ use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, Recen
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 mod cold_range;
-mod cold_range_observation;
 pub(crate) use cold_range::ColdRangePrefetch;
-use cold_range_observation::{BufferedRangeGuard, BufferedRanges};
 
 macro_rules! impl_vector_index_meta_file {
     ($($type_name:ident),+) => {
@@ -267,7 +265,6 @@ pub struct SstableStore {
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     prefetch_buffer_usage: Arc<AtomicUsize>,
-    buffered_cold_ranges: Arc<BufferedRanges>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
     pub(crate) scan_prefetch: risingwave_common::config::storage::ScanPrefetchConfig,
@@ -306,7 +303,6 @@ impl SstableStore {
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
-            buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
             scan_prefetch: config.scan_prefetch,
@@ -358,7 +354,6 @@ impl SstableStore {
             store,
 
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
-            buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             scan_prefetch: Default::default(),
@@ -428,35 +423,12 @@ impl SstableStore {
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         // future: fetch block if hybrid cache miss
-        let fetch_range = range.clone();
         let fetch_block = || {
             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
-            let buffered_ranges = self.buffered_overlap_index();
-            let read_metrics = self.read_metrics.clone();
             async move {
                 outer_fetch.inc();
-                // Only a polled external fallback counts: cache hits and Foyer followers
-                // never reach this point. Scheduler reuse can still avoid a physical GET.
-                if buffered_ranges
-                    .as_ref()
-                    .is_some_and(|index| index.contains(object_id, &fetch_range))
-                {
-                    let policy = match policy {
-                        CachePolicy::Fill(_) => "fill",
-                        CachePolicy::NotFill => "not_fill",
-                        CachePolicy::Disable => "disable",
-                    };
-                    read_metrics
-                        .cold_range_buffered_overlap_reads
-                        .with_label_values(&[policy])
-                        .inc();
-                    read_metrics
-                        .cold_range_buffered_overlap_bytes
-                        .with_label_values(&[policy])
-                        .inc_by(fetch_range.len() as u64);
-                }
                 let block_data = match store
-                    .read(&data_path, fetch_range.clone())
+                    .read(&data_path, range.clone())
                     .instrument_await("get_block_response".verbose())
                     .await
                 {
@@ -464,7 +436,7 @@ impl SstableStore {
                     Err(e) => {
                         tracing::error!(
                             "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                            fetch_range,
+                            range,
                             object_id,
                             file_size
                         );
@@ -732,12 +704,6 @@ impl SstableStore {
         entry
     }
 
-    fn buffered_overlap_index(&self) -> Option<Arc<BufferedRanges>> {
-        self.scan_prefetch
-            .observe_buffered_overlap
-            .then(|| self.buffered_cold_ranges.clone())
-    }
-
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
@@ -850,7 +816,6 @@ mod tests {
             InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
         };
 
-        use super::SstableBlockIndex;
         use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
         use crate::monitor::ObjectStoreMetrics;
 
@@ -864,21 +829,22 @@ mod tests {
             Arc::new(config),
         ))
         .with_read_coalescing();
-        let mut store = mock_sstable_store_with_object_store(Arc::new(object)).await;
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .scan_prefetch
-            .observe_buffered_overlap = true;
+        let store = mock_sstable_store_with_object_store(Arc::new(object)).await;
         let (sst, info) =
             gen_default_test_sstable(default_builder_opt_for_test(), SST_ID, store.clone()).await;
         let key = |idx: usize| FullKey::decode(&sst.meta.block_metas[idx].smallest_key);
-        let wait_for_depth = async |depth: f64| {
+        let wait_for_gauges = async |name: &str, value: f64| {
             loop {
                 if registry
                     .gather()
                     .iter()
-                    .find(|family| family.name() == "object_store_read_scheduler_waiting")
-                    .is_some_and(|family| family.get_metric()[0].get_gauge().value() == depth)
+                    .find(|family| family.name() == name)
+                    .is_some_and(|family| {
+                        family
+                            .get_metric()
+                            .iter()
+                            .all(|metric| metric.get_gauge().value() == value)
+                    })
                 {
                     break;
                 }
@@ -906,30 +872,16 @@ mod tests {
                 // Each iterator gets one poll to start its Foyer fetch or cold-range task.
                 let mut parked = Box::pin(a.seek(key(first)));
                 assert!(futures::poll!(&mut parked).is_pending());
-                wait_for_depth(1.0).await;
+                wait_for_gauges("object_store_read_scheduler_waiting", 1.0).await;
                 let mut next = Box::pin(b.seek(key(second)));
                 assert!(futures::poll!(&mut next).is_pending());
-                wait_for_depth(2.0).await;
+                wait_for_gauges("object_store_read_scheduler_waiting", 2.0).await;
 
                 backend.set_read_delay_for_test(Duration::ZERO);
                 drop(busy);
                 next.await.unwrap();
-                // Observe completion before polling A again. ColdRanges decodes on consumption.
-                let block = SstableBlockIndex {
-                    sst_id: sst.id,
-                    block_idx: first as u64,
-                };
-                let (bytes, _) = sst.calculate_block_info(first);
-                let finished = || {
-                    if prefetch == ReadPrefetchMode::ColdRanges {
-                        store.buffered_cold_ranges.contains(sst.id, &bytes)
-                    } else {
-                        store.block_cache.memory().contains(&block)
-                    }
-                };
-                while !finished() {
-                    tokio::task::yield_now().await;
-                }
+                // Both object reads must finish while A is still parked.
+                wait_for_gauges("object_store_read_in_flight", 0.0).await;
                 parked.await.unwrap();
                 assert_eq!(a.key(), key(first));
                 assert_eq!(b.key(), key(second));
