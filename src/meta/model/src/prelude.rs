@@ -16,6 +16,7 @@ pub use Source as SourceModel;
 pub use Table as TableModel;
 pub use risingwave_pb::id::*;
 
+pub use super::bounded_job::Entity as BoundedJob;
 pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;

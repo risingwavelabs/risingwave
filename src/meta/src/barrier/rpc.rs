@@ -28,7 +28,7 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::retry::exponential_backoff;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -634,6 +634,7 @@ impl PartialGraphRecoverer<'_> {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
+        active_bounded_loads: &mut HashMap<JobId, SourceId>,
         batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
         iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
     ) -> MetaResult<DatabaseCheckpointControl> {
@@ -1095,6 +1096,7 @@ impl PartialGraphRecoverer<'_> {
                 !cdc_table_snapshot_splits.contains_key(&job_id),
                 "snapshot backfill job {job_id} should not have cdc backfill"
             );
+
             if is_paused {
                 bail!("should not pause when having snapshot backfill job {job_id}");
             }
@@ -1336,7 +1338,13 @@ impl PartialGraphRecoverer<'_> {
 
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
-        let database_info = InflightDatabaseInfo::recover(
+        let bounded_loads = active_bounded_loads
+            .extract_if(|job_id, _| {
+                database_jobs.contains_key(job_id)
+                    || independent_checkpoint_job_controls.contains_key(job_id)
+            })
+            .collect_vec();
+        let mut database_info = InflightDatabaseInfo::recover(
             database_id,
             database_jobs.into_values(),
             self.control_stream_manager()
@@ -1344,6 +1352,9 @@ impl PartialGraphRecoverer<'_> {
                 .shared_actor_infos()
                 .clone(),
         );
+        for (job_id, source_id) in bounded_loads {
+            database_info.register_bounded_load(job_id, source_id);
+        }
         let database_state = BarrierWorkerState::recovery(new_epoch, is_paused);
         Ok(DatabaseCheckpointControl::recovery(
             database_id,

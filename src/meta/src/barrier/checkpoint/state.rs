@@ -533,6 +533,13 @@ impl DatabaseCheckpointControl {
         // upstream barrier into the same partial graph a second time.
         let mut skip_forward_to_iceberg_job = None;
 
+        if let Some(Command::CreateStreamingJob { info, .. }) = &command
+            && let Some(source_id) = info.bounded_load_source
+        {
+            self.database_info
+                .register_bounded_load(info.streaming_job.id(), source_id);
+        }
+
         // Each variant handles its own pre-apply, edge building, mutation generation,
         // collect base info, and post-apply. The match produces values consumed by the
         // common snapshot-backfill-merging code that follows.
@@ -1075,19 +1082,25 @@ impl DatabaseCheckpointControl {
                 } else {
                     None
                 };
+                let new_fragment_infos: Vec<_> = info
+                    .stream_job_fragments
+                    .new_fragment_info(
+                        &actors.stream_actors,
+                        &actors.actor_location,
+                        &resolved_split_assignment,
+                    )
+                    .collect();
+
                 self.database_info
                     .pre_apply_new_job(info.streaming_job.id(), cdc_tracker);
-                self.database_info.pre_apply_new_fragments(
-                    info.stream_job_fragments
-                        .new_fragment_info(
-                            &actors.stream_actors,
-                            &actors.actor_location,
-                            &resolved_split_assignment,
-                        )
-                        .map(|(fragment_id, fragment_infos)| {
+
+                self.database_info
+                    .pre_apply_new_fragments(new_fragment_infos.into_iter().map(
+                        |(fragment_id, fragment_infos)| {
                             (fragment_id, info.streaming_job.id(), fragment_infos)
-                        }),
-                );
+                        },
+                    ));
+
                 if let CreateStreamingJobType::SinkIntoTable(ref ctx) = job_type {
                     let downstream_fragment_id = ctx.new_sink_downstream.downstream_fragment_id;
                     self.database_info.pre_apply_add_node_upstream(
@@ -1983,8 +1996,16 @@ impl DatabaseCheckpointControl {
                     Some(PbMutation::Update(mutation))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
+
                     if fragment_ids.is_empty() {
-                        None
+                        self.database_info.retain_bounded_loads(|job_id| {
+                            self.independent_checkpoint_job_controls
+                                .contains_key(&job_id)
+                        });
+
+                        self.database_info
+                            .take_pending_bounded_load_start()
+                            .map(Command::start_load_mutation)
                     } else {
                         Some(PbMutation::StartFragmentBackfill(
                             PbStartFragmentBackfillMutation { fragment_ids },
