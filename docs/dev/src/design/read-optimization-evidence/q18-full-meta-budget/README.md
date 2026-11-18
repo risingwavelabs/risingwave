@@ -91,3 +91,8 @@ gauges. The per-arm directories contain the effective TOML,
 intermediate SST rows, selected CN and Meta scrapes and the
 one-second RSS series. Both completed arms passed the oracle and
 cleaned up their RiseDev processes, containers and cold clones.
+
+The [downstream attribution](downstream-attribution.md) compares
+operator timers, effective SST candidates, and metadata reuse for
+the 27 seconds in the semi-join interval and the 12 seconds in the
+final aggregation interval.
