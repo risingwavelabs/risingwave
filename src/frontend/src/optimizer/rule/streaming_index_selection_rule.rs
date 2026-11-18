@@ -99,7 +99,7 @@ impl StreamingIndexSelectionRule {
 
     /// Expands an IN predicate into a `LogicalUnion` of `LogicalScan`s.
     ///
-    /// Each branch gets a single-value equality predicate (e.g., `a = 1`) plus residual
+    /// Each branch gets a single-value predicate (e.g., `a = 1` or `a IS NULL`) plus residual
     /// conditions. Only applies when all scan ranges are non-trivial.
     fn try_expand_in(logical_scan: &LogicalScan) -> Option<PlanRef> {
         let (scan_ranges, residual) = logical_scan
@@ -142,9 +142,16 @@ impl StreamingIndexSelectionRule {
                         let table_col_idx = pk[i].column_index;
                         let col_type = table_cols[table_col_idx].data_type().clone();
                         let input_ref = InputRef::new(table_col_idx, col_type.clone());
-                        let literal = Literal::new(datum.clone(), col_type);
-                        FunctionCall::new(ExprType::Equal, vec![input_ref.into(), literal.into()])
-                            .map(ExprImpl::from)
+                        let branch = if datum.is_some() {
+                            let literal = Literal::new(datum.clone(), col_type);
+                            FunctionCall::new(
+                                ExprType::Equal,
+                                vec![input_ref.into(), literal.into()],
+                            )
+                        } else {
+                            FunctionCall::new(ExprType::IsNull, vec![input_ref.into()])
+                        };
+                        branch.map(ExprImpl::from)
                     })
                     .collect::<Result<_, _>>()
                     .ok()?;

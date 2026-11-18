@@ -183,62 +183,26 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                 self.asof_desc.clone(),
             );
 
-            if let Some(cond) = self.condition.as_ref()
-                && !params.is_asof_join()
-            {
-                let stream = match self.join_type {
-                    JoinType::Inner => {
-                        HashJoinExecutor::do_inner_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftOuter => {
-                        HashJoinExecutor::do_left_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftSemi => {
-                        HashJoinExecutor::do_left_semi_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftAnti => {
-                        HashJoinExecutor::do_left_anti_join_with_non_equi_condition(params, cond)
-                    }
+            assert!(
+                !matches!(
+                    self.join_type,
                     JoinType::RightOuter
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti
-                    | JoinType::FullOuter
-                    | JoinType::AsOfInner
-                    | JoinType::AsOfLeftOuter => unimplemented!(),
-                };
-                // For non-equi join, we need an output chunk builder to align the output chunks.
-                let mut output_chunk_builder =
-                    DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-                #[for_await]
-                for chunk in stream {
-                    for output_chunk in
-                        output_chunk_builder.append_chunk(chunk?.project(&self.output_indices))
-                    {
-                        yield output_chunk
-                    }
-                }
-                if let Some(output_chunk) = output_chunk_builder.consume_all() {
-                    yield output_chunk
-                }
-            } else {
-                let stream = match self.join_type {
-                    JoinType::Inner | JoinType::AsOfInner => {
-                        HashJoinExecutor::do_inner_join(params)
-                    }
-                    JoinType::LeftOuter | JoinType::AsOfLeftOuter => {
-                        HashJoinExecutor::do_left_outer_join(params)
-                    }
-                    JoinType::LeftSemi => HashJoinExecutor::do_left_semi_anti_join::<false>(params),
-                    JoinType::LeftAnti => HashJoinExecutor::do_left_semi_anti_join::<true>(params),
-                    JoinType::RightOuter
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
-                };
-                #[for_await]
-                for chunk in stream {
-                    yield chunk?.project(&self.output_indices)
-                }
+                        | JoinType::RightSemi
+                        | JoinType::RightAnti
+                        | JoinType::FullOuter
+                ),
+                "lookup join does not support {:?}",
+                self.join_type
+            );
+            #[for_await]
+            for chunk in HashJoinExecutor::probe_and_project(
+                params,
+                self.join_type,
+                self.condition.as_ref(),
+                &self.output_indices,
+                self.schema.data_types(),
+            ) {
+                yield chunk?
             }
         }
     }

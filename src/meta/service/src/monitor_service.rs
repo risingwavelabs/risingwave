@@ -13,17 +13,20 @@
 // limitations under the License.
 
 use risingwave_common::config::ServerConfig;
+use risingwave_common::util::tracing::log_filter;
 use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::await_tree::dump_cluster_await_tree;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
-use risingwave_pb::monitor_service::{self, StackTraceRequest, StackTraceResponse};
+use risingwave_pb::monitor_service::{
+    self, GetLogFilterRequest, LogFilterState, SetLogFilterRequest, StackTraceRequest,
+    StackTraceResponse,
+};
 use tonic::{Request, Response, Status};
 
 /// The [`MonitorService`] implementation for meta node.
 ///
-/// Currently, only [`MonitorService::stack_trace`] is implemented, which returns the await tree of
-/// all nodes in the cluster.
+/// Provides cluster await trees, profiling, and process-wide runtime log filters.
 pub struct MonitorServiceImpl {
     pub metadata_manager: MetadataManager,
     pub await_tree_reg: await_tree::Registry,
@@ -46,6 +49,20 @@ impl MonitorServiceImpl {
 
 #[tonic::async_trait]
 impl MonitorService for MonitorServiceImpl {
+    async fn set_log_filter(
+        &self,
+        request: Request<SetLogFilterRequest>,
+    ) -> Result<Response<LogFilterState>, Status> {
+        log_filter::set_log_filter_rpc(request)
+    }
+
+    async fn get_log_filter(
+        &self,
+        request: Request<GetLogFilterRequest>,
+    ) -> Result<Response<LogFilterState>, Status> {
+        log_filter::get_log_filter_rpc(request)
+    }
+
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,

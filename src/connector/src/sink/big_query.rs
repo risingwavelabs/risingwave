@@ -21,6 +21,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
+use either::Either;
 use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
@@ -264,6 +265,14 @@ pub struct BigQueryConfig {
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    /// Write `_CHANGE_SEQUENCE_NUMBER` on upsert rows, so that `BigQuery` applies the changes of
+    /// each key in the order they are sent. Once a table has rows written with it, turning it off
+    /// makes `BigQuery` ignore later changes to those rows.
+    #[serde(rename = "bigquery.change_sequence_number", default)]
+    #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
+    pub change_sequence_number: bool,
 
     #[serde(flatten)]
     pub unknown_fields: std::collections::HashMap<String, String>,
@@ -538,6 +547,11 @@ impl Sink for BigQuerySink {
 
     crate::impl_validate_sink_unknown_fields!();
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        BigQueryConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
@@ -696,13 +710,15 @@ impl BigQuerySinkWriter {
                 ..Default::default()
             };
             descriptor_proto.field.push(field);
-            let field = FieldDescriptorProto {
-                name: Some(CHANGE_SEQUENCE_NUMBER.to_owned()),
-                number: Some((schema.len() + 2) as i32),
-                r#type: Some(field_descriptor_proto::Type::String.into()),
-                ..Default::default()
-            };
-            descriptor_proto.field.push(field);
+            if config.change_sequence_number {
+                let field = FieldDescriptorProto {
+                    name: Some(CHANGE_SEQUENCE_NUMBER.to_owned()),
+                    number: Some((schema.len() + 2) as i32),
+                    r#type: Some(field_descriptor_proto::Type::String.into()),
+                    ..Default::default()
+                };
+                descriptor_proto.field.push(field);
+            }
         }
 
         let descriptor_pool = build_protobuf_descriptor_pool(&descriptor_proto)?;
@@ -724,7 +740,7 @@ impl BigQuerySinkWriter {
         } else {
             None
         };
-        let change_sequence_number_field = if !is_append_only {
+        let change_sequence_number_field = if !is_append_only && config.change_sequence_number {
             let field = message_descriptor
                 .get_field_by_name(CHANGE_SEQUENCE_NUMBER)
                 .ok_or_else(|| {
@@ -772,7 +788,11 @@ impl BigQuerySinkWriter {
     }
 
     fn upsert(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
-        let sequence_numbers = CHANGE_SEQUENCE_CLOCK.reserve(chunk.cardinality());
+        let sequence_numbers = if self.change_sequence_number_field.is_some() {
+            Either::Left(CHANGE_SEQUENCE_CLOCK.reserve(chunk.cardinality()).map(Some))
+        } else {
+            Either::Right(std::iter::repeat_n(None, chunk.cardinality()))
+        };
         let mut serialized_rows: Vec<Vec<u8>> = Vec::with_capacity(chunk.capacity());
         for ((op, row), sequence_number) in chunk.rows().zip_eq_debug(sequence_numbers) {
             if op == Op::UpdateDelete {
@@ -803,13 +823,15 @@ impl BigQuerySinkWriter {
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
             };
-            pb_row
-                .message
-                .try_set_field(
-                    self.change_sequence_number_field.as_ref().unwrap(),
-                    prost_reflect::Value::String(sequence_number),
-                )
-                .map_err(|e| SinkError::BigQuery(e.into()))?;
+            if let Some(sequence_number) = sequence_number {
+                pb_row
+                    .message
+                    .try_set_field(
+                        self.change_sequence_number_field.as_ref().unwrap(),
+                        prost_reflect::Value::String(sequence_number),
+                    )
+                    .map_err(|e| SinkError::BigQuery(e.into()))?;
+            }
 
             serialized_rows.push(pb_row.ser_to()?)
         }
@@ -825,23 +847,22 @@ impl BigQuerySinkWriter {
         if serialized_rows.is_empty() {
             return Ok(0);
         }
-        let mut result = Vec::new();
-        let mut result_inner = Vec::new();
-        let mut size_count = 0;
-        for i in serialized_rows {
-            size_count += i.len();
-            if size_count > MAX_ROW_SIZE {
-                result.push(result_inner);
-                result_inner = Vec::new();
-                size_count = i.len();
+        let mut batches = Vec::new();
+        let mut batch = Vec::new();
+        let mut batch_size = 0;
+        for row in serialized_rows {
+            if !batch.is_empty() && batch_size + row.len() > MAX_ROW_SIZE {
+                batches.push(std::mem::take(&mut batch));
+                batch_size = 0;
             }
-            result_inner.push(i);
+            batch_size += row.len();
+            batch.push(row);
         }
-        if !result_inner.is_empty() {
-            result.push(result_inner);
+        if !batch.is_empty() {
+            batches.push(batch);
         }
-        let len = result.len();
-        for serialized_rows in result {
+        let len = batches.len();
+        for serialized_rows in batches {
             let rows = AppendRowsRequestRows::ProtoRows(ProtoData {
                 writer_schema: Some(self.writer_pb_schema.clone()),
                 rows: Some(ProtoRows { serialized_rows }),
@@ -868,7 +889,7 @@ struct ChangeSequenceClock {
 impl ChangeSequenceClock {
     const fn new() -> Self {
         Self {
-            next: parking_lot::const_mutex((0, 0)),
+            next: Mutex::new((0, 0)),
         }
     }
 
@@ -1086,7 +1107,9 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Variant => {
-            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Variant")));
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Don't support Variant"
+            )));
         }
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
         DataType::Float32 | DataType::Int256 => {
@@ -1119,12 +1142,14 @@ mod test {
     use risingwave_common::types::{DataType, StructType};
     use tokio::sync::mpsc;
 
+    use crate::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
     use crate::connector_common::AwsAuthProps;
     use crate::sink::big_query::{
-        BigQueryCommon, BigQueryConfig, BigQuerySink, BigQuerySinkWriter, CHANGE_SEQUENCE_NUMBER,
-        CHANGE_TYPE, ChangeSequenceClock, StorageWriterClient, build_protobuf_descriptor_pool,
-        build_protobuf_schema,
+        BIGQUERY_SINK, BigQueryCommon, BigQueryConfig, BigQuerySink, BigQuerySinkWriter,
+        CHANGE_SEQUENCE_NUMBER, CHANGE_TYPE, ChangeSequenceClock, StorageWriterClient,
+        build_protobuf_descriptor_pool, build_protobuf_schema,
     };
+    use crate::sink::{SINK_TYPE_APPEND_ONLY, Sink, validate_sink_unknown_fields};
 
     #[tokio::test]
     async fn test_type_check() {
@@ -1240,6 +1265,7 @@ mod test {
                     msk_signer_timeout_sec: None,
                 },
                 r#type: "append-only".to_owned(),
+                change_sequence_number: false,
                 unknown_fields: Default::default(),
             },
             schema: Schema {
@@ -1262,21 +1288,53 @@ mod test {
         .unwrap();
     }
 
-    fn sink_config(sink_type: &str) -> BigQueryConfig {
-        BigQueryConfig::from_btreemap(BTreeMap::from(
-            [
-                ("bigquery.project", "project"),
-                ("bigquery.dataset", "dataset"),
-                ("bigquery.table", "table"),
-                ("type", sink_type),
-            ]
-            .map(|(k, v)| (k.to_owned(), v.to_owned())),
-        ))
-        .unwrap()
+    fn sink_properties(sink_type: &str, extra: &[(&str, &str)]) -> BTreeMap<String, String> {
+        [
+            ("bigquery.project", "project"),
+            ("bigquery.dataset", "dataset"),
+            ("bigquery.table", "table"),
+            ("type", sink_type),
+        ]
+        .iter()
+        .chain(extra)
+        .map(|&(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
+    }
+
+    fn sink_config(sink_type: &str, extra: &[(&str, &str)]) -> BigQueryConfig {
+        BigQueryConfig::from_btreemap(sink_properties(sink_type, extra)).unwrap()
+    }
+
+    #[test]
+    fn test_change_sequence_number_option() {
+        // `ALTER SINK` passes the merged properties and the altered ones.
+        let alter = |value: &str| {
+            let alter_props = BTreeMap::from([(
+                "bigquery.change_sequence_number".to_owned(),
+                value.to_owned(),
+            )]);
+            BigQuerySink::validate_alter_config_change(
+                &sink_properties("upsert", &[("bigquery.change_sequence_number", value)]),
+                &alter_props,
+            )
+        };
+        assert!(!sink_config("upsert", &[]).change_sequence_number);
+        for (value, expected) in [("true", true), ("false", false)] {
+            let config = sink_config("upsert", &[("bigquery.change_sequence_number", value)]);
+            assert_eq!(config.change_sequence_number, expected);
+            validate_sink_unknown_fields(&config).unwrap();
+            alter(value).unwrap();
+        }
+        alter("yes").unwrap_err();
+        check_sink_allow_alter_on_fly_fields(
+            BIGQUERY_SINK,
+            &["bigquery.change_sequence_number".to_owned()],
+        )
+        .unwrap();
     }
 
     /// Writes `chunks` in order and decodes the rows of the sent requests.
-    fn write_and_decode(sink_type: &str, chunks: Vec<StreamChunk>) -> Vec<DynamicMessage> {
+    fn write_and_decode(config: BigQueryConfig, chunks: Vec<StreamChunk>) -> Vec<DynamicMessage> {
         let schema = Schema {
             fields: vec![
                 Field::with_name(DataType::Int64, "id"),
@@ -1288,14 +1346,10 @@ mod test {
             environment: Environment::Emulator(String::new()),
             request_sender,
         };
-        let mut writer = BigQuerySinkWriter::with_client(
-            sink_config(sink_type),
-            schema,
-            vec![0],
-            sink_type == "append-only",
-            client,
-        )
-        .unwrap();
+        let is_append_only = config.r#type == SINK_TYPE_APPEND_ONLY;
+        let mut writer =
+            BigQuerySinkWriter::with_client(config, schema, vec![0], is_append_only, client)
+                .unwrap();
         for chunk in chunks {
             writer.write_chunk(chunk).unwrap();
         }
@@ -1320,6 +1374,53 @@ mod test {
             );
         }
         rows
+    }
+
+    #[test]
+    fn test_oversized_first_row_not_sent_as_empty_batch() {
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(DataType::Varchar, "v"),
+            ],
+        };
+        let (request_sender, mut request_rx) = mpsc::unbounded_channel();
+        let client = StorageWriterClient {
+            environment: Environment::Emulator(String::new()),
+            request_sender,
+        };
+        let mut writer = BigQuerySinkWriter::with_client(
+            sink_config("upsert", &[]),
+            schema,
+            vec![0],
+            false,
+            client,
+        )
+        .unwrap();
+
+        let big = "x".repeat(9 * 1024 * 1024);
+        let small = "x".repeat(4 * 1024 * 1024 + 512 * 1024);
+        let chunk = StreamChunk::from_pretty(&format!(
+            " I T
+            + 1 {big}
+            + 2 {small}
+            + 3 {small}"
+        ));
+        let batch_num = writer.write_chunk(chunk).unwrap();
+
+        let mut batch_row_counts = vec![];
+        while let Ok(request) = request_rx.try_recv() {
+            let Some(AppendRowsRequestRows::ProtoRows(ProtoData {
+                rows: Some(proto_rows),
+                ..
+            })) = request.rows
+            else {
+                panic!("expected proto rows");
+            };
+            batch_row_counts.push(proto_rows.serialized_rows.len());
+        }
+        assert_eq!(batch_num, 3);
+        assert_eq!(batch_row_counts, vec![1, 1, 1]);
     }
 
     #[test]
@@ -1356,7 +1457,10 @@ mod test {
                 .to_owned()
         };
 
-        let rows = write_and_decode("upsert", chunks());
+        let rows = write_and_decode(
+            sink_config("upsert", &[("bigquery.change_sequence_number", "true")]),
+            chunks(),
+        );
         let change_types: Vec<_> = rows.iter().map(|row| field(row, CHANGE_TYPE)).collect();
         assert_eq!(change_types, ["UPSERT", "UPSERT", "DELETE"]);
         let sequence_numbers: Vec<_> = rows
@@ -1375,7 +1479,21 @@ mod test {
             "{sequence_numbers:?}"
         );
 
-        let rows = write_and_decode("append-only", chunks());
+        // Off by default: upsert rows carry only the change type.
+        let rows = write_and_decode(sink_config("upsert", &[]), chunks());
+        let change_types: Vec<_> = rows.iter().map(|row| field(row, CHANGE_TYPE)).collect();
+        assert_eq!(change_types, ["UPSERT", "UPSERT", "DELETE"]);
+        assert!(
+            rows[0]
+                .descriptor()
+                .get_field_by_name(CHANGE_SEQUENCE_NUMBER)
+                .is_none()
+        );
+
+        let rows = write_and_decode(
+            sink_config("append-only", &[("bigquery.change_sequence_number", "true")]),
+            chunks(),
+        );
         for name in [CHANGE_TYPE, CHANGE_SEQUENCE_NUMBER] {
             assert!(rows[0].descriptor().get_field_by_name(name).is_none());
         }

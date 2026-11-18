@@ -739,3 +739,30 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+
+- name: exists over correlated scalar agg keeps the empty-group row
+  sql: |
+    create table a(x int);
+    create table b(x int, y int);
+    select * from a where exists (select max(y) from b where b.x = a.x);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+
+- name: not exists over correlated scalar agg keeps the empty-group row
+  sql: |
+    create table a(x int);
+    create table b(x int, y int);
+    select * from a where not exists (select sum(y) + 1 from b where b.x = a.x);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+
+- name: in over correlated scalar agg still decorrelates to group by
+  sql: |
+    create table a(x int);
+    create table b(x int, y int);
+    select * from a where x in (select max(y) from b where b.x = a.x);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

@@ -72,6 +72,7 @@ risedev ci-start ci-1cn-1fe-with-recovery
 echo "--- Run legacy CDC source tests"
 source ci/scripts/e2e-source-mysql-offline-schema-change.sh
 source ci/scripts/e2e-source-mysql-cdc-reset.sh
+source ci/scripts/e2e-source-mariadb-cdc-reset.sh
 
 echo "--- Restart RisingWave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \

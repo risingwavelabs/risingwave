@@ -139,11 +139,7 @@ public class DbzCdcEngineRunnerTest {
         boolean failStop;
 
         WaitingEngine(DbzConnectorConfig config) {
-            super(
-                    config.getSourceType(),
-                    config.getSourceId(),
-                    config.getResolvedDebeziumProps(),
-                    (success, message, error) -> {});
+            super(config, (success, message, error) -> {});
         }
 
         @Override

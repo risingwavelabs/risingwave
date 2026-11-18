@@ -114,8 +114,11 @@ pub(crate) async fn new_hummock_java_binding_iter(
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
         }));
-        let reader =
-            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
+        let reader = HummockVersionReader::new(
+            sstable_store,
+            Arc::new(HummockStateStoreMetrics::unused()),
+            1,
+        );
 
         let table = read_plan.table_catalog.unwrap();
         let versioned = table.version.is_some();

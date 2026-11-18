@@ -18,7 +18,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, SourceRefreshMode,
+    ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, SourceIngestMode,
     StreamSourceInfo, TableId, WatermarkDescArray,
 };
 
@@ -41,7 +41,9 @@ pub struct Model {
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
     pub rate_limit: Option<i32>,
-    pub refresh_mode: Option<SourceRefreshMode>,
+    #[sea_orm(column_name = "refresh_mode")]
+    #[serde(rename = "refresh_mode")]
+    pub ingest_mode: Option<SourceIngestMode>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -104,7 +106,7 @@ impl From<PbSource> for ActiveModel {
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
             rate_limit: Set(source.rate_limit.map(|id| id as _)),
-            refresh_mode: Set(source.refresh_mode.as_ref().map(SourceRefreshMode::from)),
+            ingest_mode: Set(source.ingest_mode.as_ref().map(SourceIngestMode::from)),
         }
     }
 }

@@ -45,9 +45,7 @@ public class DbzCdcEngineRunner {
             var sourceId = config.getSourceId();
             var engine =
                     new DbzCdcEngine(
-                            config.getSourceType(),
-                            config.getSourceId(),
-                            config.getResolvedDebeziumProps(),
+                            config,
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -79,9 +77,7 @@ public class DbzCdcEngineRunner {
             final DbzCdcEngineRunner finalRunner = runner;
             var engine =
                     new DbzCdcEngine(
-                            config.getSourceType(),
-                            config.getSourceId(),
-                            config.getResolvedDebeziumProps(),
+                            config,
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(

@@ -28,6 +28,32 @@ use crate::deserialize_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
+const DEFAULT_KEEP_ALIVE_SECS: u16 = 10;
+/// `rumqttc` panics if the keep alive interval is less than 5 seconds.
+const MIN_KEEP_ALIVE_SECS: u16 = 5;
+
+/// Parses `keep_alive_secs` and rejects values below [`MIN_KEEP_ALIVE_SECS`], so that an invalid
+/// value fails when the source or sink is created instead of panicking in `rumqttc` on connect.
+fn deserialize_keep_alive_secs<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    let secs: u16 = s.trim().parse().map_err(|_| {
+        serde::de::Error::invalid_value(
+            serde::de::Unexpected::Str(&s),
+            &"an integer between 5 and 65535",
+        )
+    })?;
+    if secs < MIN_KEEP_ALIVE_SECS {
+        return Err(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Unsigned(secs.into()),
+            &"an integer between 5 and 65535",
+        ));
+    }
+    Ok(Some(secs))
+}
+
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
 #[expect(clippy::enum_variant_names)]
@@ -62,14 +88,40 @@ pub struct MqttCommon {
     /// The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
     pub client_prefix: Option<String>,
 
-    /// `clean_start = true` removes all the state from queues & instructs the broker
-    /// to clean all the client state when client disconnects.
+    /// Whether to start a new session when connecting (MQTT v5 Clean Start). Defaults to `false`.
     ///
-    /// When set `false`, broker will hold the client state and performs pending
-    /// operations on the client when reconnection with same `client_id`
-    /// happens. Local queue state is also held to retransmit packets after reconnection.
+    /// `clean_start = true` makes the broker discard any existing session for the client id when
+    /// connecting. `clean_start = false` resumes the session the broker still holds for the same
+    /// client id, if any, including its subscriptions and any messages queued for it.
+    ///
+    /// This flag only applies when connecting. How long the broker keeps a session after a
+    /// disconnect is controlled by `session_expiry_interval`. If that is not set, the session ends
+    /// when the connection closes, so `clean_start = false` alone does not resume anything after a
+    /// reconnect. Conversely, `clean_start = true` with `session_expiry_interval = 60` still keeps
+    /// the new session for 60 seconds after a disconnect.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub clean_start: bool,
+
+    /// The keep alive interval in seconds. The client sends a ping to the broker if no other
+    /// packet is exchanged within this interval, and the broker may close the connection after
+    /// 1.5 times this interval without receiving any packet from the client. Must be between 5
+    /// and 65535. Defaults to 10.
+    ///
+    /// Consider a larger value if the source can be backpressured for a long time, since no
+    /// ping is sent while the source is not consuming messages.
+    #[serde(default, deserialize_with = "deserialize_keep_alive_secs")]
+    pub keep_alive_secs: Option<u16>,
+
+    /// The session expiry interval in seconds sent to the broker on connect (MQTT v5).
+    /// If not set, the broker treats it as 0 and discards the session as soon as the connection
+    /// is closed.
+    ///
+    /// Set it together with `clean_start = false` to let the broker keep the session, including
+    /// subscriptions and queued messages, across reconnects with the same client id. Note that
+    /// the client id contains the actor id, so a session is not resumed after the job is
+    /// rescheduled.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub session_expiry_interval: Option<u32>,
 
     /// The maximum number of inflight messages. Defaults to 100
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -123,12 +175,17 @@ impl MqttCommon {
         tracing::debug!("connecting mqtt using url: {}", url.as_str());
 
         let mut options = MqttOptions::try_from(url)?;
-        options.set_keep_alive(std::time::Duration::from_secs(10));
+        options.set_keep_alive(std::time::Duration::from_secs(
+            self.keep_alive_secs
+                .unwrap_or(DEFAULT_KEEP_ALIVE_SECS)
+                .into(),
+        ));
 
         options.set_clean_start(self.clean_start);
 
         let mut connect_properties = ConnectProperties::new();
         connect_properties.max_packet_size = self.max_packet_size;
+        connect_properties.session_expiry_interval = self.session_expiry_interval;
         options.set_connect_properties(connect_properties);
 
         if ssl {
@@ -188,5 +245,78 @@ impl MqttCommon {
         };
 
         Ok(tls_config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use super::*;
+
+    fn parse(extra: &[(&str, &str)]) -> Result<MqttCommon, serde_json::Error> {
+        let mut props: BTreeMap<String, String> = BTreeMap::new();
+        props.insert("url".to_owned(), "tcp://localhost:1883".to_owned());
+        for (k, v) in extra {
+            props.insert((*k).to_owned(), (*v).to_owned());
+        }
+        serde_json::from_value(serde_json::to_value(props).unwrap())
+    }
+
+    #[test]
+    fn test_keep_alive_and_session_expiry_default() {
+        let common = parse(&[]).unwrap();
+        assert_eq!(common.keep_alive_secs, None);
+        assert_eq!(common.session_expiry_interval, None);
+
+        let (_client, eventloop) = common.build_client(1.into(), 2).unwrap();
+        assert_eq!(eventloop.options.keep_alive(), Duration::from_secs(10));
+        assert_eq!(eventloop.options.session_expiry_interval(), None);
+    }
+
+    #[test]
+    fn test_keep_alive_and_session_expiry_configured() {
+        let common = parse(&[
+            ("keep_alive_secs", "300"),
+            ("session_expiry_interval", "3600"),
+            ("clean_start", "false"),
+            ("max_packet_size", "1024"),
+        ])
+        .unwrap();
+        assert_eq!(common.keep_alive_secs, Some(300));
+        assert_eq!(common.session_expiry_interval, Some(3600));
+
+        let (_client, eventloop) = common.build_client(1.into(), 2).unwrap();
+        assert_eq!(eventloop.options.keep_alive(), Duration::from_secs(300));
+        assert_eq!(eventloop.options.session_expiry_interval(), Some(3600));
+        assert!(!eventloop.options.clean_start());
+        assert_eq!(
+            eventloop
+                .options
+                .connect_properties()
+                .and_then(|p| p.max_packet_size),
+            Some(1024)
+        );
+    }
+
+    #[test]
+    fn test_invalid_keep_alive_secs() {
+        for v in ["0", "4", "65536", "-1", "abc"] {
+            assert!(
+                parse(&[("keep_alive_secs", v)]).is_err(),
+                "keep_alive_secs = {v} should be rejected"
+            );
+        }
+        assert_eq!(
+            parse(&[("keep_alive_secs", "5")]).unwrap().keep_alive_secs,
+            Some(5)
+        );
+        assert_eq!(
+            parse(&[("keep_alive_secs", "65535")])
+                .unwrap()
+                .keep_alive_secs,
+            Some(65535)
+        );
     }
 }

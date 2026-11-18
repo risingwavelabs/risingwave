@@ -35,6 +35,7 @@
           tmux
           postgresql
           patchelf
+          flock
         ]);
         env = [
           {

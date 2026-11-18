@@ -18,6 +18,7 @@ excludes = [
   "src/sqlparser/**/*.rs",
   "java/connector-node/risingwave-source-cdc/src/main/java/com/risingwave/connector/cdc/debezium/internal/*.java",
   "java/connector-node/risingwave-sink-iceberg/src/main/java/org/apache/iceberg/**/*.java",
+  "java/debezium/**",
   "src/meta/model/migration/**/*.rs",
   "lints/ui/**",
 ]

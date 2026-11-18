@@ -322,3 +322,133 @@ SELECT * FROM t_in WHERE a IN (2, 5, 8) EXCEPT SELECT * FROM mv_in;
 
 statement ok
 DROP TABLE t_in cascade;
+
+# ---- Test 12: IS NULL branches keep the NULL rows ----
+
+statement ok
+CREATE TABLE t_is_null(a INT, b INT, c INT, d INT, PRIMARY KEY(a, b, c));
+
+statement ok
+INSERT INTO t_is_null VALUES (NULL, 1, 1, 1), (NULL, 2, 5, -1), (NULL, 3, 3, -1), (1, 1, 1, 0), (2, 1, 1, 0);
+
+statement ok
+flush;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_is_null AS SELECT * FROM t_is_null WHERE a IS NULL OR a = 1;
+
+# The third arm is contained in the first one, so only eq ranges are left.
+statement ok
+CREATE MATERIALIZED VIEW mv_is_null_merged AS SELECT * FROM t_is_null WHERE a IS NULL OR a = 1 OR (a IS NULL AND b = 2 AND c > 3);
+
+query IIII rowsort
+SELECT * FROM mv_is_null;
+----
+1 1 1 0
+NULL 1 1 1
+NULL 2 5 -1
+NULL 3 3 -1
+
+query IIII rowsort
+SELECT * FROM mv_is_null_merged;
+----
+1 1 1 0
+NULL 1 1 1
+NULL 2 5 -1
+NULL 3 3 -1
+
+statement ok
+INSERT INTO t_is_null VALUES (NULL, 4, 4, 4), (1, 2, 2, 2), (3, 1, 1, 1);
+
+statement ok
+DELETE FROM t_is_null WHERE a IS NULL AND b = 1;
+
+statement ok
+flush;
+
+query IIII rowsort
+SELECT * FROM mv_is_null;
+----
+1 1 1 0
+1 2 2 2
+NULL 2 5 -1
+NULL 3 3 -1
+NULL 4 4 4
+
+query IIII rowsort
+SELECT * FROM mv_is_null_merged;
+----
+1 1 1 0
+1 2 2 2
+NULL 2 5 -1
+NULL 3 3 -1
+NULL 4 4 4
+
+statement ok
+DROP TABLE t_is_null cascade;
+
+# ---- Test 13: Nothing comes after the largest key of a descending pk ----
+
+statement ok
+CREATE TABLE t_desc(a INT, b INT, c INT, PRIMARY KEY(a, b));
+
+statement ok
+INSERT INTO t_desc VALUES (-2147483648, -2147483648, 1), (-2147483648, 0, 2), (0, 0, 3);
+
+statement ok
+CREATE TABLE t_desc_str(a VARCHAR PRIMARY KEY);
+
+statement ok
+INSERT INTO t_desc_str VALUES (''), ('a');
+
+statement ok
+flush;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc AS SELECT a, b, c FROM t_desc ORDER BY a DESC, b DESC;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_str AS SELECT a FROM t_desc_str ORDER BY a DESC;
+
+query III
+SELECT * FROM mv_desc WHERE a < -2147483648;
+----
+
+# OR arms merge into the same bound.
+query III
+SELECT * FROM mv_desc WHERE a < -2147483648 OR a < -2147483648::BIGINT;
+----
+
+query III
+SELECT * FROM mv_desc WHERE a = -2147483648 AND b < -2147483648;
+----
+
+query T
+SELECT * FROM mv_desc_str WHERE a < '';
+----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_min AS SELECT * FROM mv_desc WHERE a < -2147483648;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_min_or AS SELECT * FROM mv_desc WHERE a < -2147483648 OR a < -2147483648::BIGINT;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_min_prefix AS SELECT * FROM mv_desc WHERE a = -2147483648 AND b < -2147483648;
+
+query I
+SELECT (SELECT count(*) FROM mv_desc_min) + (SELECT count(*) FROM mv_desc_min_or) + (SELECT count(*) FROM mv_desc_min_prefix);
+----
+0
+
+query III rowsort
+SELECT * FROM mv_desc WHERE a <= -2147483648;
+----
+-2147483648 -2147483648 1
+-2147483648 0 2
+
+statement ok
+DROP TABLE t_desc cascade;
+
+statement ok
+DROP TABLE t_desc_str cascade;

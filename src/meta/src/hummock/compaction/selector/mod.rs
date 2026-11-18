@@ -72,8 +72,6 @@ pub trait CompactionSelector: Sync + Send {
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask>;
 
-    fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
-
     fn name(&self) -> &'static str;
 
     fn task_type(&self) -> compact_task::TaskType;

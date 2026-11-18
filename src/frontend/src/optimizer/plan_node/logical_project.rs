@@ -270,25 +270,32 @@ impl ToStream for LogicalProject {
             });
         let should_materialize_expr = match new_input.stream_kind() {
             StreamKind::AppendOnly => None,
-            StreamKind::Retract | StreamKind::Upsert if unsafe_allow_unmaterialized_impure_expr => {
-                // This deliberately leaves impure expressions in `StreamProject` on retract/upsert
+            StreamKind::Upsert => {
+                // A project propagates its input stream key only through direct `InputRef`s.
+                // `logical_rewrite_for_stream` appends any missing key columns as hidden direct
+                // references, so a computed impure expression cannot itself be a stream-key
+                // column. Therefore, we can safely leave impure expressions in `StreamProject`
+                // on upsert streams.
+                None
+            }
+            StreamKind::Retract if unsafe_allow_unmaterialized_impure_expr => {
+                // This deliberately leaves impure expressions in `StreamProject` on retract
                 // streams. The behavior is unsafe and only enabled by the explicit session option.
                 None
             }
-            kind @ (StreamKind::Retract | StreamKind::Upsert) => {
-                // Extract impure functions to `MaterializedExprs` operator
-                let mut impure_field_names = BTreeMap::new();
-                let mut impure_expr_indices = HashSet::new();
-                let impure_exprs: Vec<_> = self
+            StreamKind::Retract => {
+                // Extract expressions that need materialization to `MaterializedExprs` operator
+                let mut materialized_field_names = BTreeMap::new();
+                let mut materialized_expr_indices = HashSet::new();
+                let materialized_exprs: Vec<_> = self
                     .exprs()
                     .iter()
                     .enumerate()
                     .filter_map(|(idx, expr)| {
-                        // Extract impure expressions
-                        if expr.is_impure() {
-                            impure_expr_indices.insert(idx);
+                        if expr.needs_materialization() {
+                            materialized_expr_indices.insert(idx);
                             if let Some(name) = self.core.field_names.get(&idx) {
-                                impure_field_names.insert(idx, name.clone());
+                                materialized_field_names.insert(idx, name.clone());
                             }
                             Some(expr.clone())
                         } else {
@@ -296,47 +303,45 @@ impl ToStream for LogicalProject {
                         }
                     })
                     .collect();
-                if impure_exprs.is_empty() {
-                    None
-                } else if kind == StreamKind::Upsert
-                    && new_input
-                        .stream_key()
-                        .into_iter()
-                        .flatten()
-                        .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
-                {
-                    // We're operating on non-stream-key columns of upsert stream, no need to materialize.
+                if materialized_exprs.is_empty() {
                     None
                 } else {
-                    Some((impure_field_names, impure_expr_indices, impure_exprs))
+                    Some((
+                        materialized_field_names,
+                        materialized_expr_indices,
+                        materialized_exprs,
+                    ))
                 }
             }
         };
 
-        let stream_plan = if let Some((impure_field_names, impure_expr_indices, impure_exprs)) =
-            should_materialize_expr
+        let stream_plan = if let Some((
+            materialized_field_names,
+            materialized_expr_indices,
+            materialized_exprs,
+        )) = should_materialize_expr
         {
             {
                 let new_input = new_input.enforce_concrete_distribution();
 
-                // Create `MaterializedExprs` for impure expressions
+                // Create `MaterializedExprs` for the extracted expressions
                 let mat_exprs_plan: StreamPlanRef = StreamMaterializedExprs::new(
                     new_input.clone(),
-                    impure_exprs,
-                    impure_field_names,
+                    materialized_exprs,
+                    materialized_field_names,
                 )?
                 .into();
 
                 let input_len = new_input.schema().len();
                 let mut materialized_pos = 0;
 
-                // Create final expressions list with impure expressions replaced by `InputRef`s
+                // Create final expressions list with materialized expressions replaced by `InputRef`s
                 let final_exprs = self
                     .exprs()
                     .iter()
                     .enumerate()
                     .map(|(idx, expr)| {
-                        if impure_expr_indices.contains(&idx) {
+                        if materialized_expr_indices.contains(&idx) {
                             let output_idx = input_len + materialized_pos;
                             materialized_pos += 1;
                             InputRef::new(output_idx, expr.return_type()).into()

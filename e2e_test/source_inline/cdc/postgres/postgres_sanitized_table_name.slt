@@ -1,0 +1,107 @@
+statement ok
+drop source if exists pg_sanitized_name_source cascade;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -q <<'EOF'
+SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+WHERE slot_name = 'sanitized_name_slot' AND active_pid IS NOT NULL;
+SELECT pg_sleep(1);
+SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'sanitized_name_slot';
+DROP PUBLICATION IF EXISTS sanitized_name_pub;
+DROP SCHEMA IF EXISTS sanitized_name CASCADE;
+CREATE SCHEMA sanitized_name;
+CREATE TABLE sanitized_name."t_1" (id INT PRIMARY KEY, v VARCHAR);
+CREATE TABLE sanitized_name."t$1" (id INT PRIMARY KEY, v VARCHAR);
+CREATE TABLE sanitized_name."t#1" (id INT PRIMARY KEY, v VARCHAR);
+CREATE TABLE sanitized_name."t中1" (id INT PRIMARY KEY, v VARCHAR);
+INSERT INTO sanitized_name."t_1" VALUES (10, 'snapshot');
+INSERT INTO sanitized_name."t$1" VALUES (20, 'snapshot');
+INSERT INTO sanitized_name."t#1" VALUES (30, 'snapshot');
+INSERT INTO sanitized_name."t中1" VALUES (40, 'snapshot');
+EOF
+
+control substitution on
+
+statement ok
+create source pg_sanitized_name_source with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'sanitized_name',
+    publication.name = 'sanitized_name_pub',
+    slot.name = 'sanitized_name_slot'
+);
+
+control substitution off
+
+statement ok
+create table rw_underscore (id int primary key, v varchar)
+from pg_sanitized_name_source table 'sanitized_name.t_1';
+
+statement ok
+create table rw_dollar (id int primary key, v varchar)
+from pg_sanitized_name_source table 'sanitized_name.t$1';
+
+statement ok
+create table rw_hash (id int primary key, v varchar)
+from pg_sanitized_name_source table 'sanitized_name.t#1';
+
+statement ok
+create table rw_non_ascii (id int primary key, v varchar)
+from pg_sanitized_name_source table 'sanitized_name.t中1';
+
+query TIT retry 30 backoff 1s
+select 'underscore', * from rw_underscore
+union all select 'dollar', * from rw_dollar
+union all select 'hash', * from rw_hash
+union all select 'non_ascii', * from rw_non_ascii
+order by 2;
+----
+underscore 10 snapshot
+dollar 20 snapshot
+hash 30 snapshot
+non_ascii 40 snapshot
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -q <<'EOF'
+INSERT INTO sanitized_name."t$1" VALUES (21, 'stream');
+INSERT INTO sanitized_name."t#1" VALUES (31, 'stream');
+INSERT INTO sanitized_name."t中1" VALUES (41, 'stream');
+INSERT INTO sanitized_name."t_1" VALUES (11, 'stream');
+EOF
+
+# `non_ascii 41 stream` is missing because Debezium 3.2.4 decodes pgoutput relation names byte by byte
+# instead of as UTF-8, so `t中1` arrives garbled and matches no table. Add the row back once Debezium
+# includes https://github.com/debezium/dbz/issues/2710.
+query TIT retry 30 backoff 1s
+select 'underscore', * from rw_underscore
+union all select 'dollar', * from rw_dollar
+union all select 'hash', * from rw_hash
+union all select 'non_ascii', * from rw_non_ascii
+order by 2;
+----
+underscore 10 snapshot
+underscore 11 stream
+dollar 20 snapshot
+dollar 21 stream
+hash 30 snapshot
+hash 31 stream
+non_ascii 40 snapshot
+
+statement ok
+drop source pg_sanitized_name_source cascade;
+
+sleep 2s
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -q <<'EOF'
+SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+WHERE slot_name = 'sanitized_name_slot' AND active_pid IS NOT NULL;
+SELECT pg_sleep(1);
+SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'sanitized_name_slot';
+DROP PUBLICATION IF EXISTS sanitized_name_pub;
+DROP SCHEMA IF EXISTS sanitized_name CASCADE;
+EOF

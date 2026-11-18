@@ -289,11 +289,6 @@ KafkaConnection:
     comments: Client's Kerberos principal name under SASL/GSSAPI.
     required: false
     allow_alter_on_fly: true
-  - name: properties.sasl.kerberos.kinit.cmd
-    field_type: String
-    comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
-    required: false
-    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin
     field_type: String
     comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.

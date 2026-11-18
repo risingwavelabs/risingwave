@@ -840,6 +840,17 @@ profile:
       - use: schema-registry
       - use: mysql
       - use: postgres
+      - use: mariadb
+
+  local-mariadb-cdc-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: mariadb
+        persist-data: false
 
   ci-inline-source-test:
     config-path: src/config/ci-recovery.toml
@@ -922,6 +933,12 @@ profile:
       - use: mysql
         port: 3306
         address: mysql
+        user: root
+        password: 123456
+        user-managed: true
+      - use: mariadb
+        port: 3306
+        address: mariadb
         user: root
         password: 123456
         user-managed: true
@@ -1336,6 +1353,36 @@ profile:
       - use: frontend
       - use: compactor
       - use: clickhouse
+
+  local-doris-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-doris-sink-test
+      - use: sqlite
+        id: sqlite-local-doris-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: doris
+
+  local-starrocks-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-starrocks-sink-test
+      - use: sqlite
+        id: sqlite-local-starrocks-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: starrocks
 
   local-nats-test:
     config-path: src/config/ci-recovery.toml
@@ -1887,6 +1934,53 @@ template:
 
     persist-data: false
 
+  # Doris service backed by Docker.
+  doris:
+    id: doris
+
+    address: "127.0.0.1"
+    http-port: 8030
+    query-port: 9030
+
+    user: users
+    password: "123456"
+    database: demo
+    admin-user: root
+    admin-password: ""
+
+    user-managed: false
+
+    image: "apache/doris:doris-all-in-one-2.1.0"
+
+  # StarRocks service backed by Docker.
+  starrocks:
+    # Id to be picked-up by services
+    id: starrocks-${query-port}
+
+    # Address and host ports of StarRocks FE.
+    address: "127.0.0.1"
+    http-port: 28030
+    query-port: 29030
+
+    # Credentials and database used by sink tests.
+    user: users
+    password: "123456"
+    database: demo
+
+    # The managed image uses its built-in root user with an empty password.
+    # Custom admin credentials are only supported with `user-managed: true`.
+    admin-user: root
+    admin-password: ""
+
+    # The StarRocks sink SLT drops this database and its test users. For a user-managed
+    # service, explicitly set this to true only when the database is disposable.
+    database-is-disposable: false
+
+    image: "starrocks/allin1-ubuntu:3.5.21"
+
+    # If `user-managed` is true, the user is responsible for starting StarRocks.
+    user-managed: false
+
   # MySQL service backed by docker.
   mysql:
     # Id to be picked-up by services
@@ -1920,6 +2014,18 @@ template:
 
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # MariaDB service backed by Docker.
+  mariadb:
+    id: mariadb-${port}
+    address: "127.0.0.1"
+    port: 8307
+    user: root
+    password: "123456"
+    database: "risedev"
+    image: "mariadb:11.4"
+    persist-data: true
     user-managed: false
 
   # Oracle Database Free service backed by Docker.
