@@ -895,7 +895,11 @@ fn build_create_merge_into_task_sql(
 ) -> Vec<String> {
     let cdc_table_name = build_full_table_name(cdc_schema_name, cdc_table_name);
     let target_table_name = build_full_table_name(target_schema_name, target_table_name);
-    let pk_names_str = pk_column_names.join(", ");
+    let pk_names_str = pk_column_names
+        .iter()
+        .map(|name| format!("{cdc_table_name}.{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let pk_names_eq_str = pk_column_names
         .iter()
         .map(|name| format!("{target_table_name}.{name} = source.{name}", name = name))
@@ -952,7 +956,7 @@ fn build_create_merge_into_task_sql(
             USING (
                 SELECT *
                 FROM (
-                    SELECT *, ROW_NUMBER() OVER (
+                    SELECT {cdc_table_name}.*, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
                         ORDER BY {row_id_ordering}
                     ) AS dedupe_id
@@ -975,7 +979,7 @@ fn build_create_merge_into_task_sql(
             USING (
                 SELECT *
                 FROM (
-                    SELECT *, ROW_NUMBER() OVER (
+                    SELECT {cdc_table_name}.*, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
                         ORDER BY {row_id_ordering}
                     ) AS dedupe_id
@@ -1085,6 +1089,38 @@ mod tests {
         );
         for statement in &sql[1..=3] {
             assert!(statement.contains(&predicate));
+        }
+    }
+
+    #[test]
+    fn test_merge_sql_keeps_watermark_columns_out_of_source() {
+        let column_names = vec![
+            "max_epoch".to_owned(),
+            "max_row_count".to_owned(),
+            "max_actor_id".to_owned(),
+        ];
+        for schema in [None, Some("staging")] {
+            let sql = build_create_merge_into_task_sql(
+                schema,
+                Some("public"),
+                "cdc",
+                "target",
+                &column_names,
+                &column_names,
+            );
+            let cdc_table = match schema {
+                Some(_) => "\"staging\".\"cdc\"",
+                None => "\"cdc\"",
+            };
+            // Both DELETE and MERGE must expose only CDC columns, and every
+            // partition key must be unambiguous even for a composite key.
+            for statement in &sql[1..=2] {
+                assert!(statement.contains(&format!("SELECT {cdc_table}.*, ROW_NUMBER() OVER (")));
+                assert!(statement.contains(&format!(
+                    "PARTITION BY {cdc_table}.max_epoch, {cdc_table}.max_row_count, {cdc_table}.max_actor_id"
+                )));
+                assert!(!statement.contains("SELECT *, ROW_NUMBER()"));
+            }
         }
     }
 
