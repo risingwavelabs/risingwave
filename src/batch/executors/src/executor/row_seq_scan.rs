@@ -194,30 +194,25 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             return Ok(());
         }
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
-        // Point Get
+        // Count point rows as they enter the chunk so a partial chunk respects the scan limit.
         for point_get in point_gets {
-            let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
-                && let Some(chunk) = data_chunk_builder.append_one_row(row)
+                Self::execute_point_get(table.clone(), point_get, query_epoch, histogram).await?
             {
-                returned += chunk.cardinality() as u64;
-                yield chunk;
-                if let Some(limit) = &limit
-                    && returned >= *limit
-                {
-                    return Ok(());
+                returned += 1;
+                if let Some(chunk) = data_chunk_builder.append_one_row(row) {
+                    yield chunk;
+                }
+                if limit == Some(returned) {
+                    break;
                 }
             }
         }
         if let Some(chunk) = data_chunk_builder.consume_all() {
-            returned += chunk.cardinality() as u64;
             yield chunk;
-            if let Some(limit) = &limit
-                && returned >= *limit
-            {
-                return Ok(());
-            }
+        }
+        if limit == Some(returned) {
+            return Ok(());
         }
 
         // Range Scan
