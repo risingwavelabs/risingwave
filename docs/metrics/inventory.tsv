@@ -357,8 +357,6 @@ state_store_block_cache_size	gauge		the size of cache for data block cache		src/
 state_store_block_cache_usage_ratio	gauge		the ratio of block cache to it's pre-allocated memory		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_bloom_filter_check_counts	counter	table_id,type	Total number of read request to check SST filters		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_bloom_filter_true_negative_counts	counter	table_id,type	Total number of sstables that have been considered true negative by SST filters		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_cold_range_buffered_overlap_bytes	counter	cache_policy	Compressed block bytes of cold_range_buffered_overlap_reads; not physical duplicate GET bytes		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_cold_range_buffered_overlap_reads	counter	cache_policy	External block-read fallbacks whose bytes are already returned but not yet decoded/published by a ColdRanges window; counted once per fallback, not physical GETs		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_cold_range_prefetch_budget_denied	counter		ColdRanges windows denied because no multi-block prefix fits the shared prefetch budget; no speculative IO is submitted		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_cold_range_prefetch_budget_shrunk	counter		ColdRanges windows admitted with fewer blocks to fit the prefetch budget; not demand fallbacks		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_cold_range_prefetch_gap_blocks	histogram		Blocks per internal cache gap counted by cold_range_prefetch_gap_bytes; consecutive hits form one gap		src/storage/src/monitor/hummock_state_store_metrics.rs

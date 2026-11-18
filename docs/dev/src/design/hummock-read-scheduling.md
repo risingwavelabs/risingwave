@@ -175,14 +175,8 @@ budget-shrink and budget-denial metrics. Scheduler queue/admission/dispatch,
 physical reads, coalescing, overread and reuse metrics remain. Blockwise/plug-only
 metrics are removed. See the generated [metric inventory](../../../metrics/inventory.tsv).
 
-Set `storage.scan_prefetch.observe_buffered_overlap = true` to track unconsumed buffers.
-The default skips registering ranges and looking them up on demand reads.
-
-The overlap observations are diagnostic, not ownership: ordinary block requests
-can report collision with completed unconsumed buffers, and scheduled reads can
-report in-flight partial overlaps. They do not count all repeated multi-block
-reads of completed private buffers. Zero observations are not proof of zero
-redundant bytes; in-flight observations also depend on reuse being enabled.
+With in-flight reuse enabled, the scheduler also counts partially overlapping
+reads at dispatch.
 
 Regression tests cover policy/default selection, scan bounds, point-get isolation,
 cache policies, disk-cache hints, singleton sharing, concurrent cold runs, lazy

@@ -279,89 +279,8 @@ fn inflight(registry: &Registry, stage: &str) -> f64 {
 }
 
 #[tokio::test]
-async fn buffered_overlap_metrics_track_io_completion_consumption_and_drop() {
-    for (policy, label, enabled) in [
-        (CachePolicy::default(), "fill", false),
-        (CachePolicy::default(), "fill", true),
-        (CachePolicy::NotFill, "not_fill", true),
-        (CachePolicy::Disable, "disable", true),
-    ] {
-        let (mut store, sst, _, metrics, _, _dir) = setup(false).await;
-        assert!(!store.scan_prefetch.observe_buffered_overlap);
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .scan_prefetch
-            .observe_buffered_overlap = enabled;
-        let mut stats = StoreLocalStatistic::default();
-        let policy_reads = store
-            .read_metrics
-            .cold_range_buffered_overlap_reads
-            .with_label_values(&[label]);
-        let policy_bytes = store
-            .read_metrics
-            .cold_range_buffered_overlap_bytes
-            .with_label_values(&[label]);
-        let (range, _) = sst.calculate_block_info(2);
-        let mut window = store
-            .prefetch_cold_ranges(&sst, 0, 7, policy, &mut stats)
-            .await
-            .unwrap();
-        // This current-thread runtime has not polled the IO task yet.
-        assert!(!store.buffered_cold_ranges.contains(sst.id, &range));
-        let Some(Part::Read(_, read)) = window.parts.front() else {
-            panic!("expected range");
-        };
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while !read.0.is_finished() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        // The head has not been consumed, but the task's result already owns bytes.
-        assert_eq!(store.buffered_cold_ranges.contains(sst.id, &range), enabled);
-        let physical = metrics.operation_size.with_label_values(&["read"]);
-        let before = physical.get_sample_count();
-        if matches!(policy, CachePolicy::Fill(_)) {
-            let first = store.get_block_response(&sst, 2, policy).await.unwrap();
-            let follower = store.get_block_response(&sst, 2, policy).await.unwrap();
-            assert_eq!(policy_reads.get(), 0);
-            let (a, b) = tokio::join!(first.wait(), follower.wait());
-            assert!(a.is_ok() && b.is_ok());
-            // A memory hit and the Foyer follower are not external read attempts.
-            store.get(&sst, 2, policy, &mut stats).await.unwrap();
-        } else {
-            store.get(&sst, 2, policy, &mut stats).await.unwrap();
-        }
-        assert_eq!(policy_reads.get(), u64::from(enabled));
-        assert_eq!(policy_bytes.get(), u64::from(enabled) * range.len() as u64);
-        assert_eq!(physical.get_sample_count() - before, 1);
-        drop(
-            window
-                .next(&store, &sst, policy, &mut stats)
-                .await
-                .unwrap()
-                .unwrap(),
-        );
-        store.clear_block_cache().await.unwrap();
-        // Consumed block 0 is no longer classified as buffered, even without cache fill.
-        store.get(&sst, 0, policy, &mut stats).await.unwrap();
-        assert_eq!(policy_reads.get(), u64::from(enabled));
-        drop(window);
-        assert!(!store.buffered_cold_ranges.contains(sst.id, &range));
-        store.get(&sst, 3, policy, &mut stats).await.unwrap();
-        assert_eq!(policy_reads.get(), u64::from(enabled));
-        store.block_cache.close().await.unwrap();
-    }
-}
-
-#[tokio::test]
-async fn buffered_overlap_metadata_drops_with_unconsumed_task_result() {
-    let (mut store, sst, _, _, _, _dir) = setup(false).await;
-    Arc::get_mut(&mut store)
-        .unwrap()
-        .scan_prefetch
-        .observe_buffered_overlap = true;
+async fn completed_unconsumed_read_releases_its_budget_on_drop() {
+    let (store, sst, _, _, _, _dir) = setup(false).await;
     let window = store
         .prefetch_cold_ranges(
             &sst,
@@ -372,7 +291,6 @@ async fn buffered_overlap_metadata_drops_with_unconsumed_task_result() {
         )
         .await
         .unwrap();
-    let (range, _) = sst.calculate_block_info(0);
     let Some(Part::Read(_, read)) = window.parts.front() else {
         panic!("expected range");
     };
@@ -383,15 +301,8 @@ async fn buffered_overlap_metadata_drops_with_unconsumed_task_result() {
     })
     .await
     .unwrap();
-    assert!(store.buffered_cold_ranges.contains(sst.id, &range));
+    assert!(store.get_prefetch_memory_usage() > 0);
     drop(window);
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while store.buffered_cold_ranges.contains(sst.id, &range) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
     assert_eq!(store.get_prefetch_memory_usage(), 0);
     store.block_cache.close().await.unwrap();
 }
