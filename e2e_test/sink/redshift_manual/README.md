@@ -5,6 +5,8 @@ bucket. They are **disabled by default and are not scheduled by any CI pipeline*
 
 - `run.py` does nothing without `--run-live` and refuses to run under `CI`,
   `BUILDKITE`, or `GITHUB_ACTIONS`.
+- Live execution rejects Python optimization (`-O`, `-OO`, or
+  `PYTHONOPTIMIZE`) before accessing services so assertions cannot be disabled.
 - Every executable SLT record requires the `redshift-live` label. Ordinary SLT
   globs skip those records. Only the manual runner supplies that label.
 - `.coverageignore` documents this intentional exclusion; it does not itself
@@ -46,6 +48,12 @@ Use `--mode jdbc` to run without S3, or `--mode s3` to test S3 staging and COPY.
 Exported environment variables also work; omit `--env-file` in that case. The
 file parser accepts plain or quoted assignments without evaluating shell code.
 
+The harness failure-path checks run offline without credentials or services:
+
+```bash
+python3 -m unittest discover -s e2e_test/sink/redshift_manual -p test_harness.py -v
+```
+
 ## Coverage
 
 - Both modes: four parallel sink writers, 256 initial rows, updates, deletes,
@@ -70,6 +78,9 @@ Each run creates a unique RisingWave schema, Redshift table names, and S3
 subprefix. The runner attempts cleanup on success, failure, and interruption;
 it never clears the configured bucket/prefix or existing schema. Staged data
 files are explicitly deleted by the harness after checking manifest cleanup.
+On interruption, the SLT process group is stopped before resource cleanup.
+If both testing and cleanup fail, both errors are reported and the original test
+failure is preserved. A cleanup-only failure also fails the run.
 S3 versioned buckets may retain noncurrent object versions according to their
 lifecycle configuration.
 

@@ -21,6 +21,10 @@ from urllib.parse import quote_plus, urlsplit
 
 
 def require_opt_in():
+    if not __debug__:
+        raise RuntimeError(
+            "Live Redshift tests require Python assertions; disable -O/PYTHONOPTIMIZE"
+        )
     if os.environ.get("REDSHIFT_E2E_RUN") != "1":
         raise RuntimeError("Live Redshift tests require run.py --run-live")
     if any(

@@ -149,17 +149,22 @@ class LiveSink:
     def check_s3(self):
         if not self.s3:
             return
+        manifest_prefixes = tuple(
+            f"{self.state['prefix']}/{self.state[kind]}/manifest/"
+            for kind in ("target", "append")
+        )
         wait_for(
             lambda: any(
-                "/manifest/" in obj["Key"]
+                obj["Key"].startswith(manifest_prefixes)
                 for obj in s3_objects(self.s3, self.cfg, self.state["prefix"])
             ),
             False,
             "S3 manifest consumption",
         )
         rows = []
+        target_prefix = f"{self.state['prefix']}/{self.state['target']}/"
         for obj in s3_objects(self.s3, self.cfg, self.state["prefix"]):
-            if "/" + self.state["target"] + "/" in obj["Key"]:
+            if obj["Key"].startswith(target_prefix):
                 response = self.s3.get_object(
                     Bucket=self.cfg["S3_BUCKET"], Key=obj["Key"]
                 )

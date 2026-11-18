@@ -19,9 +19,11 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 from common import config, redact, require_opt_in
@@ -45,6 +47,34 @@ def load_env(path):
         if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         os.environ[key] = value
+
+
+def stop_process_group(process, timeout=15):
+    # risedev spawns cargo-make, sqllogictest, and helper processes. Wait for the
+    # whole group, even if the wrapper has already exited, before resource cleanup.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        process.poll()  # Reap the group leader so it cannot keep the group alive.
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            break
+        except PermissionError:
+            # On macOS a dying group can briefly report EPERM. Retry the probe
+            # rather than allowing resource cleanup to race surviving children.
+            pass
+        time.sleep(0.1)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait()
 
 
 def run_slt(state, directory):
@@ -79,6 +109,7 @@ def run_slt(state, directory):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        start_new_session=True,
     )
     try:
         for line in process.stdout:
@@ -86,13 +117,7 @@ def run_slt(state, directory):
         if process.wait():
             raise RuntimeError("Live sink SLT failed")
     finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+        stop_process_group(process)
 
 
 def main():
@@ -152,7 +177,15 @@ def main():
                 print(f"Running live Redshift {mode} tests", flush=True)
                 regressions.run(cfg, state, directory)
                 run_slt(state, directory)
-            finally:
+            except BaseException:
+                try:
+                    test.cleanup()
+                except Exception as cleanup_error:
+                    print(
+                        redact(f"Cleanup also failed: {cleanup_error}"), file=sys.stderr
+                    )
+                raise
+            else:
                 test.cleanup()
     print("PASS all requested live Redshift tests", flush=True)
 
