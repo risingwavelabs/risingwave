@@ -4065,3 +4065,20 @@ whole-query metrics and verified cleanup remain beside them.
 Retained metrics reconcile the extra 8,594 source-phase GETs. The fixed build has 8,485 internal cache gaps versus zero before, with 101 more nonempty windows. Remaining logical submission and scheduler merge/reuse differences contribute another net 8 GETs. The fixed gap count is already high before LocalityProvider startup. The code now publishes decoded blocks on consumption, giving concurrent scans a mechanism for fragmented cache visibility. The current ordinary-block buffered-overlap counter records 323 source observations and excludes new direct ranges against completed private buffers. Individual gap causality and a complete duplicate-read census remain open. The gap histogram has 8,458 gaps at most 64 KiB and 187.08 MiB of total gap bytes. No workload or application changes were made.
 
 See [source GET attribution](read-optimization-evidence/q18-sf10-cold-ranges-source-get-attribution.md) and its JSON for code references, exact accounting, histograms, counter-coverage limits and pre-provider samples.
+
+### SF10 Q18 ColdRanges scheduler gap 0 versus 64 KiB, 2026-11-18
+
+One native release arm reused the same 0bb0df4acf executable and cold v1346 seed, six I/O workers, G128/P32, N16/B16, 16 GiB prefetch budget, 1 MiB read ceiling, fixed4 and the six-LocalityProvider plan. Only max_gap_bytes changed from 0 to 65536. All 100 oracle rows matched and no read errors/retries occurred.
+
+| Source checkpoint metric | Gap 0 | Gap 64 KiB |
+| --- | ---: | ---: |
+| Physical GETs | 44,532 | 39,504 |
+| Read GiB | 12.291 | 12.597 |
+| Scheduler overread MiB | 0 | 79.909 |
+| Merged logical members | 3,091 | 6,846 |
+| Physical GET p99 / p99.9, ms | 32 / 64 | 32 / 64 |
+| ObjectStore caller p99 / p99.9, ms | 378.77 / 568.15 | 378.77 / 568.15 |
+
+Source GETs fell 11.3% with unchanged source tail buckets; source means increased. Full-query GETs were 122,941 versus 118,014. Whole physical p99.9 and caller p99 occupied higher buckets in the gap arm. The gap source checkpoint includes some downstream startup, and actual source completion is bounded by 80–81 versus 81–82 seconds. Whole elapsed fell from 693.08 to 658.97 seconds alongside less table-38 candidate work in downstream state. Both endpoints are single runs. Owned services and disposable data were cleaned up.
+
+See [gap comparison](read-optimization-evidence/q18-sf10-cold-ranges-gap64k.md), its JSON/table and compressed raw samples for settings, request accounting, phase boundaries, queue/service tails and limitations.
