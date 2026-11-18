@@ -4157,3 +4157,21 @@ and disposable seed clones are removed per arm. The seed and staged
 release executable are retained; the task-owned build cache is retired
 after measurement. This is local MinIO evidence with cold RW/Foyer
 processes, not a host page-cache purge or a real-S3 measurement.
+
+
+### Fixed-version HashJoin metadata retention budget replay
+
+A single warmed, release HashJoin replay holds its Hummock version and
+probe order fixed. Each of its 128 chunks sees 13 overlapping SSTs.
+Across five interleaved samples per arm, 1 MiB retains all 13 metadata
+handles and lowers Foyer metadata lookups from 360,566 at a two-handle
+budget to 1,664. Median replay time falls from 418.4 to 368.0 ms.
+Reuse off takes 419.9 ms and performs 425,828 Foyer lookups. All arms
+have the same candidate checks, 92.3% filter negatives and zero physical
+GETs in the measured interval.
+
+The small replay metadata working set weighs 125.6 KiB. Its two-handle
+budget is an experimental control and does not establish Q18 metadata
+weights or a production default. The [fixture geometry, paired results,
+and raw metrics](read-optimization-evidence/hashjoin-meta-budget-fixed-sst-98126.md)
+are recorded with the exact binary and benchmark patch.
