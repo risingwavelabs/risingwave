@@ -14,10 +14,11 @@
 
 mod upstream_table_ext {
     use std::collections::HashMap;
+    use std::future::ready;
     use std::time::Duration;
 
     use futures::future::{BoxFuture, try_join_all};
-    use futures::{TryFutureExt, TryStreamExt};
+    use futures::{Stream, TryFutureExt, TryStreamExt};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common_rate_limit::RateLimit;
@@ -63,6 +64,17 @@ mod upstream_table_ext {
         })
     }
 
+    pub(super) fn skip_noop_updates(
+        stream: impl Stream<Item = StreamExecutorResult<ChangeLogRow>>,
+    ) -> impl Stream<Item = StreamExecutorResult<ChangeLogRow>> {
+        stream.try_filter(|row| {
+            ready(!matches!(
+                row,
+                ChangeLogRow::Update { new_value, old_value } if new_value == old_value
+            ))
+        })
+    }
+
     pub(super) type UpstreamTableChangeLogStream<T: UpstreamTable> =
         VnodeStream<impl ChangeLogRowStream>;
     pub(super) type UpstreamTableChangeLogStreamFuture<'a, T> =
@@ -81,7 +93,7 @@ mod upstream_table_ext {
                 |(vnode, (start_pk, row_count))| {
                     upstream_table
                         .change_log_stream(vnode, epoch, start_pk)
-                        .map_ok(move |stream| (vnode, stream, row_count))
+                        .map_ok(move |stream| (vnode, skip_noop_updates(stream), row_count))
                 },
             ))
             .await?;
@@ -601,8 +613,11 @@ impl<'a, T: UpstreamTable> ConsumeUpstreamStream<'a, T> {
 
 #[cfg(test)]
 mod tests {
+    use futures::TryStreamExt;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::types::ScalarImpl;
     use risingwave_storage::hummock::HummockError;
+    use risingwave_storage::table::ChangeLogRow;
 
     use super::*;
 
@@ -642,5 +657,37 @@ mod tests {
 
         let other_error = StreamExecutorError::from(anyhow::anyhow!("other error"));
         assert!(!is_retention_or_snapshot_expired_error(&other_error));
+    }
+
+    #[tokio::test]
+    async fn test_skip_noop_updates() {
+        let row = |v: i64| OwnedRow::new(vec![Some(ScalarImpl::Int64(v))]);
+        let input = vec![
+            ChangeLogRow::Insert(row(0)),
+            ChangeLogRow::Update {
+                new_value: row(1),
+                old_value: row(1),
+            },
+            ChangeLogRow::Update {
+                new_value: row(2),
+                old_value: row(3),
+            },
+            ChangeLogRow::Delete(row(4)),
+        ];
+        let output: Vec<_> = skip_noop_updates(futures::stream::iter(input.into_iter().map(Ok)))
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                ChangeLogRow::Insert(row(0)),
+                ChangeLogRow::Update {
+                    new_value: row(2),
+                    old_value: row(3),
+                },
+                ChangeLogRow::Delete(row(4)),
+            ]
+        );
     }
 }
