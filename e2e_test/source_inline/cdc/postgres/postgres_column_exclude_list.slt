@@ -58,7 +58,7 @@ statement error columns in `column.exclude.list` do not exist in the upstream ta
 create table excl_t (*) with (column.exclude.list = 'payload, nope')
 from excl_src table 'public.excl_e2e';
 
-statement error `column.exclude.list` requires the `(\*)` wildcard
+statement error `column.exclude.list` requires the `\(\*\)` wildcard
 create table excl_t (id int primary key, name text) with (column.exclude.list = 'payload')
 from excl_src table 'public.excl_e2e';
 

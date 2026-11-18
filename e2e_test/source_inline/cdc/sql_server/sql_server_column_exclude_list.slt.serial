@@ -33,7 +33,7 @@ statement error columns in `column.exclude.list` do not exist in the upstream ta
 create table rw_excl_tbl (*) with (column.exclude.list = 'payload, nope')
 from mssql_excl_source table 'excl_db.dbo.excl_tbl';
 
-statement error `column.exclude.list` requires the `(\*)` wildcard
+statement error `column.exclude.list` requires the `\(\*\)` wildcard
 create table rw_excl_tbl (id int primary key, name varchar) with (column.exclude.list = 'payload')
 from mssql_excl_source table 'excl_db.dbo.excl_tbl';
 
