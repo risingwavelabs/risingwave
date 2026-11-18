@@ -810,6 +810,104 @@ mod tests {
 
     const SST_ID: u64 = 1;
 
+    #[tokio::test]
+    async fn parked_backfill_iterator_allows_independent_cold_reads() {
+        use std::time::Duration;
+
+        use risingwave_hummock_sdk::key::FullKey;
+        use risingwave_object_store::object::{
+            InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
+        };
+
+        use super::SstableBlockIndex;
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+        use crate::monitor::ObjectStoreMetrics;
+        use crate::store::PrefetchMode;
+
+        let registry = prometheus::Registry::new();
+        let backend = InMemObjectStore::for_test();
+        let mut config = ObjectStoreConfig::default();
+        config.read_scheduler.max_admitted_groups = 1.try_into().unwrap();
+        config.read_scheduler.max_inflight_reads = 1.try_into().unwrap();
+        let object = ObjectStoreImpl::InMem(backend.clone().monitored(
+            Arc::new(ObjectStoreMetrics::new(&registry)),
+            Arc::new(config),
+        ))
+        .with_read_coalescing();
+        let store = mock_sstable_store_with_object_store(Arc::new(object)).await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), SST_ID, store.clone()).await;
+        let key = |idx: usize| FullKey::decode(&sst.meta.block_metas[idx].smallest_key);
+        let wait_for_depth = async |depth: f64| {
+            loop {
+                if registry
+                    .gather()
+                    .iter()
+                    .find(|family| family.name() == "object_store_read_scheduler_waiting")
+                    .is_some_and(|family| family.get_metric()[0].get_gauge().value() == depth)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+
+        let first = 2;
+        let second = sst.meta.block_metas.len() - 3;
+        assert!(second > first + store.max_prefetch_block_number);
+        for prefetch in [PrefetchMode::Disabled, PrefetchMode::ColdRanges] {
+            store.clear_block_cache().await.unwrap();
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch,
+                ..Default::default()
+            });
+            let mut a = SstableIterator::new(sst.clone(), store.clone(), options.clone(), &info);
+            let mut b = SstableIterator::new(sst.clone(), store.clone(), options, &info);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let path = store.get_sst_data_path(sst.id);
+                backend.set_read_delay_for_test(Duration::from_secs(60));
+                let mut busy = Box::pin(store.store.read(&path, 0..1));
+                assert!(futures::poll!(&mut busy).is_pending());
+
+                // Each iterator gets one poll to start its Foyer fetch or cold-range task.
+                let mut parked = Box::pin(a.seek(key(first)));
+                assert!(futures::poll!(&mut parked).is_pending());
+                wait_for_depth(1.0).await;
+                let mut next = Box::pin(b.seek(key(second)));
+                assert!(futures::poll!(&mut next).is_pending());
+                wait_for_depth(2.0).await;
+
+                backend.set_read_delay_for_test(Duration::ZERO);
+                drop(busy);
+                next.await.unwrap();
+                // Observe completion before polling A again. ColdRanges decodes on consumption.
+                let block = SstableBlockIndex {
+                    sst_id: sst.id,
+                    block_idx: first as u64,
+                };
+                let (bytes, _) = sst.calculate_block_info(first);
+                let finished = || {
+                    if prefetch == PrefetchMode::ColdRanges {
+                        store.buffered_cold_ranges.contains(sst.id, &bytes)
+                    } else {
+                        store.block_cache.memory().contains(&block)
+                    }
+                };
+                while !finished() {
+                    tokio::task::yield_now().await;
+                }
+                parked.await.unwrap();
+                assert_eq!(a.key(), key(first));
+                assert_eq!(b.key(), key(second));
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!("parked iterator blocked an independent cold read with {prefetch:?}")
+            });
+        }
+        store.block_cache.close().await.unwrap();
+    }
+
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
     }

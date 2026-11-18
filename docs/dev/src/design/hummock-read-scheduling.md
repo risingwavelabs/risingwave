@@ -28,8 +28,9 @@ the encoded result and decodes one block at a time on the consuming runtime.
 There is no window timer, expected-candidate count, plug, or pressure heuristic.
 
 A short prefix or last-block read with no usable neighbor bypasses the boxed
-prefetch future. An unsuccessful speculative read falls back to the demanded
-block, so a corrupt or failed neighbor does not fail a valid head. Explicit seek,
+prefetch future. A range error on a multi-block read falls back to the demanded
+block, which can still be valid if a neighbor lies past EOF. Object-wide errors
+and failures decoding the demanded block propagate to the caller. Explicit seek,
 rewind, exhaustion, error, and drop release the old window and cancel its private
 read tasks. Foyer owns shared producers independently.
 
@@ -119,8 +120,8 @@ limitation is deliberate; no new sharing layer is introduced here.
 
 `read_scheduler.rs` owns admission and pending groups;
 `read_scheduler/execution.rs` owns physical dispatch, cancellation, optional
-in-flight reuse, range-error fallback, and response delivery. Eligible bounded
-reads use the scheduler when Hummock read coalescing is enabled on a supported
+in-flight reuse, range-error fallback, and response delivery. Every ordinary `store.read()`
+uses the scheduler when Hummock read coalescing is enabled on a supported
 backend (native S3, in-memory, or OpenDAL S3/MinIO).
 
 | Control | Meaning and unchanged default |
@@ -128,16 +129,19 @@ backend (native S3, in-memory, or OpenDAL S3/MinIO).
 | `max_admitted_groups` (G) | Groups from admission through completion; 64 |
 | `max_batch_requests` | Logical requests per group; 16 |
 | `max_inflight_reads` (P) | Concurrent scheduled backend reads; 32 |
-| `max_read_bytes` | Eligible input and merged span cap; 256 KiB |
+| `max_read_bytes` | Maximum byte span for coalescing; 256 KiB |
 | `max_gap_bytes` | Maximum gap between neighboring ranges; 0 |
 | `reuse_inflight_reads` | Share already covering active GETs; false |
 | `use_dedicated_io_runtime` | Run dispatch, physical reads and range-error fallback on the shared IO runtime; false |
 | `dedicated_io_runtime_workers` | Workers when the dedicated runtime is enabled; 2 |
 
-The scheduler cap is independent of the scan window cap. Reads above the
-scheduler cap bypass scheduling; set `max_read_bytes` to at least the intended
-physical run size when testing 1 MiB windows under scheduler concurrency limits.
-Unbounded/streaming reads also retain their existing direct path.
+The scheduler cap is independent of the scan window cap. A larger input range
+keeps its original bounds and uses one G credit and one P slot. Open-ended reads
+such as SST metadata fetches (`meta_offset..`) and whole-object reads use the same
+queue. These standalone reads are dispatched individually. The `route` label is
+`scheduled` for mergeable ranges, `scheduled_oversized` for larger ranges, and
+`scheduled_other` for other bounds. The separate `streaming_read()` API returns a
+reader and retains its existing dispatch path.
 
 A compatible request may join a pending group even at full G. Waiting requests
 can be absorbed into a compatible group without waiting to retry admission.
@@ -157,8 +161,10 @@ and waiting gauges must be interpreted separately. Positive gap limits trade
 extra bytes for fewer GETs; merged span and member limits still apply. The
 compactor's streaming block reader is separate from scan prefetch and is retained.
 
-ColdRanges starts its wrapper tasks on the caller runtime. Admission and response
-awaits remain on the submitting runtime. Eligible physical IO, dispatch and
+ColdRanges starts its wrapper tasks on the caller runtime. A read that needs a
+new group waits for G in the submitting future. Its owner must keep polling it
+or drop it to cancel. Foyer fetch tasks and ColdRanges read tasks continue polling
+when an iterator pauses. Physical IO, dispatch and
 range-error fallback use the configured scheduler runtime. Decode/fill stays on
 the consuming runtime. Foyer keeps its configured runtime ownership.
 

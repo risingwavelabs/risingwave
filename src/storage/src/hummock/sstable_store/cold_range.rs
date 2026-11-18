@@ -156,16 +156,30 @@ impl ColdRangePrefetch {
                 Ok(Some(block))
             }
             Part::Read(range, mut read) => {
-                let output = (&mut read.0).await.map_err(|error| {
-                    HummockError::other(format!("cold-range read task: {error}"))
-                })??;
-                let expected = sst.meta.block_metas[range.clone()]
-                    .iter()
-                    .map(|meta| meta.len as usize)
-                    .sum::<usize>();
-                if output.data.len() != expected {
-                    return Err(ObjectError::internal("unexpected cold-range read length").into());
-                }
+                let result = (&mut read.0)
+                    .await
+                    .map_err(|error| HummockError::other(format!("cold-range read task: {error}")))?
+                    .and_then(|output| {
+                        let expected = sst.meta.block_metas[range.clone()]
+                            .iter()
+                            .map(|meta| meta.len as usize)
+                            .sum::<usize>();
+                        if output.data.len() != expected {
+                            return Err(ObjectError::read_length_mismatch(
+                                "unexpected cold-range read length",
+                            ));
+                        }
+                        Ok(output)
+                    });
+                let output = match result {
+                    Err(error) if range.len() > 1 && error.is_read_range_error() => {
+                        // A speculative neighbor can extend past EOF while the head is valid.
+                        // Discard the window so the iterator retries the current block alone.
+                        self.parts.clear();
+                        return Ok(None);
+                    }
+                    other => other?,
+                };
                 self.buffered = Some(BufferedRun {
                     data: output.data,
                     blocks: range,
@@ -472,11 +486,14 @@ mod tests {
         let registry = Registry::new();
         let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
         let backend = InMemObjectStore::for_test();
-        let object = Arc::new(ObjectStoreImpl::InMem(
-            backend
-                .clone()
-                .monitored(metrics.clone(), Arc::new(ObjectStoreConfig::default())),
-        ));
+        let object = Arc::new(
+            ObjectStoreImpl::InMem(
+                backend
+                    .clone()
+                    .monitored(metrics.clone(), Arc::new(ObjectStoreConfig::default())),
+            )
+            .with_read_coalescing(),
+        );
         let mut store = mock_sstable_store_with_object_store(object).await;
         Arc::get_mut(&mut store).unwrap().read_metrics = Arc::new(HummockStateStoreMetrics::new(
             &registry,
@@ -508,6 +525,97 @@ mod tests {
             gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
         store.clear_block_cache().await.unwrap();
         (store, sst, backend, metrics, registry, dir)
+    }
+
+    #[tokio::test]
+    async fn metadata_and_oversized_scan_reach_the_scheduler() {
+        use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
+        use crate::store::PrefetchMode;
+
+        let registry = Registry::new();
+        let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
+        let mut config = ObjectStoreConfig::default();
+        config.read_scheduler.max_read_bytes = 1.try_into().unwrap();
+        let object = ObjectStoreImpl::InMem(
+            InMemObjectStore::for_test().monitored(metrics, Arc::new(config)),
+        )
+        .with_read_coalescing();
+        let store = mock_sstable_store_with_object_store(Arc::new(object)).await;
+        let (_, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 11, store.clone()).await;
+        store.clear_meta_cache().await.unwrap();
+        store.clear_block_cache().await.unwrap();
+        let requests = |route: &str| {
+            registry
+                .gather()
+                .iter()
+                .filter(|family| family.name() == "object_store_read_requests")
+                .flat_map(|family| family.get_metric())
+                .filter(|metric| {
+                    metric
+                        .get_label()
+                        .iter()
+                        .any(|label| label.name() == "route" && label.value() == route)
+                })
+                .map(|metric| metric.get_counter().value())
+                .sum::<f64>()
+        };
+        let before_meta = requests("scheduled_other");
+        let sst = store
+            .sstable(&info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+        assert_eq!(requests("scheduled_other") - before_meta, 1.0);
+
+        let options = Arc::new(SstableIteratorReadOptions {
+            prefetch: PrefetchMode::ColdRanges,
+            cache_policy: CachePolicy::Disable,
+            ..Default::default()
+        });
+        let mut iter = SstableIterator::new(sst, store.clone(), options, &info);
+        let before_scan = requests("scheduled_oversized");
+        iter.rewind().await.unwrap();
+        let mut stats = StoreLocalStatistic::default();
+        iter.collect_local_statistic(&mut stats);
+        assert!(stats.cache_data_prefetch_block_count > 1);
+        assert_eq!(requests("scheduled_oversized") - before_scan, 1.0);
+        drop(iter);
+        store.block_cache.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn missing_sst_does_not_repeat_a_cold_read() {
+        use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
+        use crate::store::PrefetchMode;
+
+        let (store, _, backend, metrics, _, _dir) = setup(false).await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 11, store.clone()).await;
+        store.clear_block_cache().await.unwrap();
+        backend
+            .delete(&store.get_sst_data_path(sst.id))
+            .await
+            .unwrap();
+        let reads = metrics
+            .operation_latency
+            .with_label_values(&["mem", "read"]);
+        for policy in [
+            CachePolicy::default(),
+            CachePolicy::NotFill,
+            CachePolicy::Disable,
+        ] {
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch: PrefetchMode::ColdRanges,
+                cache_policy: policy,
+                ..Default::default()
+            });
+            let mut iter = SstableIterator::new(sst.clone(), store.clone(), options, &info);
+            let before = reads.get_sample_count();
+            assert!(iter.rewind().await.is_err());
+            assert_eq!(reads.get_sample_count() - before, 1);
+            assert_eq!(store.get_prefetch_memory_usage(), 0);
+        }
+        store.block_cache.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -618,7 +726,7 @@ mod tests {
         }
     }
 
-    fn physical_inflight(registry: &Registry) -> f64 {
+    fn inflight(registry: &Registry, stage: &str) -> f64 {
         registry
             .gather()
             .iter()
@@ -627,7 +735,7 @@ mod tests {
             .filter(|m| {
                 m.get_label()
                     .iter()
-                    .any(|l| l.name() == "stage" && l.value() == "physical")
+                    .any(|l| l.name() == "stage" && l.value() == stage)
             })
             .map(|m| m.get_gauge().as_ref().unwrap().value())
             .sum()
@@ -804,7 +912,7 @@ mod tests {
         assert!(matches!(window.parts.back(), Some(Part::Single(2, _))));
         // No window consumption is necessary to start both cold sides.
         tokio::time::timeout(Duration::from_secs(2), async {
-            while physical_inflight(&registry) != 2.0 {
+            while inflight(&registry, "physical") != 2.0 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1585,7 +1693,8 @@ mod tests {
             6
         );
         tokio::time::timeout(Duration::from_secs(2), async {
-            while physical_inflight(&registry) != 2.0 {
+            // Both windows submitted their reads. They may share one physical GET.
+            while inflight(&registry, "logical") != 2.0 || inflight(&registry, "physical") < 1.0 {
                 tokio::task::yield_now().await;
             }
         })
@@ -1593,7 +1702,10 @@ mod tests {
         .unwrap();
         drop(windows);
         tokio::time::timeout(Duration::from_secs(2), async {
-            while store.get_prefetch_memory_usage() != 0 || physical_inflight(&registry) != 0.0 {
+            while store.get_prefetch_memory_usage() != 0
+                || inflight(&registry, "logical") != 0.0
+                || inflight(&registry, "physical") != 0.0
+            {
                 tokio::task::yield_now().await;
             }
         })
@@ -1762,7 +1874,7 @@ mod tests {
             assert!(store.get_prefetch_memory_usage() > 0);
             // Neither cold run has completed, and no iterator block has been consumed.
             tokio::time::timeout(Duration::from_secs(2), async {
-                while physical_inflight(&registry)
+                while inflight(&registry, "physical")
                     != if policy == CachePolicy::Disable {
                         1.0
                     } else {
@@ -1776,7 +1888,9 @@ mod tests {
             .expect("both sides of the hot block must start independently");
             drop(window);
             tokio::time::timeout(Duration::from_secs(2), async {
-                while physical_inflight(&registry) != 0. || store.get_prefetch_memory_usage() != 0 {
+                while inflight(&registry, "physical") != 0.
+                    || store.get_prefetch_memory_usage() != 0
+                {
                     tokio::task::yield_now().await;
                 }
             })

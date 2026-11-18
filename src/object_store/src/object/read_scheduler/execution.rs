@@ -19,7 +19,6 @@
 //! Followers can only reuse ranges fully covered by that GET.
 //! Range-error fallback releases the parent's P before acquiring P for each child.
 
-use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Instant;
@@ -36,7 +35,7 @@ use super::super::ObjectErrorInner;
 use super::replay;
 use super::{
     ActiveRead, GroupQueue, GroupQueueWorker, ObjectError, ObjectStoreMetrics, PhysicalPermit,
-    ReadGauge, ReadGroup, ReadRequest, ReadResult, ReadTask, WaitingRead,
+    ReadGauge, ReadGroup, ReadRange, ReadRequest, ReadResult, ReadTask, WaitingRead,
 };
 
 struct ActiveReadGuard<'a> {
@@ -117,7 +116,7 @@ pub(super) async fn run<F, R>(
     metrics: ObjectStoreMetrics,
     media_type: &'static str,
 ) where
-    F: Fn(String, Range<usize>) -> R + Send + Sync + 'static,
+    F: Fn(String, ReadRange) -> R + Send + Sync + 'static,
     R: Future<Output = ReadResult> + Send + 'static,
 {
     let groups = &worker.0;
@@ -239,7 +238,7 @@ impl ReadGroup {
         media_type: &str,
         sharing: Option<(&GroupQueue, &ReadSchedulerConfig)>,
     ) where
-        F: Fn(String, Range<usize>) -> R,
+        F: Fn(String, ReadRange) -> R,
         R: Future<Output = ReadResult>,
     {
         let planned = self.requests.len();
@@ -255,14 +254,18 @@ impl ReadGroup {
         // Trim the span in case requests at either end were cancelled after planning.
         // Keep the planned group if interior members cancel: do not split it into more GETs.
         let path = first.path.clone();
-        let start = first.range.start;
-        let mut end = first.range.end;
+        let mut span = first.range.clone();
         let mut gap_bytes = 0;
-        for request in &self.requests[1..] {
-            gap_bytes += request.range.start.saturating_sub(end);
-            end = end.max(request.range.end);
+        if let ReadRange::Mergeable(span) = &mut span {
+            for request in &self.requests[1..] {
+                let range = request
+                    .range
+                    .mergeable()
+                    .expect("merged group contains only bounded ranges");
+                gap_bytes += range.start.saturating_sub(span.end);
+                span.end = span.end.max(range.end);
+            }
         }
-        let span = start..end;
         metrics
             .read_scheduler_group_size
             .with_label_values(&[media_type])
@@ -275,17 +278,17 @@ impl ReadGroup {
             queue_duration.observe(request.queued_at.elapsed().as_secs_f64());
         }
         let mut partial_overlap_bytes = 0;
-        let flight = if let Some((queue, config)) = sharing {
+        let flight = if let (Some((queue, config)), Some(span)) = (sharing, span.mergeable()) {
             let mut state = queue.pending.lock().unwrap();
             let max_followers = config.max_batch_requests.get();
             // A covering GET can start between this group's admission and dispatch.
             if let Some(mut followers) =
-                state.covering_read(&path, &span, self.requests.len(), max_followers)
+                state.covering_read(&path, span, self.requests.len(), max_followers)
             {
                 followers.as_mut().unwrap().append(&mut self.requests);
                 return;
             }
-            partial_overlap_bytes = state.partial_overlap_bytes(&path, &span);
+            partial_overlap_bytes = state.partial_overlap_bytes(&path, span);
             // Move covered G waiters into the flight before starting the GET.
             // Waking them to retry would race a fast physical completion.
             let mut followers = Vec::new();
@@ -294,7 +297,7 @@ impl ReadGroup {
                     read,
                     acquire,
                     waker,
-                }) = state.take_covered_waiter(&path, &span)
+                }) = state.take_covered_waiter(&path, span)
             {
                 drop(acquire);
                 let pending = metrics
@@ -349,10 +352,9 @@ impl ReadGroup {
                     .read_scheduler_in_flight
                     .with_label_values(&[media_type]),
             );
-            tracing::debug!(target: "state_store_read_batch",?group_id, request_ids = ?trace_members, start = span.start,
-                end = span.end, "read scheduler group dispatch");
+            tracing::debug!(target: "state_store_read_batch",?group_id, request_ids = ?trace_members, start = span.mergeable().map(|r| r.start), end = span.mergeable().map(|r| r.end), "read scheduler group dispatch");
             tracing::debug!(target: "object_store_read_scheduler", ?group_id,
-                request_ids = ?trace_members, start = span.start, end = span.end,
+                request_ids = ?trace_members, start = span.mergeable().map(|r| r.start), end = span.mergeable().map(|r| r.end),
                 "scheduler physical read started");
             let result = {
                 let _timer = metrics
@@ -408,7 +410,10 @@ impl ReadGroup {
             return;
         };
         let result = result.and_then(|bytes| {
-            if bytes.len() == span.len() {
+            if span
+                .mergeable()
+                .is_none_or(|range| bytes.len() == range.len())
+            {
                 Ok(bytes)
             } else {
                 Err(ObjectError::read_length_mismatch(format!(
@@ -502,9 +507,13 @@ impl ReadGroup {
             let result = match &result {
                 Ok(bytes) if request.range == span => Ok(bytes.clone()),
                 // A block cache entry may outlive all other members of this read.
-                Ok(bytes) => Ok(Bytes::copy_from_slice(
-                    &bytes[request.range.start - start..request.range.end - start],
-                )),
+                Ok(bytes) => {
+                    let start = span.mergeable().expect("shared range").start;
+                    let range = request.range.mergeable().expect("shared member range");
+                    Ok(Bytes::copy_from_slice(
+                        &bytes[range.start - start..range.end - start],
+                    ))
+                }
                 Err(error) => Err(ObjectErrorInner::SharedRead(error.clone()).into()),
             };
             let _ = request.response.send(result);

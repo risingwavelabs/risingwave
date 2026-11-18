@@ -66,7 +66,8 @@ impl ObjectError {
         ObjectErrorInner::Internal(msg.to_string()).into()
     }
 
-    pub(crate) fn is_read_range_error(&self) -> bool {
+    /// Whether retrying a valid subrange can succeed after this read failed.
+    pub fn is_read_range_error(&self) -> bool {
         match self.inner() {
             ObjectErrorInner::ReadLengthMismatch(_) => true,
             ObjectErrorInner::SharedRead(error) => error.is_read_range_error(),

@@ -20,7 +20,7 @@
 //! backpressure and task handoff do not unnecessarily split a physical GET.
 
 use std::collections::{BTreeMap, HashMap};
-use std::ops::Range;
+use std::ops::{Bound, Range};
 use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker, ready};
 use std::time::Instant;
@@ -30,7 +30,7 @@ use futures::future::BoxFuture;
 use risingwave_common::config::storage::ReadSchedulerConfig;
 use tokio::sync::{AcquireError, Notify, OwnedSemaphorePermit, Semaphore, oneshot};
 
-use super::{ObjectError, ObjectResult, ObjectStoreMetrics};
+use super::{ObjectError, ObjectRangeBounds, ObjectResult, ObjectStoreMetrics};
 
 #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
 pub mod replay;
@@ -66,7 +66,7 @@ fn dedicated_io_runtime(workers: usize) -> &'static tokio::runtime::Runtime {
 }
 
 /// G bounds admitted groups through completion; P bounds scheduled backend reads.
-/// Staged window members and callers awaiting G are outside the admitted-group budget.
+/// A submission must be polled or dropped once the semaphore grants its credit.
 /// Compatible arrivals may join an existing group without consuming another G credit.
 pub(super) struct ReadScheduler {
     _shutdown: oneshot::Sender<()>,
@@ -78,9 +78,32 @@ pub(super) struct ReadScheduler {
     admission_duration: prometheus::Histogram,
 }
 
+/// Standalone reads keep the backend's exact bounds and never participate in merging or reuse.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ReadRange {
+    Mergeable(Range<usize>),
+    Standalone((Bound<usize>, Bound<usize>)),
+}
+
+impl ReadRange {
+    fn mergeable(&self) -> Option<&Range<usize>> {
+        match self {
+            Self::Mergeable(range) => Some(range),
+            Self::Standalone(_) => None,
+        }
+    }
+
+    pub(super) fn into_bounds(self) -> (Bound<usize>, Bound<usize>) {
+        match self {
+            Self::Mergeable(range) => (Bound::Included(range.start), Bound::Excluded(range.end)),
+            Self::Standalone(bounds) => bounds,
+        }
+    }
+}
+
 struct StagedRead {
     path: String,
-    range: Range<usize>,
+    range: ReadRange,
     response: oneshot::Sender<ReadResult>,
     trace_id: Option<u64>,
     _waiting: ReadGauge,
@@ -107,7 +130,7 @@ impl StagedRead {
 
 struct ReadRequest {
     path: String,
-    range: Range<usize>,
+    range: ReadRange,
     response: oneshot::Sender<ReadResult>,
     queued_at: Instant,
     trace_id: Option<u64>,
@@ -154,7 +177,7 @@ struct ReadGroup {
 }
 
 struct PendingReadGroup {
-    span: Range<usize>,
+    span: ReadRange,
     group: ReadGroup,
     _queued: ReadGauge,
 }
@@ -163,7 +186,7 @@ impl PendingReadGroup {
     fn new(
         queue: &GroupQueue,
         credit: OwnedSemaphorePermit,
-        span: Range<usize>,
+        span: ReadRange,
         requests: Vec<ReadRequest>,
     ) -> Self {
         Self {
@@ -183,13 +206,13 @@ impl PendingReadGroup {
         members: usize,
         config: &ReadSchedulerConfig,
     ) -> Option<Range<usize>> {
-        let start = self.span.start.min(range.start);
-        let end = self.span.end.max(range.end);
-        let gap = self
-            .span
+        let span = self.span.mergeable()?;
+        let start = span.start.min(range.start);
+        let end = span.end.max(range.end);
+        let gap = span
             .start
             .max(range.start)
-            .saturating_sub(self.span.end.min(range.end));
+            .saturating_sub(span.end.min(range.end));
         (self.group.requests[0].path == path
             && self.group.requests.len() + members <= config.max_batch_requests.get()
             && gap <= config.max_gap_bytes
@@ -203,13 +226,13 @@ impl PendingReadGroup {
         while let Some((index, span)) = pending.iter().enumerate().find_map(|(i, other)| {
             self.merge_span(
                 &other.group.requests[0].path,
-                &other.span,
+                other.span.mergeable()?,
                 other.group.requests.len(),
                 config,
             )
             .map(|span| (i, span))
         }) {
-            self.span = span;
+            self.span = ReadRange::Mergeable(span);
             self.group
                 .requests
                 .append(&mut pending.swap_remove(index).group.requests);
@@ -251,12 +274,15 @@ impl ActiveRead {
 struct PendingReadGroups {
     groups: Vec<PendingReadGroup>,
     active: Vec<Arc<ActiveRead>>,
-    waiting: HashMap<String, BTreeMap<(usize, u64), WaitingRead>>,
+    waiting: HashMap<String, BTreeMap<WaiterKey, WaitingRead>>,
     next_waiter: u64,
     // Physical tasks holding a P permit that have not taken a group yet.
     starting: usize,
     reported_ready: usize,
 }
+
+// Standalone reads sort outside every range lookup.
+type WaiterKey = (Option<usize>, u64);
 
 struct WaitingRead {
     read: StagedRead,
@@ -270,7 +296,7 @@ struct WaitingRead {
 struct GroupWaiter<'a> {
     queue: &'a GroupQueue,
     path: String,
-    key: (usize, u64),
+    key: WaiterKey,
 }
 
 impl Drop for GroupWaiter<'_> {
@@ -299,7 +325,10 @@ impl PendingReadGroups {
     }
 
     fn register_waiter<'a>(&mut self, queue: &'a GroupQueue, read: StagedRead) -> GroupWaiter<'a> {
-        let key = (read.range.start, self.next_waiter);
+        let key = (
+            read.range.mergeable().map(|range| range.start),
+            self.next_waiter,
+        );
         self.next_waiter += 1;
         let path = read.path.clone();
         self.waiting.entry(path.clone()).or_default().insert(
@@ -313,7 +342,7 @@ impl PendingReadGroups {
         GroupWaiter { queue, path, key }
     }
 
-    fn remove_waiter(&mut self, path: &str, key: (usize, u64)) -> Option<WaitingRead> {
+    fn remove_waiter(&mut self, path: &str, key: WaiterKey) -> Option<WaitingRead> {
         let waiters = self.waiting.get_mut(path)?;
         let removed = waiters.remove(&key);
         if waiters.is_empty() {
@@ -331,18 +360,19 @@ impl PendingReadGroups {
             return None;
         }
         let path = &group.group.requests[0].path;
-        let left = group
-            .span
+        let span = group.span.mergeable()?;
+        let left = span
             .start
             .saturating_sub(config.max_gap_bytes)
             .saturating_sub(config.max_read_bytes.get());
-        let right = group.span.end.saturating_add(config.max_gap_bytes);
+        let right = span.end.saturating_add(config.max_gap_bytes);
         let (key, merged_span) = self
             .waiting
             .get(path)?
-            .range((left, 0)..=(right, u64::MAX))
+            .range((Some(left), 0)..=(Some(right), u64::MAX))
             .find_map(|(&key, waiter)| {
-                let merged_span = group.merge_span(path, &waiter.read.range, 1, config)?;
+                let merged_span =
+                    group.merge_span(path, waiter.read.range.mergeable()?, 1, config)?;
                 Some((key, merged_span))
             })?;
         Some((merged_span, self.remove_waiter(path, key).unwrap()))
@@ -352,8 +382,10 @@ impl PendingReadGroups {
         let key = self
             .waiting
             .get(path)?
-            .range((span.start, 0)..(span.end, 0))
-            .find_map(|(&key, waiter)| (waiter.read.range.end <= span.end).then_some(key))?;
+            .range((Some(span.start), 0)..(Some(span.end), 0))
+            .find_map(|(&key, waiter)| {
+                (waiter.read.range.mergeable()?.end <= span.end).then_some(key)
+            })?;
         self.remove_waiter(path, key)
     }
 
@@ -421,16 +453,18 @@ impl GroupQueue {
         &self,
         pending: &[PendingReadGroup],
         path: &str,
-        range: &Range<usize>,
+        range: &ReadRange,
         reserved: Option<OwnedSemaphorePermit>,
         config: &ReadSchedulerConfig,
     ) -> Option<GroupAdmission> {
         if self.slots.is_closed() {
             return None;
         }
-        for (index, group) in pending.iter().enumerate() {
-            if let Some(span) = group.merge_span(path, range, 1, config) {
-                return Some(GroupAdmission::Join(index, span));
+        if let Some(range) = range.mergeable() {
+            for (index, group) in pending.iter().enumerate() {
+                if let Some(span) = group.merge_span(path, range, 1, config) {
+                    return Some(GroupAdmission::Join(index, span));
+                }
             }
         }
         reserved
@@ -451,7 +485,7 @@ impl GroupQueue {
             }
             GroupAdmission::Join(index, span) => {
                 let mut group = pending.swap_remove(index);
-                group.span = span;
+                group.span = ReadRange::Mergeable(span);
                 group.group.requests.push(request);
                 group.absorb_pending(pending, config);
                 group
@@ -473,7 +507,9 @@ impl GroupQueue {
         let mut group = group?;
         #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
         replay::queue(&pending, "selected");
-        group.requests.sort_unstable_by_key(|r| r.range.start);
+        group
+            .requests
+            .sort_unstable_by_key(|r| r.range.mergeable().map(|range| range.start));
         Some(group)
     }
 }
@@ -491,8 +527,18 @@ impl Drop for GroupQueueWorker {
 }
 
 impl ReadScheduler {
-    pub(super) fn can_schedule(&self, range: &Range<usize>) -> bool {
-        !range.is_empty() && range.len() <= self.config.max_read_bytes.get()
+    pub(super) fn plan(&self, range: &impl ObjectRangeBounds) -> (&'static str, ReadRange) {
+        let bounds = (range.start_bound().cloned(), range.end_bound().cloned());
+        let route = match bounds {
+            (Bound::Included(start), Bound::Excluded(end)) if start < end => {
+                if end - start <= self.config.max_read_bytes.get() {
+                    return ("scheduled", ReadRange::Mergeable(start..end));
+                }
+                "scheduled_oversized"
+            }
+            _ => "scheduled_other",
+        };
+        (route, ReadRange::Standalone(bounds))
     }
 
     pub(super) fn new<F, R>(
@@ -502,7 +548,7 @@ impl ReadScheduler {
         read: F,
     ) -> Self
     where
-        F: Fn(String, Range<usize>) -> R + Send + Sync + 'static,
+        F: Fn(String, ReadRange) -> R + Send + Sync + 'static,
         R: Future<Output = ReadResult> + Send + 'static,
     {
         #[cfg(not(madsim))]
@@ -551,14 +597,13 @@ impl ReadScheduler {
     }
 
     // Box only the cold object-read admission path; do not grow cache-facing futures.
-    pub(super) fn submit<'a>(
+    pub(super) fn submit_plan<'a>(
         &'a self,
         path: &'a str,
-        range: Range<usize>,
+        range: ReadRange,
         trace_id: Option<u64>,
     ) -> impl Future<Output = ObjectResult<oneshot::Receiver<ReadResult>>> + Send + 'a {
         Box::pin(async move {
-            debug_assert!(self.can_schedule(&range));
             let groups = &self.groups;
             let (read, response) = self.stage_read(path, range, trace_id);
             let waiter = {
@@ -576,7 +621,7 @@ impl ReadScheduler {
     fn stage_read(
         &self,
         path: &str,
-        range: Range<usize>,
+        range: ReadRange,
         trace_id: Option<u64>,
     ) -> (StagedRead, oneshot::Receiver<ReadResult>) {
         let (response, receiver) = oneshot::channel();
@@ -628,7 +673,7 @@ impl ReadScheduler {
             drop(acquire);
             // A covering flight may have freed a follower slot since registration.
             if let Some(read) = self.try_share_read(state, read) {
-                group.span = span;
+                group.span = ReadRange::Mergeable(span);
                 group
                     .group
                     .requests
@@ -649,12 +694,12 @@ impl ReadScheduler {
 
     // Return ownership if no active GET can take this follower.
     fn try_share_read(&self, state: &PendingReadGroups, read: StagedRead) -> Option<StagedRead> {
-        let Some(mut followers) = state.covering_read(
-            &read.path,
-            &read.range,
-            1,
-            self.config.max_batch_requests.get(),
-        ) else {
+        let Some(range) = read.range.mergeable() else {
+            return Some(read);
+        };
+        let Some(mut followers) =
+            state.covering_read(&read.path, range, 1, self.config.max_batch_requests.get())
+        else {
             return Some(read);
         };
         followers

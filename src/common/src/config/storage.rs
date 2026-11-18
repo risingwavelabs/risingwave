@@ -729,8 +729,7 @@ pub struct ReadSchedulerConfig {
     )]
     pub max_admitted_groups: NonZeroUsize,
     /// Maximum concurrent scheduled physical reads, including individual range-error fallbacks.
-    /// A merged GET consumes one slot regardless of its logical member count. Direct oversized
-    /// and unbounded reads are excluded.
+    /// Each ordinary object read or merged GET consumes one slot.
     #[serde(
         default = "default_read_inflight_reads",
         deserialize_with = "deserialize_read_permits"
@@ -739,7 +738,7 @@ pub struct ReadSchedulerConfig {
     /// Share a scheduled GET with fully covered reads, including waiters blocked on group admission.
     #[serde(default)]
     pub reuse_inflight_reads: bool,
-    /// Maximum input or merged range length. Larger reads bypass scheduling.
+    /// Maximum byte span for coalescing. Larger reads are scheduled individually with their original bounds.
     #[serde(default = "default_read_window_bytes")]
     pub max_read_bytes: NonZeroUsize,
     /// Maximum unread gap between neighboring ranges in the same object. The merged

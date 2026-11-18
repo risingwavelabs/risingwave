@@ -433,6 +433,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn barrier_progress_peeks_one_vnode_while_the_other_stays_parked() {
+        use std::cell::Cell;
+
+        // Record row-stream polls on either side of the barrier, independent of vnode order.
+        let mut inputs = Vec::new();
+        let mut senders = Vec::new();
+        for idx in 0..2 {
+            let (tx, mut rx) = unbounded_channel();
+            let count = std::rc::Rc::new(Cell::new(0));
+            let observed = count.clone();
+            let rows = futures::stream::poll_fn(move |cx| {
+                count.set(count.get() + 1);
+                rx.poll_recv(cx)
+            });
+            inputs.push((VirtualNode::from_index(idx), rows, 0));
+            senders.push((tx, observed));
+        }
+        let mut stream = VnodeStream::new(
+            inputs.into_iter(),
+            vec![0],
+            DataChunkBuilder::new(DATA_TYPES.clone(), 2),
+        );
+        assert!(stream.next().now_or_never().is_none());
+        assert!(senders.iter().all(|(_, count)| count.get() == 1));
+
+        let mut progress = Vec::new();
+        let mut barrier = Box::pin(stream.for_vnode_pk_progress(|vnode, _, pk| {
+            progress.push((vnode, pk.unwrap()));
+        }));
+        assert!(barrier.as_mut().now_or_never().is_none());
+        let waiting = senders
+            .iter()
+            .position(|(_, count)| count.get() == 2)
+            .unwrap();
+        let parked = 1 - waiting;
+        // Making the other input ready does not let the barrier advance past its current peek.
+        senders[parked]
+            .0
+            .send(Ok(ChangeLogRow::Insert(test_row(parked as i64))))
+            .unwrap();
+        assert!(barrier.as_mut().now_or_never().is_none());
+        assert_eq!(senders[parked].1.get(), 1);
+        senders[waiting]
+            .0
+            .send(Ok(ChangeLogRow::Insert(test_row(waiting as i64))))
+            .unwrap();
+        barrier.await.unwrap();
+        assert_eq!(
+            progress,
+            [waiting, parked].map(|idx| (VirtualNode::from_index(idx), test_row(idx as i64)))
+        );
+    }
+
+    #[tokio::test]
     async fn test_futures_unordered_peek() {
         let (tx, rx) = unbounded_channel();
         let mut stream = VnodeStream::new(

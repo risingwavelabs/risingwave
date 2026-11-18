@@ -66,6 +66,39 @@ pub type ObjectStreamingUploader = StreamingUploaderImpl;
 
 pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
 
+/// Checked half-open byte bounds for backends that do arithmetic on a read range.
+struct ObjectReadBounds {
+    start: usize,
+    end: Option<usize>,
+}
+
+impl ObjectReadBounds {
+    fn new(range: &impl ObjectRangeBounds) -> ObjectResult<Self> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+
+        let invalid =
+            || ObjectError::read_length_mismatch(format!("invalid object read range {range:?}"));
+        let start = match range.start_bound() {
+            Included(&n) => n,
+            Excluded(&n) => n.checked_add(1).ok_or_else(invalid)?,
+            Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Included(&n) => Some(n.checked_add(1).ok_or_else(invalid)?),
+            Excluded(&n) => Some(n),
+            Unbounded => None,
+        };
+        if end.is_some_and(|end| start > end) {
+            return Err(invalid());
+        }
+        Ok(Self { start, end })
+    }
+
+    fn len(&self) -> Option<usize> {
+        self.end.map(|end| end - self.start)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
     // Full path
@@ -612,7 +645,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             self.config.read_scheduler,
             move |path, range| {
                 let direct = direct.clone();
-                async move { direct.read_direct(&path, range).await }
+                async move { direct.read_direct(&path, range.into_bounds()).await }
             },
         )));
     }
@@ -706,14 +739,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let mut read_guard = self.object_store_metrics.begin_read(media_type, "logical");
         let (route, scheduled) = match &self.read_scheduler {
             None => ("direct", None),
-            Some(scheduler) => match (range.start_bound(), range.end_bound()) {
-                (Included(&start), Excluded(&end)) if start >= end => ("empty_range", None),
-                (Included(&start), Excluded(&end)) if scheduler.can_schedule(&(start..end)) => {
-                    ("scheduled", Some((scheduler, start..end)))
-                }
-                (Included(_), Excluded(_)) => ("oversized", None),
-                _ => ("unbounded", None),
-            },
+            Some(scheduler) => {
+                let (route, read_range) = scheduler.plan(&range);
+                (route, Some((scheduler, read_range)))
+            }
         };
         if let Some(request_id) = trace_id {
             let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
@@ -737,7 +766,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .observe(end.saturating_sub(start) as f64);
         }
         let result = match scheduled {
-            Some((scheduler, range)) => match scheduler.submit(path, range, trace_id).await {
+            Some((scheduler, range)) => match scheduler.submit_plan(path, range, trace_id).await {
                 Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
                 Err(error) => Err(error),
             },

@@ -19,7 +19,6 @@ use std::time::Instant;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use sync_point::sync_point;
-use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
@@ -212,14 +211,7 @@ impl SstableIterator {
             let start = profile_seek.then(Instant::now);
             let result = Box::pin(self.read_cold_range_block(idx)).await;
             SeekAwait::Prefetch.record(start);
-            match result {
-                Ok(block) => prefetched_block = block,
-                Err(error) => {
-                    // A failed speculative neighbor must not fail a valid head.
-                    self.cold_ranges = None;
-                    tracing::warn!(error = %error.as_report(), "cold-range prefetch failed, fall back to block get");
-                }
-            }
+            prefetched_block = result?;
         }
         let block = match prefetched_block {
             Some(block) => block,
@@ -279,12 +271,12 @@ impl SstableIterator {
                 self.options.cache_policy,
                 &mut self.stats,
             )
-            .await?;
+            .await;
         // A merge iterator may stay on this block while other children need the budget.
-        if window.is_empty() {
+        if block.is_err() || window.is_empty() {
             self.cold_ranges = None;
         }
-        Ok(block)
+        block
     }
 
     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {

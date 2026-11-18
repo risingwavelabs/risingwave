@@ -20,6 +20,32 @@ use super::super::{InMemObjectStore, ObjectErrorInner, ObjectStore, ObjectStoreC
 use super::execution::{PhysicalReadReservation, acquire_physical};
 use super::*;
 
+fn bounded_scheduler<F, R>(
+    metrics: &ObjectStoreMetrics,
+    media_type: &'static str,
+    config: ReadSchedulerConfig,
+    read: F,
+) -> ReadScheduler
+where
+    F: Fn(String, Range<usize>) -> R + Send + Sync + 'static,
+    R: Future<Output = ReadResult> + Send + 'static,
+{
+    ReadScheduler::new(metrics, media_type, config, move |path, range| {
+        read(path, range.mergeable().unwrap().clone())
+    })
+}
+
+impl ReadScheduler {
+    async fn submit(
+        &self,
+        path: &str,
+        range: Range<usize>,
+        trace_id: Option<u64>,
+    ) -> ObjectResult<oneshot::Receiver<ReadResult>> {
+        self.submit_plan(path, self.plan(&range).1, trace_id).await
+    }
+}
+
 #[cfg(not(madsim))]
 #[test]
 fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
@@ -78,7 +104,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
         let cancelled = Arc::new(Mutex::new(Some(cancelled)));
         let (closed, worker_closed) = oneshot::channel();
         let backend_owner = ReportWorkerExit(Some(closed));
-        let scheduler = Arc::new(ReadScheduler::new(&metrics, "test", config, {
+        let scheduler = Arc::new(bounded_scheduler(&metrics, "test", config, {
             move |path, range: Range<usize>| {
                 let _ = &backend_owner;
                 let started = started.clone();
@@ -194,7 +220,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
 
             let (starts, second_start) = oneshot::channel();
             let starts = Mutex::new(Some(starts));
-            let second = ReadScheduler::new(&metrics, "test", config, move |path, range| {
+            let second = bounded_scheduler(&metrics, "test", config, move |path, range| {
                 let starts = starts.lock().unwrap().take().unwrap();
                 async move {
                     starts
@@ -233,7 +259,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             assert_eq!(tokio::runtime::Handle::current().id(), scan_id);
             Ok(Bytes::from_static(b"a"))
         };
-        let off = ReadScheduler::new(
+        let off = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {
@@ -253,7 +279,7 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             "a",
         );
         let conflict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            ReadScheduler::new(
+            bounded_scheduler(
                 &metrics,
                 "test",
                 ReadSchedulerConfig {
@@ -276,6 +302,97 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
             "Dedicated reads used {expected_workers} I/O workers; OFF used the caller runtime"
         );
     });
+}
+
+#[tokio::test]
+async fn standalone_store_reads_share_admission_and_dispatch_with_mergeable_reads() {
+    use std::ops::Bound::{Excluded, Included, Unbounded};
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for credits in [1, 3] {
+            let metrics = Arc::new(ObjectStoreMetrics::new(&prometheus::Registry::new()));
+            let mut store =
+                InMemObjectStore::default().monitored(metrics.clone(), Default::default());
+            let config = ReadSchedulerConfig {
+                max_read_bytes: 2.try_into().unwrap(),
+                max_admitted_groups: credits.try_into().unwrap(),
+                max_inflight_reads: 1.try_into().unwrap(),
+                reuse_inflight_reads: true,
+                ..Default::default()
+            };
+            let (calls, mut reads) = mpsc::unbounded_channel();
+            let scheduler = Arc::new(ReadScheduler::new(
+                &metrics,
+                store.media_type(),
+                config,
+                move |_, range| {
+                    let calls = calls.clone();
+                    async move {
+                        let (reply, result) = oneshot::channel();
+                        calls.send((range.into_bounds(), reply)).unwrap();
+                        result.await.unwrap()
+                    }
+                },
+            ));
+            store.read_scheduler = Some(scheduler.clone());
+
+            for bounds in [
+                (Included(0), Excluded(4)),
+                (Included(1), Unbounded),
+                (Unbounded, Unbounded),
+                (Excluded(0), Included(3)),
+            ] {
+                let mut first = std::pin::pin!(store.read("sst", 1..2));
+                assert!(futures::poll!(&mut first).is_pending());
+                let (range, release) = reads.recv().await.unwrap();
+                assert_eq!(range, (Included(1), Excluded(2)));
+
+                let mut next = std::pin::pin!(store.read("sst", bounds));
+                assert!(futures::poll!(&mut next).is_pending());
+                assert_eq!(scheduler.waiting.get(), i64::from(credits == 1));
+                assert_eq!(scheduler.groups.queued.get(), i64::from(credits > 1));
+                assert!(reads.try_recv().is_err());
+                release.send(Ok(Bytes::from_static(b"b"))).unwrap();
+                assert_eq!(first.await.unwrap(), "b");
+
+                let ((), bytes) = tokio::join!(
+                    async {
+                        let (range, reply) = reads.recv().await.unwrap();
+                        assert_eq!(range, bounds);
+                        reply
+                            .send(Ok(Bytes::from_static(b"abcd").slice(bounds)))
+                            .unwrap();
+                    },
+                    next
+                );
+                assert_eq!(bytes.unwrap(), Bytes::from_static(b"abcd").slice(bounds));
+                assert!(reads.try_recv().is_err());
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn open_ended_read_past_eof_preserves_the_scheduler() {
+    let metrics = Arc::new(ObjectStoreMetrics::new(&prometheus::Registry::new()));
+    let mut store = InMemObjectStore::default().monitored(metrics, Default::default());
+    store.enable_read_coalescing();
+    store
+        .upload("sst", Bytes::from_static(b"data"))
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .read("sst", 5..)
+            .await
+            .unwrap_err()
+            .is_read_range_error()
+    );
+    assert_eq!(store.read("sst", 2..).await.unwrap(), "ta");
+    assert_eq!(store.read("sst", ..).await.unwrap(), "data");
 }
 
 #[tokio::test]
@@ -405,7 +522,7 @@ async fn contained_read_shares_a_started_get_until_its_last_waiter_leaves() {
             .with_label_values(&["test", "reservation_to_start"]);
         let (calls, mut reads) = mpsc::unbounded_channel();
         let release = Arc::new(Notify::new());
-        let scheduler = ReadScheduler::new(
+        let scheduler = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {
@@ -484,7 +601,7 @@ async fn covered_group_waiter_joins_a_new_flight_without_a_credit() {
         let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
         let (calls, mut reads) = mpsc::unbounded_channel();
         let release = Arc::new(Notify::new());
-        let scheduler = ReadScheduler::new(
+        let scheduler = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {
@@ -576,7 +693,7 @@ async fn queued_group_stays_mergeable_until_physical_task_starts() {
                 let mut state = groups.pending.lock().unwrap();
                 let request = ReadRequest {
                     path: "file".to_owned(),
-                    range: range.clone(),
+                    range: ReadRange::Mergeable(range.clone()),
                     response,
                     queued_at: Instant::now(),
                     trace_id: None,
@@ -584,7 +701,7 @@ async fn queued_group_stays_mergeable_until_physical_task_starts() {
                     _queued: None,
                 };
                 let admission = groups
-                    .admission(&state.groups, "file", &range, None, &config)
+                    .admission(&state.groups, "file", &request.range, None, &config)
                     .expect("adjacent read must join even with no free group credit");
                 let group = groups.admit(&mut state.groups, admission, request, &config);
                 state.groups.push(group);
@@ -601,7 +718,8 @@ async fn queued_group_stays_mergeable_until_physical_task_starts() {
                 {
                     let (reserved, active, dispatch) =
                         (reserved.clone(), active.clone(), dispatch.clone());
-                    move |_, range: Range<usize>| {
+                    move |_, range: ReadRange| {
+                        let range = range.mergeable().unwrap().clone();
                         assert_eq!(reserved.get(), 0);
                         assert_eq!(active.get(), 1);
                         assert_eq!(dispatch.get_sample_count(), 1);
@@ -684,15 +802,23 @@ async fn stopping_dispatcher_cancels_physical_reads() {
     let active = metrics
         .read_scheduler_in_flight
         .with_label_values(&["test"]);
-    let groups = Arc::new(GroupQueue::new(
-        &metrics,
-        "test",
-        ReadSchedulerConfig {
-            max_admitted_groups: 1.try_into().unwrap(),
-            ..Default::default()
-        },
-    ));
-    let (_shutdown, shutdown_rx) = oneshot::channel();
+    let config = ReadSchedulerConfig {
+        max_admitted_groups: 1.try_into().unwrap(),
+        ..Default::default()
+    };
+    let groups = Arc::new(GroupQueue::new(&metrics, "test", config));
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let scheduler = ReadScheduler {
+        _shutdown: shutdown,
+        groups: groups.clone(),
+        config,
+        pending: pending.clone(),
+        queued: metrics.read_scheduler_queued.with_label_values(&["test"]),
+        waiting: metrics.read_scheduler_waiting.with_label_values(&["test"]),
+        admission_duration: metrics
+            .read_scheduler_admission_duration
+            .with_label_values(&["test"]),
+    };
     let (response, result) = oneshot::channel();
     {
         let mut pending_groups = groups.pending.lock().unwrap();
@@ -700,10 +826,10 @@ async fn stopping_dispatcher_cancels_physical_reads() {
         pending_groups.groups.push(PendingReadGroup::new(
             &groups,
             permit,
-            0..1,
+            ReadRange::Mergeable(0..1),
             vec![ReadRequest {
                 path: "file".to_owned(),
-                range: 0..1,
+                range: ReadRange::Mergeable(0..1),
                 response,
                 queued_at: Instant::now(),
                 trace_id: None,
@@ -726,20 +852,22 @@ async fn stopping_dispatcher_cancels_physical_reads() {
                 }
             }
         },
-        ReadSchedulerConfig::default(),
+        config,
         metrics,
         "test",
     ));
     tokio::time::timeout(Duration::from_secs(5), async {
         started.notified().await;
         assert_eq!(active.get(), 1);
-        let waiting = groups.slots.clone().acquire_owned();
+        let waiting = scheduler.submit("queued", 0..1, None);
         tokio::pin!(waiting);
         assert!(futures::poll!(&mut waiting).is_pending());
         dispatcher.abort();
         assert!(dispatcher.await.unwrap_err().is_cancelled());
         assert!(result.await.is_err());
         assert!(waiting.await.is_err());
+        assert!(scheduler.submit("after-stop", 0..1, None).await.is_err());
+        assert!(groups.pending.lock().unwrap().waiting.is_empty());
         assert_eq!(active.get(), 0);
         assert_eq!(pending.get(), 0);
         assert!(groups.slots.is_closed());
@@ -769,7 +897,7 @@ async fn cancellation_after_planning_is_accounted_before_dispatch() {
             let (response, receiver) = oneshot::channel();
             requests.push(ReadRequest {
                 path: "file".to_owned(),
-                range: start..start + 4,
+                range: ReadRange::Mergeable(start..start + 4),
                 response,
                 queued_at: Instant::now(),
                 trace_id: None,
@@ -793,7 +921,7 @@ async fn cancellation_after_planning_is_accounted_before_dispatch() {
         }
         let read = |_, range| async move {
             assert!(!cancel_all, "a fully cancelled group must not issue IO");
-            assert_eq!(range, 0..12);
+            assert_eq!(range, ReadRange::Mergeable(0..12));
             Ok(Bytes::from_static(b"abcdefghijkl"))
         };
         group
@@ -835,7 +963,7 @@ async fn non_range_error_is_shared_without_individual_retries() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let calls = Arc::new(AtomicUsize::new(0));
-    let scheduler = ReadScheduler::new(
+    let scheduler = bounded_scheduler(
         &ObjectStoreMetrics::unused(),
         "test",
         ReadSchedulerConfig::default(),
@@ -864,7 +992,7 @@ async fn non_range_error_is_shared_without_individual_retries() {
 #[tokio::test]
 async fn out_of_bounds_read_does_not_block_adjacent_valid_reads() {
     let release_slow_read = Arc::new(Notify::new());
-    let scheduler = ReadScheduler::new(
+    let scheduler = bounded_scheduler(
         &ObjectStoreMetrics::unused(),
         "test",
         ReadSchedulerConfig {
@@ -911,7 +1039,7 @@ async fn bridge_reuses_group_credit_at_capacity() {
         let started = Arc::new(Notify::new());
         let release = Arc::new(Notify::new());
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let scheduler = ReadScheduler::new(
+        let scheduler = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {
@@ -987,7 +1115,7 @@ async fn covered_waiter_can_join_pending_group_when_flight_is_full() {
             let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
             let (calls, mut reads) = mpsc::unbounded_channel();
             let release = Arc::new(Notify::new());
-            let scheduler = ReadScheduler::new(
+            let scheduler = bounded_scheduler(
                 &metrics,
                 "test",
                 ReadSchedulerConfig {
@@ -1063,7 +1191,7 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                 let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
                 let (calls, mut reads) = mpsc::unbounded_channel();
                 let release = Arc::new(Notify::new());
-                let scheduler = Arc::new(ReadScheduler::new(
+                let scheduler = Arc::new(bounded_scheduler(
                     &metrics,
                     "test",
                     ReadSchedulerConfig {
@@ -1210,7 +1338,7 @@ async fn range_fallback_shares_the_physical_limit() {
             .read_scheduler_in_flight
             .with_label_values(&["test"]);
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let scheduler = ReadScheduler::new(
+        let scheduler = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {
@@ -1262,7 +1390,7 @@ async fn fallback_holds_group_credit_while_physical_capacity_is_available() {
         let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
         let (send_call, mut calls) = mpsc::unbounded_channel();
         let release = Arc::new(Notify::new());
-        let scheduler = ReadScheduler::new(
+        let scheduler = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {
@@ -1328,7 +1456,7 @@ async fn merged_read_is_cancelled_after_both_waiters_drop() {
     let started = Arc::new(Notify::new());
     let cancelled = Arc::new(Notify::new());
     let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-    let scheduler = ReadScheduler::new(
+    let scheduler = bounded_scheduler(
         &metrics,
         "test",
         ReadSchedulerConfig {
@@ -1417,7 +1545,7 @@ async fn partial_overlap_metrics_exclude_single_flight_reuse_and_other_objects()
         let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
         let (calls, mut reads) = mpsc::unbounded_channel();
         let release = Arc::new(Notify::new());
-        let scheduler = ReadScheduler::new(
+        let scheduler = bounded_scheduler(
             &metrics,
             "test",
             ReadSchedulerConfig {

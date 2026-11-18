@@ -22,7 +22,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::Stream;
 use itertools::Itertools;
-use risingwave_common::range::RangeBoundsExt;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -298,16 +297,14 @@ impl InMemObjectStore {
             .map(|(_, obj)| obj)
             .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)))?;
 
-        if let Some(end) = range.end()
-            && end > obj.len()
-        {
-            return Err(ObjectError::read_length_mismatch(format!(
-                "read range ends at {end}, past object length {}",
+        let bounds = (range.start_bound().cloned(), range.end_bound().cloned());
+        let slice = obj.get(bounds).ok_or_else(|| {
+            ObjectError::read_length_mismatch(format!(
+                "invalid read range {range:?} for object of length {}",
                 obj.len()
-            )));
-        }
-
-        Ok(obj.slice(range))
+            ))
+        })?;
+        Ok(obj.slice_ref(slice))
     }
 }
 
