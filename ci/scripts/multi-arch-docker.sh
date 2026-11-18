@@ -31,6 +31,25 @@ fi
 
 echo "--- arches: ${arches[*]}"
 
+# A docker config mounted from the CI agent is not readable inside the container.
+function regctl() {
+  DOCKER_AUTH_CONFIG=$(jq -n '{
+    auths: {
+      "ghcr.io": { username: $ENV.GHCR_USERNAME, password: $ENV.GHCR_TOKEN },
+      "docker.io": { username: "risingwavelabs", password: $ENV.DOCKER_TOKEN }
+    }
+  }') docker run --rm -e DOCKER_AUTH_CONFIG regclient/regctl:v0.11.7 "$@"
+}
+
+# Push `<tag>-nodwp`: the image `<tag>` without the layer of the split debug info `risingwave.dwp`.
+function pushNodwp() {
+  echo "push image tag: $1-nodwp"
+  if ! regctl image mod "$1" --create "$1-nodwp" --layer-rm-created-by 'risingwave\.dwp'; then
+    echo "^^^ +++"
+    echo "WARN: failed to push $1-nodwp; the image $1 is unaffected"
+  fi
+}
+
 # push images to gchr
 function pushGchr() {
   GHCRTAG="${ghcraddr}:$1"
@@ -42,6 +61,7 @@ function pushGchr() {
   done
   docker manifest create --insecure "$GHCRTAG" "${args[@]}"
   docker manifest push --insecure "$GHCRTAG"
+  pushNodwp "$GHCRTAG"
 }
 
 # push images to dockerhub
@@ -55,6 +75,7 @@ function pushDockerhub() {
   done
   docker manifest create --insecure "$DOCKERTAG" "${args[@]}"
   docker manifest push --insecure "$DOCKERTAG"
+  pushNodwp "$DOCKERTAG"
 }
 
 function isStableVersion() {
