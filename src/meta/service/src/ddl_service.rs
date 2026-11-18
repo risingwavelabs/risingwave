@@ -29,6 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
 use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
+use risingwave_meta::controller::utils::extract_cdc_excluded_columns_from_definition;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -50,8 +51,6 @@ use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
-use risingwave_sqlparser::ast::{Statement, cdc_table_excluded_columns};
-use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -1418,12 +1417,8 @@ impl DdlService for DdlServiceImpl {
                     &original_columns_by_name,
                 );
 
-                let excluded_columns = match Parser::parse_exactly_one(&table.definition) {
-                    Ok(Statement::CreateTable { with_options, .. }) => {
-                        cdc_table_excluded_columns(&with_options)
-                    }
-                    _ => HashSet::new(),
-                };
+                let excluded_columns =
+                    extract_cdc_excluded_columns_from_definition(&table.definition);
 
                 let collect_new_columns = |table_change: &TableSchemaChange| {
                     let mut new_columns: HashSet<(String, DataType)> =

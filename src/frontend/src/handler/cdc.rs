@@ -25,12 +25,10 @@ use risingwave_connector::source::cdc::external::{
     TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    CdcSourceExternalTableIdentifier, MARIADB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR,
-    POSTGRES_CDC_CONNECTOR, Postgres, SQL_SERVER_CDC_CONNECTOR, SqlServer,
+    CDC_COLUMN_EXCLUDE_LIST, CdcSourceExternalTableIdentifier, MARIADB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, Postgres, SQL_SERVER_CDC_CONNECTOR, SqlServer,
 };
-use risingwave_sqlparser::ast::{
-    CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY, ColumnDef, ColumnOption, SourceWatermark, TableConstraint,
-};
+use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result, RwError};
@@ -385,8 +383,11 @@ pub(crate) fn sanity_check_for_table_on_cdc_source(
 }
 
 /// Derive the schema of a CDC table from its upstream external table.
+/// Derive the schema of a CDC table created with `(*)` from the upstream table, leaving out the
+/// columns listed in `column.exclude.list`.
 pub(crate) async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
+    excluded_columns: &HashSet<String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>, Vec<CdcKeyComparison>)> {
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -398,43 +399,40 @@ pub(crate) async fn bind_cdc_table_schema_externally(
 
     let pk_names = table.pk_names().clone();
     let pk_comparisons = table.pk_column_comparisons(&pk_names)?;
-    Ok((
-        table
-            .column_descs()
-            .iter()
-            .cloned()
-            .map(|column_desc| ColumnCatalog {
-                column_desc,
-                is_hidden: false,
-            })
-            .collect(),
-        pk_names,
-        pk_comparisons,
-    ))
-}
+    let column_descs = table.column_descs();
 
-/// Remove columns listed in `column.exclude.list` from a schema derived with `(*)`.
-pub(crate) fn exclude_cdc_table_columns(
-    columns: &mut Vec<ColumnCatalog>,
-    pk_names: &[String],
-    excluded_columns: &HashSet<String>,
-) -> Result<()> {
-    for name in excluded_columns {
-        if !columns.iter().any(|c| c.name() == name) {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "column `{name}` in `{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}` does not exist in the upstream table"
-            ))
-            .into());
-        }
-        if pk_names.contains(name) {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "primary key column `{name}` cannot be excluded by `{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}`"
-            ))
-            .into());
-        }
+    let unknown = excluded_columns
+        .iter()
+        .filter(|name| !column_descs.iter().any(|c| c.name == **name))
+        .sorted()
+        .join(", ");
+    if !unknown.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "columns in `{CDC_COLUMN_EXCLUDE_LIST}` do not exist in the upstream table: {unknown}"
+        ))
+        .into());
     }
-    columns.retain(|c| !excluded_columns.contains(c.name()));
-    Ok(())
+    let excluded_pks = pk_names
+        .iter()
+        .filter(|name| excluded_columns.contains(*name))
+        .join(", ");
+    if !excluded_pks.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "primary key columns cannot be excluded by `{CDC_COLUMN_EXCLUDE_LIST}`: {excluded_pks}"
+        ))
+        .into());
+    }
+
+    let columns = column_descs
+        .iter()
+        .filter(|c| !excluded_columns.contains(&c.name))
+        .cloned()
+        .map(|column_desc| ColumnCatalog {
+            column_desc,
+            is_hidden: false,
+        })
+        .collect();
+    Ok((columns, pk_names, pk_comparisons))
 }
 
 pub(crate) async fn bind_cdc_pk_comparisons_externally(
@@ -465,39 +463,7 @@ pub(crate) fn bind_cdc_table_schema(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::types::DataType;
-
     use super::*;
-
-    #[test]
-    fn test_exclude_cdc_table_columns() {
-        let columns = || {
-            ["id", "name", "payload"]
-                .into_iter()
-                .enumerate()
-                .map(|(i, n)| {
-                    ColumnCatalog::visible(ColumnDesc::named(
-                        n,
-                        ColumnId::new(i as _),
-                        DataType::Varchar,
-                    ))
-                })
-                .collect_vec()
-        };
-        let pk = ["id".to_owned()];
-        let excluded = |names: &[&str]| names.iter().map(|n| n.to_string()).collect();
-
-        let mut cols = columns();
-        exclude_cdc_table_columns(&mut cols, &pk, &excluded(&["payload"])).unwrap();
-        assert_eq!(cols.iter().map(|c| c.name()).collect_vec(), ["id", "name"]);
-
-        let err = exclude_cdc_table_columns(&mut columns(), &pk, &excluded(&["id"])).unwrap_err();
-        assert!(err.to_string().contains("primary key column `id`"));
-
-        let err = exclude_cdc_table_columns(&mut columns(), &pk, &excluded(&["nope"])).unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
-    }
 
     fn test_schema_table_name() -> SchemaTableName {
         SchemaTableName {

@@ -24,7 +24,7 @@ pub mod source;
 pub mod split;
 pub mod sql_server;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
 
 pub use enumerator::*;
@@ -62,6 +62,16 @@ pub const CDC_BACKFILL_AS_EVEN_SPLITS: &str = "backfill.as_even_splits";
 pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_index";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
+/// Comma-separated upstream columns to leave out of a CDC table created with `(*)`.
+pub const CDC_COLUMN_EXCLUDE_LIST: &str = "column.exclude.list";
+
+/// Parse the value of `column.exclude.list`, e.g. `'a, b'`.
+pub fn parse_cdc_column_exclude_list(list: &str) -> HashSet<String> {
+    list.split(',')
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
+        .collect()
+}
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -20,11 +21,11 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::license::Feature;
 use risingwave_common::{bail, bail_not_implemented};
+use risingwave_connector::source::cdc::{CDC_COLUMN_EXCLUDE_LIST, parse_cdc_column_exclude_list};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
-    cdc_table_excluded_columns,
+    AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, SqlOption, Statement,
 };
 
 use super::create_source::SqlColumnStrategy;
@@ -37,7 +38,15 @@ use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::session::SessionImpl;
-use crate::{Binder, TableCatalog};
+use crate::{Binder, TableCatalog, WithOptions};
+
+/// Columns listed in `column.exclude.list` in the `WITH` options of a CDC table definition.
+fn cdc_excluded_columns(with_options: &[SqlOption]) -> Result<HashSet<String>> {
+    Ok(WithOptions::try_from(with_options)?
+        .get(CDC_COLUMN_EXCLUDE_LIST)
+        .map(|list| parse_cdc_column_exclude_list(list))
+        .unwrap_or_default())
+}
 
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
@@ -67,7 +76,7 @@ pub async fn get_new_table_definition_for_cdc_table(
 
         columns.clear();
         constraints.clear();
-        cdc_table_excluded_columns(with_options)
+        cdc_excluded_columns(with_options)?
     };
     let new_columns = new_columns
         .iter()
@@ -149,7 +158,12 @@ pub async fn handle_alter_table_column(
 
     // Retrieve the original table definition and parse it to AST.
     let mut definition = original_catalog.create_sql_ast_purified()?;
-    let Statement::CreateTable { columns, .. } = &mut definition else {
+    let Statement::CreateTable {
+        columns,
+        with_options,
+        ..
+    } = &mut definition
+    else {
         panic!("unexpected statement: {:?}", definition);
     };
 
@@ -189,6 +203,12 @@ pub async fn handle_alter_table_column(
             {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{new_column_name}\" of table \"{table_name}\" already exists"
+                )))?
+            }
+            // Otherwise the next upstream schema change would silently drop it again.
+            if cdc_excluded_columns(with_options)?.contains(&new_column_name) {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "column \"{new_column_name}\" of table \"{table_name}\" is listed in `{CDC_COLUMN_EXCLUDE_LIST}`"
                 )))?
             }
 

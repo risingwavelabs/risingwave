@@ -1,0 +1,80 @@
+control substitution on
+
+statement ok
+drop source if exists s_mysql_column_exclude_list cascade;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_column_exclude_list;
+    DROP TABLE IF EXISTS mysql_column_exclude_list_pk2;
+    CREATE TABLE mysql_column_exclude_list (id INT PRIMARY KEY, name VARCHAR(50), payload TEXT, raw_data TEXT);
+    INSERT INTO mysql_column_exclude_list VALUES (1, 'a', 'big', 'raw');
+    CREATE TABLE mysql_column_exclude_list_pk2 (id1 INT, id2 INT, payload TEXT, PRIMARY KEY (id1, id2));
+    INSERT INTO mysql_column_exclude_list_pk2 VALUES (1, 1, 'big');
+"
+
+statement ok
+create source s_mysql_column_exclude_list with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev',
+  auto.schema.change = 'true'
+);
+
+sleep 2s
+
+statement error primary key columns cannot be excluded by `column.exclude.list`: id
+create table rw_mysql_column_exclude_list (*) with (column.exclude.list = 'id, payload')
+from s_mysql_column_exclude_list table 'risedev.mysql_column_exclude_list';
+
+# Excluding only one column of a composite primary key is refused too.
+statement error primary key columns cannot be excluded by `column.exclude.list`: id2
+create table rw_mysql_column_exclude_list_pk2 (*) with (column.exclude.list = 'id2')
+from s_mysql_column_exclude_list table 'risedev.mysql_column_exclude_list_pk2';
+
+statement error `column.exclude.list` must list at least one column
+create table rw_mysql_column_exclude_list (*) with (column.exclude.list = ' , , ')
+from s_mysql_column_exclude_list table 'risedev.mysql_column_exclude_list';
+
+statement error columns in `column.exclude.list` do not exist in the upstream table: nope
+create table rw_mysql_column_exclude_list (*) with (column.exclude.list = 'payload, nope')
+from s_mysql_column_exclude_list table 'risedev.mysql_column_exclude_list';
+
+statement error `column.exclude.list` requires the `(\*)` wildcard
+create table rw_mysql_column_exclude_list (id int primary key, name varchar) with (column.exclude.list = 'payload')
+from s_mysql_column_exclude_list table 'risedev.mysql_column_exclude_list';
+
+statement ok
+create table rw_mysql_column_exclude_list (*) with (column.exclude.list = 'payload, raw_data')
+from s_mysql_column_exclude_list table 'risedev.mysql_column_exclude_list';
+
+query IT retry 30 backoff 1s
+select * from rw_mysql_column_exclude_list order by id;
+----
+1 a
+
+# An excluded column cannot be added back by hand: the next upstream schema change would drop it again.
+statement error column "payload" of table "rw_mysql_column_exclude_list" is listed in `column.exclude.list`
+alter table rw_mysql_column_exclude_list add column payload varchar;
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_column_exclude_list VALUES (2, 'b', 'big2', 'raw2');
+    ALTER TABLE mysql_column_exclude_list ADD COLUMN extra INT;
+    INSERT INTO mysql_column_exclude_list VALUES (3, 'c', 'big3', 'raw3', 7);
+"
+
+# The new upstream column is picked up, the excluded ones stay out.
+query ITI retry 30 backoff 1s
+select * from rw_mysql_column_exclude_list order by id;
+----
+1 a NULL
+2 b NULL
+3 c 7
+
+statement ok
+drop source s_mysql_column_exclude_list cascade;
