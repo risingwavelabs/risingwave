@@ -289,8 +289,8 @@ impl StreamMaterialize {
                     );
                     user_distributed_by
                 }
-                TableType::VectorIndex => {
-                    unreachable!("VectorIndex should not be created by StreamMaterialize")
+                TableType::VectorIndex | TableType::FullTextIndex => {
+                    unreachable!("{table_type:?} should not be created by StreamMaterialize")
                 }
                 TableType::Internal => unreachable!(),
             },
@@ -413,7 +413,8 @@ impl StreamMaterialize {
                 TableType::MaterializedView
                 | TableType::Index
                 | TableType::Internal
-                | TableType::VectorIndex => {
+                | TableType::VectorIndex
+                | TableType::FullTextIndex => {
                     assert_eq!(engine, Engine::Hummock);
                     engine
                 }
@@ -422,6 +423,7 @@ impl StreamMaterialize {
             clean_watermark_indices: ttl_watermark_indices,
             refreshable,
             vector_index_info: None,
+            full_text_index_info: None,
             cdc_table_type: None,
         })
     }
@@ -471,6 +473,7 @@ impl StreamMaterialize {
             clean_watermark_indices,
             refreshable,
             vector_index_info,
+            full_text_index_info,
             cdc_table_type,
         }: TableCatalog,
     ) -> TableCatalog {
@@ -541,6 +544,7 @@ impl StreamMaterialize {
             clean_watermark_indices,
             refreshable: false,
             vector_index_info,
+            full_text_index_info,
             cdc_table_type,
         }
     }

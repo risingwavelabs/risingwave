@@ -47,6 +47,7 @@ members = [
     "src/storage",
     "src/storage/backup",
     "src/storage/compactor",
+    "src/storage/full_text",
     "src/storage/hummock_sdk",
     "src/storage/hummock_test",
     "src/stream",
@@ -62,6 +63,7 @@ members = [
     "src/utils/delta_btree_map",
     "src/utils/futures_util",
     "src/utils/iter_util",
+    "src/utils/loser_tree",
     "src/utils/openai_embedding_service",
     "src/utils/pgwire",
     "src/utils/resource_util",
@@ -262,6 +264,7 @@ risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
+risingwave_full_text = { path = "./src/storage/full_text" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
@@ -289,6 +292,7 @@ risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
+rw_loser_tree = { path = "src/utils/loser_tree" }
 rw_resource_util = { path = "src/utils/resource_util" }
 # Pin sea-orm & sqlx to a specific version as we are using a patched version of sqlx
 # for compatibility with madsim.
@@ -460,6 +464,9 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+# Keep the explicit cross-segment doc ID mapping until it is available upstream.
+tantivy = { git = "https://github.com/risingwavelabs/tantivy.git", rev = "43144fcbd4333540bbdd7fbec565809cef305118" }
+tantivy-bitpacker = { git = "https://github.com/risingwavelabs/tantivy.git", rev = "43144fcbd4333540bbdd7fbec565809cef305118" }
 # Backport C23 string search fixes and use C17 for bundled Kerberos on modern GCC/glibc.
 krb5-src = { git = "https://github.com/risingwavelabs/krb5-src.git", rev = "a8ecc9a93a3e202a6c9993fb2fb0f901b3b59806" }
 # Use explicit prototypes and ANSI C definitions in bundled SASL for C23 compilers.

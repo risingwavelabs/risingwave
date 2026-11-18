@@ -125,23 +125,6 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
-  // Progress of a finite load, reported by its actors.
-  message LoadProgress {
-    // Lister only: all input has been assigned to the readers.
-    message ListFinished {}
-    // Reader only: all input assigned to this actor has been read.
-    message ReaderDone {}
-    message Failed {}
-
-    uint32 reporter_actor_id = 1;
-    stream_plan.LoadId load_id = 2;
-    oneof progress {
-      ListFinished list_finished = 3;
-      ReaderDone reader_done = 4;
-      Failed failed = 5;
-    }
-  }
-  repeated LoadProgress load_progress = 21;
   // SourceExecutor reports that CDC source has updated offset at least once.
   // Meta will mark the CDC source as created only after receiving this notification.
   message CdcSourceOffsetUpdated {
@@ -176,6 +159,24 @@ message BarrierCompleteResponse {
     common.Buffer vnode_bitmap = 5;
   }
   repeated TableChangeLogProgress table_change_log_progress = 20;
+  // Progress of a finite load, reported by its actors.
+  message LoadProgress {
+    // Lister only: all input has been assigned to the readers.
+    message ListFinished {}
+    // Reader only: all input assigned to this actor has been read.
+    message ReaderDone {}
+    message Failed {}
+
+    uint32 reporter_actor_id = 1;
+    stream_plan.LoadId load_id = 2;
+    oneof progress {
+      ListFinished list_finished = 3;
+      ReaderDone reader_done = 4;
+      Failed failed = 5;
+    }
+  }
+  repeated LoadProgress load_progress = 21;
+  map<uint32, hummock.FullTextIndexDelta.FullTextIndexAdds> full_text_index_adds = 22;
 }
 
 message StreamingControlStreamRequest {

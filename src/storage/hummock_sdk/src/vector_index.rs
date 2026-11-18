@@ -288,6 +288,9 @@ impl VectorIndex {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
             HummockObjectId::HnswGraphFile(_) => {}
+            HummockObjectId::FullTextSegment(_) => {}
+            HummockObjectId::FullTextDeleteFile(_) => {}
+            HummockObjectId::FullTextDeletionVector(_) => {}
         };
         let vector_files = match &self.inner {
             VectorIndexImpl::Flat(flat) => &flat.vector_store_info.vector_files,
@@ -452,6 +455,9 @@ impl VectorIndexDelta {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
             HummockObjectId::HnswGraphFile(_) => {}
+            HummockObjectId::FullTextSegment(_) => {}
+            HummockObjectId::FullTextDeleteFile(_) => {}
+            HummockObjectId::FullTextDeletionVector(_) => {}
         };
         match self {
             VectorIndexDelta::Init(_) => None,

@@ -226,6 +226,7 @@ impl TableCatalogBuilder {
             clean_watermark_indices: self.clean_watermark_indices,
             refreshable: false, // Internal tables are not refreshable
             vector_index_info: None,
+            full_text_index_info: None,
             cdc_table_type: None,
         }
     }

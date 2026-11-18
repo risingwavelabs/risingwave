@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod full_text_writer;
 pub mod hummock_storage;
 pub mod local_hummock_storage;
 pub(crate) mod object_index_writer;
@@ -21,3 +22,5 @@ pub mod version;
 
 pub use hummock_storage::*;
 pub use local_hummock_storage::*;
+#[cfg(any(test, feature = "test"))]
+pub use object_index_writer::ObjectIndexFileIdManager;

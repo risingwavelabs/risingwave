@@ -15,6 +15,8 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(error_generic_member_access)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
+// Snapshot tests produce deeply nested futures.
+#![cfg_attr(test, recursion_limit = "256")]
 
 pub mod error;
 pub mod meta_snapshot;

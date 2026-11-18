@@ -20,6 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_hummock_sdk::full_text_index::{FullTextIndexAdd, FullTextIndexDelta};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
@@ -194,10 +195,11 @@ pub(super) fn collect_resp_info(
     )
 }
 
-/// Changes of object-backed indexes reported by the writers in one barrier.
+/// Changes of object-backed indexes (vector and full-text) reported by the writers in one barrier.
 #[derive(Default)]
 pub(super) struct ObjectIndexAdds {
     vector: HashMap<TableId, Vec<VectorIndexAdd>>,
+    full_text: HashMap<TableId, Vec<FullTextIndexAdd>>,
 }
 
 impl ObjectIndexAdds {
@@ -206,6 +208,12 @@ impl ObjectIndexAdds {
             self.vector
                 .try_insert(table_id, adds.adds.into_iter().map(Into::into).collect())
                 .expect("non-duplicate");
+        }
+        for (table_id, adds) in resp.full_text_index_adds.drain() {
+            self.full_text
+                .entry(table_id)
+                .or_default()
+                .extend(adds.adds.into_iter().map(Into::into));
         }
     }
 
@@ -222,6 +230,12 @@ impl ObjectIndexAdds {
                 .try_insert(table_id, VectorIndexDelta::Adds(adds))
                 .expect("non-duplicate");
         }
+        for (table_id, adds) in self.full_text {
+            commit_info
+                .full_text_index_delta
+                .try_insert(table_id, FullTextIndexDelta::Adds(adds))
+                .expect("non-duplicate");
+        }
         let Some(index_table) = new_job.and_then(collect_new_object_index_table) else {
             return;
         };
@@ -234,6 +248,15 @@ impl ObjectIndexAdds {
                         VectorIndexDelta::Init(PbVectorIndexInit {
                             info: Some(index_table.vector_index_info.unwrap()),
                         }),
+                    )
+                    .expect("non-duplicate");
+            }
+            PbTableType::FullTextIndex => {
+                commit_info
+                    .full_text_index_delta
+                    .try_insert(
+                        index_table.id,
+                        FullTextIndexDelta::Init(index_table.full_text_index_info.clone().unwrap()),
                     )
                     .expect("non-duplicate");
             }

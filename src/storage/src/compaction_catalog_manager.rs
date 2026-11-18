@@ -837,6 +837,7 @@ mod tests {
             clean_watermark_indices: vec![],
             refreshable: false,
             vector_index_info: None,
+            full_text_index_info: None,
             cdc_table_type: None,
         }
     }
