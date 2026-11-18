@@ -992,6 +992,64 @@ pub mod tests {
     }
 
     #[test]
+    fn test_read_optimization_controls_reject_zero_limits() {
+        for (section, fields) in [(
+            "storage.object_store.read_scheduler",
+            vec![
+                "dedicated_io_runtime_workers",
+                "max_batch_requests",
+                "max_admitted_groups",
+                "max_inflight_reads",
+                "max_read_bytes",
+            ],
+        )] {
+            for field in fields {
+                assert!(
+                    toml::from_str::<RwConfig>(&format!("[{section}]\n{field} = 0")).is_err(),
+                    "{section}.{field}"
+                );
+            }
+        }
+        for section in ["storage.object_store.read_scheduler"] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!("[{section}]\nmisspelled_limit = 1")).is_err(),
+                "{section}"
+            );
+        }
+        let defaults = RwConfig::default();
+        assert!(!defaults.storage.object_store.enable_hummock_read_coalescing);
+        let scheduler = defaults.storage.object_store.read_scheduler;
+        assert!(!scheduler.use_dedicated_io_runtime);
+        assert_eq!(scheduler.dedicated_io_runtime_workers.get(), 2);
+        let config = toml::from_str::<RwConfig>(
+            "[storage.object_store.read_scheduler]\nuse_dedicated_io_runtime = true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .storage
+                .object_store
+                .read_scheduler
+                .dedicated_io_runtime_workers
+                .get(),
+            2,
+        );
+        let config = toml::from_str::<RwConfig>(
+            "[storage.object_store.read_scheduler]\nuse_dedicated_io_runtime = true\ndedicated_io_runtime_workers = 8\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .storage
+                .object_store
+                .read_scheduler
+                .dedicated_io_runtime_workers
+                .get(),
+            8,
+        );
+    }
+
+    #[test]
     fn test_storage_sstable_meta_fetch_concurrency() {
         let default: RwConfig = toml::from_str("").unwrap();
         assert_eq!(default.storage.sstable_meta_fetch_concurrency, 1);
