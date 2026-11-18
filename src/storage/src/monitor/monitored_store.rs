@@ -141,6 +141,10 @@ impl<S, E> MonitoredStateStore<S, E> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.inner.read_batch_config()
+    }
+
     fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

@@ -992,6 +992,18 @@ pub mod tests {
     }
 
     #[test]
+    fn test_batch_sst_metadata_reuse_defaults_and_limits() {
+        let config = RwConfig::default().storage.read_batch;
+        assert!(!config.meta_reuse);
+        for field in ["meta_max_entries", "meta_max_bytes", "misspelled_limit"] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!("[storage.read_batch]\n{field} = 0")).is_err(),
+                "storage.read_batch.{field}"
+            );
+        }
+    }
+
+    #[test]
     fn test_storage_sstable_meta_fetch_concurrency() {
         let default: RwConfig = toml::from_str("").unwrap();
         assert_eq!(default.storage.sstable_meta_fetch_concurrency, 1);

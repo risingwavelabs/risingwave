@@ -265,6 +265,11 @@ pub trait KeyValueFn<'a, O> =
     for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
 pub trait StateStoreGet: StaticSendSync {
+    /// Immutable startup controls for batch-local SST metadata reuse.
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        Default::default()
+    }
+
     fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

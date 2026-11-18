@@ -196,6 +196,7 @@ impl HummockServiceOpts {
             path: opts.data_directory,
             prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
             max_prefetch_block_number: opts.max_prefetch_block_number,
+            read_batch: opts.read_batch,
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,

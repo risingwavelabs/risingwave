@@ -57,7 +57,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::StateStore;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
-use risingwave_storage::hummock::CachePolicy;
+use risingwave_storage::hummock::{CachePolicy, SstMetaBatch};
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -1197,6 +1197,13 @@ where
 {
     pub fn get_data_types(&self) -> &[DataType] {
         &self.data_types
+    }
+
+    pub(crate) fn new_iterator_meta_batch(&self) -> Option<Arc<SstMetaBatch>> {
+        let config = self.row_store.state_store.read_batch_config();
+        config
+            .meta_reuse
+            .then(|| Arc::new(SstMetaBatch::new(config)))
     }
 
     pub fn table_id(&self) -> TableId {
