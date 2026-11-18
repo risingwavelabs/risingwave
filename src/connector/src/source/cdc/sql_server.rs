@@ -40,8 +40,9 @@ impl CdcSourceRuntimeFlags for SqlServer {
 impl CdcSourceDdlValidator for SqlServer {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         if !props.contains_key("schema.name") {
             // Default schema name is "dbo"
             props.insert("schema.name".into(), "dbo".into());
@@ -57,7 +58,7 @@ impl CdcSourceDdlValidator for SqlServer {
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         check_alter_with_options_inner(
             Self::CDC_CONNECTOR_NAME,
             props,

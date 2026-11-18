@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2026 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,14 @@
 
 package com.risingwave.connector.source.common;
 
-public abstract class DatabaseValidator {
+/**
+ * Checks that the upstream database of a CDC source is ready for the Debezium connector: its
+ * configuration, the privileges of the user, and the captured tables, through a connection the
+ * validator owns. The frontend has already checked the WITH options that need no connection, such
+ * as value formats and the options a connector does not support, and {@link
+ * DbzConnectorConfig#validateSource} checks the required ones before creating the validator.
+ */
+public abstract class CdcSourceValidator implements AutoCloseable {
 
     public void validateAll() {
         validateDbConfig();

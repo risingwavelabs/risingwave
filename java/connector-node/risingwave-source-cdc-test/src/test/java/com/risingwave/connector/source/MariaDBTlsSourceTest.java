@@ -21,10 +21,12 @@ import static org.junit.Assert.assertThrows;
 
 import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.source.common.CdcSourceFactory;
 import com.risingwave.connector.source.common.MySqlValidator;
+import com.risingwave.connector.source.common.MysqlDbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
+import com.risingwave.proto.ConnectorServiceProto.GetEventStreamRequest;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import com.risingwave.proto.ConnectorServiceProto.SourceType;
 import com.risingwave.proto.Data;
@@ -43,6 +45,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -171,18 +174,13 @@ public class MariaDBTlsSourceTest {
                             () -> {
                                 try (var validator =
                                         new MySqlValidator(
-                                                SourceTypeE.MARIADB,
-                                                properties,
-                                                schema,
-                                                false,
-                                                false)) {
+                                                mariadbConfig(properties), schema, false)) {
                                     validator.validateAll();
                                 }
                             });
                     properties.put(certOption, directory.resolve("ca.pem").toString());
                     try (var validator =
-                            new MySqlValidator(
-                                    SourceTypeE.MARIADB, properties, schema, false, false)) {
+                            new MySqlValidator(mariadbConfig(properties), schema, false)) {
                         validator.validateAll();
                     }
                     var channel =
@@ -214,6 +212,16 @@ public class MariaDBTlsSourceTest {
         } finally {
             server.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
         }
+    }
+
+    private static MysqlDbzConnectorConfig mariadbConfig(Map<String, String> properties) {
+        return (MysqlDbzConnectorConfig)
+                CdcSourceFactory.createSource(
+                                GetEventStreamRequest.newBuilder()
+                                        .setSourceType(SourceType.MARIADB)
+                                        .putAllProperties(properties)
+                                        .build())
+                        .getConfig();
     }
 
     private static CdcMessage readData(Iterator<GetEventStreamResponse> stream) {
