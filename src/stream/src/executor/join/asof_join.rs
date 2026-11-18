@@ -378,7 +378,11 @@ impl<S: StateStore, E: AsOfRowEncoding> AsOfJoinHashMap<S, E> {
         let table_iter = self
             .state
             .table
-            .iter_with_prefix(join_key, &sub_range, PrefetchOptions::default())
+            .iter_with_prefix(
+                join_key,
+                &sub_range,
+                PrefetchOptions::prefetch_for_prefix_scan(),
+            )
             .await?;
         let mut pinned = std::pin::pin!(table_iter);
         let mut entry = AsOfJoinCacheEntry::<E::Encoded>::default();
@@ -685,7 +689,11 @@ impl<S: StateStore, E: AsOfRowEncoding> AsOfJoinHashMap<S, E> {
         let table_iter = self
             .state
             .table
-            .iter_with_prefix(join_key, inequality_key_range, PrefetchOptions::default())
+            .iter_with_prefix(
+                join_key,
+                inequality_key_range,
+                PrefetchOptions::prefetch_for_prefix_scan(),
+            )
             .await?;
         Ok(futures::future::Either::Right(table_iter))
     }

@@ -522,8 +522,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     None => Ok(None),
                 }
             },
-            this.state_table
-                .iter_with_prefix(partition_key, sub_range, PrefetchOptions::default()),
+            this.state_table.iter_with_prefix(
+                partition_key,
+                sub_range,
+                PrefetchOptions::prefetch_for_prefix_scan()
+            ),
         )?;
 
         // If intermediate state table exists, restore intermediate state snapshots

@@ -47,12 +47,17 @@ use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
     SstableWriterOptions,
 };
-use crate::hummock::block_stream::{BlockDataStream, MemoryUsageTracker, PrefetchBlockStream};
+use crate::hummock::block_stream::{BlockDataStream, MemoryUsageTracker};
 use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
+
+mod cold_range;
+mod cold_range_observation;
+pub(crate) use cold_range::ColdRangePrefetch;
+use cold_range_observation::{BufferedRangeGuard, BufferedRanges};
 
 macro_rules! impl_vector_index_meta_file {
     ($($type_name:ident),+) => {
@@ -234,6 +239,7 @@ pub struct SstableStoreConfig {
 
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
+    pub scan_prefetch: risingwave_common::config::storage::ScanPrefetchConfig,
     pub recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub use_new_object_prefix_strategy: bool,
@@ -260,8 +266,11 @@ pub struct SstableStore {
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     prefetch_buffer_usage: Arc<AtomicUsize>,
+    buffered_cold_ranges: Arc<BufferedRanges>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
+    pub(crate) scan_prefetch: risingwave_common::config::storage::ScanPrefetchConfig,
+    pub(crate) read_metrics: Arc<HummockStateStoreMetrics>,
     /// Whether the object store is divided into prefixes depends on two factors:
     ///   1. The specific object store type.
     ///   2. Whether the existing cluster is a new cluster.
@@ -280,6 +289,7 @@ pub struct SstableStore {
 
 impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
+        tracing::info!(scan_prefetch = ?config.scan_prefetch, "storage read controls");
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
 
@@ -294,8 +304,11 @@ impl SstableStore {
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
+            buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
+            scan_prefetch: config.scan_prefetch,
+            read_metrics: config.state_store_metrics,
             use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
             skip_bloom_filter_in_serde: config.skip_bloom_filter_in_serde,
         }
@@ -310,6 +323,7 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         use_new_object_prefix_strategy: bool,
+        read_metrics: Arc<HummockStateStoreMetrics>,
     ) -> HummockResult<Self> {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
@@ -341,8 +355,11 @@ impl SstableStore {
             store,
 
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
+            buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
+            scan_prefetch: Default::default(),
+            read_metrics,
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             use_new_object_prefix_strategy,
             skip_bloom_filter_in_serde: false,
@@ -375,146 +392,6 @@ impl SstableStore {
             .map_err(Into::into)
     }
 
-    /// Buffers consecutive decoded blocks starting at `block_index`, up to `end_index` (exclusive).
-    /// Cache hits, the memory budget, and the prefetch limit may shorten the returned sequence.
-    /// All I/O and decoding errors are returned here, before the buffered blocks are consumed.
-    pub async fn prefetch_blocks(
-        &self,
-        sst: &Sstable,
-        block_index: usize,
-        end_index: usize,
-        policy: CachePolicy,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Box<PrefetchBlockStream>> {
-        let object_id = sst.id;
-        if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
-            let block = self.get(sst, block_index, policy, stats).await?;
-            return Ok(Box::new(PrefetchBlockStream::new(
-                VecDeque::from([block]),
-                block_index,
-                None,
-            )));
-        }
-        if policy != CachePolicy::Disable
-            && let Some(entry) = self
-                .block_cache
-                .get(&SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as _,
-                })
-                .await
-                .map_err(HummockError::foyer_error)?
-        {
-            stats.cache_data_block_total += 1;
-            if entry.source() == foyer::Source::Outer {
-                stats.cache_data_block_miss += 1;
-            }
-            let block = BlockHolder::from_hybrid_cache_entry(entry);
-            return Ok(Box::new(PrefetchBlockStream::new(
-                VecDeque::from([block]),
-                block_index,
-                None,
-            )));
-        }
-        let end_index = std::cmp::min(
-            end_index,
-            block_index.saturating_add(self.max_prefetch_block_number),
-        );
-        let mut end_index = std::cmp::min(end_index, sst.meta.block_metas.len());
-        let start_offset = sst.meta.block_metas[block_index].offset as usize;
-        if policy != CachePolicy::Disable {
-            let mut min_hit_index = end_index;
-            let mut hit_count = 0;
-            for idx in block_index..end_index {
-                if self.block_cache.contains(&SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: idx as _,
-                }) {
-                    if min_hit_index > idx && idx > block_index {
-                        min_hit_index = idx;
-                    }
-                    hit_count += 1;
-                }
-            }
-
-            if hit_count * 3 >= (end_index - block_index)
-                || min_hit_index * 2 > block_index + end_index
-            {
-                end_index = min_hit_index;
-            }
-        }
-        stats.cache_data_prefetch_count += 1;
-        stats.cache_data_prefetch_block_count += (end_index - block_index) as u64;
-        let end_offset = start_offset
-            + sst.meta.block_metas[block_index..end_index]
-                .iter()
-                .map(|meta| meta.len as usize)
-                .sum::<usize>();
-        let data_path = self.get_sst_data_path(object_id);
-        let memory_usage = end_offset - start_offset;
-        let tracker = MemoryUsageTracker::new(self.prefetch_buffer_usage.clone(), memory_usage);
-        let span = await_tree::span!("Prefetch SST-{}", object_id).verbose();
-        let store = self.store.clone();
-        let join_handle = tokio::spawn(async move {
-            store
-                .read(&data_path, start_offset..end_offset)
-                .instrument_await(span)
-                .await
-        });
-        let buf = match join_handle.await {
-            Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
-                tracing::error!(
-                    "prefetch meet error when read {}..{} from sst-{} ({})",
-                    start_offset,
-                    end_offset,
-                    object_id,
-                    sst.meta.estimated_size,
-                );
-                return Err(e.into());
-            }
-            Err(_) => {
-                return Err(HummockError::other("cancel by other thread"));
-            }
-        };
-        let mut offset = 0;
-        let mut blocks = VecDeque::default();
-        for idx in block_index..end_index {
-            let end = offset + sst.meta.block_metas[idx].len as usize;
-            if end > buf.len() {
-                return Err(ObjectError::internal("read unexpected EOF").into());
-            }
-            // copy again to avoid holding a large data in memory.
-            let block = Block::decode_with_copy(
-                buf.slice(offset..end),
-                sst.meta.block_metas[idx].uncompressed_size as usize,
-                true,
-            )?;
-            let holder = if let CachePolicy::Fill(hint) = policy {
-                let hint = if idx == block_index { hint } else { Hint::Low };
-                let entry = self.block_cache.insert_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: idx as _,
-                    },
-                    Box::new(block),
-                    HybridCacheProperties::default().with_hint(hint),
-                );
-                BlockHolder::from_hybrid_cache_entry(entry)
-            } else {
-                BlockHolder::from_owned_block(Box::new(block))
-            };
-
-            blocks.push_back(holder);
-            offset = end;
-        }
-        Ok(Box::new(PrefetchBlockStream::new(
-            blocks,
-            block_index,
-            Some(tracker),
-        )))
-    }
-
     pub async fn get_block_response(
         &self,
         sst: &Sstable,
@@ -543,38 +420,69 @@ impl SstableStore {
             sst_id: object_id,
             block_idx: block_index as _,
         };
-
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         // future: fetch block if hybrid cache miss
-        let fetch_block = async move {
-            let block_data = match store
-                .read(&data_path, range.clone())
-                .instrument_await("get_block_response".verbose())
-                .await
-            {
-                Ok(data) => data,
-                Err(e) => {
-                    tracing::error!(
-                        "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                        range,
-                        object_id,
-                        file_size
-                    );
-                    return Err(HummockError::from(e));
+        let fetch_range = range.clone();
+        let fetch_block = || {
+            let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
+            let buffered_ranges = self.buffered_cold_ranges.clone();
+            let read_metrics = self.read_metrics.clone();
+            async move {
+                outer_fetch.inc();
+                // Only a polled external fallback counts: cache hits and Foyer followers
+                // never reach this point. Scheduler reuse can still avoid a physical GET.
+                if buffered_ranges.contains(object_id, &fetch_range) {
+                    let policy = match policy {
+                        CachePolicy::Fill(_) => "fill",
+                        CachePolicy::NotFill => "not_fill",
+                        CachePolicy::Disable => "disable",
+                    };
+                    read_metrics
+                        .cold_range_buffered_overlap_reads
+                        .with_label_values(&[policy])
+                        .inc();
+                    read_metrics
+                        .cold_range_buffered_overlap_bytes
+                        .with_label_values(&[policy])
+                        .inc_by(fetch_range.len() as u64);
                 }
-            };
-            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
-            Ok(block)
+                let block_data = match store
+                    .read(&data_path, fetch_range.clone())
+                    .instrument_await("get_block_response".verbose())
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(e) => {
+                        tracing::error!(
+                            "get_block_response meet error when read {:?} from sst-{}, total length: {}",
+                            fetch_range,
+                            object_id,
+                            file_size
+                        );
+                        return Err(HummockError::from(e));
+                    }
+                };
+                let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+                Ok(block)
+            }
         };
 
         match policy {
             CachePolicy::Fill(hint) => {
                 let properties = HybridCacheProperties::default().with_hint(hint);
                 let fetch = self.block_cache.get_or_fetch(&idx, || {
-                    fetch_block.map(|res| res.map(|block| (block, properties)))
+                    fetch_block().map(|res| res.map(|block| (block, properties)))
                 });
+                if fetch.need_await() {
+                    // Foyer owns shared producers. Pending responses can also resolve
+                    // from disk or join another caller without issuing external IO.
+                    self.read_metrics.block_cache_pending.inc();
+                } else {
+                    self.read_metrics.block_cache_memory_hit.inc();
+                }
+
                 Ok(BlockResponse::Fetch(fetch))
             }
             CachePolicy::NotFill => {
@@ -588,13 +496,13 @@ impl SstableStore {
                         entry,
                     ))),
                     _ => {
-                        let block = fetch_block.await?;
+                        let block = fetch_block().await?;
                         Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                     }
                 }
             }
             CachePolicy::Disable => {
-                let block = fetch_block.await?;
+                let block = fetch_block().await?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
@@ -881,6 +789,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use risingwave_common::config::storage::ReadPrefetchMode;
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
@@ -897,6 +806,103 @@ mod tests {
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: u64 = 1;
+
+    #[tokio::test]
+    async fn parked_backfill_iterator_allows_independent_cold_reads() {
+        use std::time::Duration;
+
+        use risingwave_hummock_sdk::key::FullKey;
+        use risingwave_object_store::object::{
+            InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
+        };
+
+        use super::SstableBlockIndex;
+        use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+        use crate::monitor::ObjectStoreMetrics;
+
+        let registry = prometheus::Registry::new();
+        let backend = InMemObjectStore::for_test();
+        let mut config = ObjectStoreConfig::default();
+        config.read_scheduler.max_admitted_groups = 1.try_into().unwrap();
+        config.read_scheduler.max_inflight_reads = 1.try_into().unwrap();
+        let object = ObjectStoreImpl::InMem(backend.clone().monitored(
+            Arc::new(ObjectStoreMetrics::new(&registry)),
+            Arc::new(config),
+        ))
+        .with_read_coalescing();
+        let store = mock_sstable_store_with_object_store(Arc::new(object)).await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), SST_ID, store.clone()).await;
+        let key = |idx: usize| FullKey::decode(&sst.meta.block_metas[idx].smallest_key);
+        let wait_for_depth = async |depth: f64| {
+            loop {
+                if registry
+                    .gather()
+                    .iter()
+                    .find(|family| family.name() == "object_store_read_scheduler_waiting")
+                    .is_some_and(|family| family.get_metric()[0].get_gauge().value() == depth)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+
+        let first = 2;
+        let second = sst.meta.block_metas.len() - 3;
+        assert!(second > first + store.max_prefetch_block_number);
+        for prefetch in [ReadPrefetchMode::Disabled, ReadPrefetchMode::ColdRanges] {
+            store.clear_block_cache().await.unwrap();
+            let options = Arc::new(SstableIteratorReadOptions {
+                prefetch,
+                ..Default::default()
+            });
+            let mut a = SstableIterator::new(sst.clone(), store.clone(), options.clone(), &info);
+            let mut b = SstableIterator::new(sst.clone(), store.clone(), options, &info);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let path = store.get_sst_data_path(sst.id);
+                backend.set_read_delay_for_test(Duration::from_secs(60));
+                let mut busy = Box::pin(store.store.read(&path, 0..1));
+                assert!(futures::poll!(&mut busy).is_pending());
+
+                // Each iterator gets one poll to start its Foyer fetch or cold-range task.
+                let mut parked = Box::pin(a.seek(key(first)));
+                assert!(futures::poll!(&mut parked).is_pending());
+                wait_for_depth(1.0).await;
+                let mut next = Box::pin(b.seek(key(second)));
+                assert!(futures::poll!(&mut next).is_pending());
+                wait_for_depth(2.0).await;
+
+                backend.set_read_delay_for_test(Duration::ZERO);
+                drop(busy);
+                next.await.unwrap();
+                // Observe completion before polling A again. ColdRanges decodes on consumption.
+                let block = SstableBlockIndex {
+                    sst_id: sst.id,
+                    block_idx: first as u64,
+                };
+                let (bytes, _) = sst.calculate_block_info(first);
+                let finished = || {
+                    if prefetch == ReadPrefetchMode::ColdRanges {
+                        store.buffered_cold_ranges.contains(sst.id, &bytes)
+                    } else {
+                        store.block_cache.memory().contains(&block)
+                    }
+                };
+                while !finished() {
+                    tokio::task::yield_now().await;
+                }
+                parked.await.unwrap();
+                assert_eq!(a.key(), key(first));
+                assert_eq!(b.key(), key(second));
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!("parked iterator blocked an independent cold read with {prefetch:?}")
+            });
+        }
+        store.block_cache.close().await.unwrap();
+    }
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
@@ -1006,7 +1012,7 @@ mod tests {
             sstable,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
+                prefetch: ReadPrefetchMode::ColdRanges,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -1019,14 +1025,21 @@ mod tests {
         assert_eq!(iter.key(), test_key_of(0).to_ref());
         let mut stats = StoreLocalStatistic::default();
         iter.collect_local_statistic(&mut stats);
-        assert_eq!(stats.cache_data_prefetch_count, 1);
+        assert_eq!(stats.cache_data_prefetch_count, 0);
         assert_eq!(stats.cache_data_block_total, 1);
         assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
     }
 
     #[tokio::test]
     async fn test_prefetch_failure_falls_back_and_releases_tracker() {
-        for truncate in [true, false] {
+        for (truncate, mode, policy) in [
+            (true, ReadPrefetchMode::ColdRanges, CachePolicy::default()),
+            (false, ReadPrefetchMode::ColdRanges, CachePolicy::default()),
+            (true, ReadPrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (false, ReadPrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (true, ReadPrefetchMode::ColdRanges, CachePolicy::Disable),
+            (false, ReadPrefetchMode::ColdRanges, CachePolicy::Disable),
+        ] {
             let sstable_store = mock_sstable_store().await;
             let (sstable, info) =
                 gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
@@ -1052,19 +1065,32 @@ mod tests {
                 sstable.clone(),
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions {
-                    prefetch: true,
-                    cache_policy: CachePolicy::Disable,
+                    prefetch: mode,
+                    cache_policy: policy,
                     ..Default::default()
                 }),
                 &info,
             );
             iter.rewind().await.unwrap();
             assert_eq!(iter.key(), test_key_of(0).to_ref());
-            assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+            let lazy_head = mode == ReadPrefetchMode::ColdRanges && !truncate;
+            assert_eq!(sstable_store.get_prefetch_memory_usage() > 0, lazy_head);
             let mut stats = StoreLocalStatistic::default();
             iter.collect_local_statistic(&mut stats);
             assert_eq!(stats.cache_data_prefetch_count, 1);
-            assert_eq!(stats.cache_data_block_total, 1);
+            // A valid ColdRanges head no longer falls back because a later block is corrupt.
+            assert_eq!(stats.cache_data_block_total, u64::from(!lazy_head));
+            if lazy_head {
+                // Advance through the valid head to exercise failure of a buffered neighbor,
+                // not just a fresh seek. The iterator must release that window on failure.
+                loop {
+                    assert!(iter.is_valid());
+                    if iter.next().await.is_err() {
+                        break;
+                    }
+                }
+                assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+            }
             // If the single-block read also fails, the error must still reach the caller.
             let second_key = risingwave_hummock_sdk::key::FullKey::decode(
                 &sstable.meta.block_metas[1].smallest_key,
@@ -1072,147 +1098,6 @@ mod tests {
             assert!(iter.seek(second_key).await.is_err());
             assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
         }
-    }
-
-    #[tokio::test]
-    async fn test_prefetch_releases_old_budget_before_refill() {
-        let mut sstable_store = mock_sstable_store().await;
-        // The first prefetch may start at zero usage. A retained old tracker would force
-        // the next prefetch into the single-block path instead of reading another batch.
-        Arc::get_mut(&mut sstable_store)
-            .unwrap()
-            .prefetch_buffer_capacity = 0;
-        let (sstable, info) =
-            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
-                .await;
-        sstable_store.clear_block_cache().await.unwrap();
-        let next_batch = sstable_store.max_prefetch_block_number;
-        assert!(sstable.meta.block_metas.len() > next_batch + 1);
-        let mut iter = SstableIterator::new(
-            sstable.clone(),
-            sstable_store.clone(),
-            Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
-                cache_policy: CachePolicy::Disable,
-                ..Default::default()
-            }),
-            &info,
-        );
-        for idx in [0, next_batch] {
-            let key = risingwave_hummock_sdk::key::FullKey::decode(
-                &sstable.meta.block_metas[idx].smallest_key,
-            );
-            iter.seek(key).await.unwrap();
-            assert_eq!(iter.key(), key);
-            assert!(sstable_store.get_prefetch_memory_usage() > 0);
-        }
-        let mut stats = StoreLocalStatistic::default();
-        iter.collect_local_statistic(&mut stats);
-        assert_eq!(stats.cache_data_prefetch_count, 2);
-        assert_eq!(stats.cache_data_block_total, 0);
-        drop(iter);
-        assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_prefetch_producer_large_limit() {
-        let mut sstable_store = mock_sstable_store().await;
-        Arc::get_mut(&mut sstable_store)
-            .unwrap()
-            .max_prefetch_block_number = usize::MAX;
-        let (sstable, _) =
-            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
-                .await;
-        sstable_store.clear_block_cache().await.unwrap();
-        let mut stats = StoreLocalStatistic::default();
-        let mut stream = sstable_store
-            .prefetch_blocks(&sstable, 1, 3, CachePolicy::Disable, &mut stats)
-            .await
-            .unwrap();
-        assert_eq!(stats.cache_data_prefetch_block_count, 2);
-        for idx in [1, 2] {
-            assert!(matches!(
-                stream.take_block(idx),
-                crate::hummock::block_stream::PrefetchLookup::Hit(_)
-            ));
-        }
-        assert!(matches!(
-            stream.take_block(3),
-            crate::hummock::block_stream::PrefetchLookup::Exhausted
-        ));
-        drop(stream);
-        assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_prefetch_producer_respects_disabled_cache() {
-        let sstable_store = mock_sstable_store().await;
-        let (sstable, _) =
-            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
-                .await;
-        sstable_store.clear_block_cache().await.unwrap();
-        // A cached block in the requested range must not shorten a cache-disabled prefetch.
-        sstable_store
-            .get(
-                &sstable,
-                1,
-                CachePolicy::Fill(foyer::Hint::Normal),
-                &mut StoreLocalStatistic::default(),
-            )
-            .await
-            .unwrap();
-        let mut stats = StoreLocalStatistic::default();
-        let stream = sstable_store
-            .prefetch_blocks(&sstable, 0, 3, CachePolicy::Disable, &mut stats)
-            .await
-            .unwrap();
-        assert_eq!(stats.cache_data_prefetch_block_count, 3);
-        drop(stream);
-        assert!(
-            !sstable_store
-                .block_cache
-                .contains(&super::SstableBlockIndex {
-                    sst_id: sstable.id,
-                    block_idx: 0,
-                })
-        );
-
-        // With block 0 cached and the object removed, NotFill may succeed but Disable must fail.
-        sstable_store
-            .get(
-                &sstable,
-                0,
-                CachePolicy::Fill(foyer::Hint::Normal),
-                &mut StoreLocalStatistic::default(),
-            )
-            .await
-            .unwrap();
-        sstable_store.delete(sstable.id).await.unwrap();
-        assert!(
-            sstable_store
-                .prefetch_blocks(
-                    &sstable,
-                    0,
-                    3,
-                    CachePolicy::NotFill,
-                    &mut StoreLocalStatistic::default()
-                )
-                .await
-                .is_ok()
-        );
-        assert!(
-            sstable_store
-                .prefetch_blocks(
-                    &sstable,
-                    0,
-                    3,
-                    CachePolicy::Disable,
-                    &mut StoreLocalStatistic::default()
-                )
-                .await
-                .is_err()
-        );
-        assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
     }
 
     #[tokio::test]

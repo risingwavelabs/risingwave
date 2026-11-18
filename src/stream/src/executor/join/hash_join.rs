@@ -272,7 +272,11 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let decoded_key = key.deserialize(join_key_data_types)?;
     let table_iter = state_table
-        .iter_with_prefix_respecting_watermark(&decoded_key, sub_range, PrefetchOptions::default())
+        .iter_with_prefix_respecting_watermark(
+            &decoded_key,
+            sub_range,
+            PrefetchOptions::prefetch_for_prefix_scan(),
+        )
         .await?;
 
     #[for_await]
@@ -319,7 +323,11 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
     let mut degrees = vec![];
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let table_iter = degree_state_table
-        .iter_with_prefix_respecting_watermark(key, sub_range, PrefetchOptions::default())
+        .iter_with_prefix_respecting_watermark(
+            key,
+            sub_range,
+            PrefetchOptions::prefetch_for_prefix_scan(),
+        )
         .await?;
     let degree_col_idx = degree_col_idx_in_row(degree_state_table);
     #[for_await]

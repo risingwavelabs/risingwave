@@ -562,7 +562,7 @@ async fn make_snapshot_stream(
                         &pk_scan_range.pk_prefix,
                         &pk_scan_range.range_bounds,
                         vnode,
-                        PrefetchOptions::prefetch_for_large_range_scan(),
+                        PrefetchOptions::prefetch_for_snapshot_backfill(),
                         snapshot_rebuild_interval,
                     )
                     .map_ok(move |stream| {

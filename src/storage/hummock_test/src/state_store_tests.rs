@@ -1443,7 +1443,18 @@ async fn test_replicated_local_hummock_storage() {
 #[tokio::test]
 async fn test_iter_log() {
     let table_id = TableId::new(233);
-    let (hummock_storage, meta_client) = with_hummock_storage(table_id).await;
+    let mut options = default_opts_for_test();
+    options.scan_prefetch.changelog_mode =
+        Some(risingwave_common::config::storage::ReadPrefetchMode::ColdRanges);
+    let store =
+        risingwave_storage::hummock::iterator::test_utils::mock_sstable_store_with_scan_prefetch(
+            options.scan_prefetch,
+        )
+        .await;
+    let env = crate::test_utils::prepare_hummock_test_env_with_store(store, options).await;
+    env.register_table_id(table_id).await;
+    let hummock_storage = env.storage;
+    let meta_client = env.meta_client;
     let checkpoint_frequency = 3;
     let epoch_count = 10;
     let key_count = 10000;
