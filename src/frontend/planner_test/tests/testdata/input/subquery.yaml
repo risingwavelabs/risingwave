@@ -322,6 +322,14 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: a correlated equality between integers of different widths keeps the outer column type
+  sql: |
+    CREATE TABLE t1(a BIGINT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v VARCHAR);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
 - name: a row equality on every primary key column bounds a scalar subquery to one row
   sql: |
     CREATE TABLE t1(a INT, b INT);

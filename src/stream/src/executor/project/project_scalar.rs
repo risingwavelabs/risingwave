@@ -23,8 +23,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
-use tokio::sync::Semaphore;
 
+use super::inflight_rows::InflightRows;
 use crate::executor::prelude::*;
 
 type ProjectMessageFuture = impl Future<Output = StreamExecutorResult<ProjectedMessage>> + Send;
@@ -33,7 +33,7 @@ type PendingProjectMessages = FuturesOrdered<ProjectMessageFuture>;
 enum ProjectMessageInput {
     Chunk {
         chunk: StreamChunk,
-        inflight_request_semaphore: Option<Arc<Semaphore>>,
+        inflight_rows: Option<Arc<InflightRows>>,
     },
     Watermark {
         watermark: Watermark,
@@ -76,9 +76,9 @@ struct Inner {
     /// Maximum number of chunks with pending projection evaluation.
     project_expr_concurrency: usize,
 
-    /// Limits the number of chunks whose projection evaluation has started but not finished.
+    /// Limits the visible rows whose asynchronous evaluation has started but not finished.
     /// `None` means unlimited in-flight requests.
-    project_expr_inflight_request_concurrency: Option<Arc<Semaphore>>,
+    project_expr_inflight_request_concurrency: Option<Arc<InflightRows>>,
 
     /// Number of messages waiting in the ordered projection window.
     project_expr_inflight_window_size: Option<RelabeledAggregatedIntGauge>,
@@ -96,20 +96,29 @@ impl ProjectExecutor {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
         let eliminate_noop_updates =
             noop_update_hint || ctx.config.developer.aggressive_noop_update_elimination;
-        let project_expr_concurrency = match ctx.config.developer.project_expr_concurrency {
-            0 => usize::MAX,
-            concurrency => concurrency,
-        };
+        let is_async = exprs
+            .iter()
+            .any(|expr| matches!(expr, NonStrictExpression::Async(_)));
+        // Synchronous projections always process one chunk at a time, regardless of async limits.
+        let project_expr_concurrency =
+            match (is_async, ctx.config.developer.project_expr_concurrency) {
+                (false, _) => 1,
+                (true, 0) => usize::MAX,
+                (true, concurrency) => concurrency,
+            };
         let project_expr_inflight_request_concurrency = match ctx
             .config
             .developer
             .project_expr_inflight_request_concurrency
         {
             0 => None,
-            concurrency => Some(Arc::new(Semaphore::new(concurrency))),
+            concurrency if is_async => Some(Arc::new(InflightRows::new(concurrency))),
+            _ => None,
         };
-        let project_expr_inflight_window_size = (ctx.config.developer.project_expr_concurrency
-            != risingwave_common::config::default::developer::stream_project_expr_concurrency())
+        let project_expr_inflight_window_size = (is_async
+            && ctx.config.developer.project_expr_concurrency
+                != risingwave_common::config::default::developer::stream_project_expr_concurrency(
+                ))
         .then(|| {
             ctx.streaming_metrics
                 .project_expr_inflight_window_size
@@ -175,12 +184,10 @@ impl Inner {
             match input {
                 ProjectMessageInput::Chunk {
                     chunk,
-                    inflight_request_semaphore,
+                    inflight_rows,
                 } => {
-                    let _permit = if let Some(semaphore) = inflight_request_semaphore {
-                        Some(semaphore.acquire_owned().await.expect(
-                            "project expression in-flight request semaphore should not be closed",
-                        ))
+                    let _permit = if let Some(budget) = inflight_rows {
+                        Some(budget.acquire(chunk.cardinality()).await)
                     } else {
                         None
                     };
@@ -385,8 +392,7 @@ impl Inner {
                             eliminate_noop_updates,
                             ProjectMessageInput::Chunk {
                                 chunk,
-                                inflight_request_semaphore:
-                                    project_expr_inflight_request_concurrency.clone(),
+                                inflight_rows: project_expr_inflight_request_concurrency.clone(),
                             },
                         ));
                         pending_project_chunks += 1;
@@ -451,6 +457,161 @@ mod tests {
             .expect("test actor context should not be shared")
             .config = Arc::new(config);
         ctx
+    }
+
+    #[test]
+    fn test_synchronous_projection_ignores_async_configuration() {
+        for concurrency in [0, 1, 8] {
+            for rows in [0, 2] {
+                let (_, source) = MockSource::channel();
+                let source = source
+                    .into_executor(Schema::new(vec![Field::unnamed(DataType::Int64)]), vec![0]);
+                let project = ProjectExecutor::new(
+                    actor_context_with_project_expr_limits(concurrency, rows),
+                    source,
+                    vec![build_from_pretty("(add:int8 $0:int8 1:int8)")],
+                    MultiMap::new(),
+                    vec![],
+                    false,
+                );
+                assert_eq!(project.inner.project_expr_concurrency, 1);
+                assert!(
+                    project
+                        .inner
+                        .project_expr_inflight_request_concurrency
+                        .is_none()
+                );
+                assert!(project.inner.project_expr_inflight_window_size.is_none());
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct GatedProjectExpr {
+        started_rows: Arc<std::sync::Mutex<Vec<usize>>>,
+        gates: Vec<Arc<tokio::sync::Semaphore>>,
+        fail: bool,
+    }
+
+    impl ExpressionInfo for GatedProjectExpr {
+        fn return_type(&self) -> DataType {
+            DataType::Int64
+        }
+    }
+
+    impl AsyncExpression for GatedProjectExpr {
+        async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
+            let idx = {
+                let mut rows = self.started_rows.lock().unwrap();
+                let idx = rows.len();
+                rows.push(input.cardinality());
+                idx
+            };
+            let _permit = self.gates[idx].acquire().await.unwrap();
+            if self.fail {
+                return Err(risingwave_expr::ExprError::Custom("test failure".into()));
+            }
+            Ok(ValueImpl::Scalar {
+                value: Some((idx as i64).into()),
+                capacity: input.capacity(),
+            })
+        }
+
+        async fn eval_row(&self, _: &OwnedRow) -> expr::Result<Datum> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_projection_charges_visible_rows_and_releases_before_ordered_output() {
+        let rows = Arc::new(std::sync::Mutex::new(vec![]));
+        let gates: Vec<_> = (0..4)
+            .map(|_| Arc::new(tokio::sync::Semaphore::new(0)))
+            .collect();
+        let exprs = Arc::new(vec![NonStrictExpression::for_test(
+            GatedProjectExpr {
+                started_rows: rows.clone(),
+                gates: gates.clone(),
+                fail: false,
+            }
+            .boxed(),
+        )]);
+        let budget = Arc::new(InflightRows::new(5));
+        let mut pending = PendingProjectMessages::new();
+        // The first chunk has 7 physical rows but only 3 visible rows.
+        let chunks = [
+            StreamChunk::from_pretty("I\n+ 1\n+ 1\n+ 1\n+ 1 D\n+ 1 D\n+ 1 D\n+ 1 D"),
+            StreamChunk::from_pretty("I\n+ 2\n+ 2\n+ 2\n+ 2"),
+            StreamChunk::from_pretty("I\n+ 3\n+ 3\n+ 3\n+ 3\n+ 3\n+ 3\n+ 3\n+ 3"),
+            StreamChunk::from_pretty("I\n+ 4"),
+        ];
+        for chunk in &chunks {
+            pending.push_back(Inner::project_message(
+                exprs.clone(),
+                false,
+                ProjectMessageInput::Chunk {
+                    chunk: chunk.clone(),
+                    inflight_rows: Some(budget.clone()),
+                },
+            ));
+        }
+        assert!(futures::poll!(pending.next()).is_pending());
+        assert_eq!(*rows.lock().unwrap(), vec![3, 4]);
+        // The second finishes behind the blocked first, freeing its rows immediately. One oversized
+        // chunk enters, but the fourth must wait even after the first chunk finishes.
+        gates[1].add_permits(1);
+        assert!(futures::poll!(pending.next()).is_pending());
+        assert_eq!(*rows.lock().unwrap(), vec![3, 4, 8]);
+        gates[0].add_permits(1);
+        let ProjectedMessage::Chunk(first) = pending.next().await.unwrap().unwrap() else {
+            panic!()
+        };
+        assert_eq!(first.cardinality(), 3);
+        assert_eq!(first.visibility(), chunks[0].visibility());
+        assert!(matches!(
+            pending.next().await.unwrap().unwrap(),
+            ProjectedMessage::Chunk(_)
+        ));
+        assert!(futures::poll!(pending.next()).is_pending());
+        assert_eq!(*rows.lock().unwrap(), vec![3, 4, 8]);
+        gates[2].add_permits(1);
+        assert!(matches!(
+            pending.next().await.unwrap().unwrap(),
+            ProjectedMessage::Chunk(_)
+        ));
+        assert!(futures::poll!(pending.next()).is_pending());
+        assert_eq!(*rows.lock().unwrap(), vec![3, 4, 8, 1]);
+        // Dropping the executor's pending futures cancels evaluation and releases its last row.
+        drop(pending);
+        assert_eq!(budget.used_rows(), 0);
+        assert!(futures::FutureExt::now_or_never(budget.acquire(1)).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_projection_expression_error_releases_rows() {
+        let budget = Arc::new(InflightRows::new(1));
+        let exprs = Arc::new(vec![NonStrictExpression::new_topmost(
+            GatedProjectExpr {
+                started_rows: Arc::default(),
+                gates: vec![Arc::new(tokio::sync::Semaphore::new(1))],
+                fail: true,
+            }
+            .boxed(),
+            expr::LogReport,
+        )]);
+        let projected = Inner::project_message(
+            exprs,
+            false,
+            ProjectMessageInput::Chunk {
+                chunk: StreamChunk::from_pretty("I\n+ 1\n+ 2"),
+                inflight_rows: Some(budget.clone()),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(projected, ProjectedMessage::Chunk(_)));
+        assert_eq!(budget.used_rows(), 0);
+        assert!(futures::FutureExt::now_or_never(budget.acquire(1)).is_some());
     }
 
     #[tokio::test]
