@@ -68,10 +68,15 @@ impl ColdRangePrefetch {
         blocks: &[PlannedBlock],
         planning_capacity: usize,
         policy: CachePolicy,
+        observe_buffered_overlap: bool,
     ) -> Option<usize> {
         let overhead = size_of::<Part>()
             .checked_add(size_of::<SstableBlockIndex>())?
-            .checked_add(BufferedRangeGuard::estimated_overhead())?;
+            .checked_add(if observe_buffered_overlap {
+                BufferedRangeGuard::estimated_overhead()
+            } else {
+                0
+            })?;
         let mut bytes = size_of::<Self>()
             .checked_add(size_of::<MemoryUsageTracker>())?
             .checked_add(2 * size_of::<usize>())? // Arc reference counts.
@@ -107,7 +112,13 @@ impl ColdRangePrefetch {
     #[cfg(test)]
     fn reservation_bytes(metas: &[BlockMeta]) -> Option<usize> {
         let blocks: Vec<_> = metas.iter().map(|_| PlannedBlock::Cold).collect();
-        Self::planned_reservation_bytes(metas, &blocks, blocks.capacity(), CachePolicy::default())
+        Self::planned_reservation_bytes(
+            metas,
+            &blocks,
+            blocks.capacity(),
+            CachePolicy::default(),
+            false,
+        )
     }
 
     pub(crate) async fn next(
@@ -326,6 +337,7 @@ impl SstableStore {
                 &plan,
                 plan.capacity(),
                 policy,
+                self.scan_prefetch.observe_buffered_overlap,
             )
             .and_then(|bytes| {
                 MemoryUsageTracker::try_new(
@@ -439,15 +451,16 @@ impl SstableStore {
             .cold_range_prefetch_read_bytes
             .observe(range.len() as f64);
         // Spawn while constructing the window, before awaiting any read or consuming any row.
-        let observations = self.buffered_cold_ranges.clone();
+        let observations = self.buffered_overlap_index();
         let sst_id = sst.id;
         let task = tokio::spawn(async move {
             let _tracker = tracker;
             let data = object.read(&path, range.clone()).await?;
             // Register on IO completion, including completed tasks not yet consumed.
             // Invalid short responses are not reusable buffered data.
-            let observation =
-                (data.len() == range.len()).then(|| observations.register(sst_id, range));
+            let observation = observations
+                .filter(|_| data.len() == range.len())
+                .map(|index| index.register(sst_id, range));
             Ok(ReadOutput { data, observation })
         });
         window

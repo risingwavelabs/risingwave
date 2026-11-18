@@ -667,6 +667,9 @@ pub struct ScanPrefetchConfig {
     /// Retained buffers and decoding are additionally bounded by storage.prefetch_buffer_capacity_mb.
     #[serde(default = "default_scan_prefetch_bytes")]
     pub max_bytes: NonZeroUsize,
+    /// Track ordinary block reads overlapping unconsumed ColdRanges buffers for diagnostics.
+    #[serde(default)]
+    pub observe_buffered_overlap: bool,
 }
 
 impl ScanPrefetchConfig {

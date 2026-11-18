@@ -427,13 +427,16 @@ impl SstableStore {
         let fetch_range = range.clone();
         let fetch_block = || {
             let outer_fetch = self.read_metrics.block_cache_outer_fetch.clone();
-            let buffered_ranges = self.buffered_cold_ranges.clone();
+            let buffered_ranges = self.buffered_overlap_index();
             let read_metrics = self.read_metrics.clone();
             async move {
                 outer_fetch.inc();
                 // Only a polled external fallback counts: cache hits and Foyer followers
                 // never reach this point. Scheduler reuse can still avoid a physical GET.
-                if buffered_ranges.contains(object_id, &fetch_range) {
+                if buffered_ranges
+                    .as_ref()
+                    .is_some_and(|index| index.contains(object_id, &fetch_range))
+                {
                     let policy = match policy {
                         CachePolicy::Fill(_) => "fill",
                         CachePolicy::NotFill => "not_fill",
@@ -704,6 +707,12 @@ impl SstableStore {
         entry
     }
 
+    fn buffered_overlap_index(&self) -> Option<Arc<BufferedRanges>> {
+        self.scan_prefetch
+            .observe_buffered_overlap
+            .then(|| self.buffered_cold_ranges.clone())
+    }
+
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
@@ -830,7 +839,11 @@ mod tests {
             Arc::new(config),
         ))
         .with_read_coalescing();
-        let store = mock_sstable_store_with_object_store(Arc::new(object)).await;
+        let mut store = mock_sstable_store_with_object_store(Arc::new(object)).await;
+        Arc::get_mut(&mut store)
+            .unwrap()
+            .scan_prefetch
+            .observe_buffered_overlap = true;
         let (sst, info) =
             gen_default_test_sstable(default_builder_opt_for_test(), SST_ID, store.clone()).await;
         let key = |idx: usize| FullKey::decode(&sst.meta.block_metas[idx].smallest_key);
