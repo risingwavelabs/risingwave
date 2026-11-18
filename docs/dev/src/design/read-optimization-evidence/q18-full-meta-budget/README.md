@@ -96,3 +96,6 @@ The [downstream attribution](downstream-attribution.md) compares
 operator timers, effective SST candidates, and metadata reuse for
 the 27 seconds in the semi-join interval and the 12 seconds in the
 final aggregation interval.
+
+The [fixed-8 comparison](fixed8-matrix.md) reruns main and the optimized
+9 MiB configuration for three matched pairs with 12 advertised slots.
