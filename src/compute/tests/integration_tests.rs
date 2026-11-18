@@ -548,7 +548,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         let mut rows = Box::new(RowSeqScanExecutor::new(
             make_table(),
             ranges,
-            true,
+            false,
             test_batch_query_epoch(),
             8,
             "point reads".to_owned(),
