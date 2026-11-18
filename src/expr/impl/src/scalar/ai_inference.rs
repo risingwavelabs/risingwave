@@ -12,211 +12,164 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-use std::time::Duration;
+//! Row-wise SQL evaluation shared by inference functions with the standard arguments.
+//! Function codecs own their schemas and protocol; the client owns HTTP and retries.
+//!
+//! To add a function with this argument layout, implement `InferenceCodec` and register
+//! its SQL signatures in the function's module. Binder/type inference remains in the
+//! frontend. Functions with different argument layouts or batching can reuse
+//! `InferenceClient` directly without changing this wrapper or its retry loop.
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::config::AiDecideConfig;
-use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Datum, DatumRef, F64, JsonbVal, ListValue, MapRef, MapType, MapValue, Scalar,
-    ScalarImpl, ScalarRefImpl, StructValue, ToDatumRef,
+    DataType, Datum, DatumRef, JsonbVal, MapRef, MapType, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
 use risingwave_expr::expr::{
     AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, ValueImpl,
 };
-use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
-use risingwave_expr::scalar::ai_extract::ExtractionSchema;
-use risingwave_expr::{ExprError, Result, build_function};
-use serde::Serialize;
-use thiserror_ext::AsReport;
-use tokio::sync::Semaphore;
+use risingwave_expr::{ExprError, Result};
 
-/// One state is one request. An array in `state` is context, not an HTTP batch.
-#[derive(Serialize)]
-struct Request<'a> {
-    model: &'a str,
-    state: jsonbb::ValueRef<'a>,
-    questions: jsonbb::ValueRef<'a>,
+use super::ai_client::InferenceClient;
+
+/// Function-specific protocol for the row-wise inference expression. A codec may
+/// decode any SQL scalar; it borrows the original input for semantic validation.
+/// Encoding failures are local errors. Decoding failures are retried and logged,
+/// so their messages must not expose credentials or request/response payloads.
+pub(super) trait InferenceCodec: Send + Sync + 'static {
+    const NAME: &'static str;
+    const DEFINITION: &'static str;
+    const DEFINITION_NAME: &'static str;
+
+    fn new(definition: JsonbVal) -> Result<Self>
+    where
+        Self: Sized;
+    fn return_type(&self) -> DataType;
+    fn encode(&self, content: ScalarRefImpl<'_>, model: &str) -> Result<Vec<u8>>;
+    fn decode(&self, response: JsonbVal, content: ScalarRefImpl<'_>) -> Result<ScalarImpl>;
 }
 
-#[derive(Debug)]
-enum ResponseSchema {
-    Decide(QuestionSchema),
-    Extract(ExtractionSchema),
-}
-
-#[derive(Serialize)]
-struct ExtractRequest<'a> {
-    model: &'a str,
-    text: &'a str,
-    #[serde(flatten)]
-    specification: jsonbb::ValueRef<'a>,
-}
-
-struct AiInference {
+pub(super) struct AiInference<C> {
+    // content, endpoint, model, API key; other request granularities can use the
+    // InferenceClient directly instead of this row-wise expression wrapper.
     children: [BoxedExpression; 4],
     headers: Option<BoxedExpression>,
-    definition: JsonbVal,
     return_type: DataType,
-    schema: ResponseSchema,
-    client: Client,
-    config: AiDecideConfig,
-    request_permits: Option<Semaphore>,
+    codec: C,
+    client: InferenceClient,
 }
 
-impl std::fmt::Debug for AiInference {
+impl<C> std::fmt::Debug for AiInference<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Arguments may contain credentials or customer state.
+        // Both arguments and codec definitions may contain private data.
         f.debug_struct("AiInference").finish_non_exhaustive()
     }
 }
 
-#[build_function(
-    "ai_decide(jsonb, varchar, varchar, jsonb, varchar) -> struct",
-    volatile,
-    async,
-    type_infer = "unreachable"
-)]
-#[build_function(
-    "ai_decide(jsonb, varchar, varchar, jsonb, varchar, anymap) -> struct",
-    volatile,
-    async,
-    type_infer = "unreachable"
-)]
-fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    build_ai(return_type, children, false)
-}
-
-#[build_function(
-    "ai_extract(varchar, varchar, varchar, jsonb, varchar) -> struct",
-    volatile,
-    async,
-    type_infer = "unreachable"
-)]
-#[build_function(
-    "ai_extract(varchar, varchar, varchar, jsonb, varchar, anymap) -> struct",
-    volatile,
-    async,
-    type_infer = "unreachable"
-)]
-fn build_extract(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    build_ai(return_type, children, true)
-}
-
-fn build_ai(
-    return_type: DataType,
-    mut children: Vec<BoxedExpression>,
-    extract: bool,
-) -> Result<BoxedExpression> {
-    let name = if extract { "ai_extract" } else { "ai_decide" };
-    let error = |reason| ExprError::InvalidParam { name, reason };
-    let headers = if children.len() == 6 {
-        let headers = children.pop().unwrap();
-        if headers.return_type() != MapType::from_kv(DataType::Varchar, DataType::Varchar).into() {
-            return Err(function_error(
-                name,
-                "headers must be MAP(VARCHAR, VARCHAR)",
+impl<C: InferenceCodec> AiInference<C> {
+    pub(super) fn build(
+        return_type: DataType,
+        mut children: Vec<BoxedExpression>,
+        config: AiDecideConfig,
+    ) -> Result<BoxedExpression> {
+        let name = C::NAME;
+        let error = |reason| ExprError::InvalidParam { name, reason };
+        let headers = if children.len() == 6 {
+            let headers = children.pop().unwrap();
+            if headers.return_type()
+                != MapType::from_kv(DataType::Varchar, DataType::Varchar).into()
+            {
+                return Err(function_error(
+                    name,
+                    "headers must be MAP(VARCHAR, VARCHAR)",
+                ));
+            }
+            Some(headers)
+        } else {
+            None
+        };
+        let children: [BoxedExpression; 5] = children
+            .try_into()
+            .map_err(|_| error("expected five or six arguments".into()))?;
+        let Some(ScalarImpl::Jsonb(definition)) = children[3].eval_const()? else {
+            return Err(ExprError::InvalidParam {
+                name: C::DEFINITION_NAME,
+                reason: "must be constant non-null JSONB".into(),
+            });
+        };
+        let codec = C::new(definition)?;
+        if return_type != codec.return_type() {
+            return Err(error(
+                format!("return type does not match fixed {}", C::DEFINITION).into(),
             ));
         }
-        Some(headers)
-    } else {
-        None
-    };
-    let children: [BoxedExpression; 5] = children
-        .try_into()
-        .map_err(|_| error("expected five or six arguments".into()))?;
-    let Some(ScalarImpl::Jsonb(definition)) = children[3].eval_const()? else {
-        return Err(ExprError::InvalidParam {
-            name: if extract {
-                "ai_extract specification"
-            } else {
-                "ai_decide questions"
-            },
-            reason: "must be constant non-null JSONB".into(),
-        });
-    };
-    let (schema, expected_type, config) = if extract {
-        let schema = ExtractionSchema::parse(&definition)?;
-        let ty = schema.return_type();
-        (
-            ResponseSchema::Extract(schema),
-            ty,
-            risingwave_expr::scalar::ai_extract::config(),
+        let client = InferenceClient::new(name, config)?;
+        let [content, url, model, _, api_key] = children;
+        Ok(Self {
+            children: [content, url, model, api_key],
+            headers,
+            return_type,
+            codec,
+            client,
+        }
+        .boxed())
+    }
+
+    async fn request(
+        &self,
+        content: ScalarRefImpl<'_>,
+        url: &str,
+        model: &str,
+        api_key: &str,
+        headers: Option<MapRef<'_>>,
+    ) -> Result<ScalarImpl> {
+        self.client
+            .infer(
+                || {
+                    let headers = headers
+                        .map(|headers| validate_headers(headers, C::NAME))
+                        .transpose()?
+                        .unwrap_or_default();
+                    self.client
+                        .prepare_post(url, api_key, headers, || self.codec.encode(content, model))
+                },
+                |json| self.codec.decode(json, content),
+            )
+            .await
+    }
+
+    async fn evaluate(
+        &self,
+        args: [DatumRef<'_>; 4],
+        headers: Option<DatumRef<'_>>,
+    ) -> Result<Datum> {
+        let [Some(state), Some(url), Some(model), Some(api_key)] = args else {
+            return Ok(None);
+        };
+        let headers = match headers {
+            Some(None) => return Ok(None),
+            Some(Some(headers)) => Some(headers.into_map()),
+            None => None,
+        };
+        self.request(
+            state,
+            url.into_utf8(),
+            model.into_utf8(),
+            api_key.into_utf8(),
+            headers,
         )
-    } else {
-        let schema = QuestionSchema::parse(&definition)?;
-        let ty = schema.return_type();
-        (
-            ResponseSchema::Decide(schema),
-            ty,
-            risingwave_expr::scalar::ai_decide::config(),
-        )
-    };
-    if return_type != expected_type {
-        return Err(error(
-            if extract {
-                "return type does not match fixed specification"
-            } else {
-                "return type does not match fixed questions"
-            }
-            .into(),
-        ));
+        .await
+        .map(Some)
     }
-    config
-        .validate()
-        .map_err(|reason| ExprError::InvalidParam {
-            name: if extract {
-                "ai_extract config"
-            } else {
-                "ai_decide config"
-            },
-            reason: reason.replace("ai_decide", name).into(),
-        })?;
-    if config.max_concurrency as usize > Semaphore::MAX_PERMITS {
-        return Err(ExprError::InvalidParam {
-            name: if extract {
-                "ai_extract_max_concurrency"
-            } else {
-                "ai_decide_max_concurrency"
-            },
-            reason: "exceeds semaphore capacity".into(),
-        });
-    }
-    let request_permits =
-        (config.max_concurrency != 0).then(|| Semaphore::new(config.max_concurrency as usize));
-    let client = Client::builder()
-        .timeout(Duration::from_millis(config.request_timeout_ms.into()))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| function_error(name, "could not initialize HTTP client"))?;
-    let [content, url, model, _, api_key] = children;
-    Ok(AiInference {
-        children: [content, url, model, api_key],
-        headers,
-        definition,
-        return_type,
-        schema,
-        client,
-        config,
-        request_permits,
-    }
-    .boxed())
 }
 
-fn function_error(name: &str, message: impl std::fmt::Display) -> ExprError {
+pub(super) fn function_error(name: &str, message: impl std::fmt::Display) -> ExprError {
     // Never include request/response bodies, URLs, credentials or arbitrary headers.
     ExprError::Custom(format!("{name}: {message}"))
-}
-
-fn request_error(message: impl std::fmt::Display) -> ExprError {
-    // Do not attach the request, response body, URL, or function arguments to errors.
-    ExprError::Custom(format!("ai_decide: {message}"))
 }
 
 /// Validate before entering the retry loop. Never include caller-provided names or
@@ -253,291 +206,13 @@ fn request_headers(headers: MapRef<'_>) -> Result<HeaderMap> {
     validate_headers(headers, "ai_decide")
 }
 
-/// Decode strictly before the result can be persisted. Invalid responses are retried
-/// inside the request loop, without reaching non-strict expression wrappers.
-fn decode_response(response: JsonbVal, schema: &QuestionSchema) -> Result<StructValue> {
-    let response = response.take();
-    let answers = response
-        .get("answers")
-        .and_then(serde_json::Value::as_object)
-        .ok_or_else(|| request_error("response must contain an answers object"))?;
-    let mut fields = Vec::with_capacity(schema.0.len());
-    for question in &schema.0 {
-        let error = |field: &str| {
-            request_error(format!(
-                "invalid response for question {:?}: {field}",
-                question.id
-            ))
-        };
-        let answer = answers
-            .get(&question.id)
-            .and_then(serde_json::Value::as_object)
-            .ok_or_else(|| error("missing answer object"))?;
-        let expected = match &question.kind {
-            QuestionKind::Noul => "noul",
-            QuestionKind::Choice(_) => "choice",
-            QuestionKind::Score(_) => "score",
-        };
-        if answer.get("type").and_then(serde_json::Value::as_str) != Some(expected) {
-            return Err(error("answer type does not match the question"));
-        }
-        let number = |field: &str, maximum: f64| -> Result<F64> {
-            answer
-                .get(field)
-                .and_then(serde_json::Value::as_f64)
-                .filter(|v| v.is_finite() && (0.0..=maximum).contains(v))
-                .map(F64::from)
-                .ok_or_else(|| error(field))
-        };
-        let value = if let QuestionKind::Noul = &question.kind {
-            ScalarImpl::Float64(number("noul", 1.0)?)
-        } else {
-            let confidence = number("confidence", 1.0)?;
-            let probabilities = answer
-                .get("probabilities")
-                .and_then(serde_json::Value::as_object)
-                .ok_or_else(|| error("missing probabilities object"))?;
-            let keys = match &question.kind {
-                QuestionKind::Choice(labels) => labels.clone(),
-                QuestionKind::Score(count) => (0..*count).map(|i| i.to_string()).collect(),
-                QuestionKind::Noul => unreachable!(),
-            };
-            if probabilities.len() != keys.len() {
-                return Err(error(
-                    "probabilities must contain exactly the declared options",
-                ));
-            }
-            let distribution = keys
-                .iter()
-                .map(|key| {
-                    probabilities
-                        .get(key)
-                        .and_then(serde_json::Value::as_f64)
-                        .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
-                        .ok_or_else(|| error("missing or invalid probability"))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            // Services may round each probability independently. Preserve their values
-            // rather than imposing a precision or silently renormalizing the answer.
-            let distribution = ListValue::from_iter(distribution.into_iter().map(F64::from));
-            let (value, probabilities) = match &question.kind {
-                QuestionKind::Choice(labels) => {
-                    let choice = answer
-                        .get("choice")
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|s| labels.iter().any(|label| label == s))
-                        .ok_or_else(|| error("choice must be a declared option"))?;
-                    let probabilities = MapValue::try_from_kv(
-                        ListValue::from_iter(labels.iter().map(String::as_str)),
-                        distribution,
-                    )
-                    .map_err(|_| error("invalid probability map"))?;
-                    (
-                        ScalarImpl::Utf8(choice.into()),
-                        ScalarImpl::Map(probabilities),
-                    )
-                }
-                QuestionKind::Score(count) => (
-                    ScalarImpl::Float64(number("score", (count - 1) as f64)?),
-                    ScalarImpl::List(distribution),
-                ),
-                QuestionKind::Noul => unreachable!(),
-            };
-            ScalarImpl::Struct(StructValue::new(vec![
-                Some(value),
-                Some(confidence.into()),
-                Some(probabilities),
-            ]))
-        };
-        fields.push(Some(value));
-    }
-    Ok(StructValue::new(fields))
-}
-
-impl AiInference {
-    fn name(&self) -> &'static str {
-        match self.schema {
-            ResponseSchema::Decide(_) => "ai_decide",
-            ResponseSchema::Extract(_) => "ai_extract",
-        }
-    }
-
-    fn error(&self, message: impl std::fmt::Display) -> ExprError {
-        function_error(self.name(), message)
-    }
-
-    async fn request(
-        &self,
-        content: ScalarRefImpl<'_>,
-        url: &str,
-        model: &str,
-        api_key: &str,
-        headers: Option<MapRef<'_>>,
-    ) -> Result<StructValue> {
-        let headers = headers
-            .map(|headers| validate_headers(headers, self.name()))
-            .transpose()?
-            .unwrap_or_default();
-        let url = reqwest::Url::parse(url).map_err(|_| self.error("invalid model_url"))?;
-        if !matches!(url.scheme(), "http" | "https")
-            || !url.username().is_empty()
-            || url.password().is_some()
-        {
-            return Err(self.error("model_url must be an HTTP(S) URL without embedded credentials"));
-        }
-        let builder = self.client.post(url).bearer_auth(api_key).headers(headers);
-        let builder = match &self.schema {
-            ResponseSchema::Decide(_) => builder.json(&Request {
-                model,
-                state: content.into_jsonb().into(),
-                questions: self.definition.as_scalar_ref().into(),
-            }),
-            ResponseSchema::Extract(_) => {
-                let text = content.into_utf8();
-                if text.trim().is_empty() {
-                    return Err(self.error("content must not be empty or whitespace"));
-                }
-                builder.json(&ExtractRequest {
-                    model,
-                    text,
-                    specification: self.definition.as_scalar_ref().into(),
-                })
-            }
-        };
-        let request = builder
-            .build()
-            .map_err(|_| self.error("could not build HTTP request"))?;
-        let mut backoff_ms = self
-            .config
-            .retry_delay_ms
-            .min(self.config.max_retry_delay_ms);
-        loop {
-            let mut delay = Duration::from_millis(backoff_ms.into());
-            // Drop the response and its bytes before sleeping. Retry the same serialized
-            // request for every remote failure, including invalid success responses.
-            let result = async {
-                let mut response = self
-                    .client
-                    .execute(request.try_clone().expect("JSON body is cloneable"))
-                    .await
-                    .map_err(|err| {
-                        self.error(if err.is_timeout() {
-                            "HTTP request timed out"
-                        } else {
-                            "HTTP transport failed"
-                        })
-                    })?;
-                let status = response.status();
-                if !status.is_success() {
-                    if let Some(seconds) = response
-                        .headers()
-                        .get(reqwest::header::RETRY_AFTER)
-                        .and_then(|value| value.to_str().ok())
-                        .and_then(|value| value.parse::<u64>().ok())
-                    {
-                        delay = Duration::from_secs(seconds)
-                            .min(Duration::from_millis(self.config.max_retry_after_ms.into()));
-                    }
-                    return Err(self.error(format!("HTTP {status}")));
-                }
-                let too_large = || {
-                    self.error(format!(
-                        "response exceeds {} bytes",
-                        self.config.max_response_bytes
-                    ))
-                };
-                if response
-                    .content_length()
-                    .is_some_and(|len| len > u64::from(self.config.max_response_bytes))
-                {
-                    return Err(too_large());
-                }
-                let mut bytes = Vec::new();
-                while let Some(chunk) = response
-                    .chunk()
-                    .await
-                    .map_err(|_| self.error("HTTP response body read failed"))?
-                {
-                    if chunk.len()
-                        > (self.config.max_response_bytes as usize).saturating_sub(bytes.len())
-                    {
-                        return Err(too_large());
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                let json = jsonbb::Value::from_text(&bytes)
-                    .map(JsonbVal::from)
-                    .map_err(|_| self.error("successful response is not valid JSON"))?;
-                match &self.schema {
-                    ResponseSchema::Decide(schema) => decode_response(json, schema),
-                    ResponseSchema::Extract(schema) => {
-                        super::ai_extract::decode_response(json, schema, content.into_utf8())
-                    }
-                }
-            }
-            .await;
-            match result {
-                Ok(value) => return Ok(value),
-                Err(error) => {
-                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
-                        LazyLock::new(LogSuppressor::default);
-                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-                        // Only sanitized errors: never log credentials, URL or payloads.
-                        tracing::error!(error = %error.as_report(), ?delay, suppressed_count, function = self.name(), "AI request failed, retrying");
-                    }
-                }
-            }
-            // Sleep remains cancellable, including when a configured zero delay yields.
-            tokio::time::sleep(delay).await;
-            backoff_ms = backoff_ms
-                .saturating_mul(2)
-                .min(self.config.max_retry_delay_ms);
-        }
-    }
-
-    async fn evaluate(
-        &self,
-        args: [DatumRef<'_>; 4],
-        headers: Option<DatumRef<'_>>,
-    ) -> Result<Option<StructValue>> {
-        let [Some(state), Some(url), Some(model), Some(api_key)] = args else {
-            return Ok(None);
-        };
-        let headers = match headers {
-            Some(None) => return Ok(None),
-            Some(Some(headers)) => Some(headers.into_map()),
-            None => None,
-        };
-        // Share permits across concurrent eval/eval_row calls on this expression instance.
-        // Retain the permit through retries and backoff; cancellation releases it by drop.
-        let _permit = match &self.request_permits {
-            Some(permits) => Some(
-                permits
-                    .acquire()
-                    .await
-                    .expect("request semaphore is never closed"),
-            ),
-            None => None,
-        };
-        self.request(
-            state,
-            url.into_utf8(),
-            model.into_utf8(),
-            api_key.into_utf8(),
-            headers,
-        )
-        .await
-        .map(Some)
-    }
-}
-
-impl ExpressionInfo for AiInference {
+impl<C: InferenceCodec> ExpressionInfo for AiInference<C> {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 }
 
-impl AsyncExpression for AiInference {
+impl<C: InferenceCodec> AsyncExpression for AiInference<C> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut values = Vec::with_capacity(4 + usize::from(self.headers.is_some()));
         for child in self.children.iter().chain(self.headers.iter()) {
@@ -576,7 +251,7 @@ impl AsyncExpression for AiInference {
         }
         let mut builder = self.return_type().create_array_builder(input.capacity());
         for result in ordered_results {
-            builder.append(result.map(ScalarImpl::Struct));
+            builder.append(result);
         }
         let array = builder.finish().into_ref();
         if errors.is_empty() {
@@ -596,7 +271,6 @@ impl AsyncExpression for AiInference {
             args.get(4).map(ToDatumRef::to_datum_ref),
         )
         .await
-        .map(|value| value.map(ScalarImpl::Struct))
     }
 }
 
@@ -604,24 +278,132 @@ impl AsyncExpression for AiInference {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use axum::http::{HeaderMap, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::post;
     use axum::{Json, Router};
+    use reqwest::Client;
     use risingwave_common::array::{Array, ArrayBuilder, JsonbArrayBuilder, Utf8Array};
+    use risingwave_common::types::{F64, ListValue, MapValue, Scalar, StructValue};
     use risingwave_expr::expr::{
         InputRefExpression, LiteralExpression, LogReport, NonStrictExpression,
         SyncExpressionBoxExt, build_func,
     };
+    use risingwave_expr::scalar::ai_decide::QuestionSchema;
+    use risingwave_expr::scalar::ai_extract::ExtractionSchema;
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::sync::Barrier;
+    use tokio::sync::{Barrier, Semaphore};
 
+    use super::super::ai_decide::{DecideCodec, decode_response};
     use super::*;
 
     const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    #[tokio::test]
+    async fn scalar_codec_prepares_after_admission_and_retries_validation() {
+        struct IntegerCodec(AtomicUsize);
+
+        impl InferenceCodec for IntegerCodec {
+            const DEFINITION: &'static str = "specification";
+            const DEFINITION_NAME: &'static str = "test_integer specification";
+            const NAME: &'static str = "test_integer";
+
+            fn new(_: JsonbVal) -> Result<Self> {
+                Ok(Self(AtomicUsize::new(0)))
+            }
+
+            fn return_type(&self) -> DataType {
+                DataType::Int32
+            }
+
+            fn encode(&self, _: ScalarRefImpl<'_>, _: &str) -> Result<Vec<u8>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(br#"{"value":42}"#.to_vec())
+            }
+
+            fn decode(&self, response: JsonbVal, _: ScalarRefImpl<'_>) -> Result<ScalarImpl> {
+                response.take()["value"]
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                    .map(ScalarImpl::Int32)
+                    .ok_or_else(|| function_error(Self::NAME, "expected an integer"))
+            }
+        }
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let seen = attempts.clone();
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move |Json(body): Json<Value>| {
+                assert_eq!(body, json!({"value": 42}));
+                let attempt = seen.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    Json(if attempt == 0 {
+                        json!({"value":"invalid"})
+                    } else {
+                        json!({"value":42})
+                    })
+                }
+            }),
+        ))
+        .await;
+        let expr = AiInference {
+            codec: IntegerCodec::new(test_questions()).unwrap(),
+            children: [
+                LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed(),
+                LiteralExpression::new(DataType::Varchar, Some(server.url.clone().into())).boxed(),
+                LiteralExpression::new(DataType::Varchar, Some("test-model".into())).boxed(),
+                LiteralExpression::new(DataType::Varchar, Some("test-key".into())).boxed(),
+            ],
+            headers: None,
+            return_type: DataType::Int32,
+            client: InferenceClient::new(
+                IntegerCodec::NAME,
+                AiDecideConfig {
+                    max_concurrency: 1,
+                    retry_delay_ms: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        };
+        let permit = expr
+            .client
+            .request_permits
+            .as_ref()
+            .unwrap()
+            .acquire()
+            .await
+            .unwrap();
+        let input = DataChunk::new_dummy(1);
+        let evaluation = expr.eval(&input);
+        futures::pin_mut!(evaluation);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut evaluation)
+                .await
+                .is_err()
+        );
+        assert_eq!(expr.codec.0.load(Ordering::SeqCst), 0);
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
+        drop(permit);
+        let output = tokio::time::timeout(Duration::from_secs(5), evaluation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.as_int32().value_at(0), Some(42));
+        assert_eq!(expr.codec.0.load(Ordering::SeqCst), 1);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            expr.eval_row(&OwnedRow::empty()).await.unwrap(),
+            Some(ScalarImpl::Int32(42))
+        );
+        assert_eq!(expr.codec.0.load(Ordering::SeqCst), 2);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
 
     struct Server {
         url: String,
@@ -641,11 +423,10 @@ mod tests {
         Server { url, task }
     }
 
-    fn expression(timeout: Duration) -> AiInference {
+    fn expression(timeout: Duration) -> AiInference<DecideCodec> {
         AiInference {
             headers: None,
-            schema: ResponseSchema::Decide(test_schema()),
-            definition: test_questions(),
+            codec: DecideCodec::new(test_questions()).unwrap(),
             return_type: test_schema().return_type(),
             children: [0, 1, 2, 4].map(|i| {
                 let ty = if i == 0 {
@@ -655,14 +436,17 @@ mod tests {
                 };
                 InputRefExpression::new(ty, i).boxed()
             }),
-            client: Client::builder()
-                .timeout(timeout)
-                .no_proxy()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .unwrap(),
-            config: AiDecideConfig::default(),
-            request_permits: None,
+            client: {
+                let mut client =
+                    InferenceClient::new("ai_decide", AiDecideConfig::default()).unwrap();
+                client.client = Client::builder()
+                    .timeout(timeout)
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .unwrap();
+                client
+            },
         }
     }
 
@@ -866,7 +650,7 @@ mod tests {
         }
     }
 
-    async fn call(expr: &AiInference, url: &str) -> Result<StructValue> {
+    async fn call(expr: &AiInference<DecideCodec>, url: &str) -> Result<StructValue> {
         expr.request(
             JsonbVal::from(json!({"messages": ["I received the refund."]}))
                 .as_scalar_ref()
@@ -877,6 +661,7 @@ mod tests {
             None,
         )
         .await
+        .map(ScalarImpl::into_struct)
     }
 
     #[tokio::test]
@@ -905,8 +690,10 @@ mod tests {
             )
             .boxed(),
         );
-        expr.definition =
-            JsonbVal::from(json!({"q": {"type": "noul", "instructions": "Resolved?"}}));
+        expr.codec = DecideCodec::new(JsonbVal::from(
+            json!({"q": {"type": "noul", "instructions": "Resolved?"}}),
+        ))
+        .unwrap();
         expr.children = [
             LiteralExpression::new(
                 DataType::Jsonb,
@@ -1002,11 +789,11 @@ mod tests {
         let attempts = Arc::new(AtomicUsize::new(0));
         let server = raw_server(responses, attempts.clone()).await;
         let mut expr = expression(REQUEST_TIMEOUT);
-        expr.config.max_response_bytes = 128;
+        expr.client.config.max_response_bytes = 128;
         // Both Retry-After and exponential backoff must honor their configured caps.
-        expr.config.max_retry_after_ms = 1;
-        expr.config.retry_delay_ms = 10_000;
-        expr.config.max_retry_delay_ms = 2;
+        expr.client.config.max_retry_after_ms = 1;
+        expr.client.config.retry_delay_ms = 10_000;
+        expr.client.config.max_retry_delay_ms = 2;
         let value = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
             .await
             .unwrap()
@@ -1033,7 +820,7 @@ mod tests {
         ))
         .await;
         let mut expr = expression(Duration::from_millis(50));
-        expr.config.retry_delay_ms = 1;
+        expr.client.config.retry_delay_ms = 1;
         let value = tokio::time::timeout(Duration::from_secs(5), call(&expr, &server.url))
             .await
             .unwrap()
@@ -1097,7 +884,7 @@ mod tests {
         let input = DataChunk::new(columns, visibility);
         let mut expr = expression(REQUEST_TIMEOUT);
         // Exercise good rows both before and after failures while sharing one permit.
-        expr.request_permits = Some(Semaphore::new(1));
+        expr.client.request_permits = Some(Semaphore::new(1));
         let Err(ExprError::Multiple(partial, errors)) = expr.eval(&input).await else {
             panic!("row errors must carry the successful results");
         };
@@ -1405,8 +1192,8 @@ mod tests {
         ))
         .await;
         let mut expr = expression(REQUEST_TIMEOUT);
-        expr.config.retry_delay_ms = 10;
-        expr.request_permits = Some(Semaphore::new(1));
+        expr.client.config.retry_delay_ms = 10;
+        expr.client.request_permits = Some(Semaphore::new(1));
         let expr = Arc::new(expr);
         let input = chunk(&server.url, 1);
         let task = {
@@ -1425,13 +1212,21 @@ mod tests {
             "permanent HTTP failures must stay inside the retry loop"
         );
         assert_eq!(
-            expr.request_permits.as_ref().unwrap().available_permits(),
+            expr.client
+                .request_permits
+                .as_ref()
+                .unwrap()
+                .available_permits(),
             0
         );
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         assert_eq!(
-            expr.request_permits.as_ref().unwrap().available_permits(),
+            expr.client
+                .request_permits
+                .as_ref()
+                .unwrap()
+                .available_permits(),
             1
         );
         healthy.store(true, Ordering::SeqCst);

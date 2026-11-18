@@ -12,12 +12,86 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Strict wire decoding for typed extraction results. HTTP execution is shared.
+//! `AI_EXTRACT` request encoding and strict wire decoding. HTTP execution is shared.
 
-use risingwave_common::types::{Datum, F64, JsonbVal, ListValue, StructValue};
+use risingwave_common::types::{
+    DataType, Datum, F64, JsonbVal, ListValue, Scalar, ScalarImpl, ScalarRefImpl, StructValue,
+};
+use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::scalar::ai_extract::{ExtractionKind, ExtractionSchema, span_type};
-use risingwave_expr::{ExprError, Result};
+use risingwave_expr::{ExprError, Result, build_function};
+use serde::Serialize;
 use serde_json::{Map, Value};
+
+use super::ai_inference::{AiInference, InferenceCodec, function_error};
+
+#[derive(Serialize)]
+struct ExtractRequest<'a> {
+    model: &'a str,
+    text: &'a str,
+    #[serde(flatten)]
+    specification: jsonbb::ValueRef<'a>,
+}
+
+pub(super) struct ExtractCodec {
+    definition: JsonbVal,
+    schema: ExtractionSchema,
+}
+
+impl InferenceCodec for ExtractCodec {
+    const DEFINITION: &'static str = "specification";
+    const DEFINITION_NAME: &'static str = "ai_extract specification";
+    const NAME: &'static str = "ai_extract";
+
+    fn new(definition: JsonbVal) -> Result<Self> {
+        let schema = ExtractionSchema::parse(&definition)?;
+        Ok(Self { definition, schema })
+    }
+
+    fn return_type(&self) -> DataType {
+        self.schema.return_type()
+    }
+
+    fn encode(&self, content: ScalarRefImpl<'_>, model: &str) -> Result<Vec<u8>> {
+        let text = content.into_utf8();
+        if text.trim().is_empty() {
+            return Err(function_error(
+                Self::NAME,
+                "content must not be empty or whitespace",
+            ));
+        }
+        serde_json::to_vec(&ExtractRequest {
+            model,
+            text,
+            specification: self.definition.as_scalar_ref().into(),
+        })
+        .map_err(|_| function_error(Self::NAME, "could not build HTTP request"))
+    }
+
+    fn decode(&self, response: JsonbVal, content: ScalarRefImpl<'_>) -> Result<ScalarImpl> {
+        decode_response(response, &self.schema, content.into_utf8()).map(ScalarImpl::Struct)
+    }
+}
+
+#[build_function(
+    "ai_extract(varchar, varchar, varchar, jsonb, varchar) -> struct",
+    volatile,
+    async,
+    type_infer = "unreachable"
+)]
+#[build_function(
+    "ai_extract(varchar, varchar, varchar, jsonb, varchar, anymap) -> struct",
+    volatile,
+    async,
+    type_infer = "unreachable"
+)]
+fn build_extract(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    AiInference::<ExtractCodec>::build(
+        return_type,
+        children,
+        risingwave_expr::scalar::ai_extract::config(),
+    )
+}
 
 fn invalid(reason: &str) -> ExprError {
     // Remote data can contain private text; never echo names, values or payloads.
