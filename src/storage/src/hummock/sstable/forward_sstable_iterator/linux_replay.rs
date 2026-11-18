@@ -98,8 +98,8 @@ fn linux_read_scheduler_replay() {
                 MetricLevel::Info,
             )),
         ).await.unwrap();
-        store.blockwise_prefetch.max_blocks = 16.try_into().unwrap();
-        store.blockwise_prefetch.max_bytes = (1usize << 20).try_into().unwrap();
+        store.scan_prefetch.max_blocks = Some(16.try_into().unwrap());
+        store.scan_prefetch.max_bytes = (1usize << 20).try_into().unwrap();
         let store = Arc::new(store);
         let mut tables = Vec::new();
         for object in 0..OBJECTS {
@@ -190,7 +190,7 @@ fn linux_read_scheduler_replay() {
                 scans.push(tokio::spawn(async move {
                     launch.wait().await;
                     let options = Arc::new(SstableIteratorReadOptions {
-                        prefetch: PrefetchMode::Blockwise, ..Default::default()
+                        prefetch: PrefetchMode::ColdRanges, ..Default::default()
                     });
                     let mut iter = SstableIterator::new(table, store, options, &info);
                     iter.block_end_idx_exclusive = end;

@@ -82,7 +82,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
-        blockwise_prefetch: Default::default(),
+        scan_prefetch: Default::default(),
         read_batch: Default::default(),
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),

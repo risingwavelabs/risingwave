@@ -15985,8 +15985,6 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
- "risingwave_meta",
- "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",

@@ -355,11 +355,6 @@ block_efficiency_histogram	histogram		Access ratio of in-memory block.		src/stor
 state_store_block_cache_read_events	counter	event	Fill request registration and actual outer producer starts; pending includes disk cache and shared in-flight reads		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_block_cache_size	gauge		the size of cache for data block cache		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_block_cache_usage_ratio	gauge		the ratio of block cache to it's pre-allocated memory		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_blockwise_prefetch_bytes	counter	event	Compressed block bytes represented by registered, consumed or discarded handles; not physical IO bytes		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_blockwise_prefetch_events	counter	event	Blockwise lookahead events; discarded handles do not imply wasted physical reads		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_blockwise_prefetch_wait_duration_seconds	histogram		Time waiting on a prefetched block when the iterator consumes its handle, including cancelled waits		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_blockwise_prefetch_window_blocks	histogram	limit	Selected window blocks including the demand block, by limiting reason		src/storage/src/monitor/hummock_state_store_metrics.rs
-state_store_blockwise_prefetch_window_bytes	histogram		Selected window sum of max(compressed, decoded) block bytes including demand		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_bloom_filter_check_counts	counter	table_id,type	Total number of read request to check SST filters		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_bloom_filter_true_negative_counts	counter	table_id,type	Total number of sstables that have been considered true negative by SST filters		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_cold_range_buffered_overlap_bytes	counter	cache_policy	Compressed block bytes of cold_range_buffered_overlap_reads; not physical duplicate GET bytes		src/storage/src/monitor/hummock_state_store_metrics.rs

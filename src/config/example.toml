@@ -371,19 +371,15 @@ algorithm = "Lru"
 [storage.cache.vector_meta_cache_eviction_config]
 algorithm = "Lru"
 
-[storage.blockwise_prefetch]
+[storage.scan_prefetch]
 mode = ""
-enabled = false
-changelog_enabled = false
-snapshot_backfill_enabled = false
-locality_backfill_enabled = false
 prefix_mode = ""
 changelog_mode = ""
 range_scan_mode = ""
 snapshot_backfill_mode = ""
 locality_backfill_mode = ""
-max_blocks = 3
-max_bytes = 262144
+max_blocks = ""
+max_bytes = 1048576
 
 [storage.read_batch]
 enabled = false

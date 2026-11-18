@@ -14,7 +14,7 @@
 
 //! Object read admission and pending-range coalescing.
 //!
-//! `batch` briefly plugs actual reads from one iterator window before admission. This module owns G credits,
+//! This module owns G credits,
 //! pending groups, and admission waiters; `execution` owns P reservations, backend
 //! reads, and completion. Keep compatible waiters visible to pending merges so that
 //! backpressure and task handoff do not unnecessarily split a physical GET.
@@ -26,7 +26,7 @@ use std::task::{Poll, Waker, ready};
 use std::time::Instant;
 
 use bytes::Bytes;
-use futures::future::{BoxFuture, join_all};
+use futures::future::BoxFuture;
 use risingwave_common::config::storage::ReadSchedulerConfig;
 use tokio::sync::{AcquireError, Notify, OwnedSemaphorePermit, Semaphore, oneshot};
 
@@ -39,10 +39,8 @@ use replay::PhysicalPermit;
 #[cfg(not(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay")))]
 type PhysicalPermit = OwnedSemaphorePermit;
 
-mod batch;
 mod execution;
 
-pub use batch::{ReadPlug, ReadPlugToken};
 use execution::run;
 
 pub(super) type ReadResult = ObjectResult<Bytes>;
@@ -78,9 +76,6 @@ pub(super) struct ReadScheduler {
     waiting: prometheus::IntGauge,
     queued: prometheus::IntGauge,
     admission_duration: prometheus::Histogram,
-    batch_members: prometheus::IntCounter,
-    // Single-read and multi-read flushes; preserve the existing metric labels.
-    plug_flushes: [prometheus::IntCounter; 2],
 }
 
 struct StagedRead {
@@ -362,7 +357,7 @@ impl PendingReadGroups {
                 waiter.reads.retain(|read| !read.response.is_closed());
                 let span = staged_span(&waiter.reads)?;
                 let merged_span = group.merge_span(path, &span, waiter.reads.len(), config)?;
-                // Preserve active reuse without taking a follower lock in inline seal.
+                // Preserve active reuse without taking a follower lock under the queue lock.
                 if self.active.iter().any(|read| read.covers(path, &span)) {
                     return None;
                 }
@@ -532,19 +527,6 @@ impl Drop for GroupQueueWorker {
 }
 
 impl ReadScheduler {
-    // Keep scheduler waits on the same executor as physical reads when opted in.
-    fn spawn_background(
-        &self,
-        task: impl Future<Output = ()> + Send + 'static,
-    ) -> tokio::task::JoinHandle<()> {
-        #[cfg(not(madsim))]
-        if self.config.use_dedicated_io_runtime {
-            return dedicated_io_runtime(self.config.dedicated_io_runtime_workers.get())
-                .spawn(task);
-        }
-        tokio::spawn(task)
-    }
-
     pub(super) fn can_schedule(&self, range: &Range<usize>) -> bool {
         !range.is_empty() && range.len() <= self.config.max_read_bytes.get()
     }
@@ -601,14 +583,6 @@ impl ReadScheduler {
             admission_duration: metrics
                 .read_scheduler_admission_duration
                 .with_label_values(&[media_type]),
-            batch_members: metrics
-                .read_scheduler_events
-                .with_label_values(&[media_type, "submitted_batch_members"]),
-            plug_flushes: ["sealed_batch_single", "sealed_batch_multiple"].map(|event| {
-                metrics
-                    .read_scheduler_events
-                    .with_label_values(&[media_type, event])
-            }),
         }
     }
 
@@ -710,58 +684,6 @@ impl ReadScheduler {
         self.groups.ready.notify_one();
     }
 
-    fn submit_batch(self: &Arc<Self>, mut reads: Vec<StagedRead>) {
-        self.batch_members.inc_by(reads.len() as u64);
-        reads.retain(|read| !read.response.is_closed());
-        reads.sort_unstable_by(|a, b| (&a.path, a.range.start).cmp(&(&b.path, b.range.start)));
-        let mut groups: Vec<(Range<usize>, Vec<StagedRead>)> = Vec::new();
-        for read in reads {
-            if let Some((span, members)) = groups.last_mut()
-                && members[0].path == read.path
-                && members.len() < self.config.max_batch_requests.get()
-                && read.range.start.saturating_sub(span.end) <= self.config.max_gap_bytes
-                && span.end.max(read.range.end) - span.start <= self.config.max_read_bytes.get()
-            {
-                span.end = span.end.max(read.range.end);
-                members.push(read);
-            } else {
-                groups.push((read.range.clone(), vec![read]));
-            }
-        }
-        let mut deferred = Vec::new();
-        for (span, reads) in groups {
-            let Ok(mut state) = self.groups.pending.try_lock() else {
-                deferred.push(reads);
-                continue;
-            };
-            // The follower lock belongs to the physical task. Leave covering
-            // reads to the background path to preserve in-flight reuse.
-            if state
-                .active
-                .iter()
-                .any(|read| read.covers(&reads[0].path, &span))
-            {
-                deferred.push(reads);
-                continue;
-            }
-            if let Err(reads) = self.try_admit_group(&mut state, span, reads, &mut None) {
-                deferred.push(reads);
-            }
-        }
-        if !deferred.is_empty() {
-            let scheduler = self.clone();
-            self.spawn_background(async move {
-                // Each group can progress even when another needs a new G permit.
-                join_all(
-                    deferred
-                        .into_iter()
-                        .map(|reads| scheduler.submit_group(reads)),
-                )
-                .await;
-            });
-        }
-    }
-
     fn try_admit_group(
         &self,
         state: &mut PendingReadGroups,
@@ -803,25 +725,6 @@ impl ReadScheduler {
                 .map(|read| read.into_request(&self.pending, None)),
         );
         Ok(())
-    }
-
-    async fn submit_group(&self, mut reads: Vec<StagedRead>) {
-        reads.retain(|read| !read.response.is_closed());
-        let Some(span) = staged_span(&reads) else {
-            return;
-        };
-        let waiter = {
-            let mut state = self.groups.pending.lock().unwrap();
-            let Err(reads) = self.try_reuse_group(&state, &span, reads) else {
-                return;
-            };
-            let Err(reads) = self.try_admit_group(&mut state, span, reads, &mut None) else {
-                return;
-            };
-            state.register_waiter(&self.groups, reads)
-        };
-        // The result channel carries shutdown errors to each staged caller.
-        let _ = self.wait_for_group(waiter).await;
     }
 
     async fn wait_for_group(&self, waiter: GroupWaiter<'_>) -> ObjectResult<()> {

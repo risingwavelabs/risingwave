@@ -974,10 +974,10 @@ pub mod tests {
     }
 
     #[test]
-    fn test_prefetch_modes_are_independent_and_override_legacy_flags() {
-        use storage::{BlockwisePrefetchConfig, ReadPrefetchMode};
+    fn test_scan_prefetch_modes_defaults_and_overrides() {
+        use storage::{ReadPrefetchMode, ScanPrefetchConfig};
 
-        fn resolved(config: &BlockwisePrefetchConfig) -> [ReadPrefetchMode; 5] {
+        fn resolved(config: &ScanPrefetchConfig) -> [ReadPrefetchMode; 5] {
             [
                 config.prefix_mode(),
                 config.changelog_mode(),
@@ -986,10 +986,24 @@ pub mod tests {
                 config.locality_backfill_mode(),
             ]
         }
+        let defaults = RwConfig::default();
+        assert_eq!(
+            resolved(&defaults.storage.scan_prefetch),
+            [
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::ColdRanges
+            ]
+        );
+        assert_eq!(defaults.storage.max_prefetch_block_number, 16);
+        assert_eq!(defaults.storage.scan_prefetch.max_blocks, None);
+        assert_eq!(defaults.storage.scan_prefetch.max_bytes.get(), 1024 * 1024);
         let comparison: RwConfig =
             toml::from_str(include_str!("../../../config/cold-range-prefetch.toml")).unwrap();
         assert_eq!(
-            resolved(&comparison.storage.blockwise_prefetch),
+            resolved(&comparison.storage.scan_prefetch),
             [ReadPrefetchMode::ColdRanges; 5]
         );
         assert!(
@@ -998,51 +1012,29 @@ pub mod tests {
                 .object_store
                 .enable_hummock_read_coalescing
         );
-        let scheduler = &comparison.storage.object_store.read_scheduler;
-        assert!(scheduler.use_dedicated_io_runtime);
-        assert_eq!(
-            scheduler.max_read_bytes,
-            comparison.storage.blockwise_prefetch.max_bytes
+        assert!(
+            comparison
+                .storage
+                .object_store
+                .read_scheduler
+                .use_dedicated_io_runtime
         );
+        assert_eq!(
+            comparison
+                .storage
+                .object_store
+                .read_scheduler
+                .max_read_bytes,
+            comparison.storage.scan_prefetch.max_bytes
+        );
+
         for (value, mode) in [
             ("disabled", ReadPrefetchMode::Disabled),
-            ("range", ReadPrefetchMode::Range),
-            ("blockwise", ReadPrefetchMode::Blockwise),
             ("cold_ranges", ReadPrefetchMode::ColdRanges),
         ] {
-            let base = format!("[storage.blockwise_prefetch]\nmode = \"{value}\"\n");
+            let base = format!("[storage.scan_prefetch]\nmode = \"{value}\"\n");
             let config: RwConfig = toml::from_str(&base).unwrap();
-            assert_eq!(resolved(&config.storage.blockwise_prefetch), [mode; 5]);
-            let config: RwConfig =
-                toml::from_str(&format!("{base}locality_backfill_mode = \"range\"\n")).unwrap();
-            assert_eq!(
-                resolved(&config.storage.blockwise_prefetch),
-                [mode, mode, mode, mode, ReadPrefetchMode::Range]
-            );
-        }
-        for legacy in [false, true] {
-            let base = format!(
-                "[storage.blockwise_prefetch]\nenabled = {legacy}\nchangelog_enabled = {legacy}\nsnapshot_backfill_enabled = {legacy}\nlocality_backfill_enabled = {legacy}\n"
-            );
-            let config = toml::from_str::<RwConfig>(&base).unwrap();
-            let expected = if legacy {
-                [
-                    ReadPrefetchMode::Blockwise,
-                    ReadPrefetchMode::Blockwise,
-                    ReadPrefetchMode::Range,
-                    ReadPrefetchMode::Blockwise,
-                    ReadPrefetchMode::Blockwise,
-                ]
-            } else {
-                [
-                    ReadPrefetchMode::Disabled,
-                    ReadPrefetchMode::Disabled,
-                    ReadPrefetchMode::Range,
-                    ReadPrefetchMode::Range,
-                    ReadPrefetchMode::Range,
-                ]
-            };
-            assert_eq!(resolved(&config.storage.blockwise_prefetch), expected);
+            assert_eq!(resolved(&config.storage.scan_prefetch), [mode; 5]);
             for (idx, field) in [
                 "prefix_mode",
                 "changelog_mode",
@@ -1053,38 +1045,46 @@ pub mod tests {
             .into_iter()
             .enumerate()
             {
-                for (value, mode) in [
+                for (override_value, override_mode) in [
                     ("disabled", ReadPrefetchMode::Disabled),
-                    ("range", ReadPrefetchMode::Range),
-                    ("blockwise", ReadPrefetchMode::Blockwise),
                     ("cold_ranges", ReadPrefetchMode::ColdRanges),
                 ] {
-                    let config =
-                        toml::from_str::<RwConfig>(&format!("{base}{field} = \"{value}\"\n"))
-                            .unwrap();
-                    let mut selected = expected;
-                    selected[idx] = mode;
-                    assert_eq!(resolved(&config.storage.blockwise_prefetch), selected);
-                    // Preserve explicit mode and legacy fallback across config serialization.
+                    let config: RwConfig =
+                        toml::from_str(&format!("{base}{field} = \"{override_value}\"\n")).unwrap();
+                    let mut expected = [mode; 5];
+                    expected[idx] = override_mode;
+                    assert_eq!(resolved(&config.storage.scan_prefetch), expected);
                     let round_trip: RwConfig =
                         toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
-                    assert_eq!(resolved(&round_trip.storage.blockwise_prefetch), selected);
+                    assert_eq!(resolved(&round_trip.storage.scan_prefetch), expected);
                 }
-                assert!(
-                    toml::from_str::<RwConfig>(&format!("{base}{field} = \"cold_range\"\n"))
-                        .is_err()
-                );
             }
+        }
+        for value in ["range", "blockwise", "cold_range"] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!(
+                    "[storage.scan_prefetch]\nmode = \"{value}\"\n"
+                ))
+                .is_err()
+            );
+        }
+        for field in [
+            "enabled",
+            "changelog_enabled",
+            "snapshot_backfill_enabled",
+            "locality_backfill_enabled",
+        ] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!("[storage.scan_prefetch]\n{field} = true\n"))
+                    .is_err()
+            );
         }
     }
 
     #[test]
     fn test_read_optimization_controls_reject_zero_limits() {
         for (section, fields) in [
-            (
-                "storage.blockwise_prefetch",
-                vec!["max_blocks", "max_bytes"],
-            ),
+            ("storage.scan_prefetch", vec!["max_blocks", "max_bytes"]),
             (
                 "storage.read_batch",
                 vec!["concurrency", "meta_max_entries", "meta_max_bytes"],
@@ -1109,7 +1109,7 @@ pub mod tests {
             }
         }
         for section in [
-            "storage.blockwise_prefetch",
+            "storage.scan_prefetch",
             "storage.read_batch",
             "storage.object_store.read_scheduler",
         ] {
@@ -1119,30 +1119,6 @@ pub mod tests {
             );
         }
         let defaults = RwConfig::default();
-        assert!(!defaults.storage.blockwise_prefetch.enabled);
-        assert!(!defaults.storage.blockwise_prefetch.changelog_enabled);
-        assert!(
-            !defaults
-                .storage
-                .blockwise_prefetch
-                .snapshot_backfill_enabled
-        );
-        assert!(
-            !defaults
-                .storage
-                .blockwise_prefetch
-                .locality_backfill_enabled
-        );
-        let source = toml::from_str::<RwConfig>(
-            "[storage.blockwise_prefetch]\nsnapshot_backfill_enabled = true\n",
-        )
-        .unwrap()
-        .storage
-        .blockwise_prefetch;
-        assert!(source.snapshot_backfill_enabled);
-        assert!(!source.enabled);
-        assert!(!source.changelog_enabled);
-        assert!(!source.locality_backfill_enabled);
         assert!(!defaults.storage.read_batch.enabled);
         assert!(!defaults.storage.read_batch.meta_reuse);
         assert!(!defaults.storage.object_store.enable_hummock_read_coalescing);

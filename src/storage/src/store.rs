@@ -498,11 +498,11 @@ pub trait StateStoreReadVector: StaticSendSync {
 pub enum PrefetchMode {
     #[default]
     Disabled,
-    /// Buffer a contiguous range GET in the iterator, retaining its decoded blocks.
-    Range,
-    /// Request a small window through the block cache, leaving I/O merging to the scheduler.
-    Blockwise,
-    /// Opt-in prototype: concurrently read contiguous cache misses in a bounded window.
+    /// Use the storage instance's ordinary range-scan policy.
+    RangeScan,
+    /// Use the storage instance's prefix-scan policy.
+    PrefixScan,
+    /// Concurrently read contiguous cache misses in a bounded window.
     ColdRanges,
     /// Use the storage instance's ordinary Snapshot Backfill source policy.
     SnapshotBackfill,
@@ -515,16 +515,13 @@ impl From<risingwave_common::config::storage::ReadPrefetchMode> for PrefetchMode
         use risingwave_common::config::storage::ReadPrefetchMode;
         match mode {
             ReadPrefetchMode::Disabled => Self::Disabled,
-            ReadPrefetchMode::Range => Self::Range,
-            ReadPrefetchMode::Blockwise => Self::Blockwise,
             ReadPrefetchMode::ColdRanges => Self::ColdRanges,
         }
     }
 }
 
-/// Controls prefetch for range scans. Range buffers decoded blocks; Blockwise holds
-/// per-block cache responses; ColdRanges holds cache entries/lookups and pending
-/// range reads. Each retains lookahead until consumption or iterator release.
+/// Controls bounded scan prefetch. ColdRanges retains cache entries/lookups and
+/// encoded range reads until consumption or iterator release.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     pub mode: PrefetchMode,
@@ -542,9 +539,9 @@ impl PrefetchOptions {
     }
 
     pub fn prefetch_for_prefix_scan() -> Self {
-        // The storage instance applies its startup enable switch before constructing SST iterators.
+        // Resolve the caller-specific policy before constructing SST iterators.
         Self {
-            mode: PrefetchMode::Blockwise,
+            mode: PrefetchMode::PrefixScan,
             for_large_query: false,
         }
     }
@@ -566,7 +563,7 @@ impl PrefetchOptions {
     pub fn new(prefetch: bool, for_large_query: bool) -> Self {
         Self {
             mode: if prefetch {
-                PrefetchMode::Range
+                PrefetchMode::RangeScan
             } else {
                 PrefetchMode::Disabled
             },
@@ -584,12 +581,11 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            // Preserve the existing trace encoding. Replay blockwise scans on demand instead
-            // of accidentally routing them through the unrelated contiguous range reader.
-            // Both backfill requests replay with their default range policy.
+            // Preserve the existing trace encoding: prefix scans replay on demand,
+            // while ordinary/backfill scans use the configured range-scan policy.
             prefetch: matches!(
                 value.mode,
-                PrefetchMode::Range
+                PrefetchMode::RangeScan
                     | PrefetchMode::SnapshotBackfill
                     | PrefetchMode::LocalityBackfill
             ),

@@ -53,7 +53,6 @@ use read_scheduler::ReadScheduler;
 #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
 #[doc(hidden)]
 pub use read_scheduler::replay;
-pub use read_scheduler::{ReadPlug, ReadPlugToken};
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -325,19 +324,6 @@ impl ObjectStoreImpl {
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         object_store_impl_method_body!(self, read(path, range).await)
-    }
-
-    pub fn read_plug(&self, max_reads: usize) -> Option<ReadPlug> {
-        dispatch_object_store_enum!(self, |store| store.read_plug(max_reads))
-    }
-
-    pub async fn read_with_plug(
-        &self,
-        path: &str,
-        range: impl ObjectRangeBounds,
-        plug_token: Option<ReadPlugToken>,
-    ) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read_with_plug(path, range, plug_token).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -709,21 +695,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        self.read_with_plug(path, range, None).await
-    }
-
-    fn read_plug(&self, max_reads: usize) -> Option<ReadPlug> {
-        self.read_scheduler
-            .as_ref()
-            .map(|scheduler| ReadPlug::new(scheduler.clone(), max_reads))
-    }
-
-    async fn read_with_plug(
-        &self,
-        path: &str,
-        range: impl ObjectRangeBounds,
-        plug_token: Option<ReadPlugToken>,
-    ) -> ObjectResult<Bytes> {
         use std::ops::Bound::{Excluded, Included};
 
         static NEXT_TRACE_REQUEST: std::sync::atomic::AtomicU64 =
@@ -766,22 +737,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .observe(end.saturating_sub(start) as f64);
         }
         let result = match scheduled {
-            Some((scheduler, range)) => {
-                let submitted = match plug_token.as_ref().and_then(|plug_token| {
-                    plug_token.stage(scheduler, path, range.clone(), trace_id)
-                }) {
-                    Some(response) => Ok(response),
-                    None => scheduler.submit(path, range, trace_id).await,
-                };
-                match submitted {
-                    Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
-                    Err(error) => Err(error),
-                }
-            }
+            Some((scheduler, range)) => match scheduler.submit(path, range, trace_id).await {
+                Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
+                Err(error) => Err(error),
+            },
             None => self.read_direct(path, range).await,
         };
-        // Release the plug token when its logical read finishes.
-        drop(plug_token);
         if let Some(request_id) = trace_id {
             let span = tracing::debug_span!(target: "state_store_read_batch", "object_read");
             tracing::debug!(target: "state_store_read_batch", parent: &span, request_id, route,

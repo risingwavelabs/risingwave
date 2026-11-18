@@ -45,26 +45,7 @@ pub struct HummockStateStoreMetrics {
     pub(crate) block_cache_memory_hit: IntCounter,
     pub(crate) block_cache_pending: IntCounter,
     pub(crate) block_cache_outer_fetch: IntCounter,
-    pub(crate) prefetch_consumed: IntCounter,
-    pub(crate) prefetch_consume_ready: IntCounter,
-    pub(crate) prefetch_consume_pending: IntCounter,
-    pub(crate) prefetch_consume_ok: IntCounter,
-    pub(crate) prefetch_consume_error: IntCounter,
-    pub(crate) prefetch_discarded: IntCounter,
-    pub(crate) prefetch_registered_ready: IntCounter,
-    pub(crate) prefetch_registered_pending: IntCounter,
-    pub(crate) prefetch_registration_error: IntCounter,
-    pub(crate) prefetch_policy_skipped: IntCounter,
-    pub(crate) prefetch_registered_bytes: IntCounter,
-    pub(crate) prefetch_consumed_bytes: IntCounter,
-    pub(crate) prefetch_discarded_bytes: IntCounter,
-
-    pub blockwise_prefetch_events: IntCounterVec,
-    pub blockwise_prefetch_window_blocks: HistogramVec,
-    pub blockwise_prefetch_window_bytes: Histogram,
     pub block_cache_read_events: IntCounterVec,
-    pub blockwise_prefetch_bytes: IntCounterVec,
-    pub blockwise_prefetch_wait_duration: Histogram,
     pub cold_range_buffered_overlap_reads: IntCounterVec,
     pub cold_range_buffered_overlap_bytes: IntCounterVec,
     pub cold_range_prefetch_window_runs: Histogram,
@@ -149,34 +130,6 @@ pub fn global_hummock_state_store_metrics(metric_level: MetricLevel) -> HummockS
 impl HummockStateStoreMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 10ms ~ max 2.7h
-        let blockwise_prefetch_events = register_int_counter_vec_with_registry!(
-            "state_store_blockwise_prefetch_events",
-            "Blockwise lookahead events; discarded handles do not imply wasted physical reads",
-            &["event"],
-            registry
-        )
-        .unwrap();
-        let blockwise_prefetch_window_blocks = register_histogram_vec_with_registry!(
-            histogram_opts!(
-                "state_store_blockwise_prefetch_window_blocks",
-                "Selected window blocks including the demand block, by limiting reason",
-                exponential_buckets(1.0, 2.0, 12).unwrap()
-            ),
-            &["limit"],
-            registry
-        )
-        .unwrap();
-        let blockwise_prefetch_window_bytes = register_histogram_with_registry!(
-            "state_store_blockwise_prefetch_window_bytes",
-            "Selected window sum of max(compressed, decoded) block bytes including demand",
-            exponential_buckets(1024.0, 2.0, 20).unwrap(),
-            registry
-        )
-        .unwrap();
-        let blockwise_prefetch_bytes = register_int_counter_vec_with_registry!(
-            "state_store_blockwise_prefetch_bytes", "Compressed block bytes represented by registered, consumed or discarded handles; not physical IO bytes", &["event"], registry).unwrap();
-        let blockwise_prefetch_wait_duration = register_histogram_with_registry!(
-            "state_store_blockwise_prefetch_wait_duration_seconds", "Time waiting on a prefetched block when the iterator consumes its handle, including cancelled waits", exponential_buckets(0.000001, 2.0, 25).unwrap(), registry).unwrap();
         let cold_range_buffered_overlap_reads = register_int_counter_vec_with_registry!(
             "state_store_cold_range_buffered_overlap_reads",
             "External block-read fallbacks whose bytes are already returned but not yet decoded/published by a ColdRanges window; counted once per fallback, not physical GETs",
@@ -777,49 +730,11 @@ impl HummockStateStoreMetrics {
         let block_cache_memory_hit = block_cache_read_events.with_label_values(&["memory_hit"]);
         let block_cache_pending = block_cache_read_events.with_label_values(&["pending"]);
         let block_cache_outer_fetch = block_cache_read_events.with_label_values(&["outer_fetch"]);
-        let prefetch_consumed = blockwise_prefetch_events.with_label_values(&["consumed"]);
-        let prefetch_consume_ready =
-            blockwise_prefetch_events.with_label_values(&["consume_ready"]);
-        let prefetch_consume_pending =
-            blockwise_prefetch_events.with_label_values(&["consume_pending"]);
-        let prefetch_consume_ok = blockwise_prefetch_events.with_label_values(&["consume_ok"]);
-        let prefetch_consume_error =
-            blockwise_prefetch_events.with_label_values(&["consume_error"]);
-        let prefetch_discarded = blockwise_prefetch_events.with_label_values(&["discarded"]);
-        let prefetch_registered_ready =
-            blockwise_prefetch_events.with_label_values(&["registered_ready"]);
-        let prefetch_registered_pending =
-            blockwise_prefetch_events.with_label_values(&["registered_pending"]);
-        let prefetch_registration_error =
-            blockwise_prefetch_events.with_label_values(&["registration_error"]);
-        let prefetch_policy_skipped =
-            blockwise_prefetch_events.with_label_values(&["policy_skipped"]);
-        let prefetch_registered_bytes = blockwise_prefetch_bytes.with_label_values(&["registered"]);
-        let prefetch_consumed_bytes = blockwise_prefetch_bytes.with_label_values(&["consumed"]);
-        let prefetch_discarded_bytes = blockwise_prefetch_bytes.with_label_values(&["discarded"]);
         Self {
             block_cache_memory_hit,
             block_cache_pending,
             block_cache_outer_fetch,
-            prefetch_consumed,
-            prefetch_consume_ready,
-            prefetch_consume_pending,
-            prefetch_consume_ok,
-            prefetch_consume_error,
-            prefetch_discarded,
-            prefetch_registered_ready,
-            prefetch_registered_pending,
-            prefetch_registration_error,
-            prefetch_policy_skipped,
-            prefetch_registered_bytes,
-            prefetch_consumed_bytes,
-            prefetch_discarded_bytes,
 
-            blockwise_prefetch_bytes,
-            blockwise_prefetch_wait_duration,
-            blockwise_prefetch_events,
-            blockwise_prefetch_window_blocks,
-            blockwise_prefetch_window_bytes,
             cold_range_buffered_overlap_reads,
             cold_range_buffered_overlap_bytes,
             cold_range_prefetch_window_runs,

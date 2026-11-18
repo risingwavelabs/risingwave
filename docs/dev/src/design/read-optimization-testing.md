@@ -1,5 +1,11 @@
 # Streaming read optimization controls and diagnostics
 
+> Historical experiment record. Blockwise, the window plug, and the old Range
+> implementation are retained on `li0k/io-read-scheduler-simplify` (baseline
+> `98126f898412`). They are removed from the production simplification branch.
+> Configurations and benchmark commands below describe their recorded revisions;
+> use [the current design](./hummock-read-scheduling.md) for current configuration.
+
 Blockwise prefetch, read coalescing, and point MultiGet are opt-in. These startup controls require a worker restart;
 changing a SQL session parameter does not change them. Use the same TOML on every CN.
 No object format, visibility or compaction policy changes are required.

@@ -595,7 +595,7 @@ mod tests {
         for prefetch_options in [
             PrefetchOptions::prefetch_for_large_range_scan(),
             PrefetchOptions {
-                mode: crate::store::PrefetchMode::Blockwise,
+                mode: crate::store::PrefetchMode::PrefixScan,
                 for_large_query: false,
             },
         ] {

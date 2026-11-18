@@ -1,7 +1,7 @@
 // Copyright 2026 RisingWave Labs
 // SPDX-License-Identifier: Apache-2.0
 
-//! Bounded, opt-in read-ahead of contiguous memory/disk-cache misses.
+//! Bounded read-ahead of contiguous memory/disk-cache misses.
 //! Each cold run starts immediately; consuming a preceding run never starts the next one.
 //! Multi-block direct ranges do not participate in Foyer single-flight.
 //! Singleton Fill segments register ordinary shared fetches eagerly. Positive cache hints
@@ -139,7 +139,7 @@ impl ColdRangePrefetch {
                         Ok(Some(BlockHolder::from_hybrid_cache_entry(entry)))
                     }
                     // A positive index hint is not a reservation. Eviction/collision must
-                    // never turn a missing block into a hole or leave it waiting for a plug.
+                    // never turn a missing block into a hole in the returned scan.
                     None => {
                         store.read_metrics.cold_range_prefetch_hint_misses.inc();
                         store.get(sst, idx, policy, stats).await.map(Some)
@@ -231,9 +231,12 @@ impl SstableStore {
         start: usize,
         scan_end: usize,
     ) -> bool {
-        let config = self.blockwise_prefetch;
+        let config = self.scan_prefetch;
         start < scan_end.min(sst.meta.block_metas.len()).saturating_sub(1)
-            && config.max_blocks.get() > 1
+            && config
+                .max_blocks
+                .map_or(self.max_prefetch_block_number, std::num::NonZeroUsize::get)
+                > 1
             && sst.meta.block_metas[start..start + 2]
                 .iter()
                 .map(|meta| meta.len.max(meta.uncompressed_size) as usize)
@@ -250,13 +253,21 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> Option<ColdRangePrefetch> {
         fail_point!("disable_block_cache", |_| None);
-        let config = self.blockwise_prefetch;
+        let config = self.scan_prefetch;
         let metas = &sst.meta.block_metas;
         let mut end = start;
         let mut bytes = 0usize;
         for meta in metas
             .iter()
-            .take(scan_end.min(start.saturating_add(config.max_blocks.get())))
+            .take(
+                scan_end.min(
+                    start.saturating_add(
+                        config
+                            .max_blocks
+                            .map_or(self.max_prefetch_block_number, std::num::NonZeroUsize::get),
+                    ),
+                ),
+            )
             .skip(start)
         {
             let next = bytes.saturating_add(meta.len.max(meta.uncompressed_size) as usize);
@@ -471,14 +482,9 @@ mod tests {
             &registry,
             risingwave_common::config::MetricLevel::Info,
         ));
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .blockwise_prefetch
-            .max_blocks = 16.try_into().unwrap();
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .blockwise_prefetch
-            .max_bytes = (1024 * 1024).try_into().unwrap();
+        Arc::get_mut(&mut store).unwrap().scan_prefetch.max_blocks = Some(16.try_into().unwrap());
+        Arc::get_mut(&mut store).unwrap().scan_prefetch.max_bytes =
+            (1024 * 1024).try_into().unwrap();
         let dir = tempfile::tempdir().unwrap();
         if disk {
             let device = FsDeviceBuilder::new(dir.path())
@@ -502,6 +508,40 @@ mod tests {
             gen_default_test_sstable(default_builder_opt_for_test(), 10, store.clone()).await;
         store.clear_block_cache().await.unwrap();
         (store, sst, backend, metrics, registry, dir)
+    }
+
+    #[tokio::test]
+    async fn cold_range_window_inherits_legacy_block_limit_unless_overridden() {
+        for (legacy_limit, explicit_limit, expected) in
+            [(1, None, 0), (2, None, 2), (16, Some(3), 3)]
+        {
+            let (mut store, sst, _, _, _, _dir) = setup(false).await;
+            let inner = Arc::get_mut(&mut store).unwrap();
+            inner.max_prefetch_block_number = legacy_limit;
+            inner.scan_prefetch.max_blocks =
+                explicit_limit.map(|n| std::num::NonZeroUsize::new(n).unwrap());
+            let mut stats = StoreLocalStatistic::default();
+            let window = store
+                .prefetch_cold_ranges(
+                    &sst,
+                    0,
+                    sst.meta.block_metas.len(),
+                    CachePolicy::Disable,
+                    &mut stats,
+                )
+                .await;
+            assert_eq!(window.is_some(), expected > 0);
+            assert_eq!(stats.cache_data_prefetch_block_count, expected);
+            drop(window);
+            // Private IO tasks may still be observing cancellation.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while store.get_prefetch_memory_usage() != 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
     }
 
     async fn seed_hot(store: &SstableStore, sst: &Sstable, idx: usize, disk: bool) {
@@ -809,22 +849,14 @@ mod tests {
         assert!(!store.can_prefetch_cold_ranges(&sst, end - 1, end));
         assert!(!store.can_prefetch_cold_ranges(&sst, end, end));
         assert!(store.can_prefetch_cold_ranges(&sst, 0, 2));
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .blockwise_prefetch
-            .max_blocks = 1.try_into().unwrap();
+        Arc::get_mut(&mut store).unwrap().scan_prefetch.max_blocks = Some(1.try_into().unwrap());
         assert!(!store.can_prefetch_cold_ranges(&sst, 0, 2));
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .blockwise_prefetch
-            .max_blocks = 16.try_into().unwrap();
+        Arc::get_mut(&mut store).unwrap().scan_prefetch.max_blocks = Some(16.try_into().unwrap());
         let first = &sst.meta.block_metas[0];
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .blockwise_prefetch
-            .max_bytes = (first.len.max(first.uncompressed_size) as usize)
-            .try_into()
-            .unwrap();
+        Arc::get_mut(&mut store).unwrap().scan_prefetch.max_bytes =
+            (first.len.max(first.uncompressed_size) as usize)
+                .try_into()
+                .unwrap();
         assert!(!store.can_prefetch_cold_ranges(&sst, 0, 2));
         assert!(
             store
@@ -1620,10 +1652,7 @@ mod tests {
     #[tokio::test]
     async fn cold_range_metrics_do_not_count_window_boundaries_as_gaps() {
         let (mut store, sst, _, _, _, _dir) = setup(false).await;
-        Arc::get_mut(&mut store)
-            .unwrap()
-            .blockwise_prefetch
-            .max_blocks = 3.try_into().unwrap();
+        Arc::get_mut(&mut store).unwrap().scan_prefetch.max_blocks = Some(3.try_into().unwrap());
         for start in [0, 3, 6] {
             let mut window = store
                 .prefetch_cold_ranges(

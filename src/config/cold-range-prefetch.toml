@@ -1,12 +1,12 @@
 # Merge these sections into the compute node's existing configuration, then restart.
-# Compare range / blockwise / cold_ranges by changing only mode between runs.
+# ColdRanges is the only prefetch implementation; use disabled for a demand-read control.
 # Leave all per-path *_mode overrides unset to use the unified mode.
 # Keep cache sizing, disk-cache settings, and the rest of the workload configuration fixed.
 
 [storage]
 max_prefetch_block_number = 16
 
-[storage.blockwise_prefetch]
+[storage.scan_prefetch]
 mode = "cold_ranges"
 max_blocks = 16
 max_bytes = 1048576

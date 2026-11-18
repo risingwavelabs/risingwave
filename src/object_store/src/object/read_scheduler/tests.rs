@@ -125,57 +125,22 @@ fn dedicated_io_runtime_reads_while_scan_worker_is_blocked() {
                 .unwrap();
             assert_eq!(response.await.unwrap().unwrap(), "abcd");
 
-            // A partially populated plug flushes even when the caller
-            // worker is parked. No missing cache producer must arrive first.
-            let plug = ReadPlug::new(scheduler.clone(), 2);
-            let token = plug.token();
-            let sealed = token.stage(&scheduler, "sealed", 0..1, None).unwrap();
-            drop(plug);
-            check(reads.recv().await.unwrap(), "sealed", 0..1)
-                .send(Ok(Bytes::from_static(b"a")))
-                .unwrap();
-            assert_eq!(sealed.await.unwrap().unwrap(), "a");
-            assert!(token.stage(&scheduler, "sealed", 1..2, None).is_none());
-            drop(token);
-
-            // Sealing with G occupied forces deferred admission. Releasing G
-            // must advance the whole group without resuming the caller worker.
-            let holder = scheduler.submit("holder", 0..1, None).await.unwrap();
-            let release_holder = check(reads.recv().await.unwrap(), "holder", 0..1);
-            // Supply a collected group explicitly: the plug may close between
-            // two stage calls on different runtimes, which is a legal late read.
-            let (left_read, left) = scheduler.stage_read("deferred", 0..2, None);
-            let (right_read, right) = scheduler.stage_read("deferred", 2..4, None);
-            assert_eq!(scheduler.groups.slots.available_permits(), 0);
-            scheduler.submit_batch(vec![left_read, right_read]);
-            release_holder.send(Ok(Bytes::from_static(b"a"))).unwrap();
-            assert_eq!(holder.await.unwrap().unwrap(), "a");
-            check(reads.recv().await.unwrap(), "deferred", 0..4)
-                .send(Ok(Bytes::from_static(b"abcd")))
-                .unwrap();
-            assert_eq!(left.await.unwrap().unwrap(), "ab");
-            assert_eq!(right.await.unwrap().unwrap(), "cd");
-
-            // Exercise range-error fallback separately. If sealing defers admission
-            // because the queue is busy, it must not depend on the parked scan worker.
-            let (valid_read, valid) = scheduler.stage_read("fallback", 0..2, None);
-            let (invalid_read, invalid) = scheduler.stage_read("fallback", 2..4, None);
-            scheduler.submit_batch(vec![valid_read, invalid_read]);
-            check(reads.recv().await.unwrap(), "fallback", 0..4)
-                .send(Err(ObjectError::read_length_mismatch(
-                    "past EOF".to_owned(),
-                )))
-                .unwrap();
-            check(reads.recv().await.unwrap(), "fallback", 0..2)
-                .send(Ok(Bytes::from_static(b"ab")))
-                .unwrap();
-            check(reads.recv().await.unwrap(), "fallback", 2..4)
-                .send(Err(ObjectError::read_length_mismatch(
-                    "past EOF".to_owned(),
-                )))
-                .unwrap();
-            assert_eq!(valid.await.unwrap().unwrap(), "ab");
-            assert!(invalid.await.unwrap().unwrap_err().is_read_range_error());
+            // Ordinary admission waits on this block_on thread while physical dispatch
+            // continues on the dedicated runtime, even with the scan worker parked.
+            {
+                let holder = scheduler.submit("holder", 0..1, None).await.unwrap();
+                let release_holder = check(reads.recv().await.unwrap(), "holder", 0..1);
+                let deferred = scheduler.submit("deferred", 0..4, None);
+                tokio::pin!(deferred);
+                assert!(futures::poll!(&mut deferred).is_pending());
+                release_holder.send(Ok(Bytes::from_static(b"a"))).unwrap();
+                assert_eq!(holder.await.unwrap().unwrap(), "a");
+                let response = deferred.await.unwrap();
+                check(reads.recv().await.unwrap(), "deferred", 0..4)
+                    .send(Ok(Bytes::from_static(b"abcd")))
+                    .unwrap();
+                assert_eq!(response.await.unwrap().unwrap(), "abcd");
+            }
 
             let read = scheduler.submit("cancel", 0..1, None).await.unwrap();
             let cancelled_gate = check(reads.recv().await.unwrap(), "cancel", 0..1);
@@ -574,331 +539,6 @@ async fn covered_group_waiter_joins_a_new_flight_without_a_credit() {
         assert_eq!(follower.await.unwrap().unwrap(), "bc");
         assert_eq!(scheduler.waiting.get(), 0);
         assert_eq!(scheduler.groups.slots.available_permits(), 1);
-        assert!(reads.try_recv().is_err());
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
-async fn sealed_batch_waits_for_one_group_credit_without_splitting() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let release = Arc::new(Notify::new());
-        let scheduler = Arc::new(ReadScheduler::new(
-            &metrics,
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_groups: 1.try_into().unwrap(),
-                max_inflight_reads: 1.try_into().unwrap(),
-                ..Default::default()
-            },
-            {
-                let release = release.clone();
-                move |path, range: Range<usize>| {
-                    let release = release.clone();
-                    let calls = calls.clone();
-                    async move {
-                        calls.send((path.clone(), range.clone())).unwrap();
-                        if path == "busy" {
-                            release.notified().await;
-                        }
-                        Ok(Bytes::from_static(&b"abcd"[range]))
-                    }
-                }
-            },
-        ));
-        let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
-        assert_eq!(reads.recv().await.unwrap(), ("busy".to_owned(), 0..1));
-
-        let plug = ReadPlug::new(scheduler.clone(), 2);
-        let token = plug.token();
-        let b = token.stage(&scheduler, "file", 2..4, None).unwrap();
-        let a = token.stage(&scheduler, "file", 0..2, None).unwrap();
-        drop(plug);
-        assert!(token.stage(&scheduler, "file", 0..1, None).is_none());
-
-        let cancelled = ReadPlug::new(scheduler.clone(), 2);
-        let cancelled_response = cancelled.token().stage(&scheduler, "cancelled", 0..1, None);
-        assert!(cancelled_response.is_some());
-        drop(cancelled);
-        while scheduler.batch_members.get() < 3 {
-            tokio::task::yield_now().await;
-        }
-        assert_eq!(scheduler.groups.slots.available_permits(), 0);
-        assert_eq!(scheduler.waiting.get(), 3);
-        assert!(reads.try_recv().is_err());
-        drop(cancelled_response);
-        while scheduler.waiting.get() != 2 {
-            tokio::task::yield_now().await;
-        }
-
-        release.notify_one();
-        assert_eq!(busy.await.unwrap().unwrap(), "a");
-        assert_eq!(a.await.unwrap().unwrap(), "ab");
-        assert_eq!(b.await.unwrap().unwrap(), "cd");
-        assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..4));
-        assert!(reads.try_recv().is_err());
-        drop(
-            scheduler
-                .groups
-                .slots
-                .clone()
-                .acquire_owned()
-                .await
-                .unwrap(),
-        );
-        assert_eq!(scheduler.waiting.get(), 0);
-        assert_eq!(scheduler.pending.get(), 0);
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
-async fn seal_merges_ready_group_while_another_group_waits_for_credit() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let release = Arc::new(Notify::new());
-        let scheduler = Arc::new(ReadScheduler::new(
-            &metrics,
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_groups: 2.try_into().unwrap(),
-                max_inflight_reads: 1.try_into().unwrap(),
-                ..Default::default()
-            },
-            {
-                let release = release.clone();
-                move |path, range: Range<usize>| {
-                    let release = release.clone();
-                    let calls = calls.clone();
-                    async move {
-                        calls.send((path.clone(), range.clone())).unwrap();
-                        if path == "busy" {
-                            release.notified().await;
-                        }
-                        Ok(Bytes::from_static(&b"abcd"[range]))
-                    }
-                }
-            },
-        ));
-
-        let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
-        assert_eq!(reads.recv().await.unwrap(), ("busy".to_owned(), 0..1));
-        let queued = scheduler.submit("file", 0..1, None).await.unwrap();
-        assert_eq!(scheduler.groups.slots.available_permits(), 0);
-
-        let plug = ReadPlug::new(scheduler.clone(), 3);
-        let token = plug.token();
-        let deferred = token.stage(&scheduler, "after", 0..1, None).unwrap();
-        let c = token.stage(&scheduler, "file", 2..3, None).unwrap();
-        let b = token.stage(&scheduler, "file", 1..2, None).unwrap();
-        drop(plug);
-
-        // No task has had a chance to poll since sealing the plug.
-        {
-            let pending = scheduler.groups.pending.lock().unwrap();
-            assert_eq!(pending.groups.len(), 1);
-            assert_eq!(pending.groups[0].span, 0..3);
-            assert_eq!(pending.groups[0].group.requests.len(), 3);
-        }
-        assert_eq!(scheduler.waiting.get(), 1);
-        drop(deferred);
-        release.notify_one();
-        assert_eq!(busy.await.unwrap().unwrap(), "a");
-        assert_eq!(queued.await.unwrap().unwrap(), "a");
-        assert_eq!(b.await.unwrap().unwrap(), "b");
-        assert_eq!(c.await.unwrap().unwrap(), "c");
-        assert_eq!(reads.recv().await.unwrap(), ("file".to_owned(), 0..3));
-        assert!(reads.try_recv().is_err());
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test(start_paused = true)]
-async fn group_headroom_admits_demand_but_preserves_prefetch_dispatch_order() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        for group_limit in [2, 3] {
-            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-            let (send_call, mut calls) = mpsc::unbounded_channel();
-            let release_active = Arc::new(Notify::new());
-            let release_queued = Arc::new(Notify::new());
-            let scheduler = Arc::new(ReadScheduler::new(
-                &metrics,
-                "test",
-                ReadSchedulerConfig {
-                    max_admitted_groups: group_limit.try_into().unwrap(),
-                    max_inflight_reads: 1.try_into().unwrap(),
-                    ..Default::default()
-                },
-                {
-                    let release_active = release_active.clone();
-                    let release_queued = release_queued.clone();
-                    move |path, range: Range<usize>| {
-                        let send_call = send_call.clone();
-                        let release = match path.as_str() {
-                            "active-prefetch" => Some(release_active.clone()),
-                            "queued-prefetch" => Some(release_queued.clone()),
-                            _ => None,
-                        };
-                        async move {
-                            send_call.send((path, range.clone())).unwrap();
-                            if let Some(release) = release {
-                                release.notified().await;
-                            }
-                            Ok(Bytes::from_static(&b"abcd"[range]))
-                        }
-                    }
-                },
-            ));
-
-            let active_plug = ReadPlug::new(scheduler.clone(), 1);
-            let active = active_plug
-                .token()
-                .stage(&scheduler, "active-prefetch", 0..1, None)
-                .unwrap();
-            drop(active_plug);
-            assert_eq!(
-                calls.recv().await.unwrap(),
-                ("active-prefetch".into(), 0..1)
-            );
-
-            let queued_plug = ReadPlug::new(scheduler.clone(), 2);
-            let token = queued_plug.token();
-            let a = token
-                .stage(&scheduler, "queued-prefetch", 0..1, None)
-                .unwrap();
-            let b = token
-                .stage(&scheduler, "queued-prefetch", 1..2, None)
-                .unwrap();
-            drop(queued_plug);
-            assert_eq!(scheduler.groups.admitted.get(), 2);
-            assert_eq!(scheduler.groups.queued.get(), 1);
-
-            let mut demand = std::pin::pin!(scheduler.submit("demand", 2..3, None));
-            let admitted = match futures::poll!(&mut demand) {
-                Poll::Pending => None,
-                Poll::Ready(result) => Some(result.unwrap()),
-            };
-            assert_eq!(admitted.is_some(), group_limit == 3);
-            assert_eq!(scheduler.groups.slots.available_permits(), 0);
-            assert!(calls.try_recv().is_err());
-
-            let waiters = scheduler.waiting.get();
-            {
-                let mut cancelled = std::pin::pin!(scheduler.submit("cancelled", 3..4, None));
-                assert!(futures::poll!(&mut cancelled).is_pending());
-                assert_eq!(scheduler.waiting.get(), waiters + 1);
-            }
-            assert_eq!(scheduler.waiting.get(), waiters);
-
-            release_active.notify_one();
-            assert_eq!(active.await.unwrap().unwrap(), "a");
-            let demand = match admitted {
-                Some(response) => response,
-                None => demand.await.unwrap(),
-            };
-            assert_eq!(
-                calls.recv().await.unwrap(),
-                ("queued-prefetch".into(), 0..2)
-            );
-            assert!(calls.try_recv().is_err());
-
-            release_queued.notify_one();
-            assert_eq!(a.await.unwrap().unwrap(), "a");
-            assert_eq!(b.await.unwrap().unwrap(), "b");
-            assert_eq!(calls.recv().await.unwrap(), ("demand".into(), 2..3));
-            assert_eq!(demand.await.unwrap().unwrap(), "c");
-            assert!(calls.try_recv().is_err());
-            drop(
-                scheduler
-                    .groups
-                    .slots
-                    .clone()
-                    .acquire_many_owned(group_limit as u32)
-                    .await
-                    .unwrap(),
-            );
-            assert_eq!(scheduler.groups.admitted.get(), 0);
-            assert_eq!(scheduler.groups.queued.get(), 0);
-            assert_eq!(scheduler.pending.get(), 0);
-        }
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
-async fn plug_starts_on_first_read_after_handle_drop() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let scheduler = Arc::new(ReadScheduler::new(
-            &metrics,
-            "test",
-            ReadSchedulerConfig::default(),
-            move |_, range: Range<usize>| {
-                calls.send(range.clone()).unwrap();
-                std::future::ready(Ok(Bytes::from_static(&b"ab"[range])))
-            },
-        ));
-        let plug = ReadPlug::new(scheduler.clone(), 8);
-        let token = plug.token();
-        drop(plug);
-        // Foyer may start the first producer only after registration has ended.
-        let first = token.stage(&scheduler, "file", 0..1, None).unwrap();
-        // Keeping the token alive cannot hold a single cold read indefinitely.
-        assert_eq!(first.await.unwrap().unwrap(), "a");
-        assert_eq!(reads.recv().await.unwrap(), 0..1);
-        assert_eq!(scheduler.plug_flushes[0].get(), 1);
-        assert_eq!(scheduler.plug_flushes[1].get(), 0);
-        assert!(token.stage(&scheduler, "file", 1..2, None).is_none());
-        let late = scheduler.submit("file", 1..2, None).await.unwrap();
-        assert_eq!(late.await.unwrap().unwrap(), "b");
-        assert_eq!(reads.recv().await.unwrap(), 1..2);
-        assert_eq!(scheduler.waiting.get(), 0);
-        assert_eq!(scheduler.pending.get(), 0);
-        assert!(reads.try_recv().is_err());
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
-async fn plug_staging_is_bounded_and_skips_cancelled_reads() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let scheduler = Arc::new(ReadScheduler::new(
-            &ObjectStoreMetrics::unused(),
-            "test",
-            ReadSchedulerConfig::default(),
-            move |_, range: Range<usize>| {
-                calls.send(range.clone()).unwrap();
-                std::future::ready(Ok(Bytes::from_static(&b"abc"[range])))
-            },
-        ));
-        let plug = ReadPlug::new(scheduler.clone(), 2);
-        let token = plug.token();
-        let first = token.stage(&scheduler, "file", 0..1, None).unwrap();
-        drop(first);
-        let live = token.stage(&scheduler, "file", 1..2, None).unwrap();
-        assert!(token.stage(&scheduler, "file", 2..3, None).is_none());
-        drop(plug);
-        assert_eq!(live.await.unwrap().unwrap(), "b");
-        assert_eq!(reads.recv().await.unwrap(), 1..2);
-        let empty = ReadPlug::new(scheduler.clone(), 0);
-        assert!(
-            empty
-                .token()
-                .stage(&scheduler, "file", 0..1, None)
-                .is_none()
-        );
-        drop(empty);
-        tokio::task::yield_now().await;
         assert!(reads.try_recv().is_err());
     })
     .await
@@ -1343,7 +983,7 @@ async fn bridge_reuses_group_credit_at_capacity() {
 #[tokio::test]
 async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        for deferred in [false, true] {
+        {
             // Also cover a cancelled waiter and a G grant that C has not polled.
             for (extend, cancel, grant) in [
                 (false, false, false),
@@ -1393,34 +1033,13 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                 };
                 let held = grant.then(|| groups.slots.clone().try_acquire_owned().unwrap());
                 let c_range = if extend { 2..3 } else { 1..2 };
-                let mut ordinary = None;
-                let mut staged = None;
-                if deferred {
-                    let plug = ReadPlug::new(scheduler.clone(), 1);
-                    staged = plug.token().stage(&scheduler, "file", c_range, None);
-                    assert!(staged.is_some());
-                    drop(plug);
-                    while groups
-                        .pending
-                        .lock()
-                        .unwrap()
-                        .waiting
-                        .get("file")
-                        .map_or(0, BTreeMap::len)
-                        < if extend { 1 } else { 2 }
-                    {
-                        tokio::task::yield_now().await;
-                    }
-                } else {
-                    let mut submit = Box::pin(scheduler.submit("file", c_range, None));
-                    assert!(futures::poll!(&mut submit).is_pending());
-                    ordinary = Some(submit);
-                }
+                let mut submit = Box::pin(scheduler.submit("file", c_range, None));
+                assert!(futures::poll!(&mut submit).is_pending());
+                let mut ordinary = Some(submit);
                 assert_eq!(groups.slots.available_permits(), 0);
 
                 if cancel {
                     drop(ordinary.take());
-                    drop(staged.take());
                     while groups.pending.lock().unwrap().waiting.contains_key("file") {
                         tokio::task::yield_now().await;
                     }
@@ -1464,10 +1083,7 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                     assert_eq!(b.await.unwrap().unwrap(), "b");
                 }
                 if !cancel {
-                    let c = match ordinary {
-                        Some(c) => c.await.unwrap(),
-                        None => staged.unwrap(),
-                    };
+                    let c = ordinary.unwrap().await.unwrap();
                     assert_eq!(c.await.unwrap().unwrap(), if extend { "c" } else { "b" });
                 }
                 if let Some(other) = other {
@@ -1489,70 +1105,6 @@ async fn pending_group_admits_compatible_g_waiters_before_dispatch() {
                 assert_eq!(scheduler.pending.get(), 0);
             }
         }
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
-async fn cancelled_batch_prefix_does_not_hide_a_mergeable_g_waiter() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let release = Arc::new(Notify::new());
-        let scheduler = Arc::new(ReadScheduler::new(
-            &metrics,
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_groups: 2.try_into().unwrap(),
-                max_inflight_reads: 1.try_into().unwrap(),
-                max_batch_requests: 4.try_into().unwrap(),
-                max_read_bytes: 16.try_into().unwrap(),
-                max_gap_bytes: 4,
-                ..Default::default()
-            },
-            {
-                let release = release.clone();
-                move |path, range: Range<usize>| {
-                    let release = release.clone();
-                    let calls = calls.clone();
-                    async move {
-                        calls.send(range.clone()).unwrap();
-                        if path == "busy" {
-                            release.notified().await;
-                        }
-                        Ok(Bytes::from_iter(range.map(|offset| offset as u8)))
-                    }
-                }
-            },
-        ));
-        let busy = scheduler.submit("busy", 0..1, None).await.unwrap();
-        assert_eq!(reads.recv().await.unwrap(), 0..1);
-        let a = scheduler.submit("file", 100..101, None).await.unwrap();
-        let plug = ReadPlug::new(scheduler.clone(), 2);
-        let token = plug.token();
-        let cancelled = token.stage(&scheduler, "file", 81..92, None).unwrap();
-        let c = token.stage(&scheduler, "file", 92..97, None).unwrap();
-        drop(plug);
-        let groups = &scheduler.groups;
-        while !groups.pending.lock().unwrap().waiting.contains_key("file") {
-            tokio::task::yield_now().await;
-        }
-
-        drop(cancelled);
-        let b = scheduler.submit("file", 101..102, None).await.unwrap();
-        assert_eq!(groups.slots.available_permits(), 0);
-        assert!(groups.pending.lock().unwrap().waiting.is_empty());
-        release.notify_one();
-        busy.await.unwrap().unwrap();
-        assert_eq!(reads.recv().await.unwrap(), 92..102);
-        assert_eq!(c.await.unwrap().unwrap().as_ref(), &[92, 93, 94, 95, 96]);
-        assert_eq!(a.await.unwrap().unwrap().as_ref(), &[100]);
-        assert_eq!(b.await.unwrap().unwrap().as_ref(), &[101]);
-        drop(groups.slots.clone().acquire_many_owned(2).await.unwrap());
-        assert!(reads.try_recv().is_err());
-        assert_eq!(groups.admitted.get(), 0);
-        assert_eq!(scheduler.waiting.get(), 0);
     })
     .await
     .unwrap();
@@ -1772,136 +1324,6 @@ async fn merged_read_is_cancelled_after_both_waiters_drop() {
             .get(),
         1
     );
-}
-
-#[cfg(not(madsim))]
-#[tokio::test]
-async fn plug_flush_runtime_shutdown_releases_readers() {
-    let scheduler = Arc::new(ReadScheduler::new(
-        &ObjectStoreMetrics::unused(),
-        "test",
-        ReadSchedulerConfig::default(),
-        |_, _| std::future::ready(Ok(Bytes::from_static(b"a"))),
-    ));
-    let plug = ReadPlug::new(scheduler.clone(), 8);
-    let token = plug.token();
-    drop(plug);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    let response = {
-        let _enter = runtime.enter();
-        token.stage(&scheduler, "file", 0..1, None).unwrap()
-    };
-    // The flush has not even been polled; another runtime still owns the reader.
-    runtime.shutdown_background();
-    assert!(
-        tokio::time::timeout(Duration::from_secs(1), response)
-            .await
-            .unwrap()
-            .is_err()
-    );
-    assert!(token.stage(&scheduler, "file", 0..1, None).is_none());
-}
-
-#[cfg(not(madsim))]
-#[tokio::test]
-async fn concurrent_plug_capacity_flush_submits_once() {
-    for byte_limit in [false, true] {
-        let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let scheduler = Arc::new(ReadScheduler::new(
-            &metrics,
-            "test",
-            ReadSchedulerConfig {
-                max_read_bytes: (if byte_limit { 2 } else { 1024 }).try_into().unwrap(),
-                max_batch_requests: (if byte_limit { 16 } else { 2 }).try_into().unwrap(),
-                ..Default::default()
-            },
-            move |_, range: Range<usize>| {
-                calls.send(range.clone()).unwrap();
-                std::future::ready(Ok(Bytes::from_static(&b"ab"[range])))
-            },
-        ));
-        let plug = ReadPlug::new(scheduler.clone(), 8);
-        let barrier = Arc::new(std::sync::Barrier::new(2));
-        let runtime = tokio::runtime::Handle::current();
-        let threads: Vec<_> = (0..2)
-            .map(|i| {
-                let token = plug.token();
-                let scheduler = scheduler.clone();
-                let barrier = barrier.clone();
-                let runtime = runtime.clone();
-                std::thread::spawn(move || {
-                    let _enter = runtime.enter();
-                    barrier.wait();
-                    token.stage(&scheduler, "file", i..i + 1, None).unwrap()
-                })
-            })
-            .collect();
-        // The queued flush cannot run on this current-thread runtime yet.
-        let responses: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
-        assert!(plug.token().stage(&scheduler, "file", 0..1, None).is_none());
-        for (i, response) in responses.into_iter().enumerate() {
-            assert_eq!(response.await.unwrap().unwrap(), &b"ab"[i..i + 1]);
-        }
-        tokio::task::yield_now().await;
-        assert_eq!(reads.recv().await.unwrap(), 0..2);
-        assert!(reads.try_recv().is_err());
-        assert_eq!(scheduler.plug_flushes[1].get(), 1);
-        assert_eq!(scheduler.batch_members.get(), 2);
-        assert_eq!(scheduler.waiting.get(), 0);
-        drop(plug);
-    }
-}
-
-#[tokio::test]
-async fn collecting_plug_does_not_reserve_point_read_capacity() {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let (calls, mut reads) = mpsc::unbounded_channel();
-        let release_point = Arc::new(Notify::new());
-        let scheduler = Arc::new(ReadScheduler::new(
-            &ObjectStoreMetrics::new(&prometheus::Registry::new()),
-            "test",
-            ReadSchedulerConfig {
-                max_admitted_groups: 1.try_into().unwrap(),
-                max_inflight_reads: 1.try_into().unwrap(),
-                ..Default::default()
-            },
-            {
-                let release_point = release_point.clone();
-                move |path, _| {
-                    let calls = calls.clone();
-                    let release_point = release_point.clone();
-                    async move {
-                        calls.send(path.clone()).unwrap();
-                        if path == "point" {
-                            release_point.notified().await;
-                        }
-                        Ok(Bytes::from_static(b"a"))
-                    }
-                }
-            },
-        ));
-        let plug = ReadPlug::new(scheduler.clone(), 8);
-        let response = plug
-            .token()
-            .stage(&scheduler, "prefetch", 0..1, None)
-            .unwrap();
-        assert_eq!(scheduler.groups.slots.available_permits(), 1);
-        // Ordinary demand can take G while the plug is collecting. Keep
-        // the plug handle alive throughout this check.
-        let point = scheduler.submit("point", 0..1, None).await.unwrap();
-        assert_eq!(reads.recv().await.unwrap(), "point");
-        assert!(reads.try_recv().is_err());
-        release_point.notify_one();
-        assert_eq!(point.await.unwrap().unwrap(), "a");
-        assert_eq!(response.await.unwrap().unwrap(), "a");
-        assert_eq!(reads.recv().await.unwrap(), "prefetch");
-        drop(plug);
-    })
-    .await
-    .unwrap();
 }
 
 #[test]

@@ -82,14 +82,14 @@ pub struct StorageConfig {
     /// Per-path prefetch strategies and bounded lookahead budgets. Changes require restart.
     #[serde(default)]
     #[config_doc(nested)]
-    pub blockwise_prefetch: BlockwisePrefetchConfig,
+    pub scan_prefetch: ScanPrefetchConfig,
 
     /// Concurrent point reads and batch-local SST metadata reuse. Changes require restart.
     #[serde(default)]
     #[config_doc(nested)]
     pub read_batch: ReadBatchConfig,
 
-    /// max prefetch block number
+    /// Default maximum blocks per scan prefetch window; scan_prefetch.max_blocks overrides it.
     #[serde(
         default = "default::storage::max_prefetch_block_number",
         deserialize_with = "deserialize_max_prefetch_block_number"
@@ -613,104 +613,77 @@ pub struct ObjectStoreConfig {
 #[serde(rename_all = "snake_case")]
 pub enum ReadPrefetchMode {
     Disabled,
-    Range,
-    Blockwise,
+    /// Bounded reads of contiguous cache misses, decoded on consumption.
     ColdRanges,
 }
 
-/// Per-path prefetch selection and bounded lookahead budgets.
-/// Path overrides take precedence over mode; empty modes preserve legacy switch behavior.
+/// Per-path prefetch selection. Explicit path modes override the unified mode.
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
-pub struct BlockwisePrefetchConfig {
-    /// Unified prefetch mode: disabled, range, blockwise, or cold_ranges. Point gets are unaffected.
-    /// Empty preserves legacy switches. Per-path modes override this setting for controlled comparisons.
+pub struct ScanPrefetchConfig {
+    /// Unified mode: disabled or cold_ranges. Empty preserves each caller's default.
     #[serde(default)]
     pub mode: Option<ReadPrefetchMode>,
-    /// Enable blockwise lookahead requested by prefix scans. Point reads are unaffected.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Enable the same bounded blockwise lookahead for change log scans independently of prefix scans.
-    #[serde(default)]
-    pub changelog_enabled: bool,
-    /// Use blockwise instead of contiguous range prefetch for ordinary Snapshot Backfill source scans.
-    #[serde(default)]
-    pub snapshot_backfill_enabled: bool,
-    /// Use blockwise instead of contiguous range prefetch for Locality Backfill snapshot scans.
-    #[serde(default)]
-    pub locality_backfill_enabled: bool,
-    /// Prefix-scan mode: disabled, range, blockwise, or cold_ranges. Empty inherits mode, then enabled.
+    /// Prefix scans default to disabled. Empty inherits mode.
     #[serde(default)]
     pub prefix_mode: Option<ReadPrefetchMode>,
-    /// Change-log mode: disabled, range, blockwise, or cold_ranges. Empty inherits mode, then changelog_enabled.
+    /// Change-log scans default to disabled. Empty inherits mode.
     #[serde(default)]
     pub changelog_mode: Option<ReadPrefetchMode>,
-    /// Ordinary range-scan mode: disabled, range, blockwise, or cold_ranges. Empty inherits mode, then range.
+    /// Ordinary range scans default to cold_ranges. Empty inherits mode.
     #[serde(default)]
     pub range_scan_mode: Option<ReadPrefetchMode>,
-    /// Snapshot Backfill mode: disabled, range, blockwise, or cold_ranges.
-    /// Empty inherits mode, then uses blockwise if snapshot_backfill_enabled is true, otherwise range.
+    /// Snapshot Backfill defaults to cold_ranges. Empty inherits mode.
     #[serde(default)]
     pub snapshot_backfill_mode: Option<ReadPrefetchMode>,
-    /// Locality Backfill mode: disabled, range, blockwise, or cold_ranges.
-    /// Empty inherits mode, then uses blockwise if locality_backfill_enabled is true, otherwise range.
+    /// Locality Backfill defaults to cold_ranges. Empty inherits mode.
     #[serde(default)]
     pub locality_backfill_mode: Option<ReadPrefetchMode>,
-    /// Maximum blocks per Blockwise/ColdRanges window, including demand. 1 disables lookahead.
-    /// Range uses storage.max_prefetch_block_number instead.
-    #[serde(default = "default_read_window_blocks")]
-    pub max_blocks: NonZeroUsize,
-    /// Sum of max(compressed, decoded) block sizes per Blockwise/ColdRanges window. An oversized demand block
-    /// is read alone; speculative blocks never exceed this budget.
-    #[serde(default = "default_read_window_bytes")]
+    /// Maximum blocks per window, including demand. Empty uses storage.max_prefetch_block_number.
+    /// A value of 1 disables lookahead.
+    #[serde(default)]
+    pub max_blocks: Option<NonZeroUsize>,
+    /// Sum of max(compressed, decoded) block sizes per window. Oversized demand blocks are read alone.
+    /// Retained buffers and decoding are additionally bounded by storage.prefetch_buffer_capacity_mb.
+    #[serde(default = "default_scan_prefetch_bytes")]
     pub max_bytes: NonZeroUsize,
 }
 
-impl BlockwisePrefetchConfig {
+impl ScanPrefetchConfig {
     pub fn prefix_mode(&self) -> ReadPrefetchMode {
-        self.prefix_mode.or(self.mode).unwrap_or(if self.enabled {
-            ReadPrefetchMode::Blockwise
-        } else {
-            ReadPrefetchMode::Disabled
-        })
+        self.prefix_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::Disabled)
     }
 
     pub fn changelog_mode(&self) -> ReadPrefetchMode {
         self.changelog_mode
             .or(self.mode)
-            .unwrap_or(if self.changelog_enabled {
-                ReadPrefetchMode::Blockwise
-            } else {
-                ReadPrefetchMode::Disabled
-            })
+            .unwrap_or(ReadPrefetchMode::Disabled)
     }
 
     pub fn range_scan_mode(&self) -> ReadPrefetchMode {
         self.range_scan_mode
             .or(self.mode)
-            .unwrap_or(ReadPrefetchMode::Range)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
     }
 
     pub fn snapshot_backfill_mode(&self) -> ReadPrefetchMode {
         self.snapshot_backfill_mode
             .or(self.mode)
-            .unwrap_or(if self.snapshot_backfill_enabled {
-                ReadPrefetchMode::Blockwise
-            } else {
-                ReadPrefetchMode::Range
-            })
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
     }
 
     pub fn locality_backfill_mode(&self) -> ReadPrefetchMode {
         self.locality_backfill_mode
             .or(self.mode)
-            .unwrap_or(if self.locality_backfill_enabled {
-                ReadPrefetchMode::Blockwise
-            } else {
-                ReadPrefetchMode::Range
-            })
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
     }
+}
+
+fn default_scan_prefetch_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(1024 * 1024).unwrap()
 }
 
 /// Settings for `MultiGet` and bounded SST metadata retention.
@@ -789,9 +762,6 @@ fn validate_read_permits<E: serde::de::Error>(value: NonZeroUsize) -> Result<Non
     Ok(value)
 }
 
-fn default_read_window_blocks() -> NonZeroUsize {
-    NonZeroUsize::new(3).unwrap()
-}
 fn default_read_window_bytes() -> NonZeroUsize {
     NonZeroUsize::new(256 * 1024).unwrap()
 }
