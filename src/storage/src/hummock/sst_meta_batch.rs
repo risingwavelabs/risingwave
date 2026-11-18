@@ -20,6 +20,7 @@ use risingwave_common::config::storage::ReadBatchConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
+use super::block_stream::MemoryUsageTracker;
 use super::{HummockResult, SstableStore, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
@@ -35,12 +36,25 @@ pub struct SstMetaBatch {
     inner: Mutex<Metadata>,
 }
 
+struct RetainedMeta {
+    table: TableHolder,
+    _charge: MemoryUsageTracker,
+}
+
 #[derive(Default)]
 struct Metadata {
     owner: Option<Weak<SstableStore>>,
-    entries: HashMap<HummockSstableObjectId, TableHolder>,
+    entries: HashMap<HummockSstableObjectId, RetainedMeta>,
     regular_bytes: usize,
-    oversized: Option<TableHolder>,
+    has_oversized: bool,
+}
+
+impl Metadata {
+    fn available_regular_bytes(&self, config: ReadBatchConfig) -> Option<usize> {
+        let regular_entries = self.entries.len() - usize::from(self.has_oversized);
+        (regular_entries < config.meta_max_entries.get())
+            .then_some(config.meta_max_bytes.get() - self.regular_bytes)
+    }
 }
 
 impl SstMetaBatch {
@@ -86,7 +100,6 @@ impl SstMetaBatch {
             return store.sstable(info, stats).await;
         }
         let object_id = info.object_id;
-        let max_entries = self.config.meta_max_entries.get();
         let max_bytes = self.config.meta_max_bytes.get();
         let retention = {
             let mut inner = self.inner.lock();
@@ -94,17 +107,13 @@ impl SstMetaBatch {
             if !std::ptr::eq(owner.as_ptr(), Arc::as_ptr(store)) {
                 None
             } else {
-                let oversized = inner
-                    .oversized
-                    .as_ref()
-                    .filter(|table| table.id == object_id);
-                if let Some(table) = inner.entries.get(&object_id).or(oversized) {
+                if let Some(entry) = inner.entries.get(&object_id) {
                     stats.cache_meta_batch_ready += 1;
-                    return Ok(table.clone());
+                    return Ok(entry.table.clone());
                 }
                 Some((
-                    (inner.entries.len() < max_entries).then_some(max_bytes - inner.regular_bytes),
-                    inner.oversized.is_none(),
+                    inner.available_regular_bytes(self.config),
+                    !inner.has_oversized,
                 ))
             }
         };
@@ -128,27 +137,36 @@ impl SstMetaBatch {
 
         // Other reads may have retained a handle or used the remaining budget during the fetch.
         let mut inner = self.inner.lock();
-        if oversized {
-            // Keep the first oversized handle. Rotating this slot churns when keys
-            // visit multiple oversized SSTs in the same batch.
-            match &inner.oversized {
-                None => {
-                    inner.oversized = Some(table.clone());
-                    stats.cache_meta_batch_oversized += 1;
-                    stats.cache_meta_batch_retained += 1;
-                }
-                Some(entry) if entry.id != object_id => stats.cache_meta_batch_budget_reject += 1,
-                Some(_) => {}
-            }
-        } else if !inner.entries.contains_key(&object_id) {
-            if inner.entries.len() < max_entries && bytes <= max_bytes - inner.regular_bytes {
-                inner.regular_bytes += bytes;
-                inner.entries.insert(object_id, table.clone());
-                stats.cache_meta_batch_retained += 1;
-            } else {
-                stats.cache_meta_batch_budget_reject += 1;
-            }
+        if inner.entries.contains_key(&object_id) {
+            return Ok(table);
         }
+        let has_room = if oversized {
+            !inner.has_oversized
+        } else {
+            inner
+                .available_regular_bytes(self.config)
+                .is_some_and(|available| bytes <= available)
+        };
+        if !has_room {
+            stats.cache_meta_batch_budget_reject += 1;
+            return Ok(table);
+        }
+        let Some(charge) = store.try_reserve_meta_batch(bytes) else {
+            stats.cache_meta_batch_shared_budget_reject += 1;
+            return Ok(table);
+        };
+        let retained = RetainedMeta {
+            table: table.clone(),
+            _charge: charge,
+        };
+        inner.entries.insert(object_id, retained);
+        if oversized {
+            inner.has_oversized = true;
+            stats.cache_meta_batch_oversized += 1;
+        } else {
+            inner.regular_bytes += bytes;
+        }
+        stats.cache_meta_batch_retained += 1;
         Ok(table)
     }
 }
@@ -267,6 +285,52 @@ mod tests {
             batch.sstable(&store, &info, &mut reused).await.unwrap();
             assert_eq!(reused.cache_meta_block_total, 0);
         }
+    }
+
+    #[tokio::test]
+    async fn test_shared_budget_charges_oversized_and_releases_on_cancel() {
+        let mut store = mock_sstable_store().await;
+        let (table, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, store.clone()).await;
+        let weight = table.weight();
+        let config = &mut Arc::get_mut(&mut store).unwrap().read_batch;
+        config.meta_reuse = true;
+        config.meta_max_bytes = (weight - 1).try_into().unwrap();
+        config.meta_shared_max_bytes = weight.try_into().unwrap();
+        let config = *config;
+
+        let (ready, retained) = tokio::sync::oneshot::channel();
+        let holder = tokio::spawn({
+            let store = store.clone();
+            let info = info.clone();
+            async move {
+                let batch = SstMetaBatch::new(config);
+                let mut stats = StoreLocalStatistic::default();
+                batch.sstable(&store, &info, &mut stats).await.unwrap();
+                assert_eq!(stats.cache_meta_batch_oversized, 1);
+                ready.send(()).unwrap();
+                std::future::pending::<()>().await;
+                drop(batch);
+            }
+        });
+        retained.await.unwrap();
+        let batch = SstMetaBatch::new(config);
+        let mut stats = StoreLocalStatistic::default();
+        assert_eq!(
+            batch.sstable(&store, &info, &mut stats).await.unwrap().id,
+            info.object_id
+        );
+        assert_eq!(stats.cache_meta_batch_shared_budget_reject, 1);
+        assert_eq!(stats.cache_meta_batch_budget_reject, 0);
+        holder.abort();
+        assert!(holder.await.unwrap_err().is_cancelled());
+        assert_eq!(store.meta_batch_usage(), 0);
+        batch.sstable(&store, &info, &mut stats).await.unwrap();
+        batch.sstable(&store, &info, &mut stats).await.unwrap();
+        assert_eq!(stats.cache_meta_batch_ready, 1);
+        assert_eq!(store.meta_batch_usage(), weight);
+        drop(batch);
+        assert_eq!(store.meta_batch_usage(), 0);
     }
 
     #[tokio::test]

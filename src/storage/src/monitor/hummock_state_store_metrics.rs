@@ -807,6 +807,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_vector_meta_memory_usage(&self) -> u64;
     fn get_vector_data_memory_usage(&self) -> u64;
     fn get_uploading_memory_usage(&self) -> u64;
+    fn get_meta_batch_usage(&self) -> usize;
     fn get_prefetch_memory_usage(&self) -> usize;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
@@ -824,6 +825,7 @@ struct StateStoreCollector {
     vector_data_cache_size: IntGauge,
     vector_meta_cache_size: IntGauge,
     uploading_memory_size: IntGauge,
+    meta_batch_retained_bytes: IntGauge,
     prefetch_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
@@ -906,6 +908,13 @@ impl StateStoreCollector {
         .unwrap();
         collectors.push(Arc::new(uploading_memory_usage_ratio.clone()) as _);
 
+        let meta_batch_retained_bytes = IntGauge::with_opts(Opts::new(
+            "state_store_meta_batch_retained_bytes",
+            "Sum of SST metadata handle weights retained by read batches, charged per batch",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(meta_batch_retained_bytes.clone()) as _);
+
         let prefetch_memory_size = IntGauge::with_opts(Opts::new(
             "state_store_prefetch_memory_size",
             "the size of prefetch memory usage",
@@ -921,6 +930,7 @@ impl StateStoreCollector {
             vector_data_cache_size,
             vector_meta_cache_size,
             uploading_memory_size,
+            meta_batch_retained_bytes,
             prefetch_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
@@ -948,6 +958,8 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_vector_meta_memory_usage() as _);
         self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
+        self.meta_batch_retained_bytes
+            .set(self.memory_collector.get_meta_batch_usage() as i64);
         self.prefetch_memory_size
             .set(self.memory_collector.get_prefetch_memory_usage() as i64);
         self.meta_cache_usage_ratio

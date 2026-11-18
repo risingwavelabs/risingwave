@@ -387,6 +387,7 @@ concurrency = 10
 meta_reuse = false
 meta_max_entries = 16
 meta_max_bytes = 1048576
+meta_shared_max_bytes = 67108864
 
 [storage.data_file_cache]
 dir = ""

@@ -48,6 +48,7 @@ pub struct StoreLocalStatistic {
     pub cache_meta_batch_retained: u64,
     pub cache_meta_batch_oversized: u64,
     pub cache_meta_batch_budget_reject: u64,
+    pub cache_meta_batch_shared_budget_reject: u64,
 
     pub cache_data_prefetch_count: u64,
     pub cache_data_prefetch_block_count: u64,
@@ -221,6 +222,7 @@ impl StoreLocalStatistic {
             || self.cache_meta_batch_retained != 0
             || self.cache_meta_batch_oversized != 0
             || self.cache_meta_batch_budget_reject != 0
+            || self.cache_meta_batch_shared_budget_reject != 0
             || self.cache_data_prefetch_count != 0
             || self.skip_multi_version_key_count != 0
             || self.skip_delete_key_count != 0
@@ -253,6 +255,7 @@ struct LocalStoreMetrics {
     cache_meta_batch_retained: LabelGuardedLocalIntCounter,
     cache_meta_batch_oversized: LabelGuardedLocalIntCounter,
     cache_meta_batch_budget_reject: LabelGuardedLocalIntCounter,
+    cache_meta_batch_shared_budget_reject: LabelGuardedLocalIntCounter,
 
     cache_meta_block_miss: LabelGuardedLocalIntCounter,
     cache_data_prefetch_count: LabelGuardedLocalIntCounter,
@@ -323,6 +326,10 @@ impl LocalStoreMetrics {
         let cache_meta_batch_budget_reject = metrics
             .sst_store_block_request_counts
             .with_guarded_label_values(&[table_id_label, "meta_batch_budget_reject"])
+            .local();
+        let cache_meta_batch_shared_budget_reject = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_id_label, "meta_batch_shared_budget_reject"])
             .local();
         let cache_meta_block_miss = metrics
             .sst_store_block_request_counts
@@ -416,6 +423,7 @@ impl LocalStoreMetrics {
             cache_meta_batch_retained,
             cache_meta_batch_oversized,
             cache_meta_batch_budget_reject,
+            cache_meta_batch_shared_budget_reject,
 
             cache_meta_block_miss,
             cache_data_prefetch_count,
@@ -524,6 +532,7 @@ add_local_metrics_count!(
     cache_meta_batch_retained,
     cache_meta_batch_oversized,
     cache_meta_batch_budget_reject,
+    cache_meta_batch_shared_budget_reject,
     cache_meta_block_miss,
     cache_data_prefetch_count,
     cache_data_prefetch_block_count,

@@ -84,6 +84,7 @@ async fn test_multi_get_refills_while_first_key_is_pending() {
         meta_reuse: true,
         meta_max_entries: 2.try_into().unwrap(),
         meta_max_bytes: 65536.try_into().unwrap(),
+        ..Default::default()
     };
     let concurrency = config.concurrency.get();
     let count = 2 * concurrency + 3;

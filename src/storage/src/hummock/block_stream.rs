@@ -28,14 +28,17 @@ pub struct MemoryUsageTracker {
 }
 
 impl MemoryUsageTracker {
-    /// Reserve retained prefetch memory atomically, without waiting.
-    pub fn try_new(total_usage: Arc<AtomicUsize>, usage: usize, capacity: usize) -> Option<Self> {
+    /// Reserve retained memory atomically, without waiting.
+    pub fn try_new(total_usage: &Arc<AtomicUsize>, usage: usize, capacity: usize) -> Option<Self> {
         total_usage
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                 current.checked_add(usage).filter(|&next| next <= capacity)
             })
             .ok()?;
-        Some(Self { total_usage, usage })
+        Some(Self {
+            total_usage: total_usage.clone(),
+            usage,
+        })
     }
 }
 
@@ -152,19 +155,19 @@ mod tests {
     #[test]
     fn test_memory_reservation_limits_and_overflow() {
         let usage = Arc::new(AtomicUsize::new(0));
-        assert!(MemoryUsageTracker::try_new(usage.clone(), 1, 0).is_none());
-        let first = MemoryUsageTracker::try_new(usage.clone(), 40, 100).unwrap();
-        assert!(MemoryUsageTracker::try_new(usage.clone(), 61, 100).is_none());
-        let second = MemoryUsageTracker::try_new(usage.clone(), 60, 100).unwrap();
+        assert!(MemoryUsageTracker::try_new(&usage, 1, 0).is_none());
+        let first = MemoryUsageTracker::try_new(&usage, 40, 100).unwrap();
+        assert!(MemoryUsageTracker::try_new(&usage, 61, 100).is_none());
+        let second = MemoryUsageTracker::try_new(&usage, 60, 100).unwrap();
         assert_eq!(usage.load(Ordering::SeqCst), 100);
-        assert!(MemoryUsageTracker::try_new(usage.clone(), 1, 100).is_none());
-        assert!(MemoryUsageTracker::try_new(usage.clone(), usize::MAX, usize::MAX).is_none());
+        assert!(MemoryUsageTracker::try_new(&usage, 1, 100).is_none());
+        assert!(MemoryUsageTracker::try_new(&usage, usize::MAX, usize::MAX).is_none());
         assert_eq!(usage.load(Ordering::SeqCst), 100);
         drop(first);
         drop(second);
         assert_eq!(usage.load(Ordering::SeqCst), 0);
-        let full = MemoryUsageTracker::try_new(usage.clone(), usize::MAX, usize::MAX).unwrap();
-        assert!(MemoryUsageTracker::try_new(usage.clone(), 1, usize::MAX).is_none());
+        let full = MemoryUsageTracker::try_new(&usage, usize::MAX, usize::MAX).unwrap();
+        assert!(MemoryUsageTracker::try_new(&usage, 1, usize::MAX).is_none());
         drop(full);
         assert_eq!(usage.load(Ordering::SeqCst), 0);
     }
@@ -180,7 +183,7 @@ mod tests {
             for _ in 0..16 {
                 scope.spawn(|| {
                     barrier.wait();
-                    let tracker = MemoryUsageTracker::try_new(usage.clone(), 37, 7 + 3 * 37);
+                    let tracker = MemoryUsageTracker::try_new(&usage, 37, 7 + 3 * 37);
                     if tracker.is_some() {
                         admitted.fetch_add(1, Ordering::SeqCst);
                     }
