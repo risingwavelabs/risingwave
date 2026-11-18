@@ -545,7 +545,9 @@ impl ToBatch for LogicalVectorSearch {
                             .cloned()
                             .chain(scan.table().pk().iter().map(|order| order.column_index)),
                     );
-                    let table_scan = generic::TableScan::new(
+                    // This is a fresh primary-table lookup during batch conversion;
+                    // no snapshot-backfill key from stream rewriting needs preserving.
+                    let table_scan = generic::TableScan::new_for_batch(
                         primary_table_cols_idx,
                         scan.table().clone(),
                         vec![],

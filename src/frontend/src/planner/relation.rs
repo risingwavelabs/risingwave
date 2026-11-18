@@ -984,7 +984,11 @@ source: {:?}",
             predicate = predicate.and(Condition::with_expr(epoch_predicate));
         }
 
-        let log_store_scan: PlanRef = LogicalScan::from(generic::TableScan::new(
+        // The internal log catalog does not declare a logical key. Its physical key
+        // (epoch, sequence ID, vnode) is excluded from the payload projection, so the
+        // batch constructor must keep the scan key unknown rather than infer uniqueness
+        // from the catalog's empty key or its distribution columns.
+        let log_store_scan: PlanRef = LogicalScan::from(generic::TableScan::new_for_batch(
             payload_col_idx,
             log_store_table,
             vec![],

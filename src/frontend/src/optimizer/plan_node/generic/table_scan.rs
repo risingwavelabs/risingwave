@@ -27,7 +27,6 @@ use super::GenericPlanNode;
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::catalog::index_catalog::{TableIndex, VectorIndex};
-use crate::catalog::table_catalog::TableType;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{FunctionalDependencySet, Order, WatermarkColumns};
@@ -52,6 +51,7 @@ pub struct TableScan {
     pub table_indexes: Vec<Arc<TableIndex>>,
     pub vector_indexes: Vec<Arc<VectorIndex>>,
     /// Table column indices used as the stream key of this scan operator.
+    /// `None` means no known key; `Some(vec![])` means at most one row.
     table_scan_stream_key: Option<Vec<usize>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
@@ -282,6 +282,7 @@ impl TableScan {
         };
 
         let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
+        let table_scan_stream_key = Some(index_table_catalog.stream_key());
 
         Self::new(
             new_output_col_idx,
@@ -291,23 +292,29 @@ impl TableScan {
             self.ctx.clone(),
             new_predicate,
             self.as_of.clone(),
+            table_scan_stream_key,
         )
     }
 
-    /// Create a `LogicalScan` node. Used internally by optimizer.
+    /// Create a fresh batch scan, retaining keys for logical uniqueness inference.
+    /// Do not use this to rebuild a scan after stream rewriting; preserve its key instead.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        output_col_idx: Vec<usize>, // the column index in the table
+    pub(crate) fn new_for_batch(
+        output_col_idx: Vec<usize>,
         table_catalog: Arc<TableCatalog>,
         table_indexes: Vec<Arc<TableIndex>>,
         vector_indexes: Vec<Arc<VectorIndex>>,
         ctx: OptimizerContextRef,
-        predicate: Condition, // refers to column indexes of the table
+        predicate: Condition,
         as_of: Option<AsOf>,
     ) -> Self {
-        let table_scan_stream_key = (!matches!(table_catalog.table_type, TableType::Internal))
+        // Internal catalogs do not declare a logical row key: an empty catalog key
+        // or the distribution columns alone must not imply uniqueness. Vector
+        // indexes likewise do not expose rows through an ordinary streaming scan.
+        let table_scan_stream_key = table_catalog
+            .supports_streaming_scan()
             .then(|| table_catalog.stream_key());
-        Self::new_inner(
+        Self::new(
             output_col_idx,
             table_catalog,
             table_indexes,
@@ -319,7 +326,11 @@ impl TableScan {
         )
     }
 
-    pub(crate) fn new_inner(
+    /// Create a scan with an explicit stream key in table-column coordinates.
+    /// Pass `None` for internal-table scans without a known logical stream key.
+    /// When rebuilding a scan of the same table, preserve its existing key.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
         table_indexes: Vec<Arc<TableIndex>>,
@@ -450,5 +461,56 @@ impl TableScan {
         table_catalog: &TableCatalog,
     ) -> HashMap<ColumnId, usize> {
         ColumnDesc::get_id_to_op_idx_mapping(&table_catalog.columns, Some(output_col_idx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::catalog::table_catalog::TableType;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::utils::TableCatalogBuilder;
+
+    #[tokio::test]
+    async fn test_batch_scan_key_functional_dependency() {
+        let mut builder = TableCatalogBuilder::default();
+        builder.add_column(&Field::with_name(DataType::Int32, "v"));
+        builder.add_column(&Field::with_name(DataType::Int32, "w"));
+        let mut table = builder.build(vec![], 0);
+
+        for (table_type, distribution_key, expected_key) in [
+            (TableType::Internal, vec![], None),
+            (TableType::Internal, vec![0], None),
+            (TableType::MaterializedView, vec![], Some(vec![])),
+            (TableType::Table, vec![0], Some(vec![0])),
+            (TableType::Index, vec![0], Some(vec![0])),
+            (TableType::VectorIndex, vec![0], None),
+        ] {
+            table.table_type = table_type;
+            table.distribution_key = distribution_key;
+            let scan = TableScan::new_for_batch(
+                vec![0, 1],
+                Arc::new(table.clone()),
+                vec![],
+                vec![],
+                OptimizerContext::mock(),
+                Condition::true_cond(),
+                None,
+            );
+
+            assert_eq!(scan.stream_key(), expected_key);
+            // Only an explicit empty key (e.g. a global aggregate MV) implies at most
+            // one row. Internal-table distribution columns do not declare uniqueness.
+            assert_eq!(
+                scan.functional_dependency().is_key(&[]),
+                expected_key == Some(vec![])
+            );
+            assert_eq!(
+                scan.functional_dependency().is_key(&[0]),
+                expected_key.is_some()
+            );
+        }
     }
 }

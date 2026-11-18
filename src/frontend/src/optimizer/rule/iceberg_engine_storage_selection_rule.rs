@@ -66,7 +66,7 @@ impl IcebergEngineStorageSelectionRule {
     }
 }
 
-/// Rewrite the intermediate Iceberg scan to a Hummock `LogicalScan`.
+/// Rewrite the batch Iceberg scan to a Hummock row-store `LogicalScan`.
 fn rewrite_to_table_scan(
     scan: &LogicalIcebergIntermediateScan,
     table: &Arc<TableCatalog>,
@@ -81,7 +81,7 @@ fn rewrite_to_table_scan(
         .iter()
         .copied()
         .try_collect()?;
-    let table_scan = generic::TableScan::new(
+    let table_scan = generic::TableScan::new_for_batch(
         output_col_idx,
         table.clone(),
         vec![],

@@ -1,0 +1,162 @@
+# Preserve the physical scan key through predicate pull-up under UNION ALL.
+statement ok
+SET RW_IMPLICIT_FLUSH = true;
+
+statement ok
+SET streaming_parallelism = 2;
+
+statement ok
+SET streaming_use_snapshot_backfill = true;
+
+statement ok
+CREATE TABLE union_input (id int PRIMARY KEY, k int, v int);
+
+statement ok
+INSERT INTO union_input VALUES (1, 1, 10), (2, -1, 20), (3, 2, -30);
+
+# Storage PK is (v, id), while the logical stream key is id.
+statement ok
+CREATE MATERIALIZED VIEW union_ordered AS SELECT * FROM union_input ORDER BY v;
+
+statement ok
+CREATE MATERIALIZED VIEW union_plain AS SELECT * FROM union_input;
+
+statement ok
+SET streaming_use_snapshot_backfill = false;
+
+statement ok
+CREATE MATERIALIZED VIEW union_arrangement AS
+SELECT id, k FROM union_ordered WHERE k > 0
+UNION ALL
+SELECT id, k FROM union_plain;
+
+statement ok
+SET streaming_use_snapshot_backfill = true;
+
+statement ok
+SET BACKGROUND_DDL = true;
+
+# k is not a PK column, so this exercises the residual predicate path.
+# v is hidden in the union output but must remain part of the scan key.
+statement ok
+CREATE MATERIALIZED VIEW union_snapshot WITH (backfill_rate_limit = 0) AS
+SELECT id, k FROM union_ordered WHERE k > 0
+UNION ALL
+SELECT id, k FROM union_plain;
+
+query T retry 4 backoff 1s
+SELECT backfill_type FROM rw_catalog.rw_ddl_progress;
+----
+SNAPSHOT_BACKFILL
+
+# Change both predicate membership and the physical row identity during backfill.
+statement ok
+UPDATE union_input SET k = -1, v = 40 WHERE id = 1;
+
+statement ok
+UPDATE union_input SET k = 2, v = -50 WHERE id = 2;
+
+statement ok
+DELETE FROM union_input WHERE id = 3;
+
+statement ok
+INSERT INTO union_input VALUES (4, 3, 60);
+
+statement ok
+ALTER MATERIALIZED VIEW union_snapshot SET backfill_rate_limit = default;
+
+statement ok
+wait;
+
+query II rowsort
+SELECT * FROM union_snapshot;
+----
+1 -1
+2 2
+2 2
+4 3
+4 3
+
+query II rowsort
+SELECT * FROM union_arrangement;
+----
+1 -1
+2 2
+2 2
+4 3
+4 3
+
+# The leading physical PK predicate exercises the direct scan-range path.
+statement ok
+CREATE MATERIALIZED VIEW union_range WITH (backfill_rate_limit = 0) AS
+SELECT id, k FROM union_ordered WHERE v > 0
+UNION ALL
+SELECT id, k FROM union_plain;
+
+query T retry 4 backoff 1s
+SELECT backfill_type FROM rw_catalog.rw_ddl_progress;
+----
+SNAPSHOT_BACKFILL
+
+statement ok
+UPDATE union_input SET v = -40 WHERE id = 1;
+
+statement ok
+UPDATE union_input SET v = 50 WHERE id = 2;
+
+statement ok
+ALTER MATERIALIZED VIEW union_range SET backfill_rate_limit = default;
+
+statement ok
+wait;
+
+query II rowsort
+SELECT * FROM union_range;
+----
+1 -1
+2 2
+2 2
+4 3
+4 3
+
+# Verify subsequent streaming updates still use the right row identity.
+statement ok
+UPDATE union_input SET k = 5, v = 80 WHERE id = 1;
+
+query II rowsort
+SELECT * FROM union_snapshot;
+----
+1 5
+1 5
+2 2
+2 2
+4 3
+4 3
+
+query II rowsort
+SELECT * FROM union_range;
+----
+1 5
+1 5
+2 2
+2 2
+4 3
+4 3
+
+statement ok
+DROP MATERIALIZED VIEW union_range;
+
+statement ok
+DROP MATERIALIZED VIEW union_snapshot;
+
+statement ok
+DROP MATERIALIZED VIEW union_arrangement;
+
+statement ok
+DROP MATERIALIZED VIEW union_plain;
+
+statement ok
+DROP MATERIALIZED VIEW union_ordered;
+
+statement ok
+DROP TABLE union_input;
