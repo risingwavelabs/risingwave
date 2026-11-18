@@ -15,3 +15,6 @@ e2e_test/source_legacy/pulsar/**/*.slt*
 
 # Manually executed in `e2e_test/subscription/main.py`
 e2e_test/subscription/**/*.slt*
+
+# Explicitly opt-in live AWS tests; never scheduled by CI.
+e2e_test/sink/redshift_manual/**/*.slt*
