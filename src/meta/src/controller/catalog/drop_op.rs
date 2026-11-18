@@ -149,6 +149,19 @@ impl CatalogController {
                     ).into());
                 }
             }
+
+            // A table owns its source, and deleting the source also deletes the table row through
+            // a foreign key.
+            if obj.obj_type == ObjectType::Source
+                && let Some(source) = Source::find_by_id(obj.oid.as_source_id()).one(&txn).await?
+                && let Some(table_id) = source.optional_associated_table_id
+                && !removed_object_ids.contains(&table_id.as_object_id())
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "cannot drop source \"{}\": it belongs to table {table_id}, use DROP TABLE instead",
+                    source.name
+                )));
+            }
         }
 
         // Load all objects that belong to the dropped objects before deletion. Cascaded rows are

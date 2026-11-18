@@ -79,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "3.1.0"
+version = "3.1.1"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -176,14 +176,14 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260303
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc973389f93cb4a0c6be8962ca3ebc7bc9bae8a0", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0110c19435d8c5a11357571e574300936cd7aa08", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc973389f93cb4a0c6be8962ca3ebc7bc9bae8a0" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc973389f93cb4a0c6be8962ca3ebc7bc9bae8a0" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0110c19435d8c5a11357571e574300936cd7aa08" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0110c19435d8c5a11357571e574300936cd7aa08" }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
@@ -471,6 +471,8 @@ sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "d43f1f28c0a2ec281
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.15.0-json-no-preserve_order" }
 # patch to revert `Hash for StringRef` for compatibility with `&str` in vnode
 jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "f618cd8c9bc517f35dec192d4e7553650894a011" }
+# keep timezone data up to date while upstream is unmaintained
+chrono-tz = { git = "https://github.com/risingwavelabs/chrono-tz.git", tag = "v0.10.4-2026f" }
 
 # patch to make zstd version compatible:
 # desired v4.9.0+2.10.0 requires: zstd-sys >= 2.0.15

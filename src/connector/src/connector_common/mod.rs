@@ -39,6 +39,8 @@ mod iceberg;
 mod maybe_tls_connector;
 pub mod postgres;
 
+#[cfg(test)]
+pub(crate) use iceberg::mock_catalog;
 pub use iceberg::{
     IcebergCatalogKind, IcebergCatalogRuntime, IcebergCommon, IcebergTableIdentifier,
     ResolvedIcebergCatalogConfig, iceberg_java_catalog_props_from_options,

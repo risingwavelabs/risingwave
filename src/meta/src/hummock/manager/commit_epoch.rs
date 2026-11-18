@@ -37,6 +37,7 @@ use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
+use crate::hummock::manager::gc::change_log_retention::RetainedChangeLogBatch;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -120,6 +121,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             &mut versioning.table_change_log,
+            &self.gc_manager.change_log_retention,
             self.env.notification_manager(),
             Some(&self.table_committed_epoch_notifiers),
             &self.metrics,
@@ -340,11 +342,19 @@ impl HummockManager {
             .values()
             .flat_map(|l| l.get_object_ids())
             .collect::<HashSet<_>>();
-        drop(versioning_guard);
-        let may_delete_object_ids =
-            &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit;
+        let may_delete_object_ids = Arc::new(
+            &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit,
+        );
+        // Publish removed changelog references before releasing the versioning lock.
+        // Share the already collected IDs with the minor-GC queue.
         self.gc_manager
-            .add_may_delete_object_ids(may_delete_object_ids.into_iter());
+            .change_log_retention
+            .retain_batch(RetainedChangeLogBatch::ObjectIds(
+                may_delete_object_ids.clone(),
+            ));
+        drop(versioning_guard);
+        self.gc_manager
+            .add_may_delete_object_ids(may_delete_object_ids.iter().copied());
 
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
