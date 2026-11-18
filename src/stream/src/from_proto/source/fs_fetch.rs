@@ -49,7 +49,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
+        let is_full_reload_refresh = is_full_reload_refresh(&source.ingest_mode);
 
         let source_id = source.source_id;
         let source_name = source.source_name.clone();
@@ -76,7 +76,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let vnodes = Some(Arc::new(params.vnode_bitmap));
         let is_iceberg_update = iceberg_update_mode(
             &source.with_properties,
-            &source.refresh_mode,
+            &source.ingest_mode,
             source.rate_limit,
             source.row_id_index,
             params.info.stream_kind,
