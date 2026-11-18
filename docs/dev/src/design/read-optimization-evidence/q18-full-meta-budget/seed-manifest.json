@@ -1,0 +1,18 @@
+{
+  "last_live_version": 1346,
+  "assigned_compaction_tasks": 0,
+  "layout_sha256": "355ce8fecdb67bd601fb5f3cf0f7976cf22f56830d2432ec352f96ee3053b0aa",
+  "rows": {
+    "customer": 1500000,
+    "orders": 15000000,
+    "lineitem": 59986052
+  },
+  "expected_snapshot_rows": 136472104,
+  "binary_sha256": "0d24659d4c4aabaf15a6b03cb888e09be0e819319bb9b059ab65c503fe6efd6e",
+  "worker_patch_sha256": "39e694f440c057d4acbec90bae1a41428ad14aca570e220f5751e8c5966fe311",
+  "seed_sizes_kib": {
+    "minio": 66697860,
+    "postgres-8432": 78960
+  },
+  "pg_clean_shutdown": true
+}

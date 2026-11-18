@@ -1,0 +1,12 @@
+foyer_memory_usage{name="foyer.data"} 0
+foyer_memory_usage{name="foyer.meta"} 0
+jemalloc_active_bytes 36077568
+jemalloc_allocated_bytes 24287120
+jemalloc_metadata_bytes 10034664
+jemalloc_resident_bytes 44498944
+object_store_operation_latency_sum{media_type="Minio",type="read"} 0.067336416
+object_store_operation_latency_count{media_type="Minio",type="read"} 1
+process_cpu_seconds_total 0
+process_resident_memory_bytes 134217728
+state_store_uploader_imm_size 0
+state_store_uploader_uploading_task_size 0

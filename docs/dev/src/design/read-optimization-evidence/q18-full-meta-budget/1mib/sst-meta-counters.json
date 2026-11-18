@@ -1,0 +1,42 @@
+{
+  "27": {
+    "meta_total": 46162295,
+    "meta_miss": 0,
+    "meta_batch_ready": 36668321,
+    "meta_batch_retained": 583583,
+    "meta_batch_oversized": 170558,
+    "meta_batch_budget_reject": 45578672
+  },
+  "32": {
+    "meta_total": 65576755,
+    "meta_miss": 30,
+    "meta_batch_ready": 16371239,
+    "meta_batch_retained": 259987,
+    "meta_batch_oversized": 234467,
+    "meta_batch_budget_reject": 65316768
+  },
+  "38": {
+    "meta_total": 44219712,
+    "meta_miss": 59,
+    "meta_batch_ready": 45779695,
+    "meta_batch_retained": 179667,
+    "meta_batch_oversized": 58635,
+    "meta_batch_budget_reject": 44040007
+  },
+  "42": {
+    "meta_total": 284993,
+    "meta_miss": 0,
+    "meta_batch_ready": 1138701,
+    "meta_batch_retained": 70972,
+    "meta_batch_oversized": 4351,
+    "meta_batch_budget_reject": 214021
+  },
+  "53": {
+    "meta_total": 48209839,
+    "meta_miss": 0,
+    "meta_batch_ready": 26002550,
+    "meta_batch_retained": 413034,
+    "meta_batch_oversized": 190675,
+    "meta_batch_budget_reject": 47796757
+  }
+}

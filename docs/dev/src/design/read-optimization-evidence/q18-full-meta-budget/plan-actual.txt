@@ -1,0 +1,42 @@
+SET_VARIABLE
+SET_VARIABLE
+SET_VARIABLE
+SET_VARIABLE
+SET_VARIABLE
+SET_VARIABLE
+StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: NoCheck }
+└─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, $expr2] }
+  └─StreamTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0 }
+    └─StreamExchange { dist: Single }
+      └─StreamGroupTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0, group_key: [_vnode] }
+        └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr2, Vnode(customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate) as _vnode] }
+          └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
+            └─StreamLocalityProvider { locality_columns: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate] }
+              └─StreamExchange { dist: HashShard(customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate) }
+                └─StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey }
+                  ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
+                  │ └─StreamLocalityProvider { locality_columns: [orders.o_orderkey] }
+                  │   └─StreamExchange [no_shuffle] { dist: HashShard(orders.o_orderkey) }
+                  │     └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey }
+                  │       ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
+                  │       │ └─StreamLocalityProvider { locality_columns: [orders.o_orderkey] }
+                  │       │   └─StreamExchange { dist: HashShard(orders.o_orderkey) }
+                  │       │     └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey }
+                  │       │       ├─StreamExchange { dist: HashShard(customer.c_custkey) }
+                  │       │       │ └─StreamTableScan { table: customer, columns: [c_custkey, c_name] }
+                  │       │       └─StreamExchange { dist: HashShard(orders.o_custkey) }
+                  │       │         └─StreamLocalityProvider { locality_columns: [orders.o_custkey] }
+                  │       │           └─StreamExchange { dist: HashShard(orders.o_custkey) }
+                  │       │             └─StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_totalprice, o_orderdate] }
+                  │       └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                  │         └─StreamLocalityProvider { locality_columns: [lineitem.l_orderkey] }
+                  │           └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                  │             └─StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, l_linenumber] }
+                  └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                    └─StreamProject { exprs: [lineitem.l_orderkey] }
+                      └─StreamFilter { predicate: ($expr1 > 1:Decimal) }
+                        └─StreamProject { exprs: [lineitem.l_orderkey, Case((count(lineitem.l_quantity) = 0:Int64), null:Decimal, sum(lineitem.l_quantity)) as $expr1] }
+                          └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
+                            └─StreamLocalityProvider { locality_columns: [lineitem.l_orderkey] }
+                              └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                                └─StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, l_linenumber] }

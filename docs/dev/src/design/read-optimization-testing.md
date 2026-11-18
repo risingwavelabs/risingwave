@@ -4189,3 +4189,15 @@ probes per arm. Raising the budget from 1 to 9 MiB reduced table-38
 Foyer lookups by 99.37%, HashJoin match time by 73.95%, and wall time
 by 74.53%. Peak CN RSS increased from 1.844 to 2.233 GiB. See the
 [working set, controls, per-arm results, and raw data](read-optimization-evidence/q18-meta-working-set/README.md).
+
+#### Full SF10 Q18 with normal compaction
+
+Using the same release and cold v1346 seed, one full run per budget
+completed with matching 100-row results. At 9 MiB versus 1 MiB,
+CREATE MV took 461.9 versus 535.9 seconds. The target HashJoin phase
+took 95 versus 138 seconds, Foyer meta lookups for table 38 fell
+99.33%, and whole-run peak CN RSS was 5.602 versus 5.612 GiB.
+Both target layouts were stable during the phase. They differed
+across the two normal-compaction runs, with average candidate counts
+of 5.012 versus 6.000 per iterator. See the
+[full Q18 meta budget report and raw evidence](read-optimization-evidence/q18-full-meta-budget/README.md).
