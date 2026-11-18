@@ -1,0 +1,234 @@
+{
+  "gap0": {
+    "source_checkpoint": {
+      "physical_gets": 44532,
+      "physical_bytes": 13197831583,
+      "logical_requests": 47731,
+      "logical_bounded_bytes": null,
+      "requested_bytes_metric_captured": false,
+      "request_routes": {
+        "scheduled": 47117,
+        "unbounded": 614,
+        "oversized": 0,
+        "direct": 0,
+        "empty_range": 0
+      },
+      "prefetch_direct_segments": 45680,
+      "prefetch_direct_bytes": 13880103114,
+      "singleton_registrations": 1028,
+      "scheduler_overread_bytes": 0,
+      "scheduler_merged_requests": 3091,
+      "scheduler_inflight_reused": 108,
+      "scheduler_cancel_events": {
+        "cancelled_before_dispatch": 0,
+        "group_cancelled": 0,
+        "range_fallback_requests": 0
+      },
+      "retries": 0,
+      "failures": 0,
+      "outcomes": {
+        "logical": {
+          "ok": 47731,
+          "error": 0,
+          "cancelled": 0
+        },
+        "physical": {
+          "ok": 44532,
+          "error": 0,
+          "cancelled": 0
+        },
+        "attempt": {
+          "ok": 44532,
+          "error": 0,
+          "cancelled": 0
+        }
+      },
+      "residual_physical_minus_prefetch_and_overread": -682271531,
+      "residual_physical_minus_bounded_logical_and_overread": null
+    },
+    "whole_query": {
+      "physical_gets": 122941,
+      "physical_bytes": 38000625356,
+      "logical_requests": 126300,
+      "logical_bounded_bytes": 38205164519,
+      "requested_bytes_metric_captured": true,
+      "request_routes": {
+        "scheduled": 123115,
+        "unbounded": 3185,
+        "oversized": 0,
+        "direct": 0,
+        "empty_range": 0
+      },
+      "prefetch_direct_segments": 70664,
+      "prefetch_direct_bytes": 34845661631,
+      "singleton_registrations": 49955,
+      "scheduler_overread_bytes": 0,
+      "scheduler_merged_requests": 3250,
+      "scheduler_inflight_reused": 109,
+      "scheduler_cancel_events": {
+        "cancelled_before_dispatch": 0,
+        "group_cancelled": 0,
+        "range_fallback_requests": 0
+      },
+      "retries": 0,
+      "failures": 0,
+      "outcomes": {
+        "logical": {
+          "ok": 126300,
+          "error": 0,
+          "cancelled": 0
+        },
+        "physical": {
+          "ok": 122941,
+          "error": 0,
+          "cancelled": 0
+        },
+        "attempt": {
+          "ok": 122941,
+          "error": 0,
+          "cancelled": 0
+        }
+      },
+      "residual_physical_minus_prefetch_and_overread": 3154963725,
+      "residual_physical_minus_bounded_logical_and_overread": -204539163
+    },
+    "checkpoint_boundary": {
+      "source_checkpoint_s": 81.03853991720825,
+      "source_complete_bracket_s": [
+        80.00438708392903,
+        81.00808783387765
+      ],
+      "first_provider_s": 81.10497122961897,
+      "last_pre_provider_full_sample_s": 81.03853991720825,
+      "source_rows_after_last_pre_provider": 0,
+      "physical_bytes_after_last_pre_provider": 0,
+      "physical_gets_after_last_pre_provider": 0,
+      "prefetch_direct_bytes_after_last_pre_provider": 0
+    }
+  },
+  "gap64k": {
+    "source_checkpoint": {
+      "physical_gets": 39504,
+      "physical_bytes": 13525968809,
+      "logical_requests": 46406,
+      "logical_bounded_bytes": null,
+      "requested_bytes_metric_captured": false,
+      "request_routes": {
+        "scheduled": 45761,
+        "unbounded": 645,
+        "oversized": 0,
+        "direct": 0,
+        "empty_range": 0
+      },
+      "prefetch_direct_segments": 44537,
+      "prefetch_direct_bytes": 14113780255,
+      "singleton_registrations": 814,
+      "scheduler_overread_bytes": 83790197,
+      "scheduler_merged_requests": 6846,
+      "scheduler_inflight_reused": 56,
+      "scheduler_cancel_events": {
+        "cancelled_before_dispatch": 0,
+        "group_cancelled": 0,
+        "range_fallback_requests": 0
+      },
+      "retries": 0,
+      "failures": 0,
+      "outcomes": {
+        "logical": {
+          "ok": 46406,
+          "error": 0,
+          "cancelled": 0
+        },
+        "physical": {
+          "ok": 39504,
+          "error": 0,
+          "cancelled": 0
+        },
+        "attempt": {
+          "ok": 39504,
+          "error": 0,
+          "cancelled": 0
+        }
+      },
+      "residual_physical_minus_prefetch_and_overread": -671601643,
+      "residual_physical_minus_bounded_logical_and_overread": null
+    },
+    "whole_query": {
+      "physical_gets": 118014,
+      "physical_bytes": 38917795655,
+      "logical_requests": 124987,
+      "logical_bounded_bytes": 39045650678,
+      "requested_bytes_metric_captured": true,
+      "request_routes": {
+        "scheduled": 121976,
+        "unbounded": 3011,
+        "oversized": 0,
+        "direct": 0,
+        "empty_range": 0
+      },
+      "prefetch_direct_segments": 69641,
+      "prefetch_direct_bytes": 35683150186,
+      "singleton_registrations": 49806,
+      "scheduler_overread_bytes": 83855692,
+      "scheduler_merged_requests": 6916,
+      "scheduler_inflight_reused": 57,
+      "scheduler_cancel_events": {
+        "cancelled_before_dispatch": 0,
+        "group_cancelled": 0,
+        "range_fallback_requests": 0
+      },
+      "retries": 0,
+      "failures": 0,
+      "outcomes": {
+        "logical": {
+          "ok": 124987,
+          "error": 0,
+          "cancelled": 0
+        },
+        "physical": {
+          "ok": 118014,
+          "error": 0,
+          "cancelled": 0
+        },
+        "attempt": {
+          "ok": 118014,
+          "error": 0,
+          "cancelled": 0
+        }
+      },
+      "residual_physical_minus_prefetch_and_overread": 3150789777,
+      "residual_physical_minus_bounded_logical_and_overread": -211710715
+    },
+    "checkpoint_boundary": {
+      "source_checkpoint_s": 85.96337249968201,
+      "source_complete_bracket_s": [
+        81.00038474984467,
+        82.00944058410823
+      ],
+      "first_provider_s": 83.09152504186957,
+      "last_pre_provider_full_sample_s": 80.9157634996809,
+      "source_rows_after_last_pre_provider": 676859,
+      "physical_bytes_after_last_pre_provider": 207315090,
+      "physical_gets_after_last_pre_provider": 498,
+      "prefetch_direct_bytes_after_last_pre_provider": 208200170
+    }
+  },
+  "source_delta_accounting": {
+    "physical_gets": -5028,
+    "physical_bytes": 328137226,
+    "logical_requests": -1325,
+    "prefetch_direct_segments": -1143,
+    "prefetch_direct_bytes": 233677141,
+    "scheduler_overread_bytes": 83790197,
+    "scheduler_merged_requests": 3755,
+    "scheduler_inflight_reused": -52,
+    "residual_physical_minus_prefetch_and_overread": 10669888
+  },
+  "coverage_limits": [
+    "The source checkpoint capture did not select object_store_read_request_bytes; source bounded logical bytes are unavailable.",
+    "Full before/after scrapes retain whole-query requested bytes, but unbounded logical read sizes are absent by definition.",
+    "The residual is computed accounting, combining ordinary/metadata reads, overlap/reuse/cancellation and planning-versus-completion effects.",
+    "The gap64 source checkpoint includes some downstream startup; its final 498 GETs include both remaining source and early provider work.",
+    "All additional analysis reads existing files; no historical workload rerun was used."
+  ]
+}

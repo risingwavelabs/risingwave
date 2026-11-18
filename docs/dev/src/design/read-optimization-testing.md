@@ -4082,3 +4082,78 @@ One native release arm reused the same 0bb0df4acf executable and cold v1346 seed
 Source GETs fell 11.3% with unchanged source tail buckets; source means increased. Full-query GETs were 122,941 versus 118,014. Whole physical p99.9 and caller p99 occupied higher buckets in the gap arm. The gap source checkpoint includes some downstream startup, and actual source completion is bounded by 80–81 versus 81–82 seconds. Whole elapsed fell from 693.08 to 658.97 seconds alongside less table-38 candidate work in downstream state. Both endpoints are single runs. Owned services and disposable data were cleaned up.
 
 See [gap comparison](read-optimization-evidence/q18-sf10-cold-ranges-gap64k.md), its JSON/table and compressed raw samples for settings, request accounting, phase boundaries, queue/service tails and limitations.
+
+
+### SF10 Q18 4 GiB budget fix and three-pair scheduler-gap matrix, 2026-11-18
+
+Six guarded `risedev d full` runs use pristine source
+`98126f898412f675ebdd406c35cd273f4972dd2b` and one release executable,
+SHA-256 `668dda3604d17656f97ad1c0fc2e9821aca92bc6e79d08486520b5c84f8ffcff`.
+The build uses unpacked debug information and application debug assertions
+are off; the existing license-crate test configuration enables the local
+full-profile test. No application or license-source patch is added here.
+
+Every run restores the same cold v1346 source seed. Source SST fingerprint,
+query/plan hashes, 136,472,104 snapshot rows, six LocalityProviders, 53 actors,
+fixed4 parallelism, 12 advertised slots, eight configured streaming workers,
+six dedicated IO workers, G128/P32/B16, N16/1 MiB, 4 GiB prefetch budget,
+MultiGet, metadata reuse and in-flight reuse are fixed. ColdRanges covers
+source StreamScan, locality reads and HashJoin prefixes. Foyer file cache,
+trace and profiling are off. Only `max_gap_bytes` changes, in order
+0 / 64 KiB / 64 KiB / 0 / 0 / 64 KiB. The workload is the existing Q18
+locality-backfill variant with `HAVING sum(l_quantity) > 1` and LIMIT 100.
+All six output oracles match, with zero measured read errors or retries.
+
+| Metric, median of three runs | Gap 0 | Gap 64 KiB |
+| --- | ---: | ---: |
+| Source checkpoint, s | 88.01 | 84.01 |
+| Source GETs | 42,941 | 39,525 |
+| Source read GiB | 12.357 | 12.407 |
+| Source physical mean / p99 / p99.9, ms | 3.927 / 32 / 64 | 3.368 / 32 / 64 |
+| Source ObjectStore caller p99 / p99.9, ms | 378.77 / 568.15 | 378.77 / 568.15 |
+| CREATE MV wall, s | 679.04 | 638.08 |
+| Whole GETs / read GiB | 123,709 / 36.348 | 121,752 / 36.332 |
+| Source charged prefetch peak MiB | 3,847.2 | 3,857.4 |
+| Whole CN RSS peak MiB | 5,765.4 | 5,796.3 |
+| Whole budget_denied / budget_shrunk | 0 / 0 | 0 / 0 |
+
+Per-pair source GET reductions are 7.96%, 4.37% and 12.49%, for 0.53%,
+0.13% and 0.71% more physical bytes. Source checkpoints improve by
+5.01, 11.00 and 4.00 seconds. The 4 GiB fix eliminates the observed
+budget-rejection fallback in all six runs. Sampled whole-query prefetch
+charge stays at 3.752–3.773 GiB. This charge is not a CN RSS limit;
+sampled CN RSS peaks range from 5.272 to 5.721 GiB. No shrink was needed
+in this workload; the selected commit's permanent UTs cover shrinking.
+
+Whole MV differences are -145.22, -67.62 and +131.97 seconds and cannot
+be read as a stable gap-policy speedup. For the third pair, provider
+24-to-22 increases from 111 to 227 seconds with table-38 SST candidate
+checks increasing from 44.91M to 194.77M and CN CPU from 602 to 966
+aggregate seconds. Physical GET service for that interval decreases
+from 49.03 to 43.40 aggregate seconds. This locates most of the wall-time
+regression in generated-state candidate/CPU work rather than physical
+read latency. Intermediate SST layout is not frozen across runs.
+Percentiles are histogram upper bucket bounds; caller latency is not
+a demand-only or iterator-consumption latency metric.
+
+Source metrics now reuse each one-second scrape and include logical
+requested-byte histograms. All six source checkpoints precede the first
+LocalityProvider startup. The old 16 GiB comparison's extra 312.936 MiB
+is not all scheduler gap traffic: declared direct-prefetch spans add
+222.852 MiB, explicit scheduler gap adds 79.909 MiB, and a derived residual
+adds 10.176 MiB. The old gap64 checkpoint includes provider startup and
+omits source logical-byte series, preventing an exact source-only causal
+partition. The new checkpoint sampling avoids that contamination.
+
+The [full report](read-optimization-evidence/q18-sf10-gap-matrix-98126.md),
+[individual and paired tables](read-optimization-evidence/q18-sf10-gap-matrix-98126-table.md),
+[phase and queue summaries](read-optimization-evidence/q18-sf10-gap-matrix-98126.json),
+[memory curves](read-optimization-evidence/q18-sf10-gap-matrix-98126-source-memory.png),
+[historical byte ledger](read-optimization-evidence/q18-sf10-gap-matrix-98126-historical-byte-ledger.json)
+and [raw metrics, controls and scripts](read-optimization-evidence/q18-sf10-gap-matrix-98126-samples.tar.gz)
+retain the evidence. The standalone parser reproduces all six numeric
+analyses identically without runtime-helper side effects. Owned services
+and disposable seed clones are removed per arm. The seed and staged
+release executable are retained; the task-owned build cache is retired
+after measurement. This is local MinIO evidence with cold RW/Foyer
+processes, not a host page-cache purge or a real-S3 measurement.
