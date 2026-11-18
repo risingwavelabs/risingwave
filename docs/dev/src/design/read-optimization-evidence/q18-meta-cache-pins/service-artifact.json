@@ -1,0 +1,14 @@
+{
+  "source_head": "98126f898412f675ebdd406c35cd273f4972dd2b",
+  "source_diff_sha256": "b794dd3e5cbf0dd7255f184dabf0d77f6311dce1457667f647ea35b9ed6469fa",
+  "foyer_head": "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5",
+  "foyer_diff_sha256": "0d58ab8c4b825928eb03be95082577cb7bc4208ec1389e098cc74802088a2f36",
+  "profile": {
+    "opt_level": "3",
+    "debuginfo": 2,
+    "debug_assertions": false,
+    "overflow_checks": false,
+    "test": false
+  },
+  "sha256": "4d6d73140aa052211ef185e7db7d857f4c638c99cf72e1aef61dcf0c275e2da9"
+}

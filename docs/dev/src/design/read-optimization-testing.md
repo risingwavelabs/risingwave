@@ -4201,3 +4201,14 @@ Both target layouts were stable during the phase. They differed
 across the two normal-compaction runs, with average candidate counts
 of 5.012 versus 6.000 per iterator. See the
 [full Q18 meta budget report and raw evidence](read-optimization-evidence/q18-full-meta-budget/README.md).
+
+#### Foyer meta cache pins on the frozen SF10 Q18 phase
+
+A guarded replay of the same stopped snapshot measured one arm at
+each metadata budget. Raising the budget from 1 to 9 MiB increased
+peak sampled LRU pinned weight from 13.32 to 24.99 MiB, while meta
+cache occupancy rose from 46.06 to 50.71 MiB against 229 MiB. Both
+arms recorded zero over-capacity insertions. Peak CN RSS rose by
+442.6 MiB and iterator initialization averaged 97.76 versus
+20.99 microseconds. See the
+[pin and RSS evidence](read-optimization-evidence/q18-meta-cache-pins/README.md).

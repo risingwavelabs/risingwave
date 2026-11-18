@@ -1,0 +1,9 @@
+{
+  "profile": {
+    "opt_level": "3",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": false,
+    "test": false
+  }
+}

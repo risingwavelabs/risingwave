@@ -1,0 +1,40 @@
+{
+  "arm": "b1",
+  "meta_budget_bytes": 9437184,
+  "seconds_to_probe_horizon": 22.163668662365392,
+  "baseline_rss_kib": 186352,
+  "peak_rss_kib": 2347872,
+  "sampled_rss_through_s": 22.36028983304277,
+  "initial_layout": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+  "phase": {
+    "meta_total": 110855,
+    "meta_miss": 59,
+    "ready": 27816213,
+    "rejected": 1643,
+    "oversized_retained": 0,
+    "data_miss": 7288,
+    "bloom_checks": 27926938,
+    "bloom_negative": 25387893,
+    "join_lookup": 2500000,
+    "join_lookup_miss": 2500000,
+    "join_match_timer_ns": 85846796173,
+    "iter_init_ns": 53283216469,
+    "iter_init_count": 2538777,
+    "get": 9503,
+    "read_bytes": 1187206973,
+    "read_time_ns": 10954422527,
+    "retry": 0,
+    "cpu_seconds": 146
+  },
+  "horizon_scrape_time_bounds_s": [
+    22.15861862525344,
+    22.36028983304277
+  ],
+  "horizon_probe_count_bounds": [
+    2499052,
+    2536910
+  ],
+  "meta_accounting_delta": 130,
+  "resume_ack_s": 0.06294416729360819,
+  "wall_origin_unix_s": 1794981573.346378
+}

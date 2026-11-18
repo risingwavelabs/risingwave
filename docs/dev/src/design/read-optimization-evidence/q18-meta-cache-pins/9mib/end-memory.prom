@@ -1,0 +1,10 @@
+foyer_memory_op_total{name="foyer.meta",op="evict"} 0
+foyer_memory_op_total{name="foyer.meta",op="remove"} 0
+foyer_memory_op_total{name="foyer.meta",op="replace"} 0
+foyer_memory_usage{name="foyer.meta"} 53172206
+jemalloc_active_bytes 1091911680
+jemalloc_allocated_bytes 917323440
+jemalloc_resident_bytes 2282405888
+process_resident_memory_bytes 2330001408
+state_store_uploader_imm_size 76734396
+state_store_uploader_uploading_task_size 0
