@@ -52,6 +52,29 @@ public class JDBCSqlRunnerTest {
         }
     }
 
+    @Test
+    public void redshiftPasswordOverrideRequiresRemovingUrlPassword() throws Exception {
+        String password = "New+&%2B=?# 密码9!";
+        String baseUrl = "jdbc:redshift://example.invalid:5439/dev";
+        RedshiftProperties props = new RedshiftProperties();
+        props.setProperty("password", password);
+
+        // URL parameters override driver properties, including with mixed-case names.
+        RedshiftProperties conflicting =
+                Driver.parseURL(baseUrl + "?user=url%2Buser&PASSWORD=old", props);
+        assertNotNull(conflicting);
+        assertEquals("old", conflicting.getProperty("password"));
+
+        // The Rust configuration builder removes the overridden password from the URL.
+        props = new RedshiftProperties();
+        props.setProperty("password", password);
+        RedshiftProperties parsed = Driver.parseURL(baseUrl + "?user=url%2Buser&ssl=true", props);
+        assertNotNull(parsed);
+        assertEquals("url+user", parsed.getProperty("user"));
+        assertEquals(password, parsed.getProperty("password"));
+        assertEquals("true", parsed.getProperty("ssl"));
+    }
+
     private String loadTestPem() throws IOException {
         try (InputStream is =
                 getClass().getClassLoader().getResourceAsStream("test-private-key.pem")) {
