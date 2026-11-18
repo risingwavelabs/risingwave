@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, PsyncIoEngineConfig};
 use prometheus::Registry;
+use risingwave_common::config::storage::ReadPrefetchMode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreConfig, ObjectStoreImpl,
@@ -72,7 +73,6 @@ async fn setup(
 #[tokio::test]
 async fn metadata_and_oversized_scan_reach_the_scheduler() {
     use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
-    use crate::store::PrefetchMode;
 
     let registry = Registry::new();
     let metrics = Arc::new(ObjectStoreMetrics::new(&registry));
@@ -109,7 +109,7 @@ async fn metadata_and_oversized_scan_reach_the_scheduler() {
     assert_eq!(requests("scheduled_other") - before_meta, 1.0);
 
     let options = Arc::new(SstableIteratorReadOptions {
-        prefetch: PrefetchMode::ColdRanges,
+        prefetch: ReadPrefetchMode::ColdRanges,
         cache_policy: CachePolicy::Disable,
         ..Default::default()
     });
@@ -127,7 +127,6 @@ async fn metadata_and_oversized_scan_reach_the_scheduler() {
 #[tokio::test]
 async fn missing_sst_does_not_repeat_a_cold_read() {
     use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
-    use crate::store::PrefetchMode;
 
     let (store, _, backend, metrics, _, _dir) = setup(false).await;
     let (sst, info) =
@@ -146,7 +145,7 @@ async fn missing_sst_does_not_repeat_a_cold_read() {
         CachePolicy::Disable,
     ] {
         let options = Arc::new(SstableIteratorReadOptions {
-            prefetch: PrefetchMode::ColdRanges,
+            prefetch: ReadPrefetchMode::ColdRanges,
             cache_policy: policy,
             ..Default::default()
         });
@@ -162,7 +161,6 @@ async fn missing_sst_does_not_repeat_a_cold_read() {
 #[tokio::test]
 async fn parked_iterator_releases_budget_on_last_window_block() {
     use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
-    use crate::store::PrefetchMode;
     let (mut store, _, _, _, _, _dir) = setup(false).await;
     let (sst, info) =
         gen_default_test_sstable(default_builder_opt_for_test(), 11, store.clone()).await;
@@ -171,7 +169,7 @@ async fn parked_iterator_releases_budget_on_last_window_block() {
     inner.scan_prefetch.max_blocks = Some(2.try_into().unwrap());
     inner.prefetch_buffer_capacity = required;
     let opts = Arc::new(SstableIteratorReadOptions {
-        prefetch: PrefetchMode::ColdRanges,
+        prefetch: ReadPrefetchMode::ColdRanges,
         cache_policy: CachePolicy::Disable,
         ..Default::default()
     });
@@ -566,7 +564,6 @@ async fn cold_range_merge_scan_keeps_batching_with_fixed_budget() {
     use crate::hummock::test_utils::{gen_test_sstable, test_key_of};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{SstableIterator, SstableIteratorReadOptions};
-    use crate::store::PrefetchMode;
 
     for compression in [
         crate::hummock::CompressionAlgorithm::None,
@@ -596,7 +593,7 @@ async fn cold_range_merge_scan_keeps_batching_with_fixed_budget() {
         const CAPACITY: usize = 4 * 1024 * 1024;
         Arc::get_mut(&mut store).unwrap().prefetch_buffer_capacity = CAPACITY;
         let options = Arc::new(SstableIteratorReadOptions {
-            prefetch: PrefetchMode::ColdRanges,
+            prefetch: ReadPrefetchMode::ColdRanges,
             ..Default::default()
         });
         let children = tables
@@ -1025,7 +1022,6 @@ async fn cold_range_budget_rejects_before_io_and_preserves_full_cold_window() {
 #[tokio::test]
 async fn cold_range_zero_budget_iterator_uses_demand_reads() {
     use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
-    use crate::store::PrefetchMode;
 
     for policy in [
         CachePolicy::default(),
@@ -1043,7 +1039,7 @@ async fn cold_range_zero_budget_iterator_uses_demand_reads() {
             sst.clone(),
             store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: PrefetchMode::ColdRanges,
+                prefetch: ReadPrefetchMode::ColdRanges,
                 cache_policy: policy,
                 ..Default::default()
             }),

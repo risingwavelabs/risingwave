@@ -34,6 +34,7 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::storage::ReadPrefetchMode;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -564,7 +565,7 @@ pub struct SstableIteratorReadOptions {
     /// The only hard upper bound of this scan. It limits the iterator's block window.
     pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     /// How to prefetch blocks within the already-bounded scan window.
-    pub prefetch: crate::store::PrefetchMode,
+    pub prefetch: ReadPrefetchMode,
 }
 
 impl SstableIteratorReadOptions {
@@ -575,7 +576,7 @@ impl SstableIteratorReadOptions {
             cache_policy: read_options.cache_policy,
             read_table_id: None,
             scan_end_user_key: None,
-            prefetch: crate::store::PrefetchMode::Disabled,
+            prefetch: ReadPrefetchMode::Disabled,
         }
     }
 }
@@ -594,10 +595,7 @@ mod tests {
     fn test_iterator_read_options_do_not_enable_prefetch_for_point_get() {
         for prefetch_options in [
             PrefetchOptions::prefetch_for_large_range_scan(),
-            PrefetchOptions {
-                mode: crate::store::PrefetchMode::PrefixScan,
-                for_large_query: false,
-            },
+            PrefetchOptions::prefetch_for_prefix_scan(),
         ] {
             let read_options = ReadOptions {
                 prefetch_options,
@@ -605,10 +603,7 @@ mod tests {
             };
 
             let iterator_options = SstableIteratorReadOptions::from_read_options(&read_options);
-            assert_eq!(
-                iterator_options.prefetch,
-                crate::store::PrefetchMode::Disabled
-            );
+            assert_eq!(iterator_options.prefetch, ReadPrefetchMode::Disabled);
             assert!(iterator_options.scan_end_user_key.is_none());
         }
     }

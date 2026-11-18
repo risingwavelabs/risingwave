@@ -15,6 +15,7 @@
 use std::ops::Bound::*;
 use std::sync::Arc;
 
+use risingwave_common::config::storage::ReadPrefetchMode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use sync_point::sync_point;
@@ -25,7 +26,6 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::ColdRangePrefetch;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
-use crate::store::PrefetchMode;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
     fn create(
@@ -195,7 +195,7 @@ impl SstableIterator {
             return Ok(());
         }
         let mut prefetched_block = None;
-        if self.options.prefetch == PrefetchMode::ColdRanges
+        if self.options.prefetch == ReadPrefetchMode::ColdRanges
             && (self.cold_ranges.is_some()
                 || self.sstable_store.can_prefetch_cold_ranges(
                     &self.sst,
@@ -525,9 +525,9 @@ mod tests {
     #[tokio::test]
     async fn test_prefetch_table_read() {
         for (mode, policy) in [
-            (PrefetchMode::ColdRanges, CachePolicy::default()),
-            (PrefetchMode::ColdRanges, CachePolicy::NotFill),
-            (PrefetchMode::ColdRanges, CachePolicy::Disable),
+            (ReadPrefetchMode::ColdRanges, CachePolicy::default()),
+            (ReadPrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (ReadPrefetchMode::ColdRanges, CachePolicy::Disable),
         ] {
             let sstable_store = mock_sstable_store().await;
             // when upload data is successful, but upload meta is fail and delete is fail
@@ -633,7 +633,7 @@ mod tests {
             sstable.clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: crate::store::PrefetchMode::ColdRanges,
+                prefetch: ReadPrefetchMode::ColdRanges,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -643,7 +643,7 @@ mod tests {
             sstable.clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: crate::store::PrefetchMode::Disabled,
+                prefetch: ReadPrefetchMode::Disabled,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -735,8 +735,8 @@ mod tests {
 
         let table_3_start = UserKey::new(TableId::new(3), TableKey(Bytes::from_static(b"")));
         for (case, mode) in [
-            ("prefetch off", PrefetchMode::Disabled),
-            ("cold ranges", PrefetchMode::ColdRanges),
+            ("prefetch off", ReadPrefetchMode::Disabled),
+            ("cold ranges", ReadPrefetchMode::ColdRanges),
         ] {
             let options = Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::Disable,
@@ -772,7 +772,7 @@ mod tests {
                 (table_3_block_start - table_2_block_start) as u64,
                 "{case}"
             );
-            if mode != PrefetchMode::Disabled {
+            if mode != ReadPrefetchMode::Disabled {
                 assert!(stats.cache_data_prefetch_block_count > 0, "{case}");
             } else {
                 assert_eq!(stats.cache_data_prefetch_block_count, 0, "{case}");
@@ -783,7 +783,7 @@ mod tests {
             cache_policy: CachePolicy::Disable,
             read_table_id: Some(TableId::new(2)),
             scan_end_user_key: None,
-            prefetch: crate::store::PrefetchMode::Disabled,
+            prefetch: ReadPrefetchMode::Disabled,
         });
         let mut sstable_iter = SstableIterator::create(
             sstable.clone(),
@@ -833,7 +833,7 @@ mod tests {
             cache_policy: CachePolicy::Disable,
             read_table_id: None,
             scan_end_user_key: Some(Bound::Excluded(table_2_start)),
-            prefetch: crate::store::PrefetchMode::Disabled,
+            prefetch: ReadPrefetchMode::Disabled,
         });
         let mut sstable_iter =
             SstableIterator::create(sstable, sstable_store, options, &table_2_sstable_info);

@@ -358,7 +358,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         cache_policy: CachePolicy::Fill(Hint::Normal),
         read_table_id: None,
         scan_end_user_key: None,
-        prefetch: risingwave_storage::store::PrefetchMode::Disabled,
+        prefetch: risingwave_common::config::storage::ReadPrefetchMode::Disabled,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {

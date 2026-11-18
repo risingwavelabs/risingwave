@@ -27,6 +27,7 @@ use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::config::storage::ReadPrefetchMode;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
@@ -72,7 +73,8 @@ use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
 use crate::store::{
-    OnNearestItemFn, PrefetchMode, ReadLogOptions, ReadOptions, VectorNearestOptions, gen_min_epoch,
+    OnNearestItemFn, PrefetchContext, ReadLogOptions, ReadOptions, VectorNearestOptions,
+    gen_min_epoch,
 };
 use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
@@ -1126,12 +1128,12 @@ impl HummockVersionReader {
         sst_read_options.read_table_id = Some(table_id);
         sst_read_options.scan_end_user_key = Some(user_key_range.1.map(|key| key.cloned()));
         let prefetch_config = &self.sstable_store.scan_prefetch;
-        sst_read_options.prefetch = match read_options.prefetch_options.mode {
-            PrefetchMode::PrefixScan => prefetch_config.prefix_mode().into(),
-            PrefetchMode::RangeScan => prefetch_config.range_scan_mode().into(),
-            PrefetchMode::SnapshotBackfill => prefetch_config.snapshot_backfill_mode().into(),
-            PrefetchMode::LocalityBackfill => prefetch_config.locality_backfill_mode().into(),
-            mode => mode,
+        sst_read_options.prefetch = match read_options.prefetch_options.context {
+            PrefetchContext::PrefixScan => prefetch_config.prefix_mode(),
+            PrefetchContext::RangeScan => prefetch_config.range_scan_mode(),
+            PrefetchContext::SnapshotBackfill => prefetch_config.snapshot_backfill_mode(),
+            PrefetchContext::LocalityBackfill => prefetch_config.locality_backfill_mode(),
+            PrefetchContext::Disabled => ReadPrefetchMode::Disabled,
         };
         let sst_read_options = Arc::new(sst_read_options);
         enum SstKind {
@@ -1346,12 +1348,11 @@ impl HummockVersionReader {
                 );
             }
         }
-        let changelog_prefetch: PrefetchMode =
-            self.sstable_store.scan_prefetch.changelog_mode().into();
+        let changelog_prefetch = self.sstable_store.scan_prefetch.changelog_mode();
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
             read_table_id: Some(options.table_id),
-            scan_end_user_key: (changelog_prefetch != PrefetchMode::Disabled).then(|| {
+            scan_end_user_key: (changelog_prefetch != ReadPrefetchMode::Disabled).then(|| {
                 bound_table_key_range(options.table_id, &key_range)
                     .1
                     .map(|key| key.cloned())

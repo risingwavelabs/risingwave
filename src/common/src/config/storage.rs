@@ -632,9 +632,10 @@ pub struct ObjectStoreConfig {
 }
 
 /// Iterator prefetch strategy. Point gets never inherit this setting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadPrefetchMode {
+    #[default]
     Disabled,
     /// Bounded reads of contiguous cache misses, decoded on consumption.
     ColdRanges,

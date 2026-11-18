@@ -793,6 +793,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use risingwave_common::config::storage::ReadPrefetchMode;
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
@@ -822,7 +823,6 @@ mod tests {
         use super::SstableBlockIndex;
         use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
         use crate::monitor::ObjectStoreMetrics;
-        use crate::store::PrefetchMode;
 
         let registry = prometheus::Registry::new();
         let backend = InMemObjectStore::for_test();
@@ -855,7 +855,7 @@ mod tests {
         let first = 2;
         let second = sst.meta.block_metas.len() - 3;
         assert!(second > first + store.max_prefetch_block_number);
-        for prefetch in [PrefetchMode::Disabled, PrefetchMode::ColdRanges] {
+        for prefetch in [ReadPrefetchMode::Disabled, ReadPrefetchMode::ColdRanges] {
             store.clear_block_cache().await.unwrap();
             let options = Arc::new(SstableIteratorReadOptions {
                 prefetch,
@@ -887,7 +887,7 @@ mod tests {
                 };
                 let (bytes, _) = sst.calculate_block_info(first);
                 let finished = || {
-                    if prefetch == PrefetchMode::ColdRanges {
+                    if prefetch == ReadPrefetchMode::ColdRanges {
                         store.buffered_cold_ranges.contains(sst.id, &bytes)
                     } else {
                         store.block_cache.memory().contains(&block)
@@ -1016,7 +1016,7 @@ mod tests {
             sstable,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
-                prefetch: crate::store::PrefetchMode::ColdRanges,
+                prefetch: ReadPrefetchMode::ColdRanges,
                 cache_policy: CachePolicy::Disable,
                 ..Default::default()
             }),
@@ -1036,15 +1036,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_prefetch_failure_falls_back_and_releases_tracker() {
-        use crate::store::PrefetchMode;
-
         for (truncate, mode, policy) in [
-            (true, PrefetchMode::ColdRanges, CachePolicy::default()),
-            (false, PrefetchMode::ColdRanges, CachePolicy::default()),
-            (true, PrefetchMode::ColdRanges, CachePolicy::NotFill),
-            (false, PrefetchMode::ColdRanges, CachePolicy::NotFill),
-            (true, PrefetchMode::ColdRanges, CachePolicy::Disable),
-            (false, PrefetchMode::ColdRanges, CachePolicy::Disable),
+            (true, ReadPrefetchMode::ColdRanges, CachePolicy::default()),
+            (false, ReadPrefetchMode::ColdRanges, CachePolicy::default()),
+            (true, ReadPrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (false, ReadPrefetchMode::ColdRanges, CachePolicy::NotFill),
+            (true, ReadPrefetchMode::ColdRanges, CachePolicy::Disable),
+            (false, ReadPrefetchMode::ColdRanges, CachePolicy::Disable),
         ] {
             let sstable_store = mock_sstable_store().await;
             let (sstable, info) =
@@ -1079,7 +1077,7 @@ mod tests {
             );
             iter.rewind().await.unwrap();
             assert_eq!(iter.key(), test_key_of(0).to_ref());
-            let lazy_head = mode == PrefetchMode::ColdRanges && !truncate;
+            let lazy_head = mode == ReadPrefetchMode::ColdRanges && !truncate;
             assert_eq!(sstable_store.get_prefetch_memory_usage() > 0, lazy_head);
             let mut stats = StoreLocalStatistic::default();
             iter.collect_local_statistic(&mut stats);
