@@ -381,6 +381,7 @@ snapshot_backfill_mode = ""
 locality_backfill_mode = ""
 max_blocks = ""
 max_bytes = 1048576
+observe_buffered_overlap = false
 
 [storage.read_batch]
 enabled = false

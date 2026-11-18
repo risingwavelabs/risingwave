@@ -280,12 +280,18 @@ fn inflight(registry: &Registry, stage: &str) -> f64 {
 
 #[tokio::test]
 async fn buffered_overlap_metrics_track_io_completion_consumption_and_drop() {
-    for (policy, label) in [
-        (CachePolicy::default(), "fill"),
-        (CachePolicy::NotFill, "not_fill"),
-        (CachePolicy::Disable, "disable"),
+    for (policy, label, enabled) in [
+        (CachePolicy::default(), "fill", false),
+        (CachePolicy::default(), "fill", true),
+        (CachePolicy::NotFill, "not_fill", true),
+        (CachePolicy::Disable, "disable", true),
     ] {
-        let (store, sst, _, metrics, _, _dir) = setup(false).await;
+        let (mut store, sst, _, metrics, _, _dir) = setup(false).await;
+        assert!(!store.scan_prefetch.observe_buffered_overlap);
+        Arc::get_mut(&mut store)
+            .unwrap()
+            .scan_prefetch
+            .observe_buffered_overlap = enabled;
         let mut stats = StoreLocalStatistic::default();
         let policy_reads = store
             .read_metrics
@@ -313,7 +319,7 @@ async fn buffered_overlap_metrics_track_io_completion_consumption_and_drop() {
         .await
         .unwrap();
         // The head has not been consumed, but the task's result already owns bytes.
-        assert!(store.buffered_cold_ranges.contains(sst.id, &range));
+        assert_eq!(store.buffered_cold_ranges.contains(sst.id, &range), enabled);
         let physical = metrics.operation_size.with_label_values(&["read"]);
         let before = physical.get_sample_count();
         if matches!(policy, CachePolicy::Fill(_)) {
@@ -327,8 +333,8 @@ async fn buffered_overlap_metrics_track_io_completion_consumption_and_drop() {
         } else {
             store.get(&sst, 2, policy, &mut stats).await.unwrap();
         }
-        assert_eq!(policy_reads.get(), 1);
-        assert_eq!(policy_bytes.get(), range.len() as u64);
+        assert_eq!(policy_reads.get(), u64::from(enabled));
+        assert_eq!(policy_bytes.get(), u64::from(enabled) * range.len() as u64);
         assert_eq!(physical.get_sample_count() - before, 1);
         drop(
             window
@@ -340,18 +346,22 @@ async fn buffered_overlap_metrics_track_io_completion_consumption_and_drop() {
         store.clear_block_cache().await.unwrap();
         // Consumed block 0 is no longer classified as buffered, even without cache fill.
         store.get(&sst, 0, policy, &mut stats).await.unwrap();
-        assert_eq!(policy_reads.get(), 1);
+        assert_eq!(policy_reads.get(), u64::from(enabled));
         drop(window);
         assert!(!store.buffered_cold_ranges.contains(sst.id, &range));
         store.get(&sst, 3, policy, &mut stats).await.unwrap();
-        assert_eq!(policy_reads.get(), 1);
+        assert_eq!(policy_reads.get(), u64::from(enabled));
         store.block_cache.close().await.unwrap();
     }
 }
 
 #[tokio::test]
 async fn buffered_overlap_metadata_drops_with_unconsumed_task_result() {
-    let (store, sst, _, _, _, _dir) = setup(false).await;
+    let (mut store, sst, _, _, _, _dir) = setup(false).await;
+    Arc::get_mut(&mut store)
+        .unwrap()
+        .scan_prefetch
+        .observe_buffered_overlap = true;
     let window = store
         .prefetch_cold_ranges(
             &sst,
