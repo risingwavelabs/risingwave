@@ -1,0 +1,298 @@
+{
+  "p1-a": {
+    "mode": "clean_main",
+    "source": "88b98114336ae4511dcb9685afa95678e948e65a",
+    "binary_sha256": "aea723695b56fc9097846fe680f2718b3a7740365c367b2d12361c82ffb8dea8",
+    "config": {
+      "server": {
+        "metrics_level": "Debug"
+      },
+      "frontend": {
+        "unsafe_enable_local_fs_connector": true
+      },
+      "streaming": {
+        "actor_runtime_worker_threads_num": 8,
+        "unsafe_disable_strict_consistency": true
+      },
+      "storage": {
+        "prefetch_buffer_capacity_mb": 4096
+      }
+    },
+    "actual_cn_threads": {
+      "main": 1,
+      "rw-otel": 2,
+      "OpenTelemetry.Traces.BatchProcessor": 1,
+      "rw-main": 13,
+      "": 1,
+      "rw-compaction": 4,
+      "rw-batch": 12,
+      "rw-streaming": 8
+    },
+    "compute_before": "1|127.0.0.1|5688|RUNNING|4|t|t|default",
+    "source_sst_sha256": "355ce8fecdb67bd601fb5f3cf0f7976cf22f56830d2432ec352f96ee3053b0aa",
+    "plan_sha256": "a57354f017d75846edadb9f456c36d345ad7361456704dce35737d9ae686272c",
+    "sorted_oracle_sha256": "382d3506e97716c3c2e54369cee4b6415245c14da47f4293bef114b3e5125844",
+    "source_progress_s": [
+      76.00507162464783,
+      77.00717545906082
+    ],
+    "create_mv_s": 567.9394454997964,
+    "phase_wall_s": {
+      "pre_probe": 140.08004,
+      "probe": 177.99947300000002,
+      "post_probe": 249.81680299999994
+    },
+    "cn_cpu_s": 2759.0,
+    "cn_peak_rss_mib": 6018.140625,
+    "cn_get_count": 123672,
+    "cn_get_bytes": 39919396247,
+    "backend_get_mean_ms": 9.547385067145271,
+    "backend_get_p99_bucket_upper_ms": 256.0
+  },
+  "p2-a": {
+    "mode": "clean_main",
+    "source": "88b98114336ae4511dcb9685afa95678e948e65a",
+    "binary_sha256": "aea723695b56fc9097846fe680f2718b3a7740365c367b2d12361c82ffb8dea8",
+    "config": {
+      "server": {
+        "metrics_level": "Debug"
+      },
+      "frontend": {
+        "unsafe_enable_local_fs_connector": true
+      },
+      "streaming": {
+        "actor_runtime_worker_threads_num": 8,
+        "unsafe_disable_strict_consistency": true
+      },
+      "storage": {
+        "prefetch_buffer_capacity_mb": 4096
+      }
+    },
+    "actual_cn_threads": {
+      "main": 1,
+      "rw-otel": 2,
+      "OpenTelemetry.Traces.BatchProcessor": 1,
+      "rw-main": 13,
+      "": 1,
+      "rw-compaction": 4,
+      "rw-batch": 12,
+      "rw-streaming": 8
+    },
+    "compute_before": "1|127.0.0.1|5688|RUNNING|4|t|t|default",
+    "source_sst_sha256": "355ce8fecdb67bd601fb5f3cf0f7976cf22f56830d2432ec352f96ee3053b0aa",
+    "plan_sha256": "a57354f017d75846edadb9f456c36d345ad7361456704dce35737d9ae686272c",
+    "sorted_oracle_sha256": "382d3506e97716c3c2e54369cee4b6415245c14da47f4293bef114b3e5125844",
+    "source_progress_s": [
+      74.01004583295435,
+      75.01322687510401
+    ],
+    "create_mv_s": 549.1252449583262,
+    "phase_wall_s": {
+      "pre_probe": 138.190865,
+      "probe": 181.00049599999997,
+      "post_probe": 229.98222000000004
+    },
+    "cn_cpu_s": 2726.0,
+    "cn_peak_rss_mib": 6175.59375,
+    "cn_get_count": 125961,
+    "cn_get_bytes": 40111157730,
+    "backend_get_mean_ms": 8.702192263105337,
+    "backend_get_p99_bucket_upper_ms": 256.0
+  },
+  "p3-a": {
+    "mode": "clean_main",
+    "source": "88b98114336ae4511dcb9685afa95678e948e65a",
+    "binary_sha256": "aea723695b56fc9097846fe680f2718b3a7740365c367b2d12361c82ffb8dea8",
+    "config": {
+      "server": {
+        "metrics_level": "Debug"
+      },
+      "frontend": {
+        "unsafe_enable_local_fs_connector": true
+      },
+      "streaming": {
+        "actor_runtime_worker_threads_num": 8,
+        "unsafe_disable_strict_consistency": true
+      },
+      "storage": {
+        "prefetch_buffer_capacity_mb": 4096
+      }
+    },
+    "actual_cn_threads": {
+      "main": 1,
+      "rw-otel": 2,
+      "OpenTelemetry.Traces.BatchProcessor": 1,
+      "rw-main": 13,
+      "": 1,
+      "rw-compaction": 4,
+      "rw-batch": 12,
+      "rw-streaming": 8
+    },
+    "compute_before": "1|127.0.0.1|5688|RUNNING|4|t|t|default",
+    "source_sst_sha256": "355ce8fecdb67bd601fb5f3cf0f7976cf22f56830d2432ec352f96ee3053b0aa",
+    "plan_sha256": "a57354f017d75846edadb9f456c36d345ad7361456704dce35737d9ae686272c",
+    "sorted_oracle_sha256": "382d3506e97716c3c2e54369cee4b6415245c14da47f4293bef114b3e5125844",
+    "source_progress_s": [
+      74.00098054204136,
+      75.00663058366627
+    ],
+    "create_mv_s": 629.9643902499229,
+    "phase_wall_s": {
+      "pre_probe": 135.092517,
+      "probe": 288.003607,
+      "post_probe": 206.80073199999998
+    },
+    "cn_cpu_s": 2976.0,
+    "cn_peak_rss_mib": 6164.546875,
+    "cn_get_count": 127044,
+    "cn_get_bytes": 40393278814,
+    "backend_get_mean_ms": 10.084438937934713,
+    "backend_get_p99_bucket_upper_ms": 256.0
+  },
+  "1mib": {
+    "mode": "candidate",
+    "source": "98126f898412f675ebdd406c35cd273f4972dd2b",
+    "binary_sha256": "051b79433a6300f4b756d264b54c82103af0c3a40b2f19086632c6f555605efb",
+    "config": {
+      "server": {
+        "metrics_level": "Debug"
+      },
+      "frontend": {
+        "unsafe_enable_local_fs_connector": true
+      },
+      "streaming": {
+        "actor_runtime_worker_threads_num": 8,
+        "unsafe_disable_strict_consistency": true
+      },
+      "storage": {
+        "blockwise_prefetch": {
+          "mode": "cold_ranges",
+          "max_blocks": 16,
+          "max_bytes": 1048576
+        },
+        "read_batch": {
+          "enabled": true,
+          "meta_reuse": true,
+          "meta_max_bytes": 1048576
+        },
+        "object_store": {
+          "enable_hummock_read_coalescing": true,
+          "read_scheduler": {
+            "use_dedicated_io_runtime": true,
+            "dedicated_io_runtime_workers": 6,
+            "max_admitted_groups": 128,
+            "max_inflight_reads": 32,
+            "max_batch_requests": 16,
+            "max_read_bytes": 1048576,
+            "max_gap_bytes": 65536,
+            "reuse_inflight_reads": true
+          }
+        },
+        "max_prefetch_block_number": 16,
+        "prefetch_buffer_capacity_mb": 4096
+      }
+    },
+    "actual_cn_threads": {
+      "main": 1,
+      "rw-otel": 2,
+      "OpenTelemetry.Traces.BatchProcessor": 1,
+      "fastrace-global-collector": 1,
+      "rw-main": 13,
+      "": 1,
+      "rw-read-io": 6,
+      "rw-compaction": 4,
+      "rw-batch": 12,
+      "rw-streaming": 8
+    },
+    "compute_before": "1|127.0.0.1|5688|RUNNING|12|t|t|default|12",
+    "source_sst_sha256": "355ce8fecdb67bd601fb5f3cf0f7976cf22f56830d2432ec352f96ee3053b0aa",
+    "plan_sha256": "a57354f017d75846edadb9f456c36d345ad7361456704dce35737d9ae686272c",
+    "sorted_oracle_sha256": "382d3506e97716c3c2e54369cee4b6415245c14da47f4293bef114b3e5125844",
+    "source_progress_s": 78.31811195798218,
+    "create_mv_s": 535.8648865409195,
+    "phase_wall_s": {
+      "pre_probe": 171.094801902771,
+      "probe": 137.99883794784546,
+      "post_probe": 226.7712466903031
+    },
+    "cn_cpu_s": 2588.0,
+    "cn_peak_rss_mib": 5746.90625,
+    "cn_get_count": 120198,
+    "cn_get_bytes": 38944742360,
+    "backend_get_mean_ms": 2.095608182365738,
+    "backend_get_p99_bucket_upper_ms": 16.0
+  },
+  "9mib": {
+    "mode": "candidate",
+    "source": "98126f898412f675ebdd406c35cd273f4972dd2b",
+    "binary_sha256": "051b79433a6300f4b756d264b54c82103af0c3a40b2f19086632c6f555605efb",
+    "config": {
+      "server": {
+        "metrics_level": "Debug"
+      },
+      "frontend": {
+        "unsafe_enable_local_fs_connector": true
+      },
+      "streaming": {
+        "actor_runtime_worker_threads_num": 8,
+        "unsafe_disable_strict_consistency": true
+      },
+      "storage": {
+        "blockwise_prefetch": {
+          "mode": "cold_ranges",
+          "max_blocks": 16,
+          "max_bytes": 1048576
+        },
+        "read_batch": {
+          "enabled": true,
+          "meta_reuse": true,
+          "meta_max_bytes": 9437184
+        },
+        "object_store": {
+          "enable_hummock_read_coalescing": true,
+          "read_scheduler": {
+            "use_dedicated_io_runtime": true,
+            "dedicated_io_runtime_workers": 6,
+            "max_admitted_groups": 128,
+            "max_inflight_reads": 32,
+            "max_batch_requests": 16,
+            "max_read_bytes": 1048576,
+            "max_gap_bytes": 65536,
+            "reuse_inflight_reads": true
+          }
+        },
+        "max_prefetch_block_number": 16,
+        "prefetch_buffer_capacity_mb": 4096
+      }
+    },
+    "actual_cn_threads": {
+      "main": 1,
+      "rw-otel": 2,
+      "OpenTelemetry.Traces.BatchProcessor": 1,
+      "fastrace-global-collector": 1,
+      "rw-main": 13,
+      "": 1,
+      "rw-read-io": 6,
+      "rw-compaction": 4,
+      "rw-batch": 12,
+      "rw-streaming": 8
+    },
+    "compute_before": "1|127.0.0.1|5688|RUNNING|12|t|t|default|12",
+    "source_sst_sha256": "355ce8fecdb67bd601fb5f3cf0f7976cf22f56830d2432ec352f96ee3053b0aa",
+    "plan_sha256": "a57354f017d75846edadb9f456c36d345ad7361456704dce35737d9ae686272c",
+    "sorted_oracle_sha256": "382d3506e97716c3c2e54369cee4b6415245c14da47f4293bef114b3e5125844",
+    "source_progress_s": 83.3098131660372,
+    "create_mv_s": 461.87159987492487,
+    "phase_wall_s": {
+      "pre_probe": 179.09942317008972,
+      "probe": 95.00046682357788,
+      "post_probe": 187.77170988125727
+    },
+    "cn_cpu_s": 2267.0,
+    "cn_peak_rss_mib": 5736.34375,
+    "cn_get_count": 124053,
+    "cn_get_bytes": 39068249296,
+    "backend_get_mean_ms": 2.213702945708658,
+    "backend_get_p99_bucket_upper_ms": 16.0
+  }
+}
