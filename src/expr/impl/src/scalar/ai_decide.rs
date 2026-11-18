@@ -31,6 +31,8 @@ use risingwave_expr::expr::{
 use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
+use thiserror_ext::AsReport;
+
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(10);
@@ -296,7 +298,7 @@ impl AiDecide {
                         LazyLock::new(LogSuppressor::default);
                     if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         // Only sanitized errors: never log credentials, URL or payloads.
-                        tracing::error!(error = %error, ?delay, suppressed_count, "AI_DECIDE request failed, retrying");
+                        tracing::error!(error = %error.as_report(), ?delay, suppressed_count, "AI_DECIDE request failed, retrying");
                     }
                 }
             }
