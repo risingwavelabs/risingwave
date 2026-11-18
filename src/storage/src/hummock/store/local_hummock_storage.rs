@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
+use futures::{StreamExt, TryStreamExt, stream};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -30,6 +31,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tracing::{Instrument, warn};
 
+use super::iter_init_profile::{IterInitProfile, measure_polls};
 use super::version::VersionUpdate;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
@@ -220,20 +222,45 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<LocalHummockStorageIterator<'_>> {
-        let (table_key_range, read_snapshot) =
-            read_filter_for_version(epoch, self.table_id, table_key_range, &self.read_version)?;
+        let mut profile = IterInitProfile::sample(self.table_id);
+        let start = profile.as_ref().map(|_| std::time::Instant::now());
+        let init = async {
+            let snapshot_start = profile.as_ref().map(|_| std::time::Instant::now());
+            let (table_key_range, read_snapshot) =
+                read_filter_for_version(epoch, self.table_id, table_key_range, &self.read_version)?;
+            if let Some((profile, start)) = profile.as_mut().zip(snapshot_start) {
+                profile.snapshot = start.elapsed();
+            }
 
-        self.hummock_version_reader
-            .iter_with_memtable(
-                table_key_range,
-                epoch,
-                self.table_id,
-                self.table_option,
-                read_options,
-                read_snapshot,
-                Some(self.mem_table_iter()),
-            )
-            .await
+            self.hummock_version_reader
+                .iter_with_memtable(
+                    table_key_range,
+                    epoch,
+                    self.table_id,
+                    self.table_option,
+                    read_options,
+                    read_snapshot,
+                    Some(self.mem_table_iter()),
+                    profile.as_mut(),
+                )
+                .await
+        };
+        if let Some(start) = start {
+            let (result, poll) = measure_polls(init).await;
+            if let Some(profile) = profile
+                && result.is_ok()
+            {
+                profile.report(
+                    self.hummock_version_reader.stats(),
+                    self.table_id,
+                    start.elapsed(),
+                    poll,
+                );
+            }
+            result
+        } else {
+            init.await
+        }
     }
 
     async fn rev_iter_all(
@@ -317,6 +344,82 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockStorage {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.hummock_version_reader.read_batch_config()
+    }
+
+    async fn on_key_values<'a, O: Send + 'a>(
+        &'a self,
+        requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        project: impl crate::store::BatchKeyValueFn<'a, O>,
+    ) -> StorageResult<Vec<Option<O>>> {
+        if requests.len() == 1 {
+            let (key, options) = requests.into_iter().next().unwrap();
+            return Ok(vec![self.on_key_value(key, options, project).await?]);
+        }
+        let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+        let config = self.read_batch_config();
+        let metadata = crate::hummock::sst_meta_batch::SstMetaBatch::new(config);
+        let batch_span =
+            tracing::debug_span!(target: "state_store_read_batch", "native_point_batch");
+        tracing::debug!(target: "state_store_read_batch", parent: &batch_span,
+            keys = requests.len(), concurrency = config.concurrency.get(), "native point batch");
+        drop(batch_span);
+        // Prepare versions only when a key is admitted. Completed keys release their slots
+        // immediately; neither input order nor shared metadata requires waiting for a batch.
+        let mut reads = stream::iter(requests.into_iter().enumerate().map(
+            |(index, (key, options))| {
+                let project = &project;
+                let metadata = &metadata;
+                async move {
+                    let row = match self.mem_table.buffer.get(&key) {
+                        Some(KeyOp::Insert(value) | KeyOp::Update((_, value))) => Some(project(
+                            FullKey::new_with_gap_epoch(
+                                self.table_id,
+                                key.to_ref(),
+                                self.current_epoch_with_gap(),
+                            ),
+                            value.as_ref(),
+                        )?),
+                        Some(KeyOp::Delete(_)) => None,
+                        None => {
+                            let range =
+                                (Bound::Included(key.clone()), Bound::Included(key.clone()));
+                            let (range, version) = read_filter_for_version(
+                                self.epoch(),
+                                self.table_id,
+                                range,
+                                &self.read_version,
+                            )?;
+                            if is_empty_key_range(&range) {
+                                None
+                            } else {
+                                self.hummock_version_reader
+                                    .get_with_metadata(
+                                        key,
+                                        self.epoch(),
+                                        self.table_id,
+                                        self.table_option,
+                                        options,
+                                        version,
+                                        metadata,
+                                        project,
+                                    )
+                                    .await?
+                            }
+                        }
+                    };
+                    Ok::<_, crate::error::StorageError>((index, row))
+                }
+            },
+        ))
+        .buffer_unordered(config.concurrency.get());
+        while let Some((index, row)) = reads.try_next().await? {
+            output[index] = row;
+        }
+        Ok(output)
+    }
+
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

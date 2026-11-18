@@ -67,7 +67,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 cache_policy: CachePolicy::NotFill,
                 read_table_id: None,
                 scan_end_user_key: None,
-                prefetch: false,
+                prefetch: crate::store::PrefetchMode::Disabled,
             }),
             &sstable_info,
         );

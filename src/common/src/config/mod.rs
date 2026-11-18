@@ -974,6 +974,186 @@ pub mod tests {
     }
 
     #[test]
+    fn test_scan_prefetch_modes_defaults_and_overrides() {
+        use storage::{ReadPrefetchMode, ScanPrefetchConfig};
+
+        fn resolved(config: &ScanPrefetchConfig) -> [ReadPrefetchMode; 5] {
+            [
+                config.prefix_mode(),
+                config.changelog_mode(),
+                config.range_scan_mode(),
+                config.snapshot_backfill_mode(),
+                config.locality_backfill_mode(),
+            ]
+        }
+        let defaults = RwConfig::default();
+        assert_eq!(
+            resolved(&defaults.storage.scan_prefetch),
+            [
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::ColdRanges
+            ]
+        );
+        assert_eq!(defaults.storage.max_prefetch_block_number, 16);
+        assert_eq!(defaults.storage.scan_prefetch.max_blocks, None);
+        assert_eq!(defaults.storage.scan_prefetch.max_bytes.get(), 1024 * 1024);
+        let comparison: RwConfig =
+            toml::from_str(include_str!("../../../config/cold-range-prefetch.toml")).unwrap();
+        assert_eq!(
+            resolved(&comparison.storage.scan_prefetch),
+            [ReadPrefetchMode::ColdRanges; 5]
+        );
+        assert!(
+            comparison
+                .storage
+                .object_store
+                .enable_hummock_read_coalescing
+        );
+        assert!(
+            comparison
+                .storage
+                .object_store
+                .read_scheduler
+                .use_dedicated_io_runtime
+        );
+        assert_eq!(
+            comparison
+                .storage
+                .object_store
+                .read_scheduler
+                .max_read_bytes,
+            comparison.storage.scan_prefetch.max_bytes
+        );
+
+        for (value, mode) in [
+            ("disabled", ReadPrefetchMode::Disabled),
+            ("cold_ranges", ReadPrefetchMode::ColdRanges),
+        ] {
+            let base = format!("[storage.scan_prefetch]\nmode = \"{value}\"\n");
+            let config: RwConfig = toml::from_str(&base).unwrap();
+            assert_eq!(resolved(&config.storage.scan_prefetch), [mode; 5]);
+            for (idx, field) in [
+                "prefix_mode",
+                "changelog_mode",
+                "range_scan_mode",
+                "snapshot_backfill_mode",
+                "locality_backfill_mode",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                for (override_value, override_mode) in [
+                    ("disabled", ReadPrefetchMode::Disabled),
+                    ("cold_ranges", ReadPrefetchMode::ColdRanges),
+                ] {
+                    let config: RwConfig =
+                        toml::from_str(&format!("{base}{field} = \"{override_value}\"\n")).unwrap();
+                    let mut expected = [mode; 5];
+                    expected[idx] = override_mode;
+                    assert_eq!(resolved(&config.storage.scan_prefetch), expected);
+                    let round_trip: RwConfig =
+                        toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+                    assert_eq!(resolved(&round_trip.storage.scan_prefetch), expected);
+                }
+            }
+        }
+        for value in ["range", "blockwise", "cold_range"] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!(
+                    "[storage.scan_prefetch]\nmode = \"{value}\"\n"
+                ))
+                .is_err()
+            );
+        }
+        for field in [
+            "enabled",
+            "changelog_enabled",
+            "snapshot_backfill_enabled",
+            "locality_backfill_enabled",
+        ] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!("[storage.scan_prefetch]\n{field} = true\n"))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn test_read_optimization_controls_reject_zero_limits() {
+        for (section, fields) in [
+            ("storage.scan_prefetch", vec!["max_blocks", "max_bytes"]),
+            (
+                "storage.read_batch",
+                vec!["concurrency", "meta_max_entries", "meta_max_bytes"],
+            ),
+            (
+                "storage.object_store.read_scheduler",
+                vec![
+                    "dedicated_io_runtime_workers",
+                    "max_batch_requests",
+                    "max_admitted_groups",
+                    "max_inflight_reads",
+                    "max_read_bytes",
+                ],
+            ),
+            ("batch", vec!["point_get_concurrency"]),
+        ] {
+            for field in fields {
+                assert!(
+                    toml::from_str::<RwConfig>(&format!("[{section}]\n{field} = 0")).is_err(),
+                    "{section}.{field}"
+                );
+            }
+        }
+        for section in [
+            "storage.scan_prefetch",
+            "storage.read_batch",
+            "storage.object_store.read_scheduler",
+        ] {
+            assert!(
+                toml::from_str::<RwConfig>(&format!("[{section}]\nmisspelled_limit = 1")).is_err(),
+                "{section}"
+            );
+        }
+        let defaults = RwConfig::default();
+        assert!(!defaults.storage.read_batch.enabled);
+        assert!(!defaults.storage.read_batch.meta_reuse);
+        assert!(!defaults.storage.object_store.enable_hummock_read_coalescing);
+        let scheduler = defaults.storage.object_store.read_scheduler;
+        assert!(!scheduler.use_dedicated_io_runtime);
+        assert_eq!(scheduler.dedicated_io_runtime_workers.get(), 2);
+        let config = toml::from_str::<RwConfig>(
+            "[storage.object_store.read_scheduler]\nuse_dedicated_io_runtime = true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .storage
+                .object_store
+                .read_scheduler
+                .dedicated_io_runtime_workers
+                .get(),
+            2,
+        );
+        let config = toml::from_str::<RwConfig>(
+            "[storage.object_store.read_scheduler]\nuse_dedicated_io_runtime = true\ndedicated_io_runtime_workers = 8\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .storage
+                .object_store
+                .read_scheduler
+                .dedicated_io_runtime_workers
+                .get(),
+            8,
+        );
+    }
+
+    #[test]
     fn test_storage_max_prefetch_block_number_must_be_positive() {
         let config = toml::from_str::<RwConfig>(
             r#"

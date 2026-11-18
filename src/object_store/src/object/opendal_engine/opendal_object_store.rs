@@ -29,7 +29,8 @@ use thiserror_ext::AsReport;
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
     MonitoredObjectStore, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
-    ObjectRangeBounds, ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
+    ObjectRangeBounds, ObjectReadBounds, ObjectResult, ObjectStore, OperationType,
+    StreamingUploader, prefix,
 };
 
 /// Opendal object storage.
@@ -147,6 +148,7 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        let bounds = ObjectReadBounds::new(&range)?;
         let data = if range.is_full() {
             self.op.read(path).await?
         } else {
@@ -156,10 +158,10 @@ impl ObjectStore for OpendalObjectStore {
                 .await?
         };
 
-        if let Some(len) = range.len()
+        if let Some(len) = bounds.len()
             && len != data.len()
         {
-            return Err(ObjectError::internal(format!(
+            return Err(ObjectError::read_length_mismatch(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 len,
                 data.len(),
@@ -557,6 +559,22 @@ mod tests {
 
         // OpenDAL 0.58 reports an out-of-range read instead of panicking.
         store.read("/abc", 4..44).await.unwrap_err();
+        for range in [
+            (std::ops::Bound::Included(4), std::ops::Bound::Excluded(2)),
+            (
+                std::ops::Bound::Excluded(usize::MAX),
+                std::ops::Bound::Unbounded,
+            ),
+        ] {
+            assert!(
+                store
+                    .read("/abc", range)
+                    .await
+                    .unwrap_err()
+                    .is_read_range_error()
+            );
+        }
+        assert_eq!(store.read("/abc", ..2).await.unwrap(), "12");
     }
 
     #[tokio::test]

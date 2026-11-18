@@ -38,7 +38,7 @@ use crate::hummock::test_utils::{
 };
 use crate::hummock::{
     HummockValue, RecentFilter, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreConfig, SstableStoreRef, TableHolder,
+    SstableMetaCacheValue, SstableStoreConfig, SstableStoreRef, TableHolder,
 };
 use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -58,6 +58,22 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub async fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_recent_filter(Arc::new(NoneRecentFilter::default().into())).await
+}
+
+pub async fn mock_sstable_store_with_read_batch(
+    config: risingwave_common::config::storage::ReadBatchConfig,
+) -> SstableStoreRef {
+    let mut store = mock_sstable_store().await;
+    Arc::get_mut(&mut store).unwrap().read_batch = config;
+    store
+}
+
+pub async fn mock_sstable_store_with_scan_prefetch(
+    config: risingwave_common::config::storage::ScanPrefetchConfig,
+) -> SstableStoreRef {
+    let mut store = mock_sstable_store().await;
+    Arc::get_mut(&mut store).unwrap().scan_prefetch = config;
+    store
 }
 
 pub async fn mock_sstable_store_with_recent_filter(
@@ -91,6 +107,12 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
+        .with_weighter(
+            |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
+                std::mem::size_of::<HummockSstableObjectId>()
+                    + value.estimated_meta_cache_memory_weight()
+            },
+        )
         .storage()
         .build()
         .await
@@ -108,6 +130,8 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
 
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
+        scan_prefetch: Default::default(),
+        read_batch: Default::default(),
 
         recent_filter,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),

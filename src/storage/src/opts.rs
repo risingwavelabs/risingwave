@@ -68,6 +68,8 @@ pub struct StorageOpts {
     pub max_cached_recent_versions_number: usize,
 
     pub max_prefetch_block_number: usize,
+    pub scan_prefetch: risingwave_common::config::storage::ScanPrefetchConfig,
+    pub read_batch: risingwave_common::config::storage::ReadBatchConfig,
 
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
@@ -250,6 +252,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
+            scan_prefetch: c.storage.scan_prefetch,
+            read_batch: c.storage.read_batch,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,
@@ -398,6 +402,26 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_prefetch_budget_is_independent_of_shared_buffer() {
+        let mut config = RwConfig::default();
+        let default_prefetch = extract_storage_memory_config(&config).prefetch_buffer_capacity_mb;
+        for shared_buffer in [64, 512] {
+            for prefetch in [None, Some(0), Some(17)] {
+                config.storage.shared_buffer_capacity_mb = Some(shared_buffer);
+                config.storage.prefetch_buffer_capacity_mb = prefetch;
+                let memory = extract_storage_memory_config(&config);
+                let params = system_params_for_test();
+                let opts = StorageOpts::from((&config, &params.into(), &memory));
+                assert_eq!(opts.shared_buffer_capacity_mb, shared_buffer);
+                assert_eq!(
+                    opts.prefetch_buffer_capacity_mb,
+                    prefetch.unwrap_or(default_prefetch)
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_file_cache_submit_queue_size_threshold() {

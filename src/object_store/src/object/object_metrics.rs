@@ -16,9 +16,9 @@ use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    HistogramVec, Registry, exponential_buckets, histogram_opts,
+    HistogramVec, IntCounterVec, IntGaugeVec, Registry, exponential_buckets, histogram_opts,
     register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry,
+    register_int_counter_with_registry, register_int_gauge_vec_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -33,10 +33,92 @@ pub struct ObjectStoreMetrics {
     pub operation_size: HistogramVec,
     pub failure_count: GenericCounterVec<AtomicU64>,
     pub request_retry_count: GenericCounterVec<AtomicU64>,
+    pub(super) read_outcomes: IntCounterVec,
+    pub(super) read_in_flight: IntGaugeVec,
+    pub(super) read_scheduler_events: IntCounterVec,
+    pub(super) read_scheduler_pending: IntGaugeVec,
+    pub(super) read_scheduler_groups: IntGaugeVec,
+    pub(super) read_scheduler_queued: IntGaugeVec,
+    pub(super) read_scheduler_in_flight: IntGaugeVec,
+    pub(super) read_scheduler_reserved: IntGaugeVec,
+    pub(super) read_scheduler_waiting: IntGaugeVec,
+    pub(super) read_scheduler_admission_duration: HistogramVec,
+    pub(super) read_requests: GenericCounterVec<AtomicU64>,
+    pub(super) read_request_duration: HistogramVec,
+    pub(super) read_request_bytes: HistogramVec,
+    pub(super) read_scheduler_overread_bytes: IntCounterVec,
+    pub(super) read_scheduler_partial_overlap_bytes: IntCounterVec,
+    pub(super) read_scheduler_group_size: HistogramVec,
+    pub(super) read_scheduler_queue_duration: HistogramVec,
+    pub(super) read_scheduler_physical_duration: HistogramVec,
 }
 
 impl ObjectStoreMetrics {
-    fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
+        let read_outcomes = register_int_counter_vec_with_registry!(
+            "object_store_read_outcomes", "Read completions by layer; attempts are backend invocations, not SDK-internal HTTP retries", &["media_type", "stage", "outcome"], registry).unwrap();
+        let read_in_flight = register_int_gauge_vec_with_registry!(
+            "object_store_read_in_flight",
+            "Currently executing reads by layer",
+            &["media_type", "stage"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_events = register_int_counter_vec_with_registry!(
+            "object_store_read_scheduler_events",
+            "Scheduler planning, completion and fallback events",
+            &["media_type", "event"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_pending = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_pending",
+            "Admitted logical reads, queued or in flight",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_groups = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_groups",
+            "Read groups by stage: admitted through completion, queued until selection, or ready to claim a physical permit (queued minus dispatch reservations)",
+            &["media_type", "stage"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_queued = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_queued",
+            "Admitted logical reads not yet dispatched",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_in_flight = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_in_flight", "Scheduled physical reads from first backend future poll through completion or cancellation, including retry loops and range-error fallbacks",
+            &["media_type"], registry).unwrap();
+        let read_scheduler_reserved = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_reserved",
+            "Scheduled group reads holding a physical permit before starting the backend future",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_waiting = register_int_gauge_vec_with_registry!(
+            "object_store_read_scheduler_waiting",
+            "Logical reads waiting for scheduler admission, including collected window reads",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_admission_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_admission_duration_seconds",
+                "Time waiting for admission, including cancelled waits",
+                exponential_buckets(0.000_01, 2.0, 22).unwrap()
+            ),
+            &["media_type"],
+            registry
+        )
+        .unwrap();
         let read_bytes = register_int_counter_with_registry!(
             "object_store_read_bytes",
             "Total bytes of requests read from object store",
@@ -96,6 +178,76 @@ impl ObjectStoreMetrics {
             registry
         )
         .unwrap();
+        let read_request_bytes = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_request_bytes",
+                "Requested bytes of bounded logical reads, before coalescing",
+                exponential_buckets(1024.0, 2.0, 22).unwrap()
+            ),
+            &["media_type", "route"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_partial_overlap_bytes = register_int_counter_vec_with_registry!(
+            "object_store_read_scheduler_partial_overlap_bytes",
+            "Union of byte intersections with older active same-object reads that do not fully cover the new dispatch; observed at flight registration, counts attempted group reads, not successful or unique duplicate bytes",
+            &["media_type"], registry
+        ).unwrap();
+        let read_scheduler_overread_bytes = register_int_counter_vec_with_registry!(
+            "object_store_read_scheduler_overread_bytes",
+            "Gap bytes in successful scheduled reads, including holes left by cancelled members",
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_group_size = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_group_size",
+                "Number of logical range reads in each scheduled physical read",
+                exponential_buckets(1.0, 2.0, 16).unwrap()
+            ),
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+        let read_requests = register_int_counter_vec_with_registry!(
+            "object_store_read_requests",
+            "Logical object store read calls by dispatch route",
+            &["media_type", "route"],
+            registry
+        )
+        .unwrap();
+        let read_request_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_request_duration_seconds",
+                "Time to complete a logical object store read, including scheduling and retries",
+                exponential_buckets(0.000_01, 1.5, 44).unwrap()
+            ),
+            &["media_type", "route"],
+            registry
+        )
+        .unwrap();
+        let read_scheduler_queue_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_queue_duration_seconds",
+                "Time from admitting a range read to dispatching it",
+                exponential_buckets(0.000_01, 2.0, 18).unwrap()
+            ),
+            &["media_type"],
+            registry
+        )
+        .unwrap();
+
+        let read_scheduler_physical_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "object_store_read_scheduler_physical_duration_seconds",
+                "Scheduled backend read duration (including retries), permit wait for range-error fallback, or reservation-to-backend-start time for dispatched groups",
+                exponential_buckets(0.000_01, 2.0, 22).unwrap()
+            ),
+            &["media_type", "stage"],
+            registry
+        )
+        .unwrap();
 
         Self {
             write_bytes,
@@ -104,11 +256,66 @@ impl ObjectStoreMetrics {
             operation_size,
             failure_count,
             request_retry_count,
+            read_outcomes,
+            read_in_flight,
+            read_scheduler_events,
+            read_scheduler_pending,
+            read_scheduler_groups,
+            read_scheduler_queued,
+            read_scheduler_in_flight,
+            read_scheduler_reserved,
+            read_scheduler_waiting,
+            read_scheduler_admission_duration,
+            read_requests,
+            read_request_duration,
+            read_request_bytes,
+            read_scheduler_overread_bytes,
+            read_scheduler_partial_overlap_bytes,
+            read_scheduler_group_size,
+            read_scheduler_queue_duration,
+            read_scheduler_physical_duration,
         }
     }
 
     /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         GLOBAL_OBJECT_STORE_METRICS.clone()
+    }
+}
+
+/// Account for dropped futures as cancellation, including during retries or scheduler waits.
+/// The guard is created only when an object read is polled; cache hits do not pay for it.
+pub(super) struct ReadGuard {
+    outcomes: IntCounterVec,
+    in_flight: prometheus::IntGauge,
+    media_type: &'static str,
+    stage: &'static str,
+    outcome: &'static str,
+}
+
+impl ObjectStoreMetrics {
+    pub(super) fn begin_read(&self, media_type: &'static str, stage: &'static str) -> ReadGuard {
+        let in_flight = self.read_in_flight.with_label_values(&[media_type, stage]);
+        in_flight.inc();
+        ReadGuard {
+            outcomes: self.read_outcomes.clone(),
+            in_flight,
+            media_type,
+            stage,
+            outcome: "cancelled",
+        }
+    }
+}
+impl ReadGuard {
+    pub(super) fn finish<T, E>(&mut self, result: &Result<T, E>) {
+        self.outcome = if result.is_ok() { "ok" } else { "error" };
+    }
+}
+impl Drop for ReadGuard {
+    fn drop(&mut self) {
+        self.in_flight.dec();
+        self.outcomes
+            .with_label_values(&[self.media_type, self.stage, self.outcome])
+            .inc();
     }
 }
