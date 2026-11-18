@@ -584,9 +584,9 @@ async fn queued_group_stays_mergeable_until_physical_task_starts() {
                     _queued: None,
                 };
                 let admission = groups
-                    .admission(&state.groups, "file", &range, 1, &mut None, &config)
+                    .admission(&state.groups, "file", &range, None, &config)
                     .expect("adjacent read must join even with no free group credit");
-                let group = groups.admit(&mut state.groups, admission, range, [request], &config);
+                let group = groups.admit(&mut state.groups, admission, request, &config);
                 state.groups.push(group);
                 state.update_ready(&groups);
                 groups.ready.notify_one();
@@ -975,6 +975,74 @@ async fn bridge_reuses_group_credit_at_capacity() {
         assert_eq!(groups.queued.get(), 0);
         assert_eq!(groups.admitted.get(), 0);
         assert_eq!(scheduler.pending.get(), 0);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn covered_waiter_can_join_pending_group_when_flight_is_full() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for free_follower in [false, true] {
+            let metrics = ObjectStoreMetrics::new(&prometheus::Registry::new());
+            let (calls, mut reads) = mpsc::unbounded_channel();
+            let release = Arc::new(Notify::new());
+            let scheduler = ReadScheduler::new(
+                &metrics,
+                "test",
+                ReadSchedulerConfig {
+                    max_admitted_groups: 2.try_into().unwrap(),
+                    max_inflight_reads: 1.try_into().unwrap(),
+                    max_batch_requests: 3.try_into().unwrap(),
+                    reuse_inflight_reads: true,
+                    ..Default::default()
+                },
+                {
+                    let release = release.clone();
+                    move |_, range: Range<usize>| {
+                        let calls = calls.clone();
+                        let release = release.clone();
+                        async move {
+                            calls.send(range.clone()).unwrap();
+                            if range == (0..4) {
+                                release.notified().await;
+                            }
+                            Ok(Bytes::from_static(&b"abcde"[range]))
+                        }
+                    }
+                },
+            );
+            let leader = scheduler.submit("file", 0..4, None).await.unwrap();
+            assert_eq!(reads.recv().await.unwrap(), 0..4);
+            let mut followers = Vec::new();
+            for _ in 0..3 {
+                followers.push(scheduler.submit("file", 0..1, None).await.unwrap());
+            }
+            let tail = scheduler.submit("file", 4..5, None).await.unwrap();
+            let mut waiter = std::pin::pin!(scheduler.submit("file", 1..2, None));
+            assert!(futures::poll!(&mut waiter).is_pending());
+            if free_follower {
+                drop(followers.pop().unwrap());
+            }
+            let bridge = scheduler.submit("file", 2..5, None).await.unwrap();
+            let Poll::Ready(result) = futures::poll!(&mut waiter) else {
+                panic!("a mergeable waiter should be admitted before the leader finishes");
+            };
+            let waiter = result.unwrap();
+            release.notify_one();
+            assert_eq!(leader.await.unwrap().unwrap(), "abcd");
+            assert_eq!(waiter.await.unwrap().unwrap(), "b");
+            assert_eq!(tail.await.unwrap().unwrap(), "e");
+            assert_eq!(bridge.await.unwrap().unwrap(), "cde");
+            for follower in followers {
+                assert_eq!(follower.await.unwrap().unwrap(), "a");
+            }
+            assert_eq!(
+                reads.recv().await.unwrap(),
+                if free_follower { 2..5 } else { 1..5 }
+            );
+            assert!(reads.try_recv().is_err());
+        }
     })
     .await
     .unwrap();

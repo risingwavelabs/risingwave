@@ -105,12 +105,6 @@ impl StagedRead {
     }
 }
 
-fn staged_span(reads: &[StagedRead]) -> Option<Range<usize>> {
-    let start = reads.first()?.range.start;
-    let end = reads.iter().map(|read| read.range.end).max().unwrap();
-    Some(start..end)
-}
-
 struct ReadRequest {
     path: String,
     range: Range<usize>,
@@ -257,15 +251,15 @@ impl ActiveRead {
 struct PendingReadGroups {
     groups: Vec<PendingReadGroup>,
     active: Vec<Arc<ActiveRead>>,
-    waiting: HashMap<String, BTreeMap<(usize, u64), WaitingReadGroup>>,
+    waiting: HashMap<String, BTreeMap<(usize, u64), WaitingRead>>,
     next_waiter: u64,
     // Physical tasks holding a P permit that have not taken a group yet.
     starting: usize,
     reported_ready: usize,
 }
 
-struct WaitingReadGroup {
-    reads: Vec<StagedRead>,
+struct WaitingRead {
+    read: StagedRead,
     // Keep the acquire with the entry so joining also cancels its G request,
     // including a credit already assigned by the semaphore but not yet polled.
     acquire: BoxFuture<'static, Result<OwnedSemaphorePermit, AcquireError>>,
@@ -304,18 +298,14 @@ impl PendingReadGroups {
         }
     }
 
-    fn register_waiter<'a>(
-        &mut self,
-        queue: &'a GroupQueue,
-        reads: Vec<StagedRead>,
-    ) -> GroupWaiter<'a> {
-        let key = (reads[0].range.start, self.next_waiter);
+    fn register_waiter<'a>(&mut self, queue: &'a GroupQueue, read: StagedRead) -> GroupWaiter<'a> {
+        let key = (read.range.start, self.next_waiter);
         self.next_waiter += 1;
-        let path = reads[0].path.clone();
+        let path = read.path.clone();
         self.waiting.entry(path.clone()).or_default().insert(
             key,
-            WaitingReadGroup {
-                reads,
+            WaitingRead {
+                read,
                 acquire: Box::pin(queue.slots.clone().acquire_owned()),
                 waker: None,
             },
@@ -323,7 +313,7 @@ impl PendingReadGroups {
         GroupWaiter { queue, path, key }
     }
 
-    fn remove_waiter(&mut self, path: &str, key: (usize, u64)) -> Option<WaitingReadGroup> {
+    fn remove_waiter(&mut self, path: &str, key: (usize, u64)) -> Option<WaitingRead> {
         let waiters = self.waiting.get_mut(path)?;
         let removed = waiters.remove(&key);
         if waiters.is_empty() {
@@ -336,13 +326,11 @@ impl PendingReadGroups {
         &mut self,
         group: &PendingReadGroup,
         config: &ReadSchedulerConfig,
-    ) -> Option<(Range<usize>, WaitingReadGroup)> {
+    ) -> Option<(Range<usize>, WaitingRead)> {
         if group.group.requests.len() == config.max_batch_requests.get() {
             return None;
         }
         let path = &group.group.requests[0].path;
-        // The original start can shift right on cancellation, by at most the
-        // byte limit for a group. Anything earlier cannot reach the left edge.
         let left = group
             .span
             .start
@@ -351,42 +339,21 @@ impl PendingReadGroups {
         let right = group.span.end.saturating_add(config.max_gap_bytes);
         let (key, merged_span) = self
             .waiting
-            .get_mut(path)?
-            .range_mut((left, 0)..=(right, u64::MAX))
+            .get(path)?
+            .range((left, 0)..=(right, u64::MAX))
             .find_map(|(&key, waiter)| {
-                waiter.reads.retain(|read| !read.response.is_closed());
-                let span = staged_span(&waiter.reads)?;
-                let merged_span = group.merge_span(path, &span, waiter.reads.len(), config)?;
-                // Preserve active reuse without taking a follower lock under the queue lock.
-                if self.active.iter().any(|read| read.covers(path, &span)) {
-                    return None;
-                }
+                let merged_span = group.merge_span(path, &waiter.read.range, 1, config)?;
                 Some((key, merged_span))
             })?;
         Some((merged_span, self.remove_waiter(path, key).unwrap()))
     }
 
-    fn take_covered_waiter(
-        &mut self,
-        path: &str,
-        span: &Range<usize>,
-        available: usize,
-        max_read_bytes: usize,
-    ) -> Option<WaitingReadGroup> {
-        // Cancellation can remove the original first member and shift the start right.
-        let left = span.start.saturating_sub(max_read_bytes);
+    fn take_covered_waiter(&mut self, path: &str, span: &Range<usize>) -> Option<WaitingRead> {
         let key = self
             .waiting
-            .get_mut(path)?
-            .range_mut((left, 0)..(span.end, 0))
-            .find_map(|(&key, waiter)| {
-                waiter.reads.retain(|read| !read.response.is_closed());
-                let waiting_span = staged_span(&waiter.reads)?;
-                (waiter.reads.len() <= available
-                    && span.start <= waiting_span.start
-                    && waiting_span.end <= span.end)
-                    .then_some(key)
-            })?;
+            .get(path)?
+            .range((span.start, 0)..(span.end, 0))
+            .find_map(|(&key, waiter)| (waiter.read.range.end <= span.end).then_some(key))?;
         self.remove_waiter(path, key)
     }
 
@@ -455,20 +422,18 @@ impl GroupQueue {
         pending: &[PendingReadGroup],
         path: &str,
         range: &Range<usize>,
-        members: usize,
-        reserved: &mut Option<OwnedSemaphorePermit>,
+        reserved: Option<OwnedSemaphorePermit>,
         config: &ReadSchedulerConfig,
     ) -> Option<GroupAdmission> {
         if self.slots.is_closed() {
             return None;
         }
         for (index, group) in pending.iter().enumerate() {
-            if let Some(span) = group.merge_span(path, range, members, config) {
+            if let Some(span) = group.merge_span(path, range, 1, config) {
                 return Some(GroupAdmission::Join(index, span));
             }
         }
         reserved
-            .take()
             .or_else(|| self.slots.clone().try_acquire_owned().ok())
             .map(GroupAdmission::New)
     }
@@ -477,18 +442,17 @@ impl GroupQueue {
         &self,
         pending: &mut Vec<PendingReadGroup>,
         admission: GroupAdmission,
-        span: Range<usize>,
-        requests: impl IntoIterator<Item = ReadRequest>,
+        request: ReadRequest,
         config: &ReadSchedulerConfig,
     ) -> PendingReadGroup {
         match admission {
             GroupAdmission::New(credit) => {
-                PendingReadGroup::new(self, credit, span, requests.into_iter().collect())
+                PendingReadGroup::new(self, credit, request.range.clone(), vec![request])
             }
             GroupAdmission::Join(index, span) => {
                 let mut group = pending.swap_remove(index);
                 group.span = span;
-                group.group.requests.extend(requests);
+                group.group.requests.push(request);
                 group.absorb_pending(pending, config);
                 group
             }
@@ -596,25 +560,13 @@ impl ReadScheduler {
         Box::pin(async move {
             debug_assert!(self.can_schedule(&range));
             let groups = &self.groups;
-            let (read, response) = self.stage_read(path, range.clone(), trace_id);
+            let (read, response) = self.stage_read(path, range, trace_id);
             let waiter = {
                 let mut state = groups.pending.lock().unwrap();
-                if let Some(mut followers) =
-                    state.covering_read(path, &range, 1, self.config.max_batch_requests.get())
-                {
-                    followers
-                        .as_mut()
-                        .unwrap()
-                        .push(read.into_request(&self.pending, None));
+                let Some(read) = self.try_submit(&mut state, read, None) else {
                     return Ok(response);
-                }
-                if let Some(admission) =
-                    groups.admission(&state.groups, path, &range, 1, &mut None, &self.config)
-                {
-                    self.insert_group(&mut state, admission, range, std::iter::once(read));
-                    return Ok(response);
-                }
-                state.register_waiter(groups, vec![read])
+                };
+                state.register_waiter(groups, read)
             };
             self.wait_for_group(waiter).await?;
             Ok(response)
@@ -641,38 +593,48 @@ impl ReadScheduler {
         )
     }
 
-    fn insert_group(
+    // Return the read only when it still needs a group credit.
+    fn try_submit(
         &self,
         state: &mut PendingReadGroups,
-        admission: GroupAdmission,
-        span: Range<usize>,
-        reads: impl IntoIterator<Item = StagedRead>,
-    ) {
-        let requests = reads
-            .into_iter()
-            .map(|read| read.into_request(&self.pending, Some(&self.queued)));
-        let mut group =
-            self.groups
-                .admit(&mut state.groups, admission, span, requests, &self.config);
+        read: StagedRead,
+        reserved: Option<OwnedSemaphorePermit>,
+    ) -> Option<StagedRead> {
+        let read = self.try_share_read(state, read)?;
+        let Some(admission) = self.groups.admission(
+            &state.groups,
+            &read.path,
+            &read.range,
+            reserved,
+            &self.config,
+        ) else {
+            return Some(read);
+        };
+        let request = read.into_request(&self.pending, Some(&self.queued));
+        let mut group = self
+            .groups
+            .admit(&mut state.groups, admission, request, &self.config);
         // Take compatible waiters before publishing the group. Waking them to
         // retry would race the worker taking the group for dispatch.
         while let Some((
             span,
-            WaitingReadGroup {
-                reads,
+            WaitingRead {
+                read,
                 acquire,
                 waker,
             },
         )) = state.take_mergeable_waiter(&group, &self.config)
         {
             drop(acquire);
-            group.span = span;
-            group.group.requests.extend(
-                reads
-                    .into_iter()
-                    .map(|read| read.into_request(&self.pending, Some(&self.queued))),
-            );
-            group.absorb_pending(&mut state.groups, &self.config);
+            // A covering flight may have freed a follower slot since registration.
+            if let Some(read) = self.try_share_read(state, read) {
+                group.span = span;
+                group
+                    .group
+                    .requests
+                    .push(read.into_request(&self.pending, Some(&self.queued)));
+                group.absorb_pending(&mut state.groups, &self.config);
+            }
             if let Some(waker) = waker {
                 waker.wake();
             }
@@ -682,49 +644,24 @@ impl ReadScheduler {
         #[cfg(all(target_os = "linux", not(madsim), feature = "read-scheduler-replay"))]
         replay::queue(state, "installed");
         self.groups.ready.notify_one();
+        None
     }
 
-    fn try_admit_group(
-        &self,
-        state: &mut PendingReadGroups,
-        span: Range<usize>,
-        reads: Vec<StagedRead>,
-        reserved: &mut Option<OwnedSemaphorePermit>,
-    ) -> Result<(), Vec<StagedRead>> {
-        let Some(admission) = self.groups.admission(
-            &state.groups,
-            &reads[0].path,
-            &span,
-            reads.len(),
-            reserved,
-            &self.config,
-        ) else {
-            return Err(reads);
-        };
-        self.insert_group(state, admission, span, reads);
-        Ok(())
-    }
-
-    fn try_reuse_group(
-        &self,
-        state: &PendingReadGroups,
-        span: &Range<usize>,
-        reads: Vec<StagedRead>,
-    ) -> Result<(), Vec<StagedRead>> {
+    // Return ownership if no active GET can take this follower.
+    fn try_share_read(&self, state: &PendingReadGroups, read: StagedRead) -> Option<StagedRead> {
         let Some(mut followers) = state.covering_read(
-            &reads[0].path,
-            span,
-            reads.len(),
+            &read.path,
+            &read.range,
+            1,
             self.config.max_batch_requests.get(),
         ) else {
-            return Err(reads);
+            return Some(read);
         };
-        followers.as_mut().unwrap().extend(
-            reads
-                .into_iter()
-                .map(|read| read.into_request(&self.pending, None)),
-        );
-        Ok(())
+        followers
+            .as_mut()
+            .unwrap()
+            .push(read.into_request(&self.pending, None));
+        None
     }
 
     async fn wait_for_group(&self, waiter: GroupWaiter<'_>) -> ObjectResult<()> {
@@ -737,33 +674,15 @@ impl ReadScheduler {
             else {
                 return Poll::Ready(Ok(()));
             };
-            if waiting
-                .reads
-                .iter_mut()
-                .all(|read| read.response.poll_closed(cx).is_ready())
-            {
-                state.remove_waiter(&waiter.path, waiter.key);
-                return Poll::Ready(Ok(()));
-            }
+            // The submitting future holds the receiver until admission. Its
+            // GroupWaiter removes this entry if the future is dropped.
             waiting
                 .waker
                 .get_or_insert_with(|| cx.waker().clone())
                 .clone_from(cx.waker());
-            let mut reserved = ready!(waiting.acquire.as_mut().poll(cx)).ok();
-            let mut reads = state.remove_waiter(&waiter.path, waiter.key).unwrap().reads;
-            reads.retain(|read| !read.response.is_closed());
-            let Some(span) = staged_span(&reads) else {
-                return Poll::Ready(Ok(()));
-            };
-            let Err(reads) = self.try_reuse_group(&state, &span, reads) else {
-                return Poll::Ready(Ok(()));
-            };
-            if let Err(reads) = self.try_admit_group(&mut state, span, reads, &mut reserved) {
-                for read in reads {
-                    let _ = read
-                        .response
-                        .send(Err(ObjectError::internal("read scheduler stopped")));
-                }
+            let reserved = ready!(waiting.acquire.as_mut().poll(cx)).ok();
+            let read = state.remove_waiter(&waiter.path, waiter.key).unwrap().read;
+            if self.try_submit(&mut state, read, reserved).is_some() {
                 return Poll::Ready(Err(ObjectError::internal("read scheduler stopped")));
             }
             Poll::Ready(Ok(()))

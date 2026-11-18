@@ -36,7 +36,7 @@ use super::super::ObjectErrorInner;
 use super::replay;
 use super::{
     ActiveRead, GroupQueue, GroupQueueWorker, ObjectError, ObjectStoreMetrics, PhysicalPermit,
-    ReadGauge, ReadGroup, ReadRequest, ReadResult, ReadTask, WaitingReadGroup,
+    ReadGauge, ReadGroup, ReadRequest, ReadResult, ReadTask, WaitingRead,
 };
 
 struct ActiveReadGuard<'a> {
@@ -290,26 +290,17 @@ impl ReadGroup {
             // Waking them to retry would race a fast physical completion.
             let mut followers = Vec::new();
             while followers.len() < max_followers
-                && let Some(WaitingReadGroup {
-                    reads,
+                && let Some(WaitingRead {
+                    read,
                     acquire,
                     waker,
-                }) = state.take_covered_waiter(
-                    &path,
-                    &span,
-                    max_followers - followers.len(),
-                    config.max_read_bytes.get(),
-                )
+                }) = state.take_covered_waiter(&path, &span)
             {
                 drop(acquire);
                 let pending = metrics
                     .read_scheduler_pending
                     .with_label_values(&[media_type]);
-                followers.extend(
-                    reads
-                        .into_iter()
-                        .map(|read| read.into_request(&pending, None)),
-                );
+                followers.push(read.into_request(&pending, None));
                 if let Some(waker) = waker {
                     waker.wake();
                 }
