@@ -16,8 +16,11 @@
 
 package com.risingwave.runner;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+import com.amazon.redshift.Driver;
+import com.amazon.redshift.util.RedshiftProperties;
 import com.risingwave.connector.SnowflakeJDBCSinkConfig;
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,6 +29,28 @@ import java.security.PrivateKey;
 import org.junit.Test;
 
 public class JDBCSqlRunnerTest {
+
+    @Test
+    public void redshiftDriverPropertiesPreserveCredentials() throws Exception {
+        String username = "user+&%2B=?# 用户";
+        for (String password :
+                new String[] {
+                    "Example+Pass9!", "Example&Pass9!", "Example%2BPass9!", "Example=?# 密码9!"
+                }) {
+            RedshiftProperties props = new RedshiftProperties();
+            props.setProperty("user", username);
+            props.setProperty("password", password);
+            RedshiftProperties parsed =
+                    Driver.parseURL(
+                            "jdbc:redshift://example.invalid:5439/dev?ssl=true&ApplicationName=risingwave",
+                            props);
+            assertNotNull(parsed);
+            assertEquals(username, parsed.getProperty("user"));
+            assertEquals(password, parsed.getProperty("password"));
+            assertEquals("true", parsed.getProperty("ssl"));
+            assertEquals("risingwave", parsed.getProperty("ApplicationName"));
+        }
+    }
 
     private String loadTestPem() throws IOException {
         try (InputStream is =
