@@ -351,7 +351,7 @@ impl MaterializeCache {
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
     ) -> StreamExecutorResult<()> {
-        let mut futures = vec![];
+        let mut missing_keys = vec![];
         for key in keys {
             self.metrics.materialize_cache_total_count.inc();
 
@@ -367,6 +367,31 @@ impl MaterializeCache {
                 continue;
             }
 
+            missing_keys.push(key);
+        }
+        if table.native_point_batch_enabled() {
+            let keys = missing_keys
+                .iter()
+                .map(|key| table.pk_serde().deserialize(key).unwrap())
+                .collect_vec();
+            for (key, row) in missing_keys
+                .into_iter()
+                .zip_eq_fast(table.get_rows(&keys).await?)
+            {
+                let row = row.map(CompactedRow::from);
+                let row = match row {
+                    Some(row) if row_below_watermark(&self.row_serde, table, &row)? => None,
+                    other => other,
+                };
+                if row.is_some() {
+                    self.metrics.materialize_data_exist_count.inc();
+                }
+                self.lru_cache.put(key.to_vec(), row);
+            }
+            return Ok(());
+        }
+        let mut futures = vec![];
+        for key in missing_keys {
             let row_serde = self.row_serde.clone();
             futures.push(async move {
                 let key_row = table.pk_serde().deserialize(key).unwrap();

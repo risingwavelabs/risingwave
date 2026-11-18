@@ -60,6 +60,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_recent_filter(Arc::new(NoneRecentFilter::default().into())).await
 }
 
+pub async fn mock_sstable_store_with_read_batch(
+    config: risingwave_common::config::storage::ReadBatchConfig,
+) -> SstableStoreRef {
+    let mut store = mock_sstable_store().await;
+    Arc::get_mut(&mut store).unwrap().read_batch = config;
+    store
+}
+
 pub async fn mock_sstable_store_with_recent_filter(
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
 ) -> SstableStoreRef {
