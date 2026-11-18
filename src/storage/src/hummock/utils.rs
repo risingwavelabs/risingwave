@@ -650,10 +650,6 @@ impl MemoryCollector for HummockMemoryCollector {
         self.limiter.get_memory_usage()
     }
 
-    fn get_meta_batch_usage(&self) -> usize {
-        self.sstable_store.meta_batch_usage()
-    }
-
     fn get_prefetch_memory_usage(&self) -> usize {
         self.sstable_store.get_prefetch_memory_usage()
     }

@@ -329,7 +329,7 @@ impl SstableStore {
             )
             .and_then(|bytes| {
                 MemoryUsageTracker::try_new(
-                    &self.prefetch_buffer_usage,
+                    self.prefetch_buffer_usage.clone(),
                     bytes,
                     self.prefetch_buffer_capacity,
                 )

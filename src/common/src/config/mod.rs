@@ -1087,12 +1087,7 @@ pub mod tests {
             ("storage.scan_prefetch", vec!["max_blocks", "max_bytes"]),
             (
                 "storage.read_batch",
-                vec![
-                    "concurrency",
-                    "meta_max_entries",
-                    "meta_max_bytes",
-                    "meta_shared_max_bytes",
-                ],
+                vec!["concurrency", "meta_max_entries", "meta_max_bytes"],
             ),
             (
                 "storage.object_store.read_scheduler",

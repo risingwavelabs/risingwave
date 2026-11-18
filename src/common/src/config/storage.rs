@@ -705,10 +705,6 @@ pub struct ReadBatchConfig {
     /// Retained regular metadata bytes; one oversized SST may additionally be retained.
     #[serde(default = "default_read_meta_bytes")]
     pub meta_max_bytes: NonZeroUsize,
-    /// Total SST metadata weight retained by read batches sharing a Hummock store, including oversized entries.
-    /// Batches sharing a live cache entry are charged once. Reads continue when the budget is full.
-    #[serde(default = "default_read_meta_shared_bytes")]
-    pub meta_shared_max_bytes: NonZeroUsize,
 }
 
 /// Object-store range coalescing and dispatch.
@@ -779,9 +775,6 @@ fn default_read_meta_entries() -> NonZeroUsize {
 }
 fn default_read_meta_bytes() -> NonZeroUsize {
     NonZeroUsize::new(1024 * 1024).unwrap()
-}
-fn default_read_meta_shared_bytes() -> NonZeroUsize {
-    NonZeroUsize::new(64 * 1024 * 1024).unwrap()
 }
 fn default_dedicated_io_runtime_workers() -> NonZeroUsize {
     NonZeroUsize::new(2).unwrap()
