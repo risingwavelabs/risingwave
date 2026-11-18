@@ -11,6 +11,7 @@ use sea_orm::{
     Statement, TransactionTrait,
 };
 use sea_orm_migration::prelude::*;
+use thiserror_ext::AsReport;
 
 // Keep in sync with `FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan`.
 const CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN_FLAG: i32 = 1 << 13;
@@ -98,7 +99,8 @@ async fn backfill_cross_db_subscriptions(manager: &SchemaManager<'_>) -> Result<
         let fragment = FragmentRow::from_query_result(&row, "")?;
         let stream_node = PbStreamNode::decode(fragment.stream_node.as_slice()).map_err(|err| {
             DbErr::Custom(format!(
-                "failed to decode stream node for cross-database subscription migration: {err}"
+                "failed to decode stream node for cross-database subscription migration: {}",
+                err.as_report()
             ))
         })?;
         collect_cross_db_dependencies(fragment.job_id, &stream_node, &mut cross_db_dependencies)?;

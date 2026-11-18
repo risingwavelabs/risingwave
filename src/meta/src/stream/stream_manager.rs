@@ -436,8 +436,9 @@ impl GlobalStreamManager {
                     .await
                     .map_err(|err| (err, false, None))?;
             }
-            let streaming_job = stream_manager
-                .run_create_streaming_job_command(stream_job_fragments, ctx)
+            let streaming_job = Box::pin(
+                stream_manager.run_create_streaming_job_command(stream_job_fragments, ctx),
+            )
                 .await
                 .map_err(|err| (err, false, None))?;
             // The create command has been collected, so rescheduling no longer conflicts with
