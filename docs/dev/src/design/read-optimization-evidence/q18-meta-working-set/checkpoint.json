@@ -1,0 +1,25 @@
+{
+  "elapsed_since_ddl_s": 207.5598760843277,
+  "frozen_layout_sha256": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+  "objects_with_membership": 95,
+  "phase_work": {
+    "meta_total": 11039621,
+    "meta_miss": 1,
+    "ready": 6269680,
+    "rejected": 11015007,
+    "oversized_retained": 6152,
+    "data_miss": 4500,
+    "bloom_checks": 17309195,
+    "bloom_negative": 15735513,
+    "join_lookup": 1573674,
+    "join_lookup_miss": 1573674,
+    "join_match_timer_ns": 138409458644,
+    "iter_init_ns": 108618477193,
+    "iter_init_count": 1573455,
+    "get": 57354,
+    "read_bytes": 20643117675,
+    "retry": 0,
+    "cpu_seconds": 1130
+  },
+  "nonempty_samples_at_pause": 96
+}

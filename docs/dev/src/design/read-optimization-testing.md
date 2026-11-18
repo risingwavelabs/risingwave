@@ -4175,3 +4175,17 @@ budget is an experimental control and does not establish Q18 metadata
 weights or a production default. The [fixture geometry, paired results,
 and raw metrics](read-optimization-evidence/hashjoin-meta-budget-fixed-sst-98126.md)
 are recorded with the exact binary and benchmark patch.
+
+### SF10 Q18 HashJoin metadata working set
+
+Real HashJoin fragment 23 sampled 97 input chunks from Q18. Each
+visited 11 distinct SSTs with a combined decoded metadata weight of
+8.45–8.81 MiB. Each chunk had four handles heavier than 1 MiB.
+The regular 1 MiB cap and one oversized slot retained four of the
+11 handles. A 9 MiB regular budget covered the sampled working set.
+
+Two restored pairs used the same paused SST snapshot and 2.5 million
+probes per arm. Raising the budget from 1 to 9 MiB reduced table-38
+Foyer lookups by 99.37%, HashJoin match time by 73.95%, and wall time
+by 74.53%. Peak CN RSS increased from 1.844 to 2.233 GiB. See the
+[working set, controls, per-arm results, and raw data](read-optimization-evidence/q18-meta-working-set/README.md).

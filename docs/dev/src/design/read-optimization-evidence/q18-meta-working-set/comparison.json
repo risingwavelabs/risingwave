@@ -1,0 +1,250 @@
+{
+  "invariants": {
+    "join_lookup": [
+      2500000,
+      2500000,
+      2500000,
+      2500000
+    ],
+    "join_lookup_miss": [
+      2500000,
+      2500000,
+      2500000,
+      2500000
+    ],
+    "bloom_checks": [
+      27823676,
+      28157969,
+      28122181,
+      27639344
+    ],
+    "bloom_negative": [
+      25293954,
+      25597445,
+      25564059,
+      25126435
+    ],
+    "iter_init_count": [
+      2529266,
+      2559627,
+      2556293,
+      2512521
+    ]
+  },
+  "means": {
+    "Foyer meta queries": {
+      "a": 17686946.5,
+      "b": 111754,
+      "change_pct": -99.36815549252665
+    },
+    "Foyer meta misses": {
+      "a": 59.5,
+      "b": 60.5,
+      "change_pct": 1.680672268907563
+    },
+    "Per-chunk meta hits": {
+      "a": 10044865,
+      "b": 28028377,
+      "change_pct": 179.03189341021508
+    },
+    "Retain rejects": {
+      "a": 17647514,
+      "b": 1712,
+      "change_pct": -99.99029891688994
+    },
+    "HashJoin active actor-seconds": {
+      "a": 293.54141952550003,
+      "b": 76.4674799705,
+      "change_pct": -73.95002037732625
+    },
+    "Iterator init actor-seconds": {
+      "a": 247.860356492,
+      "b": 47.859616718,
+      "change_pct": -80.69089490737308
+    },
+    "Wall seconds to 2.5M probes": {
+      "a": 76.19398624127786,
+      "b": 19.40287971496681,
+      "change_pct": -74.53489353670885
+    },
+    "Baseline CN RSS GiB": {
+      "a": 0.1783294677734375,
+      "b": 0.17856597900390625,
+      "change_pct": 0.13262599469496023
+    },
+    "Peak CN RSS GiB": {
+      "a": 1.8440170288085938,
+      "b": 2.2327728271484375,
+      "change_pct": 21.082006959068924
+    },
+    "CN CPU seconds": {
+      "a": 420.5,
+      "b": 137.5,
+      "change_pct": -67.30083234244947
+    },
+    "CN object GETs": {
+      "a": 9325.5,
+      "b": 9499.5,
+      "change_pct": 1.8658516969599486
+    },
+    "CN read GiB": {
+      "a": 0.9774115099571645,
+      "b": 1.1037077675573528,
+      "change_pct": 12.921503001916076
+    }
+  },
+  "arms": [
+    {
+      "arm": "a1",
+      "meta_budget_bytes": 1048576,
+      "seconds_to_probe_horizon": 78.08043136515087,
+      "baseline_rss_kib": 187296,
+      "peak_rss_kib": 1920336,
+      "sampled_rss_through_s": 78.26190208410844,
+      "initial_layout": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+      "phase": {
+        "meta_total": 17745612,
+        "meta_miss": 60,
+        "ready": 10078184,
+        "rejected": 17706050,
+        "oversized_retained": 9889,
+        "data_miss": 7225,
+        "bloom_checks": 27823676,
+        "bloom_negative": 25293954,
+        "join_lookup": 2500000,
+        "join_lookup_miss": 2500000,
+        "join_match_timer_ns": 297353642826,
+        "iter_init_ns": 250884623002,
+        "iter_init_count": 2529266,
+        "get": 9362,
+        "read_bytes": 1058063313,
+        "retry": 0,
+        "cpu_seconds": 427
+      },
+      "horizon_scrape_time_bounds_s": [
+        77.23723779199645,
+        78.26190208410844
+      ],
+      "horizon_probe_count_bounds": [
+        2472428,
+        2505934
+      ],
+      "meta_accounting_delta": 120,
+      "observed_later_write_stall_after_probes": 3809844
+    },
+    {
+      "arm": "b1",
+      "meta_budget_bytes": 9437184,
+      "seconds_to_probe_horizon": 19.195586961069175,
+      "baseline_rss_kib": 185728,
+      "peak_rss_kib": 2317552,
+      "sampled_rss_through_s": 19.55668808426708,
+      "initial_layout": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+      "phase": {
+        "meta_total": 111827,
+        "meta_miss": 62,
+        "ready": 28046497,
+        "rejected": 1720,
+        "oversized_retained": 0,
+        "data_miss": 7339,
+        "bloom_checks": 28157969,
+        "bloom_negative": 25597445,
+        "join_lookup": 2500000,
+        "join_lookup_miss": 2500000,
+        "join_match_timer_ns": 75664912174,
+        "iter_init_ns": 47304573931,
+        "iter_init_count": 2559627,
+        "get": 9514,
+        "read_bytes": 1184743498,
+        "retry": 0,
+        "cpu_seconds": 136
+      },
+      "horizon_scrape_time_bounds_s": [
+        18.535548666957766,
+        19.55668808426708
+      ],
+      "horizon_probe_count_bounds": [
+        2408348,
+        2550142
+      ],
+      "meta_accounting_delta": 355,
+      "resume_ack_s": 0.05438608396798372
+    },
+    {
+      "arm": "b2",
+      "meta_budget_bytes": 9437184,
+      "seconds_to_probe_horizon": 19.610172468864448,
+      "baseline_rss_kib": 188752,
+      "peak_rss_kib": 2364912,
+      "sampled_rss_through_s": 20.568665000144392,
+      "initial_layout": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+      "phase": {
+        "meta_total": 111681,
+        "meta_miss": 59,
+        "ready": 28010257,
+        "rejected": 1704,
+        "oversized_retained": 0,
+        "data_miss": 7329,
+        "bloom_checks": 28122181,
+        "bloom_negative": 25564059,
+        "join_lookup": 2500000,
+        "join_lookup_miss": 2500000,
+        "join_match_timer_ns": 77270047767,
+        "iter_init_ns": 48414659505,
+        "iter_init_count": 2556293,
+        "get": 9485,
+        "read_bytes": 1185450885,
+        "retry": 0,
+        "cpu_seconds": 139
+      },
+      "horizon_scrape_time_bounds_s": [
+        19.546324416063726,
+        20.568665000144392
+      ],
+      "horizon_probe_count_bounds": [
+        2491644,
+        2625441
+      ],
+      "meta_accounting_delta": -243,
+      "resume_ack_s": 0.046013208106160164
+    },
+    {
+      "arm": "a2",
+      "meta_budget_bytes": 1048576,
+      "seconds_to_probe_horizon": 74.30754111740485,
+      "baseline_rss_kib": 186688,
+      "peak_rss_kib": 1946848,
+      "sampled_rss_through_s": 75.05306858289987,
+      "initial_layout": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+      "phase": {
+        "meta_total": 17628281,
+        "meta_miss": 59,
+        "ready": 10011546,
+        "rejected": 17588978,
+        "oversized_retained": 9824,
+        "data_miss": 7173,
+        "bloom_checks": 27639344,
+        "bloom_negative": 25126435,
+        "join_lookup": 2500000,
+        "join_lookup_miss": 2500000,
+        "join_match_timer_ns": 289729196225,
+        "iter_init_ns": 244836089982,
+        "iter_init_count": 2512521,
+        "get": 9289,
+        "read_bytes": 1040911922,
+        "retry": 0,
+        "cpu_seconds": 414
+      },
+      "horizon_scrape_time_bounds_s": [
+        74.02967962482944,
+        75.05306858289987
+      ],
+      "horizon_probe_count_bounds": [
+        2494926,
+        2513614
+      ],
+      "meta_accounting_delta": 483,
+      "resume_ack_s": 0.05131075019016862
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "arm": "a1",
+  "meta_budget_bytes": 1048576,
+  "seconds_to_probe_horizon": 78.08043136515087,
+  "baseline_rss_kib": 187296,
+  "peak_rss_kib": 1920336,
+  "sampled_rss_through_s": 78.26190208410844,
+  "initial_layout": "7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b",
+  "phase": {
+    "meta_total": 17745612,
+    "meta_miss": 60,
+    "ready": 10078184,
+    "rejected": 17706050,
+    "oversized_retained": 9889,
+    "data_miss": 7225,
+    "bloom_checks": 27823676,
+    "bloom_negative": 25293954,
+    "join_lookup": 2500000,
+    "join_lookup_miss": 2500000,
+    "join_match_timer_ns": 297353642826,
+    "iter_init_ns": 250884623002,
+    "iter_init_count": 2529266,
+    "get": 9362,
+    "read_bytes": 1058063313,
+    "retry": 0,
+    "cpu_seconds": 427
+  },
+  "horizon_scrape_time_bounds_s": [
+    77.23723779199645,
+    78.26190208410844
+  ],
+  "horizon_probe_count_bounds": [
+    2472428,
+    2505934
+  ],
+  "meta_accounting_delta": 120,
+  "observed_later_write_stall_after_probes": 3809844
+}

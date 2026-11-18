@@ -1,0 +1,46 @@
+{
+  "source": "98126f898412f675ebdd406c35cd273f4972dd2b",
+  "command": [
+    "cargo",
+    "build",
+    "--offline",
+    "--locked",
+    "--release",
+    "--no-default-features",
+    "-p",
+    "risingwave_cmd_all",
+    "--bin",
+    "risingwave",
+    "-j",
+    "4",
+    "--message-format=json",
+    "--config",
+    "profile.release.package.risingwave_license.debug-assertions=true"
+  ],
+  "env": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO": "unpacked"
+  },
+  "patch_sha256": "17f611b98bdb97d1d4bf3f25b4a417e66ffe4beec627e261cecf5040afa146ec",
+  "service-artifact": {
+    "source_head": "98126f898412f675ebdd406c35cd273f4972dd2b",
+    "source_diff_sha256": "17f611b98bdb97d1d4bf3f25b4a417e66ffe4beec627e261cecf5040afa146ec",
+    "profile": {
+      "opt_level": "3",
+      "debuginfo": 2,
+      "debug_assertions": false,
+      "overflow_checks": false,
+      "test": false
+    },
+    "sha256": "051b79433a6300f4b756d264b54c82103af0c3a40b2f19086632c6f555605efb"
+  },
+  "license-artifact": {
+    "profile": {
+      "opt_level": "3",
+      "debuginfo": 2,
+      "debug_assertions": true,
+      "overflow_checks": false,
+      "test": false
+    }
+  }
+}

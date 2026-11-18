@@ -1,0 +1,8 @@
+foyer_memory_usage{name="foyer.data"} 180310284
+foyer_memory_usage{name="foyer.meta"} 54090943
+jemalloc_active_bytes 1176977408
+jemalloc_allocated_bytes 1012121160
+jemalloc_resident_bytes 2374729728
+process_resident_memory_bytes 2421440512
+state_store_uploader_imm_size 103784784
+state_store_uploader_uploading_task_size 0

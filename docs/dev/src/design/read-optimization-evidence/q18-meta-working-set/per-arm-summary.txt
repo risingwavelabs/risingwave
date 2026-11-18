@@ -1,0 +1,19 @@
+Snapshot fingerprint: 7a535eb1dc8c00b422424576719a8b7cab8dac88d013431b09c30409e9a8d00b
+Captured probe counts: 1573674 ; restored: {'join_lookup': [2500000, 2500000, 2500000, 2500000], 'join_lookup_miss': [2500000, 2500000, 2500000, 2500000], 'bloom_checks': [27823676, 28157969, 28122181, 27639344], 'bloom_negative': [25293954, 25597445, 25564059, 25126435], 'iter_init_count': [2529266, 2559627, 2556293, 2512521]}
+| Metric | a1 (1 MiB) | b1 (9 MiB) | b2 (9 MiB) | a2 (1 MiB) | B change vs A average |
+|---|---:|---:|---:|---:|---:|
+| Foyer meta queries | 17,745,612 | 111,827 | 111,681 | 17,628,281 | -99.37% |
+| Foyer meta misses | 60 | 62 | 59 | 59 | +1.68% |
+| Per-chunk meta hits | 10,078,184 | 28,046,497 | 28,010,257 | 10,011,546 | +179.03% |
+| Retain rejects | 17,706,050 | 1,720 | 1,704 | 17,588,978 | -99.99% |
+| HashJoin active actor-seconds | 297.354 | 75.665 | 77.270 | 289.729 | -73.95% |
+| Iterator init actor-seconds | 250.885 | 47.305 | 48.415 | 244.836 | -80.69% |
+| Wall seconds to 2.5M probes | 78.080 | 19.196 | 19.610 | 74.308 | -74.53% |
+| Baseline CN RSS GiB | 0.179 | 0.177 | 0.180 | 0.178 | +0.13% |
+| Peak CN RSS GiB | 1.831 | 2.210 | 2.255 | 1.857 | +21.08% |
+| CN CPU seconds | 427 | 136 | 139 | 414 | -67.30% |
+| CN object GETs | 9,362 | 9,514 | 9,485 | 9,289 | +1.87% |
+| CN read GiB | 0.985 | 1.103 | 1.104 | 0.969 | +12.92% |
+Different bloom_checks 518625 absolute; relative 0.018764012633584848
+Different bloom_negative 471010 absolute; relative 0.018745596022675004
+Different iter_init_count 47106 absolute; relative 0.01874850001253714
