@@ -34,7 +34,7 @@ use super::QueryExecution;
 use super::stats::DistributedQueryMetrics;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::{ExecutionContextRef, SchedulerResult};
+use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerResult};
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
@@ -190,9 +190,11 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         mut query: Query,
+        snapshot_override: Option<ReadSnapshot>,
     ) -> SchedulerResult<DistributedQueryStream> {
         // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot();
+        let pinned_snapshot =
+            snapshot_override.unwrap_or_else(|| context.session().pinned_snapshot());
         pinned_snapshot.fill_batch_query_epoch(&mut query)?;
 
         if let Some(query_limit) = self.distributed_query_limit

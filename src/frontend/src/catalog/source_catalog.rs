@@ -117,6 +117,59 @@ impl SourceCatalog {
         self.info.external_table.is_some()
     }
 
+    pub fn is_iceberg_update_source(&self) -> bool {
+        self.with_properties.is_iceberg_update_source()
+    }
+
+    /// The single place enforcing Iceberg `streaming_updates` restrictions. Called at the end of
+    /// CREATE SOURCE / CREATE TABLE binding, and again when binding a restored catalog.
+    pub fn validate_iceberg_update_source(&self) -> Result<()> {
+        if !self.is_iceberg_update_source() {
+            return Ok(());
+        }
+        let full_reload = self.refresh_mode.as_ref().is_some_and(|mode| {
+            matches!(
+                mode.refresh_mode,
+                Some(risingwave_pb::plan_common::source_refresh_mode::RefreshMode::FullReload(_))
+            )
+        });
+        let unsupported = [
+            (self.info.is_shared(), "shared sources"),
+            (full_reload, "FULL_RELOAD refresh"),
+            (self.rate_limit.is_some(), "source rate limiting"),
+            (
+                self.columns
+                    .iter()
+                    .any(ColumnCatalog::is_connector_additional_column),
+                "INCLUDE columns",
+            ),
+            (!self.watermark_descs.is_empty(), "watermarks"),
+        ];
+        if let Some((_, feature)) = unsupported.iter().find(|(violated, _)| *violated) {
+            return Err(crate::error::ErrorCode::NotSupported(
+                format!("Iceberg streaming_updates does not support {feature}"),
+                "Remove it, or set streaming_updates = 'false'".to_owned(),
+            )
+            .into());
+        }
+
+        let stored_columns = self
+            .columns
+            .iter()
+            .all(|column| !column.is_iceberg_hidden_column() && !column.is_generated());
+        let has_key = !self.pk_col_ids.is_empty()
+            && self
+                .pk_col_ids
+                .iter()
+                .all(|id| self.columns.iter().any(|column| column.column_id() == *id));
+        if !stored_columns || !has_key || self.append_only || self.row_id_index.is_some() {
+            return Err(crate::error::ErrorCode::BindError(
+                "invalid Iceberg update source catalog: requires stored logical columns and a SQL primary key, without generated row IDs".to_owned()
+            ).into());
+        }
+        Ok(())
+    }
+
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
     pub fn iceberg_table_name(&self) -> Option<String> {
         if self.name.starts_with(ICEBERG_SOURCE_PREFIX) {
@@ -137,9 +190,9 @@ impl SourceCatalog {
     ///
     /// Returns error if it's invalid.
     pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
-        if self.with_properties.is_cdc_connector() {
-            // For CDC sources, we should not purify the SQL definition to add column definitions
-            // or constraints.
+        if self.with_properties.is_cdc_connector() || self.is_iceberg_update_source() {
+            // These sources infer their schema. Preserve the SQL primary key for update sources
+            // without adding inferred column definitions that their CREATE path rejects.
             return self.create_sql_ast();
         }
 

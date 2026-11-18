@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod buffer_table_cache;
 mod eowc_gap_fill;
 mod sort;
 mod sort_buffer;
 
+pub use buffer_table_cache::BufferTableCache;
 pub use eowc_gap_fill::{EowcGapFillExecutor, EowcGapFillExecutorArgs};
 pub use sort::{SortExecutor, SortExecutorArgs};
 pub use sort_buffer::SortBuffer;

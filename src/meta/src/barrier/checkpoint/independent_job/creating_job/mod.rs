@@ -185,7 +185,10 @@ impl CreatingStreamingJobControl {
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
         let opts = &partial_graph_manager.control_stream_manager().env.opts;
-        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(
+            opts.in_flight_barrier_nums,
+            opts.snapshot_backfill_barrier_amplification_factor,
+        );
 
         let mut job = Self {
             control: IndependentJobControl::new(independent_job_info),
@@ -736,7 +739,10 @@ impl CreatingStreamingJobControl {
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
         let opts = &partial_graph_recoverer.control_stream_manager().env.opts;
-        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(
+            opts.in_flight_barrier_nums,
+            opts.snapshot_backfill_barrier_amplification_factor,
+        );
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
@@ -776,14 +782,17 @@ impl CreatingStreamingJobControl {
             } => format!("LogStore [pending barriers: {}]", pending_barriers.len()),
             CreatingStreamingJobStatus::ConsumingUpstream { .. } => "Upstream".to_owned(),
             CreatingStreamingJobStatus::Finishing(finish_epoch, ..) => {
-                let committed_epoch = self
-                    .control
-                    .max_committed_epoch
-                    .expect("should have committed");
-                let lag = Duration::from_millis(
-                    Epoch(*finish_epoch).physical_time() - Epoch(committed_epoch).physical_time(),
-                );
-                format!("Finishing [epoch lag: {lag:?}]",)
+                if let Some(committed_epoch) = self.control.max_committed_epoch {
+                    let lag = Duration::from_millis(
+                        Epoch(*finish_epoch)
+                            .physical_time()
+                            .saturating_sub(Epoch(committed_epoch).physical_time()),
+                    );
+                    format!("Finishing [epoch lag: {lag:?}]")
+                } else {
+                    // Collection can finish before the first checkpoint is durably committed.
+                    "Finishing [waiting for first checkpoint]".to_owned()
+                }
             }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -1102,7 +1111,42 @@ impl CreatingStreamingJobControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manager::MetaOpts;
+
+    #[test]
+    fn test_finishing_progress_before_first_checkpoint() {
+        let job_id = JobId::new(1);
+        let mut job = CreatingStreamingJobControl {
+            control: IndependentJobControl::new(IndependentJobInfo {
+                job_id,
+                partial_graph_id: 1.into(),
+                snapshot_backfill_upstream_tables: HashSet::new(),
+                snapshot_epoch: Epoch::from_physical_time(1000).0,
+                state_table_ids: HashSet::new(),
+            }),
+            node_actors: HashMap::new(),
+            status: CreatingStreamingJobStatus::Finishing(
+                Epoch::from_physical_time(2000).0,
+                TrackingJob::recovered(job_id, &HashMap::new()),
+            ),
+            max_lagged_barrier_num: 10,
+            max_pending_barrier_num: 10,
+            upstream_lag: GLOBAL_META_METRICS
+                .snapshot_backfill_lag
+                .with_guarded_label_values(&[&job_id.to_string()]),
+        };
+        assert_eq!(
+            job.gen_backfill_progress().progress,
+            "Finishing [waiting for first checkpoint]"
+        );
+        for (committed_time, expected_lag) in [(1500, "500ms"), (2000, "0ns"), (2500, "0ns")] {
+            job.control
+                .ack_completed(Epoch::from_physical_time(committed_time).0);
+            assert_eq!(
+                job.gen_backfill_progress().progress,
+                format!("Finishing [epoch lag: {expected_lag}]")
+            );
+        }
+    }
 
     fn checkpoint_barrier(prev_epoch: u64, curr_epoch: u64) -> BarrierInfo {
         BarrierInfo {
@@ -1220,20 +1264,13 @@ mod tests {
 
     #[test]
     fn test_snapshot_backfill_max_pending_barrier_num() {
-        let mut opts = MetaOpts::test(false);
-        opts.in_flight_barrier_nums = 10;
-
-        opts.snapshot_backfill_barrier_amplification_factor = 0;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
-
-        opts.snapshot_backfill_barrier_amplification_factor = 1;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
-
-        opts.snapshot_backfill_barrier_amplification_factor = 10;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 100);
-
-        opts.in_flight_barrier_nums = usize::MAX;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), usize::MAX);
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(10, 0), 10);
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(10, 1), 10);
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(10, 10), 100);
+        assert_eq!(
+            snapshot_backfill_max_pending_barrier_num(usize::MAX, 10),
+            usize::MAX
+        );
     }
 
     #[test]

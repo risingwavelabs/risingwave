@@ -250,3 +250,74 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: lateral after a left item references an enclosing query
+  sql: |
+    create table a (a1 int);
+    select (select y from (select 100 as q) t1, lateral (select a1 + q as y) z) from a;
+  expected_outputs:
+    - batch_plan
+- name: explicit join lateral references an enclosing query
+  sql: |
+    create table a (a1 int);
+    select (select y from (select 100 as q) t1 cross join lateral (select a1 + q as y) z) from a;
+  expected_outputs:
+    - batch_plan
+- name: nested lateral references the left input of an enclosing lateral
+  sql: |
+    create table t1 (x int);
+    create table t2 (y int);
+    select * from t1, lateral (select * from t2, lateral (select x + y as s) iz) oz;
+  expected_outputs:
+    - batch_plan
+- name: non-lateral item under a join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table t1 (x int);
+    create table t2 (y int);
+    select a1, (select count(*) from t1, (t2 cross join (select a1 as v) w) where v = x) from a;
+  expected_outputs:
+    - batch_plan
+- name: non-lateral item under a nested lateral join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select a1, (select max(v) from t0, (t1 cross join (t2 cross join lateral (select y as yy) l cross join (select a1 as v) w))) from a;
+  expected_outputs:
+    - batch_plan
+- name: join condition under a nested lateral join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table b (b1 int);
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select a1, (select count(*) from t0, (t1 cross join (t2 cross join lateral (select y as yy) l join b on b1 = a1))) from a;
+  expected_outputs:
+    - batch_plan
+- name: lateral item under an intermediate join references an outer left input
+  sql: |
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select * from t0, (t1 cross join (t2 cross join lateral (select x + z as s) q));
+  expected_outputs:
+    - batch_plan
+- name: lateral table function under an intermediate join references an outer left input
+  sql: |
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select * from t0 cross join (t1 cross join (t2 cross join unnest(array[x, z]) u));
+  expected_outputs:
+    - batch_plan
+- name: lateral item under an intermediate join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select a1, (select max(s) from t0, (t1 cross join (t2 cross join lateral (select a1 + z as s) q))) from a;
+  expected_outputs:
+    - batch_plan

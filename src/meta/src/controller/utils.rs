@@ -2097,7 +2097,7 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
                 error = %e.as_report(),
                 "failed to parse table definition")
         })
-        .unwrap()
+        .ok()?
         .try_into()
         .unwrap();
     if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
@@ -2134,7 +2134,8 @@ pub async fn rename_relation(
             let old_name = relation.name.clone();
             relation.name = object_name.into();
             if obj.obj_type != ObjectType::View {
-                relation.definition = alter_relation_rename(&relation.definition, object_name);
+                relation.definition = alter_relation_rename(&relation.definition, object_name)
+                    .with_context(|| format!("failed to rename {old_name}"))?;
             }
             let active_model = $table::ActiveModel {
                 $identity: Set(relation.$identity),
@@ -2292,7 +2293,10 @@ pub async fn rename_relation_refer(
                 .await?
                 .unwrap();
             relation.definition =
-                alter_relation_rename_refs(&relation.definition, old_name, object_name);
+                alter_relation_rename_refs(&relation.definition, old_name, object_name)
+                    .with_context(|| {
+                        format!("failed to update the definition of {}", relation.name)
+                    })?;
             let active_model = $table::ActiveModel {
                 $identity: Set(relation.$identity),
                 definition: Set(relation.definition.clone()),

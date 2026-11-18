@@ -29,6 +29,7 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::anyhow;
 use iceberg::spec::SerializedDataFile;
 pub use manager::IcebergPkIndexSinkManager;
+pub(crate) use manager::IcebergPkIndexSinkRegistration;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, IcebergConfig};

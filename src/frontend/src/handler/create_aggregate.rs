@@ -21,7 +21,9 @@ use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_sqlparser::ast::DataType as AstDataType;
 
 use super::*;
-use crate::handler::create_function::reject_variant_in_udf_signature;
+use crate::handler::create_function::{
+    reject_variant_in_udf_signature, should_reject_function_behavior,
+};
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_aggregate(
@@ -74,6 +76,15 @@ pub async fn handle_create_aggregate(
         }
         None => None,
     };
+
+    if let Some(behavior) = &params.behavior
+        && should_reject_function_behavior(behavior, UdfKind::Aggregate)
+    {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "`{behavior}` is not supported for aggregate functions"
+        ))
+        .into());
+    }
 
     let return_type = bind_data_type(&returns)?;
 
@@ -146,6 +157,8 @@ pub async fn handle_create_aggregate(
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        unsafe_skip_materializing_exprs: false,
+        is_immutable: false,
         is_async: None,
         is_batched: None,
         created_at_epoch: None,

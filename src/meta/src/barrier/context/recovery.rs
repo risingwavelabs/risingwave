@@ -474,6 +474,8 @@ impl GlobalBarrierWorkerContextImpl {
             &self.refresh_manager,
             &self.hummock_manager,
             &self.metadata_manager,
+            &self.sink_manager,
+            &self.iceberg_pk_index_sink_manager,
             drop_cancel.streaming_job_ids,
             drop_cancel.dropped_state_table_ids,
             "drop_streaming_jobs",
@@ -495,10 +497,8 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
-        for sink_id in &cleaned_dirty_jobs.sink_ids {
-            self.iceberg_compaction_manager
-                .clear_iceberg_maintenance_by_sink_id(*sink_id);
-        }
+        self.iceberg_pk_index_sink_manager
+            .retire_sinks(cleaned_dirty_jobs.sink_ids.iter().copied());
         if database_id.is_some() {
             // Per-database recovery does not run the global Hummock purge below. Unregister the
             // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
@@ -506,6 +506,8 @@ impl GlobalBarrierWorkerContextImpl {
                 &self.refresh_manager,
                 &self.hummock_manager,
                 &self.metadata_manager,
+                &self.sink_manager,
+                &self.iceberg_pk_index_sink_manager,
                 cleaned_dirty_jobs.streaming_job_ids,
                 cleaned_dirty_jobs.dropped_table_ids,
                 "clean_dirty_creating_jobs",
@@ -541,13 +543,6 @@ impl GlobalBarrierWorkerContextImpl {
             {
                 continue;
             }
-            let config = crate::manager::iceberg_pk_index_sink::build_iceberg_config(&pb_sink)
-                .with_context(|| {
-                    format!(
-                        "build iceberg config while re-registering v3 sink {}",
-                        pb_sink.id
-                    )
-                })?;
             let state_table_id = self
                 .metadata_manager
                 .catalog_controller
@@ -576,12 +571,12 @@ impl GlobalBarrierWorkerContextImpl {
             futs.push(async move {
                 let partial_graph_id =
                     to_partial_graph_id(pb_sink.database_id, Some(pb_sink.id.as_job_id()));
-                let result = manager
-                    .register_sink(pb_sink.id, partial_graph_id, config)
-                    .await;
-                if result.is_ok() {
+                let result = async {
+                    manager.register_sink(pb_sink.id, partial_graph_id).await?;
                     manager.advance_committed_epochs([(partial_graph_id, recovered_epoch)]);
+                    Ok::<_, anyhow::Error>(())
                 }
+                .await;
                 (pb_sink.id, result)
             });
         }
@@ -806,6 +801,8 @@ impl GlobalBarrierWorkerContextImpl {
         };
         let mut min_downstream_committed_epochs = HashMap::new();
         for (job_id, fragments) in jobs {
+            let iceberg_v3 =
+                is_iceberg_v3_fragment_nodes(fragments.values().map(|fragment| &fragment.nodes));
             let job_committed_epoch =
                 Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
@@ -824,7 +821,16 @@ impl GlobalBarrierWorkerContextImpl {
                             job_id, upstream_table
                         )
                     })?;
-                    let pinned_epoch = max(snapshot_epoch, job_committed_epoch);
+                    let mut pinned_epoch = max(snapshot_epoch, job_committed_epoch);
+                    if iceberg_v3
+                        && let Some(log) = table_change_log.get(&upstream_table)
+                        && let Err(index) = log.binary_search_by_checkpoint_epoch(pinned_epoch)
+                        && let Some(previous) = index.checked_sub(1).and_then(|i| log.get(i))
+                    {
+                        // Compaction may commit between two upstream checkpoints.
+                        // Keep the preceding real checkpoint as the replay anchor.
+                        pinned_epoch = previous.checkpoint_epoch;
+                    }
                     match min_downstream_committed_epochs.entry(upstream_table) {
                         Entry::Occupied(entry) => {
                             let prev_min_epoch = entry.into_mut();
@@ -1211,7 +1217,7 @@ mod tests {
         let fragment_id = FragmentId::new(100);
         let upstream_table_id = TableId::new(200);
         let state_table_id = TableId::new(300);
-        let fragments = HashMap::from([(
+        let mut fragments = HashMap::from([(
             fragment_id,
             LoadedFragment {
                 fragment_id,
@@ -1282,6 +1288,56 @@ mod tests {
             log_epochs.get(&upstream_table_id).unwrap(),
             &vec![(vec![], 100), (vec![], 102)]
         );
+
+        // A completed compaction can be just beyond the upstream's durable head.
+        let fragment = fragments.get_mut(&fragment_id).unwrap();
+        fragment.nodes = PbStreamNode {
+            node_body: Some(PbNodeBody::IcebergWithPkIndexWriter(Default::default())),
+            input: vec![std::mem::take(&mut fragment.nodes)],
+            ..Default::default()
+        };
+        version.state_table_info =
+            HummockVersionStateTableInfo::from_protobuf_owned(HashMap::from([
+                (
+                    state_table_id,
+                    StateTableInfo {
+                        committed_epoch: 101,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+                (
+                    upstream_table_id,
+                    StateTableInfo {
+                        committed_epoch: 100,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+            ]));
+        let (_, log_epochs) = GlobalBarrierWorkerContextImpl::resolve_hummock_version_epochs(
+            std::iter::once((job_id, &fragments)),
+            &version,
+            &table_change_log,
+        )
+        .unwrap();
+        assert!(!log_epochs.contains_key(&upstream_table_id));
+
+        // A missing real checkpoint is not permission to guess a synthetic replay anchor.
+        for missing_logs in [
+            HashMap::new(),
+            HashMap::from([(upstream_table_id, TableChangeLog::new([]))]),
+        ] {
+            let error = GlobalBarrierWorkerContextImpl::resolve_hummock_version_epochs(
+                std::iter::once((job_id, &fragments)),
+                &version,
+                &missing_logs,
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("downstream epoch 101 later than upstream epoch 100")
+            );
+        }
     }
 
     #[test]

@@ -17,6 +17,7 @@ mod frame_finder;
 mod general;
 mod over_partition;
 mod range_cache;
+mod watermark_trigger;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 pub use general::{OverWindowExecutor, OverWindowExecutorArgs};

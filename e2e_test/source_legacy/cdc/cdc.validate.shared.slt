@@ -106,8 +106,8 @@ create table oracle_user_provided_heartbeat_action (
  debezium.heartbeat.action.query = 'UPDATE APP.RW_HEARTBEAT SET HEARTBEAT = 1 WHERE ID = 1'
 ) FORMAT DEBEZIUM ENCODE JSON;
 
-statement error 'database.pdb.name' must be an unquoted Oracle identifier
-create table oracle_invalid_pdb_identifier (
+statement error
+create table oracle_unsafe_pdb_name (
  id INT PRIMARY KEY
 ) with (
  connector = 'oracle-cdc',

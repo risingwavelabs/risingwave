@@ -236,24 +236,17 @@ impl CheckpointControl {
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
-        new_barrier: NewBarrier,
+        mut new_barrier: NewBarrier<'_>,
         partial_graph_manager: &mut PartialGraphManager,
-        periodic_barriers: &mut PeriodicBarriers,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
-        let NewBarrier {
-            database_id,
-            command,
-            span,
-            checkpoint,
-        } = new_barrier;
-
-        if let Some((mut command, notifier)) = command {
+        let database_id = new_barrier.database_id;
+        if let Some((command, _)) = &mut new_barrier.command {
             if let &mut Command::CreateStreamingJob {
                 ref mut cross_db_snapshot_backfill_info,
                 ref info,
                 ..
-            } = &mut command
+            } = command
             {
                 for (table_id, snapshot_epoch) in
                     &mut cross_db_snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
@@ -279,6 +272,9 @@ impl CheckpointControl {
                         let err: MetaError =
                             anyhow!("database of cross db upstream table {} not found", table_id)
                                 .into();
+                        let (_, notifier) = new_barrier
+                            .command
+                            .expect("matched command should still exist");
                         notifier.notify_start_failed(err);
 
                         return Ok(());
@@ -286,11 +282,39 @@ impl CheckpointControl {
                 }
             }
 
+            if let Command::ApplyIcebergPkIndexCompaction { sink_id, .. } = &*command
+                && self
+                    .databases
+                    .get(&database_id)
+                    .and_then(|database| database.running_state())
+                    .and_then(|database| {
+                        database
+                            .independent_checkpoint_job_controls
+                            .get(&sink_id.as_job_id())
+                    })
+                    .and_then(IndependentCheckpointJobControl::running)
+                    .is_none()
+            {
+                // DROP can overtake an asynchronous compaction result. Reject it before
+                // advancing epochs or injecting barriers, without recovering other jobs.
+                let err = anyhow!(
+                    "Iceberg V3 independent job for sink {} is not running in database {}",
+                    sink_id,
+                    database_id
+                )
+                .into();
+                let (_, notifier) = new_barrier
+                    .command
+                    .expect("matched command should still exist");
+                notifier.notify_start_failed(err);
+                return Ok(());
+            }
+
             let database = match self.databases.entry(database_id) {
                 Entry::Occupied(entry) => entry
                     .into_mut()
                     .expect_running("should not have command when not running"),
-                Entry::Vacant(entry) => match &command {
+                Entry::Vacant(entry) => match &*command {
                     Command::CreateStreamingJob { info, job_type, .. } => {
                         let CreateStreamingJobType::Normal = job_type else {
                             if cfg!(debug_assertions) {
@@ -298,7 +322,11 @@ impl CheckpointControl {
                                     "unexpected first job of type {job_type:?} with info {info:?}"
                                 );
                             } else {
-                                notifier.notify_start_failed(anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into());
+                                let err = anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into();
+                                let (_, notifier) = new_barrier
+                                    .command
+                                    .expect("matched command should still exist");
+                                notifier.notify_start_failed(err);
                                 return Ok(());
                             }
                         };
@@ -321,8 +349,11 @@ impl CheckpointControl {
                     | Command::Resume
                     | Command::DropStreamingJobs { .. }
                     | Command::DropSubscription { .. } => {
-                        notifier.start().started();
                         warn!(?command, "skip command for empty database");
+                        let (_, notifier) = new_barrier
+                            .command
+                            .expect("matched command should still exist");
+                        notifier.start().started();
                         return Ok(());
                     }
                     Command::RescheduleIntent { .. }
@@ -347,7 +378,11 @@ impl CheckpointControl {
                             )
                         } else {
                             warn!(%database_id, ?command, "database does not exist while handling the command");
-                            notifier.notify_start_failed(anyhow!("database {database_id} does not exist while handling command {command:?}").into());
+                            let err = anyhow!("database {database_id} does not exist while handling command {command:?}").into();
+                            let (_, notifier) = new_barrier
+                                .command
+                                .expect("matched command should still exist");
+                            notifier.notify_start_failed(err);
                             return Ok(());
                         }
                     }
@@ -355,11 +390,8 @@ impl CheckpointControl {
             };
 
             database.handle_new_barrier(
-                Some((command, notifier)),
-                checkpoint,
-                span,
+                new_barrier,
                 partial_graph_manager,
-                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -383,11 +415,8 @@ impl CheckpointControl {
                 return Ok(());
             }
             database.handle_new_barrier(
-                None,
-                checkpoint,
-                span,
+                new_barrier,
                 partial_graph_manager,
-                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -1236,18 +1265,16 @@ impl DatabaseCheckpointControl {
     /// Handle the new barrier from the scheduled queue and inject it.
     fn handle_new_barrier(
         &mut self,
-        command: Option<(Command, Notifier)>,
-        checkpoint: bool,
-        span: tracing::Span,
+        mut new_barrier: NewBarrier<'_>,
         partial_graph_manager: &mut PartialGraphManager,
-        periodic_barriers: &mut PeriodicBarriers,
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let prev_epoch = self.state.in_flight_prev_epoch();
         let curr_epoch = prev_epoch.next();
 
-        let (mut command, notifier) = if let Some((command, notifier)) = command {
+        let (mut command, notifier) = if let Some((command, notifier)) = new_barrier.command.take()
+        {
             (Some(command), Some(notifier))
         } else {
             (None, None)
@@ -1377,12 +1404,14 @@ impl DatabaseCheckpointControl {
             return Ok(());
         }
 
-        let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
+        let barrier_info = self
+            .state
+            .next_barrier_info(new_barrier.checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch(), "new barrier enqueued");
         });
-        span.record("epoch", barrier_info.curr_epoch());
+        new_barrier.span.record("epoch", barrier_info.curr_epoch());
 
         let epoch = barrier_info.epoch();
         let ApplyCommandInfo { jobs_to_wait } = match self.apply_command(
@@ -1390,7 +1419,7 @@ impl DatabaseCheckpointControl {
             &mut notifier_start,
             barrier_info,
             partial_graph_manager,
-            periodic_barriers,
+            new_barrier.periodic_barriers,
             hummock_version_stats,
             worker_nodes,
         ) {
@@ -1406,6 +1435,8 @@ impl DatabaseCheckpointControl {
                 return Err(err);
             }
         };
+
+        new_barrier.injected();
 
         // Record the in-flight barrier.
         self.enqueue_command(epoch, jobs_to_wait);
@@ -1463,5 +1494,118 @@ impl DatabaseCheckpointControl {
             ),
             _ => panic!("job {} should be a batch refresh job", job_id),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use risingwave_common::id::SinkId;
+
+    use super::*;
+    use crate::barrier::IcebergPkIndexCompactionOverwrite;
+    use crate::barrier::info::{CreateStreamingJobStatus, InflightStreamingJobInfo};
+
+    fn compaction_command(sink_id: SinkId) -> Command {
+        Command::ApplyIcebergPkIndexCompaction {
+            sink_id,
+            task_id: 9.into(),
+            overwrite: IcebergPkIndexCompactionOverwrite {
+                output_result: Default::default(),
+                input_file_paths: vec!["s3://bucket/input.parquet".to_owned()],
+                read_snapshot_id: 10,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pk_index_compaction_rejects_dropped_targets_without_advancing_barriers() {
+        let env = MetaSrvEnv::for_test().await;
+        let database_id = DatabaseId::new(1);
+        let sink_id = SinkId::new(42);
+        for resetting in [true, false] {
+            for has_other_job in [true, false] {
+                let mut control = CheckpointControl::new(env.clone());
+                let mut database =
+                    DatabaseCheckpointControl::new(database_id, env.shared_actor_infos().clone());
+                if has_other_job {
+                    database
+                        .database_info
+                        .add_existing(InflightStreamingJobInfo {
+                            job_id: JobId::new(43),
+                            fragment_infos: HashMap::new(),
+                            subscribers: HashMap::new(),
+                            status: CreateStreamingJobStatus::Created,
+                            cdc_table_backfill_tracker: None,
+                        });
+                }
+                if resetting {
+                    // DROP has started resetting the target, but its acknowledgment is pending.
+                    database.independent_checkpoint_job_controls.insert(
+                        sink_id.as_job_id(),
+                        IndependentCheckpointJobControl::Resetting {
+                            pinned_upstream_tables: HashSet::new(),
+                            subscriptions_to_drop: vec![],
+                            notifiers: vec![],
+                        },
+                    );
+                }
+                let prev_epoch = database.state.in_flight_prev_epoch().value();
+                control.databases.insert(
+                    database_id,
+                    DatabaseCheckpointControlStatus::Running(database),
+                );
+                let mut graphs = PartialGraphManager::uninitialized(env.clone());
+                let mut periodic = PeriodicBarriers::new(Duration::from_secs(1), 10, vec![]);
+                let (notifier, started) = Notifier::new();
+
+                let result = control.handle_new_barrier(
+                    NewBarrier::for_test(
+                        database_id,
+                        Some((compaction_command(sink_id), notifier)),
+                        true,
+                        &mut periodic,
+                    ),
+                    &mut graphs,
+                    &HashMap::new(),
+                );
+                assert!(result.is_ok(), "stale compaction must not trigger recovery");
+                let error = started.await.unwrap().unwrap_err();
+                assert!(error.to_string().contains("not running"));
+                let database = control.databases[&database_id].running_state().unwrap();
+                assert_eq!(database.state.in_flight_prev_epoch().value(), prev_epoch);
+                assert_eq!(
+                    database.database_info.contains_job(JobId::new(43)),
+                    has_other_job
+                );
+                assert_eq!(
+                    database.independent_checkpoint_job_controls.len(),
+                    usize::from(resetting)
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pk_index_compaction_rejects_missing_database() {
+        let env = MetaSrvEnv::for_test().await;
+        let mut control = CheckpointControl::new(env.clone());
+        let mut graphs = PartialGraphManager::uninitialized(env);
+        let mut periodic = PeriodicBarriers::new(Duration::from_secs(1), 10, vec![]);
+        let (notifier, started) = Notifier::new();
+        let result = control.handle_new_barrier(
+            NewBarrier::for_test(
+                DatabaseId::new(1),
+                Some((compaction_command(SinkId::new(42)), notifier)),
+                true,
+                &mut periodic,
+            ),
+            &mut graphs,
+            &HashMap::new(),
+        );
+        assert!(result.is_ok());
+        assert!(started.await.unwrap().is_err());
+        assert!(control.databases.is_empty());
     }
 }

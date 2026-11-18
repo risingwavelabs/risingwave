@@ -24,12 +24,12 @@ use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableReader, MySqlOffset,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableReader, MysqlOffset,
     SchemaTableName,
 };
 #[derive(Debug)]
 pub struct MockExternalTableReader {
-    binlog_watermarks: Vec<MySqlOffset>,
+    binlog_watermarks: Vec<MysqlOffset>,
     snapshot_cnt: AtomicUsize,
     snapshot_errors_remaining: AtomicUsize,
     cdc_offset_idx: AtomicUsize,
@@ -44,11 +44,11 @@ impl MockExternalTableReader {
         // - ignore events before (1.binlog, pos=2);
         // - apply events in the range of (1.binlog, pos=2, 1.binlog, pos=4) to the snapshot
         let binlog_watermarks = vec![
-            MySqlOffset::new(binlog_file.clone(), 2), // binlog low watermark
-            MySqlOffset::new(binlog_file.clone(), 4),
-            MySqlOffset::new(binlog_file.clone(), 6),
-            MySqlOffset::new(binlog_file.clone(), 8),
-            MySqlOffset::new(binlog_file, 10),
+            MysqlOffset::new(binlog_file.clone(), 2), // binlog low watermark
+            MysqlOffset::new(binlog_file.clone(), 4),
+            MysqlOffset::new(binlog_file.clone(), 6),
+            MysqlOffset::new(binlog_file.clone(), 8),
+            MysqlOffset::new(binlog_file, 10),
         ];
         let parallel_backfill_snapshots = vec![
             OwnedRow::new(vec![
@@ -119,7 +119,7 @@ impl MockExternalTableReader {
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
         Box::new(move |offset| {
-            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+            Ok(CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(
                 offset,
             )?))
         })
@@ -191,9 +191,9 @@ impl ExternalTableReader for MockExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let idx = self.cdc_offset_idx.fetch_add(1, Ordering::Relaxed);
         if idx < self.binlog_watermarks.len() {
-            Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
+            Ok(CdcOffset::Mysql(self.binlog_watermarks[idx].clone()))
         } else {
-            Ok(CdcOffset::MySql(MySqlOffset {
+            Ok(CdcOffset::Mysql(MysqlOffset {
                 filename: "1.binlog".to_owned(),
                 position: u64::MAX,
             }))

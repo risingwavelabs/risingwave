@@ -21,6 +21,7 @@ use anyhow::anyhow;
 use futures::future::{Either, try_join_all};
 use futures::{Stream, TryFutureExt, TryStreamExt, pin_mut};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::EpochPair;
@@ -191,6 +192,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 }
             };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
+        let upstream_table_id = self.upstream_table.table_id();
+        let progress_table_id = self.progress_state_table.table_id();
         let initial_backfill_paused =
             first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
         yield Message::Barrier(first_recv_barrier);
@@ -206,7 +209,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 let table_id_str = format!("{}", self.upstream_table.table_id());
                 let actor_id_str = format!("{}", self.actor_ctx.id);
 
-                // Phase 1: consume upstream snapshot
+                // Phase 1: consume upstream snapshot. Snapshot reads use state-store data at
+                // `snapshot_epoch`, not change logs before it. Since the truncate frontier is
+                // exclusive, reporting `snapshot_epoch` is safe even before this scan finishes.
                 let mut barrier_epoch = if first_recv_barrier_epoch.prev < snapshot_epoch {
                     trace!(
                         table_id = %self.upstream_table.table_id(),
@@ -235,6 +240,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             initial_backfill_paused,
                             &self.actor_ctx,
                             &self.pk_scan_range,
+                            progress_table_id,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -251,6 +257,15 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     let recv_barrier_epoch = recv_barrier.epoch;
                     assert_eq!(snapshot_epoch, recv_barrier_epoch.prev);
                     let post_commit = backfill_state.commit(recv_barrier.epoch).await?;
+                    if recv_barrier.is_checkpoint() {
+                        self.progress.report_table_change_log_progress(
+                            recv_barrier.epoch,
+                            upstream_table_id,
+                            progress_table_id,
+                            self.upstream_table.vnodes().clone(),
+                            snapshot_epoch,
+                        );
+                    }
                     yield Message::Barrier(recv_barrier);
                     post_commit.post_yield_barrier(None).await?;
                     recv_barrier_epoch
@@ -338,6 +353,15 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         false
                     };
                     let post_commit = backfill_state.commit(barrier.epoch).await?;
+                    if barrier.is_checkpoint() {
+                        self.progress.report_table_change_log_progress(
+                            barrier.epoch,
+                            upstream_table_id,
+                            progress_table_id,
+                            self.upstream_table.vnodes().clone(),
+                            barrier.epoch.prev,
+                        );
+                    }
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                     yield Message::Barrier(barrier);
                     post_commit.post_yield_barrier(None).await?;
@@ -571,6 +595,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
     pk_scan_range: &'a PkScanRange,
+    progress_table_id: TableId,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -647,6 +672,15 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 let post_commit = backfill_state.commit(barrier.epoch).await?;
                 trace!(?barrier_epoch, count, "update progress");
                 progress.update(barrier_epoch, barrier_epoch.prev, count as _);
+                if barrier.is_checkpoint() {
+                    progress.report_table_change_log_progress(
+                        barrier.epoch,
+                        upstream_table.table_id(),
+                        progress_table_id,
+                        upstream_table.vnodes().clone(),
+                        snapshot_epoch,
+                    );
+                }
 
                 let new_rate_limit = barrier.mutation.as_ref().and_then(|m| {
                     if let Mutation::Throttle(config) = &**m
@@ -696,6 +730,15 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     trace!(?barrier_epoch, count, "report finish");
     let post_commit = backfill_state.commit(barrier_epoch).await?;
     progress.finish(barrier_epoch, count as _);
+    if barrier_to_report_finish.is_checkpoint() {
+        progress.report_table_change_log_progress(
+            barrier_epoch,
+            upstream_table.table_id(),
+            progress_table_id,
+            upstream_table.vnodes().clone(),
+            snapshot_epoch,
+        );
+    }
     yield Message::Barrier(barrier_to_report_finish);
     post_commit.post_yield_barrier(None).await?;
 
@@ -705,6 +748,15 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
         barrier_epoch = barrier.epoch;
         let post_commit = backfill_state.commit(barrier.epoch).await?;
+        if barrier.is_checkpoint() {
+            progress.report_table_change_log_progress(
+                barrier.epoch,
+                upstream_table.table_id(),
+                progress_table_id,
+                upstream_table.vnodes().clone(),
+                snapshot_epoch,
+            );
+        }
         yield Message::Barrier(barrier);
         post_commit.post_yield_barrier(None).await?;
         if barrier_epoch.curr == snapshot_epoch {

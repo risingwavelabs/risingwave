@@ -19,7 +19,7 @@ mod err_isolation;
 #[cfg(madsim)]
 mod exactly_once;
 #[cfg(madsim)]
-mod iceberg_v3_2pc;
+mod iceberg_pk_index;
 #[cfg(madsim)]
 mod rate_limit;
 #[cfg(madsim)]

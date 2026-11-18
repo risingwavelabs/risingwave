@@ -68,8 +68,6 @@ impl SstableIterator {
         options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        let mut block_start_idx_inclusive = 0;
-        let mut block_end_idx_exclusive = sstable.meta.block_metas.len();
         assert!(
             !sstable_info_ref.table_ids.is_empty(),
             "SstableIterator: SST {} (object {}) has empty table_ids",
@@ -95,56 +93,52 @@ impl SstableIterator {
             read_table_id_range.0,
             read_table_id_range.1
         );
-        let block_meta_count = sstable.meta.block_metas.len();
+        let block_metas = &sstable.meta.block_metas;
+        let block_meta_count = block_metas.len();
         assert!(block_meta_count > 0);
+        let first_table_id = block_metas[0].table_id();
+        let last_table_id = block_metas[block_meta_count - 1].table_id();
         assert!(
-            sstable.meta.block_metas[0].table_id() <= read_table_id_range.0,
+            first_table_id <= read_table_id_range.0,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
+            block_metas
                 .iter()
                 .map(|meta| meta.table_id())
                 .collect::<Vec<_>>()
         );
         assert!(
-            sstable.meta.block_metas[block_meta_count - 1].table_id() >= read_table_id_range.1,
+            last_table_id >= read_table_id_range.1,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.1,
-            sstable
-                .meta
-                .block_metas
+            block_metas
                 .iter()
                 .map(|meta| meta.table_id())
                 .collect::<Vec<_>>()
         );
 
-        while block_start_idx_inclusive < block_meta_count
-            && sstable.meta.block_metas[block_start_idx_inclusive].table_id()
-                < read_table_id_range.0
-        {
-            block_start_idx_inclusive += 1;
-        }
+        // Block table IDs follow key order. Full-range reads need neither search.
+        let block_start_idx_inclusive = if first_table_id == read_table_id_range.0 {
+            0
+        } else {
+            block_metas.partition_point(|meta| meta.table_id() < read_table_id_range.0)
+        };
         // We assume that the table id read must exist in the sstable, otherwise it is a fatal error.
         assert!(
             block_start_idx_inclusive < block_meta_count,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
+            block_metas
                 .iter()
                 .map(|meta| meta.table_id())
                 .collect::<Vec<_>>()
         );
 
-        while block_end_idx_exclusive > block_start_idx_inclusive
-            && sstable.meta.block_metas[block_end_idx_exclusive - 1].table_id()
-                > read_table_id_range.1
-        {
-            block_end_idx_exclusive -= 1;
-        }
+        let mut block_end_idx_exclusive = if last_table_id == read_table_id_range.1 {
+            block_meta_count
+        } else {
+            block_metas.partition_point(|meta| meta.table_id() <= read_table_id_range.1)
+        };
         assert!(
             block_end_idx_exclusive > block_start_idx_inclusive,
             "block_end_idx_exclusive {} <= block_start_idx_inclusive {} block_meta_count {}",
@@ -154,8 +148,7 @@ impl SstableIterator {
         );
 
         if let Some(end_bound) = options.scan_end_user_key.as_ref() {
-            let block_metas =
-                &sstable.meta.block_metas[block_start_idx_inclusive..block_end_idx_exclusive];
+            let block_metas = &block_metas[block_start_idx_inclusive..block_end_idx_exclusive];
             let range_end_idx_exclusive = match end_bound {
                 Unbounded => block_metas.len(),
                 Included(end_key) => block_metas.partition_point(|block_meta| {

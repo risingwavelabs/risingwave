@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryStreamExt;
 use iceberg::io::{
     AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, FileIO, FileIOBuilder,
     GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD,
@@ -35,6 +36,7 @@ use iceberg::{
     TableCreation, TableIdent,
 };
 use iceberg_storage_opendal::OpenDalStorageFactory;
+use itertools::Itertools;
 use thiserror_ext::AsReport;
 use typed_builder::TypedBuilder;
 
@@ -177,14 +179,14 @@ impl StorageCatalog {
         &self.file_io
     }
 
+    fn namespace_path(&self, namespace: &NamespaceIdent) -> String {
+        std::iter::once(self.warehouse.trim_end_matches('/'))
+            .chain(namespace.iter().map(String::as_str))
+            .join("/")
+    }
+
     fn table_path(&self, table: &TableIdent) -> String {
-        let mut names = table.namespace.clone().inner();
-        names.push(table.name.clone());
-        if self.warehouse.ends_with('/') {
-            format!("{}{}", self.warehouse, names.join("/"))
-        } else {
-            format!("{}/{}", self.warehouse, names.join("/"))
-        }
+        format!("{}/{}", self.namespace_path(&table.namespace), table.name)
     }
 
     async fn commit_table(&self, table_path: &str, next_metadata: TableMetadata) -> Result<()> {
@@ -261,10 +263,29 @@ impl Catalog for StorageCatalog {
         todo!()
     }
 
-    /// List tables from namespace.
-    async fn list_tables(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        // FIXME: the iceberg `file_io` doesn't provide enough api to list files in a directory.
-        Ok(vec![])
+    /// List tables from namespace, i.e. the directories directly under the namespace directory
+    /// that have a version hint.
+    async fn list_tables(&self, namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
+        let namespace_path = self.namespace_path(namespace);
+        let mut entries = self.file_io.list(&namespace_path, false).await?;
+        let mut tables = vec![];
+        while let Some(entry) = entries.try_next().await? {
+            if !entry.is_dir {
+                continue;
+            }
+            let Some((parent, name)) = entry.path.trim_end_matches('/').rsplit_once('/') else {
+                continue;
+            };
+            // Some storages also return the listed directory itself.
+            if parent != namespace_path {
+                continue;
+            }
+            let table = TableIdent::new(namespace.clone(), name.to_owned());
+            if self.table_exists(&table).await? {
+                tables.push(table);
+            }
+        }
+        Ok(tables)
     }
 
     async fn update_namespace(
@@ -406,5 +427,68 @@ impl Catalog for StorageCatalog {
             ErrorKind::Unexpected,
             "register_table is not supported in storage catalog",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iceberg::spec::{NestedField, PrimitiveType, Schema, Type};
+
+    use super::*;
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_list_tables() {
+        let catalog = StorageCatalog {
+            warehouse: "memory:/warehouse/".to_owned(),
+            file_io: FileIOBuilder::new(Arc::new(OpenDalStorageFactory::memory())).build(),
+        };
+        let schema = Schema::builder()
+            .with_fields(vec![
+                NestedField::required(1, "id", Type::Primitive(PrimitiveType::Int)).into(),
+            ])
+            .build()
+            .unwrap();
+        let db = NamespaceIdent::new("db".to_owned());
+        let nested = NamespaceIdent::from_strs(["db", "nested"]).unwrap();
+        for (namespace, name) in [(&db, "t2"), (&db, "t1"), (&nested, "t3")] {
+            let location = catalog.table_path(&TableIdent::new(namespace.clone(), name.to_owned()));
+            let creation = TableCreation::builder()
+                .name(name.to_owned())
+                .location(location)
+                .schema(schema.clone())
+                .build();
+            catalog.create_table(namespace, creation).await.unwrap();
+        }
+        // A directory without a version hint is not a table.
+        catalog
+            .file_io()
+            .new_output("memory:/warehouse/db/not_a_table/data/0.parquet")
+            .unwrap()
+            .write("".into())
+            .await
+            .unwrap();
+
+        let list = async |namespace: &NamespaceIdent| {
+            let mut tables = catalog.list_tables(namespace).await.unwrap();
+            tables.sort_by(|a, b| a.name.cmp(&b.name));
+            tables
+        };
+        assert_eq!(
+            list(&db).await,
+            vec![
+                TableIdent::new(db.clone(), "t1".to_owned()),
+                TableIdent::new(db.clone(), "t2".to_owned()),
+            ]
+        );
+        assert_eq!(
+            list(&nested).await,
+            vec![TableIdent::new(nested.clone(), "t3".to_owned())]
+        );
+        assert!(
+            list(&NamespaceIdent::new("missing".to_owned()))
+                .await
+                .is_empty()
+        );
     }
 }

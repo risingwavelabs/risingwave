@@ -13,13 +13,18 @@
 // limitations under the License.
 
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use crate::executor::ActorContext;
-use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
+use crate::task::barrier_manager::LocalBarrierEvent::{
+    ReportCreateProgress, ReportTableChangeLogProgress,
+};
 use crate::task::barrier_worker::managed_state::PartialGraphState;
 use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, LocalBarrierManager};
@@ -32,6 +37,16 @@ type BufferedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows, BufferedRows),
     DoneConsumingUpstreamTableOrSource(ConsumedRows, BufferedRows),
+}
+
+#[derive(Debug)]
+pub(crate) struct TableChangeLogProgress {
+    pub(crate) actor_id: ActorId,
+    pub(crate) fragment_id: FragmentId,
+    pub(crate) upstream_table_id: TableId,
+    pub(crate) progress_table_id: TableId,
+    pub(crate) vnode_bitmap: Arc<Bitmap>,
+    pub(crate) truncate_epoch: u64,
 }
 
 impl BackfillState {
@@ -88,9 +103,8 @@ impl PartialGraphState {
     ) {
         if let Some((prev_fragment_id, _)) = self
             .graph_state
+            .event_mut(epoch)
             .create_mview_progress
-            .entry(epoch.curr)
-            .or_default()
             .insert(actor, (fragment_id, state))
         {
             assert_eq!(prev_fragment_id, fragment_id)
@@ -107,12 +121,29 @@ impl PartialGraphState {
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
             self.graph_state
+                .event_mut(epoch)
                 .cdc_table_backfill_progress
-                .entry(epoch.curr)
-                .or_default()
                 .insert(actor, state);
         } else {
             warn!(?epoch, %actor, ?state, "ignore CDC table backfill progress");
+        }
+    }
+
+    pub(crate) fn update_table_change_log_progress(
+        &mut self,
+        epoch: EpochPair,
+        progress: TableChangeLogProgress,
+    ) {
+        let actor_id = progress.actor_id;
+        if let Some(actor_state) = self.actor_states.get(&actor_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
+        {
+            self.graph_state
+                .event_mut(epoch)
+                .table_change_log_progress
+                .push(progress);
+        } else {
+            warn!(?epoch, %actor_id, ?progress, "ignore table change log progress");
         }
     }
 }
@@ -131,6 +162,10 @@ impl LocalBarrierManager {
             actor,
             state,
         })
+    }
+
+    fn report_table_change_log_progress(&self, epoch: EpochPair, progress: TableChangeLogProgress) {
+        self.send_event(ReportTableChangeLogProgress { epoch, progress });
     }
 }
 
@@ -196,6 +231,29 @@ impl CreateMviewProgressReporter {
 
     pub fn actor_id(&self) -> ActorId {
         self.backfill_actor_id
+    }
+
+    /// Report the change-log frontier persisted by the same barrier. This remains active after
+    /// creation progress has reached `Done`.
+    pub fn report_table_change_log_progress(
+        &self,
+        epoch: EpochPair,
+        upstream_table_id: TableId,
+        progress_table_id: TableId,
+        vnode_bitmap: Arc<Bitmap>,
+        truncate_epoch: u64,
+    ) {
+        self.barrier_manager.report_table_change_log_progress(
+            epoch,
+            TableChangeLogProgress {
+                actor_id: self.backfill_actor_id,
+                fragment_id: self.fragment_id,
+                upstream_table_id,
+                progress_table_id,
+                vnode_bitmap,
+                truncate_epoch,
+            },
+        );
     }
 
     fn update_inner(&mut self, epoch: EpochPair, state: BackfillState) {

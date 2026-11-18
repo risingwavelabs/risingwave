@@ -20,7 +20,8 @@ use arc_swap::ArcSwap;
 use risingwave_common::bail;
 use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_meta_model::DatabaseId;
+use risingwave_meta_model::{DatabaseId, WorkerId};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::{DdlProgress, PbBackfillType};
 use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -35,10 +36,9 @@ use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
     BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, FragmentBackfillProgress,
-    RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
+    RecoveryStatus, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -165,13 +165,13 @@ impl GlobalBarrierManager {
         let status = self.status.load();
         match &**status {
             BarrierManagerStatus::Starting
-            | BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap) => {
+            | BarrierManagerStatus::Recovering(RecoveryStatus::Bootstrap) => {
                 bail!("The cluster is bootstrapping")
             }
-            BarrierManagerStatus::Recovering(RecoveryReason::Failover(e)) => {
+            BarrierManagerStatus::Recovering(RecoveryStatus::Failover(e)) => {
                 Err(anyhow::anyhow!(e.clone()).context("The cluster is recovering"))?
             }
-            BarrierManagerStatus::Recovering(RecoveryReason::Adhoc) => {
+            BarrierManagerStatus::Recovering(RecoveryStatus::Adhoc) => {
                 bail!("The cluster is recovering-adhoc")
             }
             BarrierManagerStatus::Running => Ok(()),
@@ -194,9 +194,9 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         refresh_manager: GlobalRefreshManagerRef,
+        initial_workers_tx: oneshot::Sender<HashMap<WorkerId, WorkerNode>>,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -210,7 +210,6 @@ impl GlobalBarrierManager {
             source_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
-            iceberg_compaction_manager,
             scale_controller,
             request_rx,
             refresh_manager,
@@ -222,7 +221,7 @@ impl GlobalBarrierManager {
             request_tx,
             metadata_manager: metadata_manager_clone,
         };
-        let (join_handle, shutdown_tx) = barrier_worker.start();
+        let (join_handle, shutdown_tx) = barrier_worker.start(initial_workers_tx);
         (Arc::new(manager), join_handle, shutdown_tx)
     }
 }

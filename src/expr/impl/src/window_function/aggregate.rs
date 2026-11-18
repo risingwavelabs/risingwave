@@ -28,7 +28,7 @@ use risingwave_expr::aggregate::{
 };
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{
-    BoxedWindowState, FrameBounds, StateEvictHint, StateKey, StatePos, WindowFuncCall,
+    BoxedWindowState, FrameBounds, Readiness, StateEvictHint, StateKey, StatePos, WindowFuncCall,
     WindowFuncKind, WindowState,
 };
 use smallvec::SmallVec;
@@ -181,6 +181,14 @@ where
         }
     }
 
+    fn readiness(&self) -> Readiness {
+        self.buffer.readiness()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     fn slide(&mut self) -> Result<(Datum, StateEvictHint)> {
         let output = match self.agg_impl {
             AggImpl::Full(ref agg_func) => {
@@ -252,8 +260,7 @@ where
     W: WindowImpl<Key = StateKey, Value = StateValue>,
 {
     fn estimated_heap_size(&self) -> usize {
-        // estimate `VecDeque` of `StreamWindowBuffer` internal size
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Does not count the overhead of the `VecDeque` in the buffer itself.
         self.arg_data_types.estimated_heap_size() + self.buffer_heap_size.size()
     }
 }

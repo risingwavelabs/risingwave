@@ -186,21 +186,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         return isCdcSourceJob;
     }
 
-    /** For Citus which is a distributed version of PG */
-    public void validateDistributedTable() throws SQLException {
-        try (var stmt =
-                jdbcConnection.prepareStatement(ValidatorUtils.getSql("citus.distributed_table"))) {
-            stmt.setString(1, schemaName + "." + tableName);
-            var res = stmt.executeQuery();
-            while (res.next()) {
-                var ret = res.getString(1);
-                if (!ret.equalsIgnoreCase("distributed")) {
-                    throw ValidatorUtils.invalidArgument("Citus table is not a distributed table");
-                }
-            }
-        }
-    }
-
     private void validateTableSchema() throws SQLException {
         if (isCdcSourceJob) {
             return;
@@ -723,7 +708,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    protected void alterPublicationIfNeeded() throws SQLException {
+    private void alterPublicationIfNeeded() throws SQLException {
         if (isCdcSourceJob) {
             throw ValidatorUtils.invalidArgument(
                     "The connector properties is created by a shared source unexpectedly");

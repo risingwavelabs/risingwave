@@ -32,6 +32,7 @@ export CONNECTOR_LIBS_PATH="./connector-node/libs"
 echo "--- Testing multi-batch Iceberg compaction rounds"
 risedev ci-start ci-iceberg-compaction-round
 risedev slt './e2e_test/iceberg/compaction_round.slt'
+risedev slt './e2e_test/iceberg/pk_index_compaction_round.slt'
 risedev ci-kill
 
 echo "--- starting risingwave cluster"
@@ -43,11 +44,13 @@ source .risingwave/config/risedev-env
 set +a
 
 
-echo "--- Running tests"
+echo "--- Install Iceberg test dependencies"
 cd e2e_test/iceberg
-# Don't remove the `--quiet` option since poetry has a bug when printing output, see
-# https://github.com/python-poetry/poetry/issues/3412
-poetry update --quiet
+poetry --version
+# Keep dependency failures visible in CI while disabling interactive output.
+poetry update --no-interaction --no-ansi
+
+echo "--- Running tests"
 poetry run python main.py
 
 echo "--- Running pure slt tests"

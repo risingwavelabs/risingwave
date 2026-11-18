@@ -268,18 +268,7 @@ impl CatalogController {
 
     pub async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
         let inner = self.inner.read().await;
-        let sink_objs = Sink::find_by_id(sink_id)
-            .find_also_related(Object)
-            .one(&inner.db)
-            .await?;
-        if let Some((sink, obj)) = sink_objs {
-            let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
-                .one(&inner.db)
-                .await?;
-            Ok(Some(ObjectModel(sink, obj.unwrap(), streaming_job).into()))
-        } else {
-            Ok(None)
-        }
+        inner.get_sink_by_id(sink_id).await
     }
 
     pub async fn get_sink_auto_refresh_schema_from(
@@ -791,5 +780,22 @@ impl CatalogController {
         C: ConnectionTrait,
     {
         fetch_streaming_job_extra_info(txn, job_ids).await
+    }
+}
+
+impl CatalogControllerInner {
+    pub(crate) async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
+        let sink_objs = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&self.db)
+            .await?;
+        if let Some((sink, obj)) = sink_objs {
+            let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                .one(&self.db)
+                .await?;
+            Ok(Some(ObjectModel(sink, obj.unwrap(), streaming_job).into()))
+        } else {
+            Ok(None)
+        }
     }
 }

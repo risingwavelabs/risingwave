@@ -1,0 +1,55 @@
+- name: changelog distribution key survives pruning
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t distributed by (tenant) select payload from c;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_stream
+  - stream_plan
+  - stream_dist_plan
+
+- name: changelog composite distribution key preserves order
+  sql: |
+    create table t (id int primary key, tenant int, "Region" int, payload varchar);
+    with c as changelog from public.t distributed by ("Region", tenant)
+    select payload, _changelog_row_id from c;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+
+- name: changelog distribution key already matches input
+  sql: |
+    create table t (id int primary key, payload varchar);
+    with c as changelog from t distributed by (id) select * from c;
+  expected_outputs:
+  - stream_plan
+
+- name: changelog distribution key on singleton input
+  sql: |
+    create table t (v int);
+    create materialized view mv as select count(*) as c from t;
+    with x as changelog from mv distributed by (c) select * from x;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+
+- name: changelog missing distribution column
+  sql: |
+    create table t (id int);
+    with c as changelog from t distributed by (missing) select * from c;
+  expected_outputs:
+  - binder_error
+
+- name: changelog duplicate distribution column
+  sql: |
+    create table t (id int);
+    with c as changelog from t distributed by (id, ID) select * from c;
+  expected_outputs:
+  - binder_error
+
+- name: changelog hidden distribution column
+  sql: |
+    create table t (id int);
+    with c as changelog from t distributed by (_row_id) select * from c;
+  expected_outputs:
+  - binder_error

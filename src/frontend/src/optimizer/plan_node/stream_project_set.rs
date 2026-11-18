@@ -60,8 +60,8 @@ impl StreamProjectSet {
                 Inherent(monotonicity) => {
                     if monotonicity.is_non_decreasing() && !monotonicity.is_constant() {
                         // TODO(rc): may be we should also derive watermark for constant later
-                        // FIXME(rc): we need to check expr is not table function
-                        // to produce watermarks
+                        // Table functions are always `Unknown`, so only scalar
+                        // expressions can reach here.
                         nondecreasing_exprs.push(expr_idx);
                         // each inherently non-decreasing expr creates a new watermark group
                         out_watermark_columns.insert(out_expr_idx, ctx.next_watermark_group_id());

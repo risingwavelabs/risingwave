@@ -44,5 +44,9 @@ pub struct IcebergSinkCompactionUpdate {
     // runtime event information
     pub sink_id: SinkId,
     pub force_compaction: bool,
+    /// Ingestion (including deletes) requires evaluation. A
+    /// maintenance-only commit advances the observed snapshot without creating
+    /// fresh ingestion backlog.
+    pub has_new_data: bool,
     pub observed_snapshot: IcebergCommittedSnapshot,
 }

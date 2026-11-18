@@ -279,7 +279,7 @@ impl ExprVisitable for LogicalHopWindow {}
 
 impl PredicatePushdown for LogicalHopWindow {
     /// Keep predicate on time window parameters (`window_start`, `window_end`),
-    /// the rest may be pushed-down.
+    /// the rest may be pushed-down according to [`Condition::split_pushable`].
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -294,7 +294,7 @@ impl PredicatePushdown for LogicalHopWindow {
                 window_columns.insert(i);
             }
         }
-        let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
+        let (time_window_pred, pushed_predicate) = predicate.split_pushable(&window_columns);
         let mut mapping = self.o2i_col_mapping();
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut mapping);
         gen_filter_and_pushdown(self, time_window_pred, pushed_predicate, ctx)

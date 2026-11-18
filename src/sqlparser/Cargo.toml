@@ -19,6 +19,7 @@ path = "src/lib.rs"
 
 [dependencies]
 itertools = { workspace = true }
+serde = { workspace = true }
 task-local = "0.1"
 thiserror = { workspace = true }
 tracing = "0.1"
@@ -33,7 +34,6 @@ anyhow = "1"
 console = "0.16"
 libtest-mimic = "0.8"
 matches = "0.1"
-serde = { workspace = true }
 serde_with = "3"
 serde_yaml = "0.9"
 walkdir = "2"

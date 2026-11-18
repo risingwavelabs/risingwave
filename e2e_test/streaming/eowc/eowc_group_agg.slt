@@ -50,5 +50,13 @@ select * from mv order by window_start;
 statement ok
 drop materialized view mv;
 
+# Adding months to a timestamp is not monotonic, so the shifted column has no watermark.
+statement error Emit-On-Window-Close mode requires a watermark column in GROUP BY
+create materialized view mv as
+select tm + interval '1 month' as m, max(foo)
+from t
+group by m
+emit on window close;
+
 statement ok
 drop table t;

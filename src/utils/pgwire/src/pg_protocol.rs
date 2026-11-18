@@ -33,7 +33,7 @@ use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
-use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
+use risingwave_sqlparser::ast::{SqlOptionRedactionRef, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -108,7 +108,7 @@ where
     // Client Address
     peer_addr: AddressRef,
 
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    sql_option_redaction: Option<SqlOptionRedactionRef>,
     message_memory_manager: MessageMemoryManagerRef,
 }
 
@@ -205,12 +205,12 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 
 fn get_redacted_and_truncated_sql(
     sql: &str,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    sql_option_redaction: Option<SqlOptionRedactionRef>,
 ) -> String {
-    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords
-        && !keywords.is_empty()
+    let redacted_sql = if let Some(redaction) = sql_option_redaction
+        && !redaction.keywords.is_empty()
     {
-        redact_sql(sql, keywords)
+        redact_sql(sql, redaction)
     } else {
         sql.to_owned()
     };
@@ -221,11 +221,10 @@ fn get_redacted_and_truncated_sql(
 /// Record `sql` in the current tracing span.
 fn record_sql_in_span(
     sql: &str,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    sql_option_redaction: Option<SqlOptionRedactionRef>,
     span: &mut tracing::Span,
 ) {
-    let redacted_and_truncated_sql =
-        get_redacted_and_truncated_sql(sql, redact_sql_option_keywords);
+    let redacted_and_truncated_sql = get_redacted_and_truncated_sql(sql, sql_option_redaction);
     span.record("sql", tracing::field::display(&redacted_and_truncated_sql));
 }
 
@@ -234,11 +233,11 @@ fn record_user_in_span(user: &str, span: &mut tracing::Span) {
 }
 
 /// Redacts sensitive SQL fields. Data in DML is not redacted.
-fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
+fn redact_sql(sql: &str, redaction: SqlOptionRedactionRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
             .into_iter()
-            .map(|sql| sql.to_redacted_string(keywords.clone()))
+            .map(|sql| sql.to_redacted_string(redaction.clone()))
             .join(";"),
         Err(_) => sql.to_owned(),
     }
@@ -247,7 +246,7 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
 #[derive(Clone)]
 pub struct ConnectionContext {
     pub tls_config: Option<TlsConfig>,
-    pub redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    pub sql_option_redaction: Option<SqlOptionRedactionRef>,
     pub message_memory_manager: MessageMemoryManagerRef,
     pub stream_flush_threshold_bytes: usize,
 }
@@ -265,7 +264,7 @@ where
     ) -> Self {
         let ConnectionContext {
             tls_config,
-            redact_sql_option_keywords,
+            sql_option_redaction,
             message_memory_manager,
             stream_flush_threshold_bytes,
         } = context;
@@ -287,7 +286,7 @@ where
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
             peer_addr,
-            redact_sql_option_keywords,
+            sql_option_redaction,
             message_memory_manager,
         }
     }
@@ -377,14 +376,14 @@ where
                 if let Ok(portal_name) = cstr_to_str(&execute_msg.portal_name)
                     && let Ok(sql) = self.get_portal_sql(portal_name)
                 {
-                    record_sql_in_span(&sql, self.redact_sql_option_keywords.clone(), &mut span);
+                    record_sql_in_span(&sql, self.sql_option_redaction.clone(), &mut span);
                 }
             }
             _ => {
                 if let Ok(sql) = msg.get_sql()
                     && let Some(sql) = sql
                 {
-                    record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
+                    record_sql_in_span(sql, self.sql_option_redaction.clone(), &mut span);
                 }
             }
         }
@@ -836,8 +835,7 @@ where
     }
 
     async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
-        let truncated_sql =
-            get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
+        let truncated_sql = get_redacted_and_truncated_sql(&sql, self.sql_option_redaction.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -1157,7 +1155,7 @@ where
                 let portal = self.get_portal_data(&portal_name)?.clone();
                 let sql = format!("{}", portal.portal);
                 let truncated_sql =
-                    get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
+                    get_redacted_and_truncated_sql(&sql, self.sql_option_redaction.clone());
                 drop(sql);
 
                 session.check_idle_in_transaction_timeout()?;
@@ -1691,8 +1689,7 @@ fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
+    use risingwave_sqlparser::ast::SqlOptionRedaction;
     use tokio::io::AsyncReadExt;
 
     use super::*;
@@ -1726,7 +1723,10 @@ mod tests {
 
     #[test]
     fn test_redact_parsable_sql() {
-        let keywords = Arc::new(HashSet::from(["v2".into(), "v4".into(), "b".into()]));
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            ["v2".into(), "v4".into(), "b".into()],
+            [],
+        ));
         let sql = r"
         create source temp (k bigint, v varchar) with (
             connector = 'datagen',
@@ -1737,28 +1737,57 @@ mod tests {
         ) FORMAT plain ENCODE json (a='1',b='2')
         ";
         assert_eq!(
-            redact_sql(sql, keywords),
+            redact_sql(sql, redaction),
             "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
         );
     }
 
     #[test]
+    fn test_redact_sql_option_allowlist() {
+        let config = risingwave_common::config::BatchConfig::default();
+        let sql = "CREATE SINK s FROM t WITH (primary_key = 'id', api_key = 'secret')";
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            config.redact_sql_option_keywords.clone(),
+            config.redact_sql_option_allowlist,
+        ));
+        assert_eq!(
+            get_redacted_and_truncated_sql(sql, Some(redaction)),
+            "CREATE SINK s FROM t WITH (primary_key = 'id', api_key = [REDACTED])",
+        );
+
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            config.redact_sql_option_keywords,
+            [],
+        ));
+        assert_eq!(
+            get_redacted_and_truncated_sql(sql, Some(redaction)),
+            "CREATE SINK s FROM t WITH (primary_key = [REDACTED], api_key = [REDACTED])",
+        );
+    }
+
+    #[test]
     fn test_redact_user_password_sql() {
-        let keywords = Arc::new(HashSet::from(["password".into()]));
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            ["password".into()],
+            ["password".into()],
+        ));
 
         assert_eq!(
-            redact_sql("ALTER USER WITH PASSWORD 'rw_password_2'", keywords.clone()),
+            redact_sql(
+                "ALTER USER WITH PASSWORD 'rw_password_2'",
+                redaction.clone()
+            ),
             "ALTER USER WITH PASSWORD [REDACTED]"
         );
         assert_eq!(
             redact_sql(
                 "ALTER USER foo WITH ENCRYPTED PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
-                keywords.clone(),
+                redaction.clone(),
             ),
             "ALTER USER foo WITH ENCRYPTED PASSWORD [REDACTED]"
         );
         assert_eq!(
-            redact_sql("CREATE USER foo WITH PASSWORD 'rw_password_2'", keywords),
+            redact_sql("CREATE USER foo WITH PASSWORD 'rw_password_2'", redaction),
             "CREATE USER foo WITH PASSWORD [REDACTED]"
         );
     }

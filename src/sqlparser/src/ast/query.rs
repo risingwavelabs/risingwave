@@ -364,11 +364,18 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
-            CteInner::ChangeLog { from, key } => {
+            CteInner::ChangeLog {
+                from,
+                key,
+                distributed_by,
+            } => {
                 write!(f, "{} AS changelog from {}", self.alias, from)?;
 
                 if let Some(key) = key {
                     write!(f, " KEY ({})", display_comma_separated(key))?;
+                }
+                if let Some(columns) = distributed_by {
+                    write!(f, " DISTRIBUTED BY ({})", display_comma_separated(columns))?;
                 }
             }
         }
@@ -382,6 +389,7 @@ pub enum CteInner {
     ChangeLog {
         from: ObjectName,
         key: Option<Vec<Ident>>,
+        distributed_by: Option<Vec<Ident>>,
     },
 }
 

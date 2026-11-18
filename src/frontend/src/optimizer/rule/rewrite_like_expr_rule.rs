@@ -24,6 +24,7 @@ use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 /// `RewriteLikeExprRule` rewrites simple like expression, so that it can benefit from index selection.
 /// col like 'ABC' => col = 'ABC'
 /// col like 'ABC%' => col >= 'ABC' and col < 'ABD'
+/// col like 'ABC_' => col >= 'ABC' and col < 'ABD' and col like 'ABC_'
 /// col like 'ABC%E' => col >= 'ABC' and col < 'ABD' and col like 'ABC%E'
 pub struct RewriteLikeExprRule {}
 impl Rule<Logical> for RewriteLikeExprRule {
@@ -131,7 +132,6 @@ impl ExprRewriter for LikeExprRewriter {
         };
 
         let bytes = data.as_bytes();
-        let len = bytes.len();
 
         let (char_wildcard_idx, str_wildcard_idx, unescaped_bytes) =
             Self::cal_index_and_unescape(bytes);
@@ -204,7 +204,7 @@ impl ExprRewriter for LikeExprRewriter {
             DataType::Boolean,
         );
 
-        if idx == len - 1 {
+        if str_wildcard_idx == Some(idx) && idx == unescaped_bytes.len() - 1 {
             between.into()
         } else {
             FunctionCall::new_unchecked(

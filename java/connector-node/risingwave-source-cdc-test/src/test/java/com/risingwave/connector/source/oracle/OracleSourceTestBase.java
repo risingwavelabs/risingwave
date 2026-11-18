@@ -16,14 +16,10 @@
 
 package com.risingwave.connector.source.oracle;
 
-import static org.junit.Assert.assertEquals;
-
 import com.risingwave.connector.source.SourceTestClient;
-import com.risingwave.proto.ConnectorServiceProto;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import org.junit.After;
 import org.junit.Before;
@@ -53,49 +49,12 @@ abstract class OracleSourceTestBase {
         }
     }
 
-    protected void createSourceTable() {
-        createTable(
-                "APP.CUSTOMERS",
-                "CREATE TABLE APP.CUSTOMERS "
-                        + "(ID NUMBER PRIMARY KEY, NAME VARCHAR2(100), EMAIL VARCHAR2(100))");
-    }
-
-    protected void createSourceTableWithAllColumnLogging() {
-        createSourceTable();
-        execute("ALTER TABLE APP.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
-    }
-
     protected void createTable(String name, String sql) {
         execute(sql);
         tables.add(name);
     }
 
-    protected void trackTable(String name) {
-        tables.add(name);
-    }
-
     protected void execute(String sql) {
         SourceTestClient.performQuery(pdb, sql);
-    }
-
-    protected int queryInt(String sql) throws SQLException {
-        try (var result = SourceTestClient.performQuery(pdb, sql)) {
-            return result.getInt(1);
-        }
-    }
-
-    protected ConnectorServiceProto.ValidateSourceResponse validate(
-            Map<String, String> properties) {
-        return oracle().sourceTestClient()
-                .validateSource(ConnectorServiceProto.SourceType.ORACLE, properties);
-    }
-
-    /**
-     * Asserts successful validation without {@code CONTAINER_DATA=ALL} for the fixture's connector
-     * user. This also verifies that the validator switches to the configured PDB before checking
-     * its metadata.
-     */
-    protected void assertValid(Map<String, String> properties) {
-        assertEquals("", validate(properties).getError().getErrorMessage());
     }
 }

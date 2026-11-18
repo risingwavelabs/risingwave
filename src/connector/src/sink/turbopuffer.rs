@@ -270,6 +270,9 @@ impl Sink for TurbopufferSink {
     crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::TurbopufferSink
+            .check_available()
+            .map_err(|e| anyhow!(e))?;
         Ok(())
     }
 

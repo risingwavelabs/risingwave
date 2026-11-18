@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use base64::prelude::*;
 use google_cloud_gax::conn::Environment;
 use google_cloud_pubsub::apiv1;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
@@ -78,9 +79,9 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    /// `credentials` is a JSON string containing the service account credentials. If omitted,
-    /// the connector uses Google Application Default Credentials (ADC) when allowed by the
-    /// deployment environment.
+    /// `credentials` is a JSON string containing the service account credentials, optionally
+    /// base64-encoded. If omitted, the connector uses Google Application Default Credentials
+    /// (ADC) when allowed by the deployment environment.
     /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
@@ -161,6 +162,17 @@ impl crate::source::UnknownFields for PubsubProperties {
     }
 }
 
+fn parse_credentials(credentials: &str) -> ConnectorResult<CredentialsFile> {
+    // Before 3.1, the environment-based authentication path also accepted base64-encoded JSON.
+    // Preserve that behavior without modifying process-wide environment variables.
+    let credentials = if let Ok(decoded) = BASE64_STANDARD.decode(credentials) {
+        serde_json::from_slice(&decoded)
+    } else {
+        serde_json::from_str(credentials)
+    };
+    Ok(credentials.context("failed to parse Google Cloud Pub/Sub credentials")?)
+}
+
 impl PubsubProperties {
     pub(crate) fn subscriber_config(&self) -> ConnectorResult<SubscriberConfig> {
         let stream_ack_deadline_seconds = self
@@ -201,9 +213,7 @@ impl PubsubProperties {
             .with_audience(apiv1::conn_pool::AUDIENCE)
             .with_scopes(&apiv1::conn_pool::SCOPES);
         let (environment, detected_project_id) = if let Some(credentials) = &self.credentials {
-            let credentials = CredentialsFile::new_from_str(credentials)
-                .await
-                .context("failed to parse Google Cloud Pub/Sub credentials")?;
+            let credentials = parse_credentials(credentials)?;
             let provider = DefaultTokenSourceProvider::new_with_credentials(
                 auth_config,
                 Box::new(credentials),
@@ -260,6 +270,51 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    const TEST_CREDENTIALS: &str = r#"{
+        "type": "service_account",
+        "project_id": "test-project",
+        "client_email": "test@example.com",
+        "private_key": "test-key"
+    }"#;
+
+    fn assert_test_credentials(credentials: CredentialsFile) {
+        assert_eq!(credentials.tp, "service_account");
+        assert_eq!(credentials.project_id.as_deref(), Some("test-project"));
+        assert_eq!(
+            credentials.client_email.as_deref(),
+            Some("test@example.com")
+        );
+        assert_eq!(credentials.private_key.as_deref(), Some("test-key"));
+    }
+
+    #[test]
+    fn test_parse_credentials_json() {
+        assert_test_credentials(parse_credentials(TEST_CREDENTIALS).unwrap());
+    }
+
+    #[test]
+    fn test_parse_credentials_base64() {
+        assert_test_credentials(
+            parse_credentials(&BASE64_STANDARD.encode(TEST_CREDENTIALS)).unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_parse_credentials_invalid() {
+        for credentials in [
+            "not valid JSON".to_owned(),
+            BASE64_STANDARD.encode("not valid JSON"),
+            BASE64_STANDARD.encode([0xff, 0xfe]),
+        ] {
+            let error = parse_credentials(&credentials).err().unwrap();
+            assert!(
+                error
+                    .to_string()
+                    .contains("failed to parse Google Cloud Pub/Sub credentials")
+            );
+        }
+    }
 
     fn parse_pubsub_properties(extra: serde_json::Value) -> PubsubProperties {
         let mut value = json!({
