@@ -9,6 +9,10 @@ SELECT CASE WHEN false THEN (ai_decide('{}'::jsonb, 'invalid', 'test-model', ai_
 ----
 0
 
+# The text constructor keeps its nonempty-level contract.
+statement error score levels must be nonempty strings
+SELECT ai_score_question('q', 'Rate?', ARRAY[' ', 'High']);
+
 # JSON null is a real input. Request-construction errors follow ordinary strictness.
 statement ok
 SET batch_expr_strict_mode = true;

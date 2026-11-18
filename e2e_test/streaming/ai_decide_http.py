@@ -106,8 +106,8 @@ def exercise(server):
         ai_score_question('size', 'How many events?', ARRAY['No events', 'One event', 'At least two events'])
     )"""
 
-    def analyze(state):
-        return f"ai_decide({state}, '{url}', 'test-model', {questions}, 'test-key')"
+    def analyze(state, question_sql=questions):
+        return f"ai_decide({state}, '{url}', 'test-model', {question_sql}, 'test-key')"
 
     def states(view, where="", order="id"):
         return f"SELECT (result).signal FROM {view} {where} ORDER BY {order}"
@@ -125,6 +125,28 @@ def exercise(server):
     assert server.calls[-1]["questions"]["team"]["criteria"] == {"billing": "Payments and refunds", "technical": "Software issues"}
     assert server.calls[-1]["state"] == p1
 
+    # Constant JSONB definitions preserve structured descriptions through binding and HTTP.
+    structured_questions = {
+        "signal": {"type": "noul", "instructions": {"question": "Synthetic signal?", "threshold": 0},
+                   "criteria": {"true": {"examples": ["first", "second"]}, "false": ["No signal", None]}},
+        "generation": {"type": "noul", "instructions": None,
+                       "criteria": {"true": "Synthetic generation", "false": None}},
+        "team": {"type": "choice", "instructions": ["Which team?", {"include_refunds": True}],
+                 "criteria": {"billing": {"examples": ["Payments", "Refunds"]}, "technical": ["Software issues"]}},
+        "size": {"type": "score", "instructions": "How many events?",
+                 "criteria": [{"count": 0}, ["One event", 1], None]},
+    }
+    questions_json = json.dumps(structured_questions).replace("'", "''")
+    structured_sql = f"'{questions_json}'::jsonb"
+    before = server.count()
+    structured_response = json.loads(sql(
+        f"SELECT to_jsonb(result) FROM (SELECT {analyze(batch_state, structured_sql)} AS result) e"
+    )[0])
+    assert server.count() == before + 1
+    assert server.calls[-1] == {"model": "test-model", "state": p1, "questions": structured_questions}
+    for field in ["signal", "team", "size"]:
+        assert structured_response[field] == response[field]
+
     # Referencing several fields of one subquery result must not duplicate inference.
     before = server.count()
     assert sql(f"SELECT (result).signal, (result).team.choice, (result).team.confidence, (result).size.score FROM (SELECT {analyze(batch_state)} AS result) e") == ["0.1|billing|0.6|1"]
@@ -139,6 +161,7 @@ def exercise(server):
 
     for append_only in [False, True]:
         sql("CREATE TABLE ai_fields_input (id INT, payload JSONB, enabled BOOLEAN)" + (" APPEND ONLY" if append_only else ""))
+        question_sql = questions if append_only else structured_sql
         # Keep the settings and DDL in one session so the job captures both overrides.
         # A two-row input can exceed the row budget without preventing progress.
         sql(f"SET streaming_project_expr_concurrency = 4; "
@@ -146,7 +169,7 @@ def exercise(server):
             f"CREATE MATERIALIZED VIEW ai_fields AS "
             f"SELECT id, id + 1 AS next_id, (result).signal AS signal, "
             f"(result).team.choice AS team, (result).size.score AS size "
-            f"FROM (SELECT id, CASE WHEN enabled THEN {analyze('payload')} END AS result "
+            f"FROM (SELECT id, CASE WHEN enabled THEN {analyze('payload', question_sql)} END AS result "
             f"FROM ai_fields_input) e")
         assert sql("SELECT key, value FROM rw_streaming_job_config WHERE name = 'ai_fields' "
                    "AND key LIKE 'streaming.developer.project_expr_%' ORDER BY key") == [
@@ -160,13 +183,14 @@ def exercise(server):
                   [[2, 0.1, "billing", 1], [3, None, None, None]])
         assert server.count() == before + 1, "projection duplicated inference or evaluated a false branch"
         if not append_only:
+            assert server.calls[-1]["questions"] == structured_questions
             sql("DELETE FROM ai_fields_input")
             wait_rows("SELECT signal FROM ai_fields", [])
             assert server.count() == before + 1, "retraction reevaluated inference"
         sql("DROP MATERIALIZED VIEW ai_fields; DROP TABLE ai_fields_input")
 
     sql("CREATE TABLE jev_input (id INT PRIMARY KEY, user_id INT, payload JSONB)")
-    sql(f"CREATE MATERIALIZED VIEW jev_direct AS SELECT id, {analyze('payload')} AS result FROM jev_input")
+    sql(f"CREATE MATERIALIZED VIEW jev_direct AS SELECT id, {analyze('payload', structured_sql)} AS result FROM jev_input")
     sql("CREATE MATERIALIZED VIEW jev_totals AS SELECT count(*) AS n, sum((result).generation) AS generation_sum FROM jev_direct")
     sql("INSERT INTO jev_input VALUES (1, 1, '{\"message\":\"first\"}'), (2, 1, '{\"message\":\"second\"}')")
     wait_rows(states("jev_direct"), [0.1, 0.2])

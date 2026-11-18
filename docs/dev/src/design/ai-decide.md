@@ -75,8 +75,27 @@ The descriptions guide the model; the returned choice is always the label.
 
 The constructors return JSONB definitions. A constant JSONB question object is
 also accepted by the same `ai_decide` entry point and undergoes the same schema
-validation. This version accepts string instructions/descriptions only; nested
-JSON instructions and per-row definitions are not supported.
+validation. In JSONB definitions, instructions and choice/score descriptions may
+be strings, objects, arrays or JSON null. Nested JSON is preserved in the HTTP
+request. Probability (`noul`) questions may also supply a `criteria` object with
+`true` and/or `false` descriptions using those same types; omitted or null criteria
+leave the boundary to the instructions. Score levels must still be distinct.
+These description shapes do not change the SQL result types. Per-row question
+definitions are not supported.
+
+For example, pass this constant as the `questions` argument to describe both sides
+of a probability question:
+
+```sql
+'{"refund": {
+    "type": "noul",
+    "instructions": {"question": "Does the customer request a refund?"},
+    "criteria": {
+        "true": {"examples": ["Return my payment", "I want my money back"]},
+        "false": ["Invoice inquiry", "Payment confirmation"]
+    }
+}}'::jsonb
+```
 
 ## Result types
 

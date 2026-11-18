@@ -137,8 +137,10 @@ pub(super) fn question(kind: &str, inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
             let levels = criteria
                 .iter()
                 .map(|item| match item {
-                    Some(ScalarRefImpl::Utf8(value)) => Ok(Value::String(value.to_owned())),
-                    _ => Err(invalid("score levels must be non-null strings")),
+                    Some(ScalarRefImpl::Utf8(value)) if !value.trim().is_empty() => {
+                        Ok(Value::String(value.to_owned()))
+                    }
+                    _ => Err(invalid("score levels must be nonempty strings")),
                 })
                 .collect::<Result<Vec<_>>>()?;
             definition["criteria"] = Value::Array(levels);
