@@ -212,14 +212,6 @@ impl StorageCatalog {
 
         // write version hint
         let final_file_path = format!("{table_path}/metadata/version-hint.text");
-        if self
-            .file_io()
-            .exists(final_file_path.as_str())
-            .await
-            .map_err(|_| Error::new(ErrorKind::Unexpected, "Fail to check exist"))?
-        {
-            self.file_io().delete(final_file_path.as_str()).await?;
-        }
         self.file_io()
             .new_output(final_file_path)?
             .write(format!("{}", current_version + 1).into())
