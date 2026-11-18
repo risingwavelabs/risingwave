@@ -15355,7 +15355,6 @@ dependencies = [
  "sea-orm",
  "serde_json",
  "thiserror-ext",
- "tokio-stream 0.1.15",
  "tracing",
  "workspace-hack",
 ]
