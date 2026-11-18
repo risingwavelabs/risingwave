@@ -57,13 +57,24 @@ use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
-use crate::source::cdc::CdcSourceType;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceMessageEventStream, SourceChunkStream, SourceColumnDesc, SourceColumnType,
-    SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent, SourceMeta,
-    SourceReaderEvent,
+    BoxSourceMessageEventStream, ConnectorProperties, SourceChunkStream, SourceColumnDesc,
+    SourceColumnType, SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent,
+    SourceMeta, SourceReaderEvent,
 };
+
+/// Returns how the Debezium JSON accessors of a parser handle numeric values: by the policy of the
+/// native CDC connector, or without parsing numbers from strings when the Debezium events arrive
+/// through a transport connector such as Kafka.
+fn debezium_numeric_handling(connector_props: &ConnectorProperties) -> NumericHandling {
+    match connector_props.native_cdc_type() {
+        Some(cdc_type) => cdc_type.debezium_numeric_handling(),
+        None => NumericHandling::Relax {
+            string_parsing: false,
+        },
+    }
+}
 
 fn decode_row_with_strict_pk(
     connector_name: &str,
@@ -609,8 +620,7 @@ impl ByteStreamSourceParserImpl {
                 Ok(Self::Plain(parser))
             }
             (ProtocolProperties::Debezium(_), _) => {
-                let numeric_handling =
-                    CdcSourceType::from(&source_ctx.connector_props).debezium_numeric_handling();
+                let numeric_handling = debezium_numeric_handling(&source_ctx.connector_props);
                 let parser = DebeziumParser::new(
                     parser_config.specific,
                     rw_columns,

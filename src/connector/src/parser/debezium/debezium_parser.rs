@@ -29,7 +29,6 @@ use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
     ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
-use crate::source::cdc::CdcSourceType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -144,7 +143,9 @@ impl DebeziumParser {
             props,
             rw_columns,
             SourceContext::dummy().into(),
-            CdcSourceType::Unspecified.debezium_numeric_handling(),
+            NumericHandling::Relax {
+                string_parsing: false,
+            },
         )
         .await
     }
@@ -231,6 +232,7 @@ mod tests {
 
     use super::*;
     use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
+    use crate::source::cdc::CdcSourceType;
     use crate::source::{ConnectorProperties, SourceCtrlOpts};
 
     #[tokio::test]

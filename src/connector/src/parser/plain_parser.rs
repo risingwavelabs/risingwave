@@ -29,8 +29,8 @@ use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::upsert_parser::get_key_column_name;
-use crate::parser::{BytesProperties, ParseResult, ParserFormat};
-use crate::source::cdc::{CdcMessageType, CdcSourceType};
+use crate::parser::{BytesProperties, ParseResult, ParserFormat, debezium_numeric_handling};
+use crate::source::cdc::CdcMessageType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
 /// Parser for `FORMAT PLAIN`, i.e., append-only source.
@@ -76,7 +76,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
-                CdcSourceType::from(&source_ctx.connector_props).debezium_numeric_handling(),
+                debezium_numeric_handling(&source_ctx.connector_props),
                 BigintUnsignedHandlingMode::Long,
                 false,
             )?,

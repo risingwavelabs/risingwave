@@ -146,11 +146,11 @@ mod tests {
     use serde_json::Value;
     use thiserror_ext::AsReport;
 
+    use crate::parser::unified::json::NumericHandling;
     use crate::parser::{
         DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
         SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::cdc::CdcSourceType;
     use crate::source::{SourceContext, SourceCtrlOpts};
 
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
@@ -182,7 +182,9 @@ mod tests {
             props,
             rw_columns,
             SourceContext::dummy().into(),
-            CdcSourceType::Unspecified.debezium_numeric_handling(),
+            NumericHandling::Relax {
+                string_parsing: false,
+            },
         )
         .await
         .unwrap()

@@ -122,7 +122,7 @@ pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
 }
 
 /// Checks the `CREATE` and `ALTER` statements of a CDC source connector.
-pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
+pub trait CdcSourceDdlValidator: CdcSourceRuntimeFlags {
     /// Checks the `FORMAT ... ENCODE ...` clause of a `CREATE` statement.
     fn check_format_encode(format: PbFormatType, encode: PbEncodeType) -> ConnectorResult<()> {
         check_format_encode_inner(
@@ -155,10 +155,7 @@ pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
-    ) -> ConnectorResult<()>
-    where
-        Self: CdcSourceRuntimeFlags,
-    {
+    ) -> ConnectorResult<()> {
         check_common_with_options::<Self>(props, secret_refs)
     }
 
@@ -172,10 +169,7 @@ pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
     fn check_alter_with_options(
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
-    ) -> ConnectorResult<()>
-    where
-        Self: CdcSourceRuntimeFlags,
-    {
+    ) -> ConnectorResult<()> {
         check_common_with_options::<Self>(props, secret_refs)
     }
 }

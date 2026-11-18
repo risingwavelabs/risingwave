@@ -31,6 +31,7 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.management.JMException;
+import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -233,12 +234,7 @@ public abstract class DbzConnectorConfig {
             // bean metric is marked as true before starting the binlog client, which may still
             // fail to connect the upstream database.
             try {
-                var metricsName =
-                        new ObjectName(
-                                "debezium."
-                                        + sourceType.name().toLowerCase(Locale.ROOT)
-                                        + ":type=connector-metrics,context=streaming,server="
-                                        + dbServerName);
+                var metricsName = getStreamingMetricsObjectName(dbServerName);
                 if ((boolean) mbeanServer.getAttribute(metricsName, "Connected")) {
                     LOG.info("Debezium streaming source of {} started", dbServerName);
                     return true;
@@ -256,6 +252,19 @@ public abstract class DbzConnectorConfig {
             TimeUnit.SECONDS.sleep(1); // poll interval; interruption cancels startup
             pollCount++;
         }
+    }
+
+    /**
+     * Returns the JMX name under which Debezium registers the streaming metrics of {@code
+     * dbServerName}, which {@link #waitForStreamingRunning} polls.
+     */
+    protected ObjectName getStreamingMetricsObjectName(String dbServerName)
+            throws MalformedObjectNameException {
+        return new ObjectName(
+                "debezium."
+                        + sourceType.name().toLowerCase(Locale.ROOT)
+                        + ":type=connector-metrics,context=streaming,server="
+                        + dbServerName);
     }
 
     /**
