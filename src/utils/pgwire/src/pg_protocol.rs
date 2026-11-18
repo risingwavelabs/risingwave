@@ -200,7 +200,10 @@ pub fn cstr_to_str(b: &Bytes) -> PsqlResult<&str> {
         &b[..]
     };
     std::str::from_utf8(without_null).map_err(|err| {
-        PsqlError::protocol_error(format!("invalid UTF-8 in protocol string: {err}"))
+        PsqlError::protocol_error(format!(
+            "invalid UTF-8 in protocol string: {}",
+            err.as_report()
+        ))
     })
 }
 

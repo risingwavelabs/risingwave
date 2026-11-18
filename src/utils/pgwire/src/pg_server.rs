@@ -748,6 +748,7 @@ pub(crate) mod tests {
             for packet in packets {
                 let mut stream = TcpStream::connect(addr).await.unwrap();
                 stream.write_all(&packet).await.unwrap();
+                stream.flush().await.unwrap();
                 // The complete malformed frame must be rejected while the client stays open.
                 match stream.read(&mut [0]).await {
                     Ok(0) => {}
