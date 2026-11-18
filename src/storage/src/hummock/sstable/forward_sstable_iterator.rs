@@ -201,13 +201,6 @@ impl SstableIterator {
             return Ok(());
         }
         let mut prefetched_block = None;
-        if self
-            .cold_ranges
-            .as_ref()
-            .is_some_and(|window| window.is_empty())
-        {
-            self.cold_ranges = None;
-        }
         if self.options.prefetch == PrefetchMode::ColdRanges
             && (self.cold_ranges.is_some()
                 || self.sstable_store.can_prefetch_cold_ranges(
@@ -263,44 +256,35 @@ impl SstableIterator {
         &mut self,
         idx: usize,
     ) -> HummockResult<Option<crate::hummock::BlockHolder>> {
-        if let Some(window) = self.cold_ranges.as_mut()
-            && let Some(block) = window
-                .next(
-                    &self.sstable_store,
+        if self.cold_ranges.is_none() {
+            self.cold_ranges = self
+                .sstable_store
+                .prefetch_cold_ranges(
                     &self.sst,
+                    idx,
+                    self.block_end_idx_exclusive,
                     self.options.cache_policy,
                     &mut self.stats,
                 )
-                .await?
-        {
-            return Ok(Some(block));
+                .await
+                .map(Box::new);
         }
-        // Release the preceding window's reservation before requesting another one.
-        self.cold_ranges = None;
-        self.cold_ranges = self
-            .sstable_store
-            .prefetch_cold_ranges(
+        let Some(window) = self.cold_ranges.as_mut() else {
+            return Ok(None);
+        };
+        let block = window
+            .next(
+                &self.sstable_store,
                 &self.sst,
-                idx,
-                self.block_end_idx_exclusive,
                 self.options.cache_policy,
                 &mut self.stats,
             )
-            .await
-            .map(Box::new);
-        match self.cold_ranges.as_mut() {
-            Some(window) => {
-                window
-                    .next(
-                        &self.sstable_store,
-                        &self.sst,
-                        self.options.cache_policy,
-                        &mut self.stats,
-                    )
-                    .await
-            }
-            None => Ok(None),
+            .await?;
+        // A merge iterator may stay on this block while other children need the budget.
+        if window.is_empty() {
+            self.cold_ranges = None;
         }
+        Ok(block)
     }
 
     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {

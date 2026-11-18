@@ -511,6 +511,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parked_iterator_releases_budget_on_last_window_block() {
+        use crate::hummock::{HummockIterator, SstableIterator, SstableIteratorReadOptions};
+        use crate::store::PrefetchMode;
+        let (mut store, _, _, _, _, _dir) = setup(false).await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 11, store.clone()).await;
+        let required = ColdRangePrefetch::reservation_bytes(&sst.meta.block_metas[..2]).unwrap();
+        let inner = Arc::get_mut(&mut store).unwrap();
+        inner.scan_prefetch.max_blocks = Some(2.try_into().unwrap());
+        inner.prefetch_buffer_capacity = required;
+        let opts = Arc::new(SstableIteratorReadOptions {
+            prefetch: PrefetchMode::ColdRanges,
+            cache_policy: CachePolicy::Disable,
+            ..Default::default()
+        });
+        let mut first = SstableIterator::new(sst.clone(), store.clone(), opts.clone(), &info);
+        first.rewind().await.unwrap();
+        assert_eq!(store.get_prefetch_memory_usage(), required);
+        while first.value_meta().block_id == Some(0) {
+            first.next().await.unwrap();
+        }
+        assert_eq!(first.value_meta().block_id, Some(1));
+        assert_eq!(store.get_prefetch_memory_usage(), 0);
+        let mut second = SstableIterator::new(sst.clone(), store.clone(), opts, &info);
+        second.rewind().await.unwrap();
+        assert_eq!(
+            store.read_metrics.cold_range_prefetch_budget_denied.get(),
+            0
+        );
+        assert_eq!(store.get_prefetch_memory_usage(), required);
+        assert_eq!(
+            first.key(),
+            FullKey::decode(&sst.meta.block_metas[1].smallest_key)
+        );
+        drop(second);
+        assert_eq!(store.get_prefetch_memory_usage(), 0);
+    }
+
+    #[tokio::test]
     async fn cold_range_window_inherits_legacy_block_limit_unless_overridden() {
         for (legacy_limit, explicit_limit, expected) in
             [(1, None, 0), (2, None, 2), (16, Some(3), 3)]
