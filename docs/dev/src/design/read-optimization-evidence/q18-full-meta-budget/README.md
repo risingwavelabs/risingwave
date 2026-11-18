@@ -99,3 +99,6 @@ final aggregation interval.
 
 The [fixed-8 comparison](fixed8-matrix.md) reruns main and the optimized
 9 MiB configuration for three matched pairs with 12 advertised slots.
+
+The [production-branch regression check](production-pr-regression.md)
+compares the integrated production release with the same fixed-8 matrix.
