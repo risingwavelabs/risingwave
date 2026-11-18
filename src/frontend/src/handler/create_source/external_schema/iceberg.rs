@@ -12,18 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
+use risingwave_connector::source::iceberg::IcebergBoundedScan;
 
 use super::*;
 
 /// TODO: make hidden columns additional columns, instead of normal columns?
+/// Infers columns from the pinned snapshot for bounded loads, or the current schema otherwise.
 pub async fn extract_iceberg_columns(
     with_properties: &WithOptionsSecResolved,
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
         let table = properties.load_table().await?;
-        columns_from_table(&table, properties.streaming_updates)
+        let metadata = table.metadata();
+        let schema = match properties.bounded_scan()? {
+            Some(IcebergBoundedScan::Snapshot { snapshot_id }) => {
+                let snapshot = metadata.snapshot_by_id(snapshot_id).ok_or_else(|| {
+                    anyhow!("snapshot {snapshot_id} does not exist in the Iceberg table")
+                })?;
+                snapshot.schema(metadata)?
+            }
+            None => metadata.current_schema().clone(),
+        };
+        columns_from_table(&table, &schema, properties.streaming_updates)
     } else {
         anyhow::bail!("invalid connector for Iceberg schema inference")
     }
@@ -31,10 +43,11 @@ pub async fn extract_iceberg_columns(
 
 fn columns_from_table(
     table: &::iceberg::table::Table,
+    schema: &::iceberg::spec::Schema,
     streaming_updates: bool,
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
     let iceberg_schema: arrow_schema_iceberg::Schema =
-        ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
+        ::iceberg::arrow::schema_to_arrow_schema(schema)?;
 
     let mut columns: Vec<ColumnCatalog> = iceberg_schema
         .fields()
