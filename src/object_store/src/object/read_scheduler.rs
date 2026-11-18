@@ -354,10 +354,8 @@ impl PendingReadGroups {
         }
         let path = &group.group.requests[0].path;
         let span = group.span.mergeable()?;
-        let left = span
-            .start
-            .saturating_sub(config.max_gap_bytes)
-            .saturating_sub(config.max_read_bytes.get());
+        // An earlier start would exceed the size limit even if the waiter ends inside the group.
+        let left = span.end.saturating_sub(config.max_read_bytes.get());
         let right = span.end.saturating_add(config.max_gap_bytes);
         let (key, merged_span) = self
             .waiting
@@ -497,6 +495,7 @@ impl GroupQueue {
             .map(|(index, _)| index);
         let group = index.map(|index| pending.groups.swap_remove(index).group);
         pending.update_ready(self);
+        drop(pending);
         let mut group = group?;
         group
             .requests

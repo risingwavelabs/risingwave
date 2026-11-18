@@ -20,7 +20,7 @@
 //! Range-error fallback releases the parent's P before acquiring P for each child.
 
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
+use std::task::{Context, Poll, ready};
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -150,7 +150,7 @@ pub(super) async fn run<F, R>(
             }
             _ = std::future::poll_fn(|cx| {
                 for group in &mut groups.pending.lock().unwrap().groups {
-                    if group.group.requests.iter_mut().all(|r| r.response.poll_closed(cx).is_ready()) {
+                    if poll_all_closed(&mut group.group.requests, cx).is_ready() {
                         return Poll::Ready(());
                     }
                 }
@@ -313,18 +313,13 @@ impl ReadGroup {
             let result = tokio::select! {
                 biased;
                 _ = std::future::poll_fn(|cx| {
-                    if !self.requests.iter_mut().all(|request| request.response.poll_closed(cx).is_ready()) {
-                        return Poll::Pending;
-                    }
+                    ready!(poll_all_closed(&mut self.requests, cx));
                     let mut followers = flight.flight.followers.lock().unwrap();
-                    if followers.as_mut().unwrap().iter_mut().all(|request| request.response.poll_closed(cx).is_ready()) {
-                        // Close registration while holding the lock so a new follower
-                        // cannot join a GET that is about to be cancelled.
-                        followers.take();
-                        Poll::Ready(())
-                    } else {
-                        Poll::Pending
-                    }
+                    ready!(poll_all_closed(followers.as_mut().unwrap(), cx));
+                    // Close registration while holding the lock so a new follower
+                    // cannot join a GET that is about to be cancelled.
+                    followers.take();
+                    Poll::Ready(())
                 }) => None,
                 result = physical => Some(result),
             };
@@ -461,13 +456,20 @@ impl ReadGroup {
     }
 }
 
+fn poll_all_closed(requests: &mut [ReadRequest], cx: &mut Context<'_>) -> Poll<()> {
+    for request in requests {
+        ready!(request.response.poll_closed(cx));
+    }
+    Poll::Ready(())
+}
+
 async fn read_while_wanted(
     requests: &mut [ReadRequest],
     read: impl Future<Output = ReadResult>,
 ) -> Option<ReadResult> {
     tokio::select! {
         biased;
-        _ = join_all(requests.iter_mut().map(|request| request.response.closed())) => None,
+        _ = std::future::poll_fn(|cx| poll_all_closed(requests, cx)) => None,
         result = read => Some(result),
     }
 }
