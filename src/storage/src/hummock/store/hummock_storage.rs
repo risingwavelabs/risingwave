@@ -60,6 +60,9 @@ use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::store::object_index_writer::{
+    HummockObjectIndexWriter, ObjectIndexWriterContext, ObjectIndexWriterImpl,
+};
 use crate::hummock::store::vector_writer::HummockVectorWriter;
 use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
@@ -685,7 +688,11 @@ impl HummockStorage {
         self.hummock_event_sender
             .send(HummockEvent::GetMinUncommittedObjectId { result_tx: tx })
             .expect("should send success");
-        rx.await.expect("should await success")
+        let sst_id = rx.await.expect("should await success");
+        let object_index_id = self
+            .object_id_manager
+            .min_uncommitted_object_index_id(&self.version_update_notifier_tx.borrow());
+        sst_id.into_iter().chain(object_index_id).min()
     }
 
     pub async fn sync(
@@ -771,14 +778,9 @@ impl StateStoreRead for HummockStorageReadSnapshot {
     }
 }
 
-impl StateStoreReadVector for HummockStorageReadSnapshot {
-    async fn nearest<'a, O: Send + 'a>(
-        &'a self,
-        vec: VectorRef<'a>,
-        options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
-    ) -> StorageResult<Vec<O>> {
-        let version = match self.epoch {
+impl HummockStorageReadSnapshot {
+    async fn get_object_index_version(&self, op: &str) -> StorageResult<PinnedVersion> {
+        Ok(match self.epoch {
             HummockReadEpoch::LatestCommitted(_) => unreachable!("snapshot epoch must be resolved"),
             HummockReadEpoch::Committed(epoch)
             | HummockReadEpoch::BatchQueryCommitted(epoch, _)
@@ -796,11 +798,23 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
                     ))
                 })?,
             HummockReadEpoch::NoWait(_) => {
-                return Err(
-                    HummockError::other("nearest query does not support NoWait epoch").into(),
-                );
+                return Err(HummockError::other(format!(
+                    "{op} query does not support NoWait epoch"
+                ))
+                .into());
             }
-        };
+        })
+    }
+}
+
+impl StateStoreReadVector for HummockStorageReadSnapshot {
+    async fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> StorageResult<Vec<O>> {
+        let version = self.get_object_index_version("nearest").await?;
         dispatch_distance_measurement!(options.measure, MeasurementType, {
             Ok(self
                 .hummock_version_reader
@@ -1037,14 +1051,25 @@ impl StateStore for HummockStorage {
     }
 
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
-        HummockVectorWriter::new(
-            options.table_id,
+        HummockVectorWriter::new(self.new_object_index_writer(options.table_id))
+    }
+}
+
+impl HummockStorage {
+    fn new_object_index_writer<W: ObjectIndexWriterImpl>(
+        &self,
+        table_id: TableId,
+    ) -> HummockObjectIndexWriter<W> {
+        HummockObjectIndexWriter::new(
+            ObjectIndexWriterContext {
+                table_id,
+                sstable_store: self.context.sstable_store.clone(),
+                object_id_manager: self.object_id_manager.clone(),
+                stats: self.hummock_version_reader.stats().clone(),
+                storage_opts: self.context.storage_opts.clone(),
+            },
             self.version_update_notifier_tx.clone(),
-            self.context.sstable_store.clone(),
-            self.object_id_manager.clone(),
             self.hummock_event_sender.clone(),
-            self.hummock_version_reader.stats().clone(),
-            self.context.storage_opts.clone(),
         )
     }
 }

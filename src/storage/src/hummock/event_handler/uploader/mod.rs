@@ -36,8 +36,7 @@ use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
-use risingwave_hummock_sdk::{HummockEpoch, HummockRawObjectId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockRawObjectId, LocalSstableInfo, ObjectIndexAdd};
 use task_manager::{TaskManager, UploadingTaskStatus};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -1005,7 +1004,7 @@ impl UploaderData {
         let mut uploading_tasks = HashSet::new();
         let mut spilled_tasks = BTreeSet::new();
         let mut all_table_ids = HashSet::new();
-        let mut vector_index_adds = HashMap::new();
+        let mut object_index_adds = HashMap::new();
 
         let mut flush_payload = HashMap::new();
 
@@ -1080,18 +1079,27 @@ impl UploaderData {
                     }
 
                     if let hash_map::Entry::Occupied(mut entry) =
-                        self.unsync_vector_index_data.entry(*table_id)
+                        self.unsync_object_index_data.entry(*table_id)
                     {
-                        let data = entry.get_mut();
-                        let adds = take_before_epoch(&mut data.sealed_epoch_data, epoch)
-                            .into_values()
-                            .flatten()
-                            .collect_vec();
-                        if data.is_dropped && data.sealed_epoch_data.is_empty() {
+                        let writers = entry.get_mut();
+                        let mut adds = Vec::new();
+                        writers.retain(|writer_id, data| {
+                            assert!(
+                                data.is_dropped || data.curr_epoch > epoch,
+                                "object index writer {writer_id} of {table_id} has not sealed epoch {epoch}"
+                            );
+                            adds.extend(
+                                take_before_epoch(&mut data.sealed_epoch_data, epoch)
+                                    .into_values()
+                                    .flatten(),
+                            );
+                            !data.is_dropped || !data.sealed_epoch_data.is_empty()
+                        });
+                        if writers.is_empty() {
                             entry.remove();
                         }
                         if !adds.is_empty() {
-                            vector_index_adds
+                            object_index_adds
                                 .try_insert(*table_id, adds)
                                 .expect("non-duplicate");
                         }
@@ -1143,7 +1151,7 @@ impl UploaderData {
                 remaining_uploading_tasks: uploading_tasks,
                 uploaded,
                 table_watermarks: all_table_watermarks,
-                vector_index_adds,
+                object_index_adds,
                 sync_result_sender,
             },
         );
@@ -1169,7 +1177,7 @@ struct SyncingData {
     // newer data at the front
     uploaded: VecDeque<Arc<StagingSstableInfo>>,
     table_watermarks: HashMap<TableId, TableWatermarks>,
-    vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
+    object_index_adds: HashMap<TableId, Vec<ObjectIndexAdd>>,
     sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
 }
 
@@ -1177,7 +1185,7 @@ struct SyncingData {
 pub struct SyncedData {
     pub uploaded_ssts: VecDeque<Arc<StagingSstableInfo>>,
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
-    pub vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
+    pub object_index_adds: HashMap<TableId, Vec<ObjectIndexAdd>>,
 }
 
 struct UploaderContext {
@@ -1208,8 +1216,8 @@ impl UploaderContext {
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Copy, Clone, Debug)]
 struct SyncId(usize);
 
-struct UnsyncVectorIndexData {
-    sealed_epoch_data: BTreeMap<HummockEpoch, Option<VectorIndexAdd>>,
+struct UnsyncObjectIndexData {
+    sealed_epoch_data: BTreeMap<HummockEpoch, Option<ObjectIndexAdd>>,
     curr_epoch: u64,
     is_dropped: bool,
 }
@@ -1217,7 +1225,7 @@ struct UnsyncVectorIndexData {
 #[derive(Default)]
 struct UploaderData {
     unsync_data: UnsyncData,
-    unsync_vector_index_data: HashMap<TableId, UnsyncVectorIndexData>,
+    unsync_object_index_data: HashMap<TableId, HashMap<u64, UnsyncObjectIndexData>>,
 
     syncing_data: BTreeMap<SyncId, SyncingData>,
 
@@ -1239,6 +1247,8 @@ impl UploaderData {
         }
         self.unsync_data
             .clear_tables(&table_ids, &mut self.task_manager);
+        self.unsync_object_index_data
+            .retain(|table_id, _| !table_ids.contains(table_id));
         self.syncing_data.retain(|sync_id, syncing_data| {
             if syncing_data
                 .sync_table_epochs
@@ -1386,38 +1396,47 @@ impl HummockUploader {
             .local_seal_epoch(instance_id, next_epoch, opts);
     }
 
-    pub(super) fn register_vector_writer(&mut self, table_id: TableId, init_epoch: HummockEpoch) {
+    pub(super) fn register_object_index_writer(
+        &mut self,
+        table_id: TableId,
+        writer_id: u64,
+        init_epoch: HummockEpoch,
+    ) {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
         assert!(
-            data.unsync_vector_index_data
+            data.unsync_object_index_data
+                .entry(table_id)
+                .or_default()
                 .try_insert(
-                    table_id,
-                    UnsyncVectorIndexData {
+                    writer_id,
+                    UnsyncObjectIndexData {
                         sealed_epoch_data: Default::default(),
                         curr_epoch: init_epoch,
                         is_dropped: false,
                     }
                 )
                 .is_ok(),
-            "duplicate vector writer on {}",
+            "duplicate object index writer on {}",
             table_id
         )
     }
 
-    pub(super) fn vector_writer_seal_epoch(
+    pub(super) fn object_index_writer_seal_epoch(
         &mut self,
         table_id: TableId,
+        writer_id: u64,
         next_epoch: HummockEpoch,
-        add: Option<VectorIndexAdd>,
+        add: Option<ObjectIndexAdd>,
     ) {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
         let data = data
-            .unsync_vector_index_data
+            .unsync_object_index_data
             .get_mut(&table_id)
+            .and_then(|writers| writers.get_mut(&writer_id))
             .expect("should exist");
         assert!(!data.is_dropped);
         assert!(
@@ -1432,17 +1451,24 @@ impl HummockUploader {
         data.curr_epoch = next_epoch;
     }
 
-    pub(super) fn drop_vector_writer(&mut self, table_id: TableId) {
+    pub(super) fn drop_object_index_writer(&mut self, table_id: TableId, writer_id: u64) {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        let hash_map::Entry::Occupied(mut entry) = data.unsync_vector_index_data.entry(table_id)
+        let hash_map::Entry::Occupied(mut entry) = data.unsync_object_index_data.entry(table_id)
         else {
-            panic!("vector writer {} should exist", table_id);
+            // Recovery may clear the table before the old writer guard is dropped.
+            return;
         };
-        let data = entry.get_mut();
+        let writers = entry.get_mut();
+        let Some(data) = writers.get_mut(&writer_id) else {
+            return;
+        };
         data.is_dropped = true;
         if data.sealed_epoch_data.is_empty() {
+            writers.remove(&writer_id);
+        }
+        if writers.is_empty() {
             entry.remove();
         }
     }
@@ -1604,7 +1630,7 @@ impl UploaderData {
                 remaining_uploading_tasks: _,
                 uploaded,
                 table_watermarks,
-                vector_index_adds,
+                object_index_adds,
                 sync_result_sender,
             } = syncing_data;
             context
@@ -1628,7 +1654,7 @@ impl UploaderData {
                 Ok(SyncedData {
                     uploaded_ssts: uploaded,
                     table_watermarks,
-                    vector_index_adds,
+                    object_index_adds,
                 }),
             )
         }
@@ -1788,10 +1814,10 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::metrics::LabelGuardedHistogram;
     use risingwave_common::util::epoch::EpochExt;
-    use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_hummock_sdk::vector_index::{
         FlatIndexAdd, VectorFileInfo, VectorIndexAdd, VectorStoreInfoDelta,
     };
+    use risingwave_hummock_sdk::{HummockEpoch, ObjectIndexAdd};
     use tokio::sync::oneshot;
 
     use super::test_utils::*;
@@ -1896,6 +1922,96 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn test_object_index_multiple_writers() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let epoch = INITIAL_EPOCH.next_epoch();
+        let tables = HashSet::from_iter([TEST_TABLE_ID]);
+        uploader.start_epoch(epoch, tables.clone());
+        for writer_id in 0..3 {
+            uploader.register_object_index_writer(TEST_TABLE_ID, writer_id, epoch);
+        }
+        // A writer initialized for a future epoch does not participate in this checkpoint.
+        uploader.register_object_index_writer(TEST_TABLE_ID, 3, epoch.next_epoch());
+        let add = ObjectIndexAdd::Vector(VectorIndexAdd::Flat(FlatIndexAdd {
+            vector_store_info_delta: VectorStoreInfoDelta {
+                next_vector_id: 0,
+                added_vector_files: vec![],
+            },
+        }));
+        uploader.object_index_writer_seal_epoch(
+            TEST_TABLE_ID,
+            2,
+            epoch.next_epoch(),
+            Some(add.clone()),
+        );
+        uploader.drop_object_index_writer(TEST_TABLE_ID, 2);
+        uploader.object_index_writer_seal_epoch(TEST_TABLE_ID, 0, epoch.next_epoch(), None);
+        uploader.object_index_writer_seal_epoch(
+            TEST_TABLE_ID,
+            1,
+            epoch.next_epoch(),
+            Some(add.clone()),
+        );
+        let (tx, rx) = oneshot::channel();
+        uploader.start_single_epoch_sync(epoch, tx, tables.clone());
+        let synced = rx.await.unwrap().unwrap();
+        assert_eq!(
+            synced.object_index_adds[&TEST_TABLE_ID],
+            vec![add.clone(), add.clone()]
+        );
+        assert!(!uploader.data().unsync_object_index_data[&TEST_TABLE_ID].contains_key(&2));
+
+        let epoch = epoch.next_epoch();
+        uploader.start_epoch(epoch, tables.clone());
+        uploader.register_object_index_writer(TEST_TABLE_ID, 4, epoch);
+        for writer_id in [3, 1, 0] {
+            uploader.object_index_writer_seal_epoch(
+                TEST_TABLE_ID,
+                writer_id,
+                epoch.next_epoch(),
+                None,
+            );
+        }
+        uploader.object_index_writer_seal_epoch(
+            TEST_TABLE_ID,
+            4,
+            epoch.next_epoch(),
+            Some(add.clone()),
+        );
+        let (tx, rx) = oneshot::channel();
+        uploader.start_single_epoch_sync(epoch, tx, tables);
+        let synced = rx.await.unwrap().unwrap();
+        assert_eq!(synced.object_index_adds[&TEST_TABLE_ID], vec![add]);
+        for writer_id in [0, 1, 3, 4] {
+            uploader.drop_object_index_writer(TEST_TABLE_ID, writer_id);
+        }
+        assert!(
+            !uploader
+                .data()
+                .unsync_object_index_data
+                .contains_key(&TEST_TABLE_ID)
+        );
+        // A late drop from an old recovery generation must not remove a new instance.
+        uploader.register_object_index_writer(TEST_TABLE_ID, 5, epoch.next_epoch());
+        uploader.drop_object_index_writer(TEST_TABLE_ID, 0);
+        assert!(uploader.data().unsync_object_index_data[&TEST_TABLE_ID].contains_key(&5));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "has not sealed epoch")]
+    async fn test_object_index_sync_requires_empty_writer_seal() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let epoch = INITIAL_EPOCH.next_epoch();
+        let tables = HashSet::from_iter([TEST_TABLE_ID]);
+        uploader.start_epoch(epoch, tables.clone());
+        uploader.register_object_index_writer(TEST_TABLE_ID, 0, epoch);
+        uploader.register_object_index_writer(TEST_TABLE_ID, 1, epoch);
+        uploader.object_index_writer_seal_epoch(TEST_TABLE_ID, 0, epoch.next_epoch(), None);
+        let (tx, _rx) = oneshot::channel();
+        uploader.start_single_epoch_sync(epoch, tx, tables);
+    }
+
+    #[tokio::test]
     async fn test_uploader_basic() {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let mut sst_collector = UploadedSstCollector::default();
@@ -1910,7 +2026,7 @@ pub(crate) mod tests {
         uploader.add_imm(TEST_LOCAL_INSTANCE_ID, (imm.clone(), tracker));
         uploader.local_seal_epoch_for_test(TEST_LOCAL_INSTANCE_ID, epoch1);
 
-        uploader.register_vector_writer(VECTOR_INDEX_TABLE_ID, epoch1);
+        uploader.register_object_index_writer(VECTOR_INDEX_TABLE_ID, 0, epoch1);
         let vector_info_file = VectorFileInfo {
             object_id: 1.into(),
             vector_count: 1,
@@ -1918,14 +2034,15 @@ pub(crate) mod tests {
             start_vector_id: 0,
             meta_offset: 20,
         };
-        let vector_index_add = VectorIndexAdd::Flat(FlatIndexAdd {
+        let vector_index_add = ObjectIndexAdd::Vector(VectorIndexAdd::Flat(FlatIndexAdd {
             vector_store_info_delta: VectorStoreInfoDelta {
                 next_vector_id: 1,
                 added_vector_files: vec![vector_info_file.clone()],
             },
-        });
-        uploader.vector_writer_seal_epoch(
+        }));
+        uploader.object_index_writer_seal_epoch(
             VECTOR_INDEX_TABLE_ID,
+            0,
             epoch1.next_epoch(),
             Some(vector_index_add.clone()),
         );
@@ -1959,7 +2076,7 @@ pub(crate) mod tests {
                 let SyncedData {
                     uploaded_ssts,
                     table_watermarks,
-                    vector_index_adds,
+                    object_index_adds,
                 } = data;
                 assert_eq!(1, uploaded_ssts.len());
                 let staging_sst = &uploaded_ssts[0];
@@ -1973,11 +2090,11 @@ pub(crate) mod tests {
                     staging_sst.sstable_infos()
                 );
                 assert!(table_watermarks.is_empty());
-                assert_eq!(vector_index_adds.len(), 1);
-                let (table_id, vector_index_adds) = vector_index_adds.into_iter().next().unwrap();
+                assert_eq!(object_index_adds.len(), 1);
+                let (table_id, object_index_adds) = object_index_adds.into_iter().next().unwrap();
                 assert_eq!(table_id, VECTOR_INDEX_TABLE_ID);
-                assert_eq!(vector_index_adds.len(), 1);
-                let synced_vector_index_add = vector_index_adds[0].clone();
+                assert_eq!(object_index_adds.len(), 1);
+                let synced_vector_index_add = object_index_adds[0].clone();
                 assert_eq!(vector_index_add, synced_vector_index_add);
             }
             _ => unreachable!(),

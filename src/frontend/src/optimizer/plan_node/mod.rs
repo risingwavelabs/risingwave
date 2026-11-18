@@ -990,6 +990,7 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
+mod object_index_write;
 
 pub mod batch;
 pub mod generic;

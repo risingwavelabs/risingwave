@@ -30,9 +30,9 @@ use risingwave_hummock_sdk::vector_index::{
 };
 use risingwave_pb::hummock::PbHnswGraph;
 
+use crate::hummock::store::object_index_writer::ObjectIndexFileIdManagerRef;
 use crate::hummock::vector::file::{FileVectorStore, FileVectorStoreCtx};
 use crate::hummock::vector::monitor::report_hnsw_stat;
-use crate::hummock::vector::writer::VectorObjectIdManagerRef;
 use crate::hummock::{HummockResult, SstableStoreRef};
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
@@ -44,7 +44,7 @@ pub(crate) struct HnswFlatIndexWriter {
     measure: DistanceMeasurement,
     options: HnswBuilderOptions,
     sstable_store: SstableStoreRef,
-    object_id_manager: VectorObjectIdManagerRef,
+    object_id_manager: ObjectIndexFileIdManagerRef,
     stats: HnswFlatIndexWriterStats,
 
     vector_store: FileVectorStore,
@@ -63,7 +63,7 @@ impl HnswFlatIndexWriter {
         dimension: usize,
         measure: DistanceMeasurement,
         sstable_store: SstableStoreRef,
-        object_id_manager: VectorObjectIdManagerRef,
+        object_id_manager: ObjectIndexFileIdManagerRef,
         stats: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
@@ -163,7 +163,7 @@ impl HnswFlatIndexWriter {
             let size = encoded_graph.len();
             let object_id = self
                 .object_id_manager
-                .get_new_vector_object_id()
+                .get_new_file_object_id()
                 .await?
                 .into();
             let path = self

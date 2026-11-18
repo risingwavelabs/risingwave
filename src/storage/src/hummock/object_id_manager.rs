@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::DerefMut;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockSstableObjectId, ObjectIdRange};
 use risingwave_pb::hummock::GetNewObjectIdsRequest;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, HummockMetaClient};
@@ -39,6 +41,14 @@ pub struct ObjectIdManager {
     available_object_ids: Mutex<ObjectIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    object_index_uploads: Mutex<BTreeMap<HummockRawObjectId, ObjectIndexUpload>>,
+}
+
+/// Unsealed uploads belong to a live writer/task. Once sealed, they remain protected even
+/// after that owner drops, until the checkpoint is visible in the pinned version.
+struct ObjectIndexUpload {
+    owner: Weak<()>,
+    sealed_epoch: Option<(TableId, u64)>,
 }
 
 impl ObjectIdManager {
@@ -48,7 +58,49 @@ impl ObjectIdManager {
             available_object_ids: Mutex::new(ObjectIdRange::new(u64::MIN, u64::MIN)),
             remote_fetch_number,
             hummock_meta_client,
+            object_index_uploads: Default::default(),
         }
+    }
+
+    pub(crate) fn track_object_index_upload(&self, id: HummockRawObjectId, owner: &Arc<()>) {
+        self.object_index_uploads.lock().insert(
+            id,
+            ObjectIndexUpload {
+                owner: Arc::downgrade(owner),
+                sealed_epoch: None,
+            },
+        );
+    }
+
+    pub(crate) fn seal_object_index_uploads(
+        &self,
+        table_id: TableId,
+        epoch: u64,
+        ids: impl IntoIterator<Item = HummockRawObjectId>,
+    ) {
+        let mut uploads = self.object_index_uploads.lock();
+        for id in ids {
+            let upload = uploads
+                .get_mut(&id)
+                .expect("object index upload is tracked");
+            upload.sealed_epoch = Some((table_id, epoch));
+        }
+    }
+
+    pub(crate) fn min_uncommitted_object_index_id(
+        &self,
+        version: &HummockVersion,
+    ) -> Option<HummockRawObjectId> {
+        let mut uploads = self.object_index_uploads.lock();
+        uploads.retain(|_, upload| match upload.sealed_epoch {
+            Some((table_id, epoch)) => version
+                .state_table_info
+                .info()
+                .get(&table_id)
+                .is_some_and(|info| info.committed_epoch < epoch),
+            None => upload.owner.strong_count() > 0,
+        });
+        uploads.first_key_value().map(|(id, _)| *id)
     }
 
     pub async fn get_new_object_id<I: From<HummockRawObjectId>>(&self) -> HummockResult<I> {
