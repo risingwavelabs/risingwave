@@ -706,7 +706,7 @@ pub struct ReadBatchConfig {
     #[serde(default = "default_read_meta_bytes")]
     pub meta_max_bytes: NonZeroUsize,
     /// Total SST metadata weight retained by read batches sharing a Hummock store, including oversized entries.
-    /// Each batch is charged independently. Reads continue when the budget is full.
+    /// Batches sharing a live cache entry are charged once. Reads continue when the budget is full.
     #[serde(default = "default_read_meta_shared_bytes")]
     pub meta_shared_max_bytes: NonZeroUsize,
 }

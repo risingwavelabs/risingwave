@@ -1822,14 +1822,14 @@ mod tests {
         let weight = table.weight();
         let config = &mut Arc::get_mut(&mut store).unwrap().read_batch;
         config.meta_reuse = true;
-        config.meta_shared_max_bytes = (weight * 4).try_into().unwrap();
+        config.meta_shared_max_bytes = weight.try_into().unwrap();
         let config = *config;
         let reader = HummockVersionReader::new(store.clone(), store.read_metrics.clone());
         let key = test_key_of(0);
         let table_id = key.user_key.table_id;
         let epoch = key.epoch_with_gap.pure_epoch();
         let key = TableKey(Bytes::from(key.user_key.table_key.0));
-        let version = build_version_from_sstable(table_id, info);
+        let version = build_version_from_sstable(table_id, info.clone());
 
         // Keep a chunk's batch alive after iterator initialization, as a HashJoin does.
         let chunk = Arc::new(SstMetaBatch::new(config));
@@ -1846,11 +1846,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(iter.try_next().await.unwrap().is_some());
         assert_eq!(store.meta_batch_usage(), weight);
 
         // Each task uses the point-read entry point called by native MultiGet. Keep all batches
-        // alive until every read has returned, including the ones refused retention.
+        // alive until every read has returned, sharing the same cache entry.
         let mut reads = tokio::task::JoinSet::new();
         for _ in 0..128 {
             let reader = reader.clone();
@@ -1879,11 +1878,19 @@ mod tests {
         while let Some(result) = reads.join_next().await {
             batches.push(result.unwrap());
         }
-        assert_eq!(store.meta_batch_usage(), 4 * weight);
+        let mut stats = crate::monitor::StoreLocalStatistic::default();
+        for batch in &batches {
+            batch.sstable(&store, &info, &mut stats).await.unwrap();
+        }
+        assert_eq!(stats.cache_meta_batch_ready, 128);
+        assert_eq!(stats.cache_meta_block_total, 0);
+        assert_eq!(store.meta_batch_usage(), weight);
         drop(batches);
         assert_eq!(store.meta_batch_usage(), weight);
         drop(chunk);
         assert_eq!(store.meta_batch_usage(), 0);
+        // An active iterator owns its read handle independently of the batch charge.
+        assert!(iter.try_next().await.unwrap().is_some());
     }
 
     #[tokio::test]

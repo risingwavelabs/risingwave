@@ -910,7 +910,7 @@ impl StateStoreCollector {
 
         let meta_batch_retained_bytes = IntGauge::with_opts(Opts::new(
             "state_store_meta_batch_retained_bytes",
-            "Sum of SST metadata handle weights retained by read batches, charged per batch",
+            "Weight of distinct live SST metadata entries retained by read batches",
         ))
         .unwrap();
         collectors.push(Arc::new(meta_batch_retained_bytes.clone()) as _);

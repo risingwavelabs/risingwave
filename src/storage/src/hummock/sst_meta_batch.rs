@@ -20,7 +20,6 @@ use risingwave_common::config::storage::ReadBatchConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-use super::block_stream::MemoryUsageTracker;
 use super::{HummockResult, SstableStore, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
@@ -36,15 +35,68 @@ pub struct SstMetaBatch {
     inner: Mutex<Metadata>,
 }
 
-struct RetainedMeta {
+/// Read batches share this charge. The holder keeps the Foyer value's address stable
+/// until the charge is removed in `Drop`. Reloading an SST creates a distinct entry.
+pub(super) struct RetainedMeta {
     table: TableHolder,
-    _charge: MemoryUsageTracker,
+    budget: Arc<Mutex<MetaBatchBudget>>,
+}
+
+#[derive(Default)]
+pub(super) struct MetaBatchBudget {
+    entries: HashMap<usize, Weak<RetainedMeta>>,
+    pub(super) used: usize,
+}
+
+impl RetainedMeta {
+    pub(super) fn try_acquire(
+        budget: &Arc<Mutex<MetaBatchBudget>>,
+        limit: usize,
+        table: &TableHolder,
+    ) -> Option<Arc<Self>> {
+        let address = std::ptr::from_ref(table.value()).addr();
+        let mut state = budget.lock();
+        if let Some(previous) = state.entries.get(&address) {
+            if let Some(live) = previous.upgrade() {
+                return Some(live);
+            }
+            // The last owner's destructor is waiting for this lock. Transfer its charge.
+        } else {
+            let used = state.used.checked_add(table.weight())?;
+            if used > limit {
+                return None;
+            }
+            state.used = used;
+        }
+        let retained = Arc::new(Self {
+            table: table.clone(),
+            budget: budget.clone(),
+        });
+        state.entries.insert(address, Arc::downgrade(&retained));
+        Some(retained)
+    }
+}
+
+impl Drop for RetainedMeta {
+    fn drop(&mut self) {
+        let address = std::ptr::from_ref(self.table.value()).addr();
+        let mut state = self.budget.lock();
+        // A concurrent acquisition may already have inherited this entry's charge.
+        if state
+            .entries
+            .get(&address)
+            .is_some_and(|entry| std::ptr::eq(entry.as_ptr(), self))
+        {
+            state.entries.remove(&address);
+            state.used -= self.table.weight();
+        }
+    }
 }
 
 #[derive(Default)]
 struct Metadata {
     owner: Option<Weak<SstableStore>>,
-    entries: HashMap<HummockSstableObjectId, RetainedMeta>,
+    entries: HashMap<HummockSstableObjectId, Arc<RetainedMeta>>,
     regular_bytes: usize,
     has_oversized: bool,
 }
@@ -151,13 +203,9 @@ impl SstMetaBatch {
             stats.cache_meta_batch_budget_reject += 1;
             return Ok(table);
         }
-        let Some(charge) = store.try_reserve_meta_batch(bytes) else {
+        let Some(retained) = store.try_retain_meta(&table) else {
             stats.cache_meta_batch_shared_budget_reject += 1;
             return Ok(table);
-        };
-        let retained = RetainedMeta {
-            table: table.clone(),
-            _charge: charge,
         };
         inner.entries.insert(object_id, retained);
         if oversized {
@@ -288,22 +336,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_shared_budget_charges_oversized_and_releases_on_cancel() {
+    async fn test_shared_charge_survives_one_cancel_and_excludes_reloaded_entries() {
+        use crate::hummock::{Sstable, SstableMetaCacheValue};
+
         let mut store = mock_sstable_store().await;
         let (table, info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, store.clone()).await;
+        let replacement = Sstable::clone(&table);
+        let replacement_weight = std::mem::size_of::<HummockSstableObjectId>()
+            + replacement.estimated_meta_cache_memory_weight();
         let weight = table.weight();
         let config = &mut Arc::get_mut(&mut store).unwrap().read_batch;
         config.meta_reuse = true;
-        config.meta_max_bytes = (weight - 1).try_into().unwrap();
-        config.meta_shared_max_bytes = weight.try_into().unwrap();
+        config.meta_max_bytes = 1.try_into().unwrap();
+        config.meta_shared_max_bytes = weight.max(replacement_weight).try_into().unwrap();
         let config = *config;
 
-        let (ready, retained) = tokio::sync::oneshot::channel();
-        let holder = tokio::spawn({
+        let park_batch = || {
             let store = store.clone();
             let info = info.clone();
-            async move {
+            let (ready, retained) = tokio::sync::oneshot::channel();
+            let holder = tokio::spawn(async move {
                 let batch = SstMetaBatch::new(config);
                 let mut stats = StoreLocalStatistic::default();
                 batch.sstable(&store, &info, &mut stats).await.unwrap();
@@ -311,25 +364,65 @@ mod tests {
                 ready.send(()).unwrap();
                 std::future::pending::<()>().await;
                 drop(batch);
+            });
+            (holder, retained)
+        };
+        let (first, first_ready) = park_batch();
+        let (last, last_ready) = park_batch();
+        first_ready.await.unwrap();
+        last_ready.await.unwrap();
+        assert_eq!(store.meta_batch_usage(), weight);
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert_eq!(store.meta_batch_usage(), weight);
+
+        // Reload the same object ID while a batch still pins the old entry.
+        let new_entry = store
+            .meta_cache()
+            .insert(info.object_id, SstableMetaCacheValue::from(replacement));
+        assert_eq!(new_entry.weight(), replacement_weight);
+        let next = SstMetaBatch::new(config);
+        let mut stats = StoreLocalStatistic::default();
+        let result = next.sstable(&store, &info, &mut stats).await.unwrap();
+        assert!(std::ptr::eq(result.value(), new_entry.value()));
+        assert_eq!(stats.cache_meta_batch_shared_budget_reject, 1);
+        assert_eq!(stats.cache_meta_batch_retained, 0);
+        last.abort();
+        assert!(last.await.unwrap_err().is_cancelled());
+        assert_eq!(store.meta_batch_usage(), 0);
+        next.sstable(&store, &info, &mut stats).await.unwrap();
+        assert_eq!(stats.cache_meta_batch_retained, 1);
+        assert_eq!(store.meta_batch_usage(), replacement_weight);
+        drop(next);
+        assert_eq!(store.meta_batch_usage(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_last_release_racing_retain_does_not_lose_the_charge() {
+        let mut store = mock_sstable_store().await;
+        let (table, _) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, store.clone()).await;
+        let weight = table.weight();
+        Arc::get_mut(&mut store)
+            .unwrap()
+            .read_batch
+            .meta_shared_max_bytes = weight.try_into().unwrap();
+
+        // A new owner of this still-live entry must always fit, including while the
+        // previous last owner's destructor is removing its weak registration.
+        let start = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    start.wait();
+                    for _ in 0..1_000 {
+                        let charge = store.try_retain_meta(&table).unwrap();
+                        assert_eq!(store.meta_batch_usage(), weight);
+                        drop(charge);
+                    }
+                });
             }
         });
-        retained.await.unwrap();
-        let batch = SstMetaBatch::new(config);
-        let mut stats = StoreLocalStatistic::default();
-        assert_eq!(
-            batch.sstable(&store, &info, &mut stats).await.unwrap().id,
-            info.object_id
-        );
-        assert_eq!(stats.cache_meta_batch_shared_budget_reject, 1);
-        assert_eq!(stats.cache_meta_batch_budget_reject, 0);
-        holder.abort();
-        assert!(holder.await.unwrap_err().is_cancelled());
-        assert_eq!(store.meta_batch_usage(), 0);
-        batch.sstable(&store, &info, &mut stats).await.unwrap();
-        batch.sstable(&store, &info, &mut stats).await.unwrap();
-        assert_eq!(stats.cache_meta_batch_ready, 1);
-        assert_eq!(store.meta_batch_usage(), weight);
-        drop(batch);
         assert_eq!(store.meta_batch_usage(), 0);
     }
 

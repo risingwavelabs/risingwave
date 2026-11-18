@@ -50,6 +50,7 @@ use super::{
 };
 use crate::hummock::block_stream::{BlockDataStream, MemoryUsageTracker};
 use crate::hummock::none::NoneRecentFilter;
+use crate::hummock::sst_meta_batch::{MetaBatchBudget, RetainedMeta};
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
@@ -267,7 +268,7 @@ pub struct SstableStore {
     ///
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
-    meta_batch_usage: Arc<AtomicUsize>,
+    meta_batch_budget: Arc<parking_lot::Mutex<MetaBatchBudget>>,
     prefetch_buffer_usage: Arc<AtomicUsize>,
     buffered_cold_ranges: Arc<BufferedRanges>,
     prefetch_buffer_capacity: usize,
@@ -307,7 +308,7 @@ impl SstableStore {
             vector_block_cache: config.vector_block_cache,
 
             recent_filter: config.recent_filter,
-            meta_batch_usage: Arc::default(),
+            meta_batch_budget: Arc::default(),
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
@@ -360,7 +361,7 @@ impl SstableStore {
             path,
             store,
 
-            meta_batch_usage: Arc::default(),
+            meta_batch_budget: Arc::default(),
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             buffered_cold_ranges: Arc::default(),
             prefetch_buffer_capacity: block_cache_capacity,
@@ -738,16 +739,16 @@ impl SstableStore {
             .insert(object_id, SstableMetaCacheValue::from(sst));
     }
 
-    pub(super) fn try_reserve_meta_batch(&self, weight: usize) -> Option<MemoryUsageTracker> {
-        MemoryUsageTracker::try_new(
-            &self.meta_batch_usage,
-            weight,
+    pub(super) fn try_retain_meta(&self, table: &TableHolder) -> Option<Arc<RetainedMeta>> {
+        RetainedMeta::try_acquire(
+            &self.meta_batch_budget,
             self.read_batch.meta_shared_max_bytes.get(),
+            table,
         )
     }
 
     pub(super) fn meta_batch_usage(&self) -> usize {
-        self.meta_batch_usage.load(Ordering::Relaxed)
+        self.meta_batch_budget.lock().used
     }
 
     pub fn get_prefetch_memory_usage(&self) -> usize {
