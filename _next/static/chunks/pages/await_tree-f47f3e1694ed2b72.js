@@ -1,0 +1,18 @@
+(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[505],{3414:(e,t,r)=>{"use strict";r.d(t,{A:()=>i});var n=r(21462),a=r(40757);function i(e,t=null,r=!0){let[s,l]=(0,n.useState)(),[c,o]=(0,n.useState)(!1),[u,d]=(0,n.useState)(0),f=(0,a.A)(),h=(0,n.useCallback)(()=>d(e=>e+1),[]);return(0,n.useEffect)(()=>{let n=async()=>{if(r){o(!0);try{let t=await e();l(t)}catch(e){f(e)}finally{o(!1)}}};if(n(),!t)return;let a=setInterval(n,t);return()=>clearInterval(a)},[f,t,r,u]),{response:s,refresh:h,loading:c}}},28359:(e,t,r)=>{(window.__NEXT_P=window.__NEXT_P||[]).push(["/await_tree",function(){return r(87045)}])},59784:(e,t,r)=>{"use strict";r.d(t,{EV:()=>l,VL:()=>s,ZS:()=>u,gd:()=>i,vM:()=>o});var n=r(58530),a=r(22222);async function i(){return await a.Ay.get("/metrics/cluster")}async function s(){return(await a.Ay.get("/clusters/1")).map(n.v4.fromJSON)}async function l(){return(await a.Ay.get("/clusters/2")).map(n.v4.fromJSON)}async function c(){return(await a.Ay.get("/clusters/4")).map(n.v4.fromJSON)}async function o(){let[e,t,r]=await Promise.all([l(),s(),c()]);return[...e,...t,...r]}async function u(){return await a.Ay.get("/version")}},87045:(e,t,r)=>{"use strict";r.r(t),r.d(t,{default:()=>A});var n=r(23798),a=r(55740),i=r(15653),s=r(22798),l=r(50239),c=r(77131),o=r(14629),u=r(44492),d=r(99981),f=r(14408),h=r.n(f),p=r(59857),m=r.n(p),w=r(21462),$=r(74903),j=r(58660),x=r(22222),g=r(59784),v=r(3414),y=r(26251);function A(){let{response:e}=(0,v.A)(g.EV),[t,r]=(0,w.useState)(),[f,p]=(0,w.useState)("");(0,w.useEffect)(()=>{e&&!t&&r("")},[e,t]);let A=async()=>{let e,r;if(void 0!==t){e=""===t?"Await-Tree Dump of All Compute Nodes:":`Await-Tree Dump of Compute Node ${t}:`,p("Loading...");try{let n=y.VZ.fromJSON(await x.Ay.get(`/monitor/await_tree/${t}`)),a=h()(n.actorTraces).entries().map(([e,t])=>`[Actor ${e}]
+${t}`).join("\n"),i=h()(n.rpcTraces).entries().map(([e,t])=>`[RPC ${e}]
+${t}`).join("\n"),s=h()(n.compactionTaskTraces).entries().map(([e,t])=>`[Compaction ${e}]
+${t}`).join("\n"),l=h()(n.inflightBarrierTraces).entries().map(([e,t])=>`[Barrier ${e}]
+${t}`).join("\n"),c=h()(n.barrierWorkerState).entries().map(([e,t])=>`[BarrierWorkerState (Worker ${e})]
+${t}`).join("\n"),o=h()(n.jvmStackTraces).entries().map(([e,t])=>`[JVM (Worker ${e})]
+${t}`).join("\n");r=`${e}
+
+${a}
+${i}
+${s}
+${l}
+${c}
+
+${o}`}catch(t){r=`${e}
+
+ERROR: ${t.message}
+${t.cause}`}p(r)}},S=(0,n.jsxs)(a.s,{p:3,height:"calc(100vh - 20px)",flexDirection:"column",children:[(0,n.jsx)(j.A,{children:"Await Tree Dump"}),(0,n.jsxs)(a.s,{flexDirection:"row",height:"full",width:"full",children:[(0,n.jsx)(i.T,{mr:3,spacing:3,alignItems:"flex-start",width:200,height:"full",children:(0,n.jsxs)(s.MJ,{children:[(0,n.jsx)(l.l,{children:"Compute Nodes"}),(0,n.jsxs)(i.T,{children:[(0,n.jsxs)(c.l,{onChange:e=>r(e.target.value),children:[e&&(0,n.jsx)("option",{value:"",children:"All"},""),e&&e.map(e=>(0,n.jsxs)("option",{value:e.id,children:["(",e.id,") ",e.host?.host,":",e.host?.port]},e.id))]}),(0,n.jsx)(o.$,{onClick:e=>A(),width:"full",children:"Dump"})]})]})}),(0,n.jsx)(u.a,{flex:1,height:"full",ml:3,overflowX:"scroll",overflowY:"scroll",children:void 0===f?(0,n.jsx)($.A,{}):(0,n.jsx)(d.Ay,{language:"sql",options:{fontSize:13,readOnly:!0,renderWhitespace:"boundary",wordWrap:"on"},defaultValue:'Select a compute node and click "Dump"...',value:f})})]})]});return(0,n.jsxs)(w.Fragment,{children:[(0,n.jsx)(m(),{children:(0,n.jsx)("title",{children:"Await Tree Dump"})}),S]})}}},e=>{e.O(0,[959,616,339,650,636,593,792],()=>e(e.s=28359)),_N_E=e.O()}]);
