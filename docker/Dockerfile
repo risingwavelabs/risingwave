@@ -2,9 +2,15 @@ FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
 
+ARG MIN_OPENJDK_21_VERSION=21.0.13.1+2-1~24.04.1
+
 RUN apt-get update \
   && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-21-jdk software-properties-common \
-    python3.12 python3.12-dev openssl pkg-config curl git libblas-dev liblapack-dev libomp-dev
+    python3.12 python3.12-dev openssl pkg-config curl git libblas-dev liblapack-dev libomp-dev \
+  && installed="$(dpkg-query -W -f='${Version}' openjdk-21-jdk)" \
+  && if dpkg --compare-versions "$installed" lt "$MIN_OPENJDK_21_VERSION"; then \
+    echo "openjdk-21-jdk $installed is older than $MIN_OPENJDK_21_VERSION" >&2; exit 1; \
+  fi
 
 FROM base AS rust-base
 
