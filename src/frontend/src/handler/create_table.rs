@@ -39,6 +39,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
+use risingwave_connector::source::cdc::table_options::derive_connect_properties_for_cdc_table;
 use risingwave_connector::source::cdc::{CdcSourceExternalTableIdentifier, build_cdc_table_id};
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type,
@@ -75,8 +76,8 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
-    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
+    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
+    sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,

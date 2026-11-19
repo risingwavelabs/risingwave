@@ -38,6 +38,8 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::cdc::external::SchemaTableName;
+use risingwave_connector::source::cdc::table_options::refresh_cdc_table_connect_properties;
 use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
 use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::{
@@ -2959,7 +2961,9 @@ impl CatalogController {
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
         skip_alter_on_fly_check: bool,
     ) -> MetaResult<WithOptionsSecResolved> {
-        let inner = self.inner.read().await;
+        // Fragment mutations hold a read guard while reading and rewriting entire nodes.
+        // Exclude them until commit so they cannot restore stale connector properties.
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let (source, _obj) = Source::find_by_id(source_id)
@@ -3150,6 +3154,10 @@ impl CatalogController {
             is_shared_source,
         )
         .await?;
+
+        if is_shared_source {
+            update_cdc_table_props_fragments(&txn, source_id, &options_with_secret).await?;
+        }
 
         let mut to_update_objs = Vec::with_capacity(2);
         let (source, obj) = Source::find_by_id(source_id)
@@ -3397,7 +3405,9 @@ impl CatalogController {
         Vec<(SourceId, HashMap<String, String>)>, // Source ID and their complete properties
         Vec<(SinkId, HashMap<String, String>)>,   // Sink ID and their complete properties
     )> {
-        let inner = self.inner.read().await;
+        // Serialize dependent fragment refreshes with fragment mutations on every
+        // metadata backend, just like a direct source property update.
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         // Find all dependent sources and sinks first
@@ -3612,6 +3622,10 @@ impl CatalogController {
                 // - Otherwise update the shared source job.
                 // - For non-shared sources, also update any dependent streaming jobs that embed a copy.
                 let is_shared_source = source.is_shared();
+                if is_shared_source {
+                    update_cdc_table_props_fragments(&txn, source_id, &source_options_with_secret)
+                        .await?;
+                }
                 let mut dep_source_job_ids: Vec<JobId> = Vec::new();
                 if !is_shared_source {
                     dep_source_job_ids = ObjectDependency::find()
@@ -4181,6 +4195,82 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub new_log_store_table: Option<Box<PbTable>>,
 }
 
+/// Refresh embedded CDC descriptors in the same transaction as the shared source.
+/// Inspect CDC fragments directly so this also covers jobs still being created.
+/// Callers must hold the catalog write guard through transaction commit.
+async fn update_cdc_table_props_fragments(
+    txn: &DatabaseTransaction,
+    source_id: SourceId,
+    options: &WithOptionsSecResolved,
+) -> MetaResult<()> {
+    if matches!(options.cdc_source_type(), CdcSourceType::Unspecified) {
+        return Ok(());
+    }
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+        .filter(FragmentTypeMask::intersects(
+            FragmentTypeFlag::StreamCdcScan,
+        ))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    for (fragment_id, stream_node) in fragments {
+        let mut stream_node = stream_node.to_protobuf();
+        let mut changed = Ok(false);
+        visit_stream_node_mut(&mut stream_node, |node| {
+            if let Ok(previously_changed) = changed {
+                changed = update_cdc_table_node_props(node, source_id, options)
+                    .map(|node_changed| previously_changed || node_changed);
+            }
+        });
+        if changed? {
+            Fragment::update(fragment::ActiveModel {
+                fragment_id: Set(fragment_id),
+                stream_node: Set(StreamNode::from(&stream_node)),
+                ..Default::default()
+            })
+            .exec(txn)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+fn update_cdc_table_node_props(
+    node: &mut PbNodeBody,
+    source_id: SourceId,
+    options: &WithOptionsSecResolved,
+) -> MetaResult<bool> {
+    let PbNodeBody::StreamCdcScan(node) = node else {
+        return Ok(false);
+    };
+    let Some(desc) = &mut node.cdc_table_desc else {
+        return Ok(false);
+    };
+    if desc.source_id != source_id {
+        return Ok(false);
+    }
+
+    let (properties, table_name) = refresh_cdc_table_connect_properties(
+        options,
+        desc.table_name.clone(),
+        desc.connect_properties
+            .get("connector")
+            .map(String::as_str)
+            .unwrap_or_default(),
+        desc.connect_properties
+            .get("database.name")
+            .map(String::as_str)
+            .unwrap_or_default(),
+        &SchemaTableName::from_properties(&desc.connect_properties),
+    )?;
+    (desc.connect_properties, desc.secret_refs) = properties.into_parts();
+    desc.table_name = table_name;
+    Ok(true)
+}
+
 async fn update_connector_props_fragments<F>(
     txn: &DatabaseTransaction,
     job_ids: Vec<JobId>,
@@ -4242,13 +4332,170 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
+    use futures::FutureExt;
+    use risingwave_connector::WithOptionsSecResolved;
+    use risingwave_pb::plan_common::ExternalTableDesc;
+    use risingwave_pb::secret::PbSecretRef;
     use risingwave_pb::stream_plan::{
         CompactionResolverNode, IcebergWithPkIndexPositionDeleteMergerNode,
-        IcebergWithPkIndexWriterNode, SinkDesc, SinkNode,
+        IcebergWithPkIndexWriterNode, SinkDesc, SinkNode, StreamCdcScanNode,
     };
     use risingwave_sqlparser::ast::{SqlOption, Statement};
 
-    use super::{Parser, PbNodeBody, SinkId, merge_with_options, update_sink_node_props};
+    use super::{
+        Parser, PbNodeBody, SinkId, merge_with_options, update_cdc_table_node_props,
+        update_sink_node_props,
+    };
+    use crate::controller::catalog::CatalogController;
+    use crate::manager::MetaSrvEnv;
+
+    #[tokio::test]
+    async fn test_connector_updates_exclude_fragment_mutations() {
+        let controller = CatalogController::new(MetaSrvEnv::for_test().await)
+            .await
+            .unwrap();
+        let updates = [
+            controller
+                .update_source_props_by_source_id(
+                    999999.into(),
+                    BTreeMap::new(),
+                    BTreeMap::new(),
+                    true,
+                )
+                .map(|result| result.map(|_| ()))
+                .boxed(),
+            controller
+                .update_connection_and_dependent_objects_props(
+                    999999.into(),
+                    BTreeMap::new(),
+                    BTreeMap::new(),
+                )
+                .map(|result| result.map(|_| ()))
+                .boxed(),
+        ];
+
+        for mut update in updates {
+            // Both fragment mutation APIs keep this read guard through commit.
+            let fragment_mutation_guard = controller.inner.read().await;
+            assert!(futures::poll!(update.as_mut()).is_pending());
+            // A queued exclusive update also blocks new fragment mutations. Checking
+            // this avoids relying on timing or the database's transaction isolation.
+            assert!(controller.inner.try_read().is_err());
+            drop(fragment_mutation_guard);
+
+            // Once the fragment mutation releases its guard, the update can reach
+            // catalog validation. These IDs deliberately have no catalog entries.
+            update.await.expect_err("the catalog object does not exist");
+        }
+    }
+
+    #[test]
+    fn test_update_cdc_table_props_preserves_table_identity_and_replaces_secrets() {
+        let source_id = 42.into();
+        let original = ExternalTableDesc {
+            source_id,
+            table_name: "sales.orders".into(),
+            connect_properties: BTreeMap::from([
+                ("connector".into(), "postgres-cdc".into()),
+                ("database.name".into(), "orders_db".into()),
+                ("schema.name".into(), "sales".into()),
+                ("table.name".into(), "orders".into()),
+                ("password".into(), "old_password".into()),
+                ("hostname".into(), "old_host".into()),
+            ]),
+            ..Default::default()
+        };
+        let mut node = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
+            cdc_table_desc: Some(original.clone()),
+            ..Default::default()
+        }));
+        let secret = PbSecretRef {
+            secret_id: 99.into(),
+            ..Default::default()
+        };
+        let options = WithOptionsSecResolved::new(
+            BTreeMap::from([
+                ("connector".into(), "postgres-cdc".into()),
+                ("database.name".into(), "orders_db".into()),
+                ("schema.name".into(), "public".into()),
+                ("table.name".into(), "source_filter".into()),
+                ("hostname".into(), "new_host".into()),
+            ]),
+            BTreeMap::from([("password".into(), secret)]),
+        );
+
+        // Another shared source must not change this table's plan.
+        assert!(!update_cdc_table_node_props(&mut node, 43.into(), &options).unwrap());
+        let PbNodeBody::StreamCdcScan(scan) = &node else {
+            unreachable!()
+        };
+        assert_eq!(scan.cdc_table_desc.as_ref().unwrap(), &original);
+
+        assert!(update_cdc_table_node_props(&mut node, source_id, &options).unwrap());
+        let PbNodeBody::StreamCdcScan(scan) = &node else {
+            unreachable!()
+        };
+        let desc = scan.cdc_table_desc.as_ref().unwrap();
+        for key in ["database.name", "schema.name", "table.name"] {
+            assert_eq!(
+                desc.connect_properties[key],
+                original.connect_properties[key]
+            );
+        }
+        assert_eq!(desc.connect_properties["hostname"], "new_host");
+        assert!(!desc.connect_properties.contains_key("password"));
+        assert_eq!(desc.secret_refs["password"], secret);
+
+        // Replacing a secret with plaintext must remove the stale secret reference.
+        let options = WithOptionsSecResolved::new(
+            {
+                let mut props = options.as_plaintext().clone();
+                props.insert("password".into(), "new_password".into());
+                props
+            },
+            BTreeMap::new(),
+        );
+        assert!(update_cdc_table_node_props(&mut node, source_id, &options).unwrap());
+        let PbNodeBody::StreamCdcScan(scan) = &node else {
+            unreachable!()
+        };
+        let desc = scan.cdc_table_desc.as_ref().unwrap();
+        assert_eq!(desc.connect_properties["password"], "new_password");
+        assert!(desc.secret_refs.is_empty());
+    }
+
+    #[test]
+    fn test_update_cdc_table_props_rejects_identity_change_without_mutating_node() {
+        let original = ExternalTableDesc {
+            source_id: 42.into(),
+            table_name: "sales.orders".into(),
+            connect_properties: BTreeMap::from([
+                ("connector".into(), "postgres-cdc".into()),
+                ("database.name".into(), "orders_db".into()),
+                ("schema.name".into(), "sales".into()),
+                ("table.name".into(), "orders".into()),
+            ]),
+            ..Default::default()
+        };
+        let mut options = original.connect_properties.clone();
+        options.insert("database.name".into(), "other_db".into());
+        let mut node = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
+            cdc_table_desc: Some(original.clone()),
+            ..Default::default()
+        }));
+        assert!(
+            update_cdc_table_node_props(
+                &mut node,
+                42.into(),
+                &WithOptionsSecResolved::without_secrets(options)
+            )
+            .is_err()
+        );
+        let PbNodeBody::StreamCdcScan(scan) = node else {
+            unreachable!()
+        };
+        assert_eq!(scan.cdc_table_desc.unwrap(), original);
+    }
 
     #[test]
     fn test_update_sink_props_in_all_sink_nodes() {

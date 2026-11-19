@@ -181,6 +181,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
+        42.into(),
+        "public.mock_table".into(),
         table_name,
         "mydb".to_owned(),
         config,
@@ -490,6 +492,8 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
     let config = ExternalTableConfig::default();
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
+        42.into(),
+        "public.mock_table".into(),
         table_name,
         "mydb".to_owned(),
         config,

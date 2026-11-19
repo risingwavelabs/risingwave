@@ -1,0 +1,151 @@
+# Changing a shared source must refresh existing CDC plans, including secret references.
+# RECOVER verifies that actors can be rebuilt after the old secret has been dropped.
+control substitution on
+
+statement ok
+DROP SOURCE IF EXISTS pg_props_source CASCADE;
+
+statement ok
+DROP SECRET IF EXISTS pg_props_old;
+
+statement ok
+DROP SECRET IF EXISTS pg_props_new;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+    WHERE slot_name = 'pg_props_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots
+    WHERE slot_name = 'pg_props_slot';
+    DROP PUBLICATION IF EXISTS pg_props_pub;
+    DROP SCHEMA IF EXISTS rw_cdc_props CASCADE;
+    CREATE SCHEMA rw_cdc_props;
+    CREATE TABLE rw_cdc_props.orders (id INT PRIMARY KEY, value INT);
+    INSERT INTO rw_cdc_props.orders SELECT g, g * 10 FROM generate_series(1, 20) g;
+    CREATE PUBLICATION pg_props_pub FOR TABLE rw_cdc_props.orders;
+"
+
+statement ok
+CREATE SECRET pg_props_old WITH (backend = 'meta') AS '${PGPASSWORD:}';
+
+statement ok
+CREATE SECRET pg_props_new WITH (backend = 'meta') AS '${PGPASSWORD:}';
+
+statement ok
+CREATE SOURCE pg_props_source WITH (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'rw_cdc_props',
+    slot.name = 'pg_props_slot',
+    publication.name = 'pg_props_pub'
+);
+
+statement ok
+CREATE TABLE pg_props_serial (*) FROM pg_props_source TABLE 'rw_cdc_props.orders';
+
+statement ok
+CREATE TABLE pg_props_parallel (*) WITH (
+    backfill.parallelism = '2',
+    backfill.num_rows_per_split = '5'
+) FROM pg_props_source TABLE 'rw_cdc_props.orders';
+
+query II retry 30 backoff 1s
+SELECT (SELECT count(*) FROM pg_props_serial), (SELECT count(*) FROM pg_props_parallel);
+----
+20 20
+
+statement ok
+ALTER SOURCE pg_props_source CONNECTOR WITH (password = SECRET pg_props_old);
+
+# Read persisted descriptors directly; escape the JSONPath root for SLT substitution.
+query IB
+WITH pg_props_plans AS (
+    SELECT jsonb_path_query_first(f.node, '\$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
+    FROM rw_catalog.rw_fragment_infos f
+    JOIN rw_catalog.rw_relations r ON r.id = f.table_id
+    WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
+      AND 'STREAM_CDC_SCAN' = ANY(f.flags)
+)
+SELECT count(*), bool_and(
+    cdc_desc->'connectProperties'->>'password' IS NULL
+    AND (cdc_desc->'secretRefs'->'password'->>'secretId')::int = s.id
+    AND cdc_desc->'connectProperties'->>'schema.name' = 'rw_cdc_props'
+    AND cdc_desc->'connectProperties'->>'table.name' = 'orders'
+    AND cdc_desc->'connectProperties'->>'database.name' = '${PGDATABASE:postgres}'
+) FROM pg_props_plans
+JOIN rw_catalog.rw_secrets s ON s.name = 'pg_props_old';
+----
+2 t
+
+statement ok
+ALTER SOURCE pg_props_source CONNECTOR WITH (password = SECRET pg_props_new);
+
+statement ok
+DROP SECRET pg_props_old;
+
+query IB
+WITH pg_props_plans AS (
+    SELECT jsonb_path_query_first(f.node, '\$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
+    FROM rw_catalog.rw_fragment_infos f
+    JOIN rw_catalog.rw_relations r ON r.id = f.table_id
+    WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
+      AND 'STREAM_CDC_SCAN' = ANY(f.flags)
+)
+SELECT count(*), bool_and(
+    (cdc_desc->'secretRefs'->'password'->>'secretId')::int = s.id
+) FROM pg_props_plans
+JOIN rw_catalog.rw_secrets s ON s.name = 'pg_props_new';
+----
+2 t
+
+statement ok
+RECOVER;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO rw_cdc_props.orders VALUES (21, 210);"
+
+query II retry 30 backoff 1s
+SELECT (SELECT count(*) FROM pg_props_serial), (SELECT count(*) FROM pg_props_parallel);
+----
+21 21
+
+# Switching back to plaintext must also clear the old secret reference.
+statement ok
+ALTER SOURCE pg_props_source CONNECTOR WITH (password = '${PGPASSWORD:}');
+
+statement ok
+DROP SECRET pg_props_new;
+
+query IB
+WITH pg_props_plans AS (
+    SELECT jsonb_path_query_first(f.node, '\$.**.streamCdcScan.cdcTableDesc') AS cdc_desc
+    FROM rw_catalog.rw_fragment_infos f
+    JOIN rw_catalog.rw_relations r ON r.id = f.table_id
+    WHERE r.name IN ('pg_props_serial', 'pg_props_parallel')
+      AND 'STREAM_CDC_SCAN' = ANY(f.flags)
+)
+SELECT count(*), bool_and(
+    cdc_desc->'secretRefs'->'password' IS NULL
+    AND cdc_desc->'connectProperties'->>'password' = '${PGPASSWORD:}'
+) FROM pg_props_plans;
+----
+2 t
+
+statement ok
+DROP SOURCE pg_props_source CASCADE;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+    WHERE slot_name = 'pg_props_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots
+    WHERE slot_name = 'pg_props_slot';
+    DROP PUBLICATION IF EXISTS pg_props_pub;
+    DROP SCHEMA IF EXISTS rw_cdc_props CASCADE;
+"

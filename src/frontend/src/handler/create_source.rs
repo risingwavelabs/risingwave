@@ -52,6 +52,7 @@ use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_RETRIES_MAX_KEY, SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig,
     name_strategy_from_str,
 };
+use risingwave_connector::source::cdc::table_options::derive_connect_properties_for_cdc_table;
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY,
     CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
@@ -96,8 +97,8 @@ use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
-    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
+    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
+    sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_table::{
     ColumnIdGenerator, bind_pk_and_row_id_on_relation, bind_sql_column_constraints,
