@@ -167,11 +167,13 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         staging_table_catalog: &Table,
         progress_state_table: &Table,
         vnodes: Option<Arc<Bitmap>>,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         let table_id = table_catalog.id;
         let associated_source_id = table_catalog
             .optional_associated_source_id
-            .expect("refreshable table must have an associated source")
+            .ok_or_else(|| {
+                anyhow::anyhow!("refreshable table {table_id} must have an associated source")
+            })?
             .into();
 
         // staging table is pk-only, and we don't need to check value consistency
@@ -195,7 +197,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
 
         debug_assert_eq!(staging_table.vnodes(), progress_table.vnodes());
 
-        Self {
+        Ok(Self {
             table_catalog: table_catalog.clone(),
             staging_table_catalog: staging_table_catalog.clone(),
             staging_table,
@@ -203,7 +205,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
             refresh_start_prev_epoch: None,
             table_id,
             associated_source_id,
-        }
+        })
     }
 }
 

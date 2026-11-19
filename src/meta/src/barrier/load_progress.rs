@@ -45,28 +45,24 @@ impl LoadReport {
         resps
             .values()
             .flat_map(|resp| &resp.load_progress)
-            .filter_map(|report| {
-                let parsed = Self::from_pb(report);
-
-                if parsed.is_none() {
-                    tracing::warn!(?report, "ignore malformed load progress");
-                }
-
-                parsed
-            })
+            .map(Self::from_pb)
     }
 
-    fn from_pb(report: &PbLoadProgress) -> Option<Self> {
-        let progress = match report.progress? {
+    fn from_pb(report: &PbLoadProgress) -> Self {
+        let source_id = report
+            .load_id
+            .expect("load progress must have a load id")
+            .source_id;
+        let progress = match report.progress.expect("load progress must have a progress") {
             Progress::ListFinished(_) => LoadProgress::ListFinished,
             Progress::ReaderDone(_) => LoadProgress::ReaderDone,
             Progress::Failed(_) => LoadProgress::Failed,
         };
 
-        Some(Self {
+        Self {
             actor_id: report.reporter_actor_id,
-            source_id: report.load_id?.source_id,
+            source_id,
             progress,
-        })
+        }
     }
 }
