@@ -3,6 +3,9 @@ include oracle_test_env.slt.part
 statement ok
 DROP SOURCE IF EXISTS oracle_pk_source CASCADE;
 
+statement ok
+DROP SOURCE IF EXISTS oracle_pk_connect_source CASCADE;
+
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
 
@@ -27,7 +30,7 @@ execute_oracle_sqls([
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_SCALE_EXCEEDED ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NEGATIVE_SCALE_WIDE (ID NUMBER(28,-1) PRIMARY KEY, VALUE VARCHAR2(100))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NEGATIVE_SCALE_WIDE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
-    # Supported keys at the edge of RisingWave's 28-digit decimal, plus a DATE key.
+    # Supported keys at the edge of RisingWave's 28-digit decimal, plus DATE and TIMESTAMP keys.
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 (ID NUMBER(28,0) PRIMARY KEY, VALUE VARCHAR2(100))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 VALUES (1, 'small')",
@@ -46,6 +49,16 @@ execute_oracle_sqls([
     "VALUES (TO_DATE('2024-01-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS'), 'small')",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_DATE "
     "VALUES (TO_DATE('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS'), 'max')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_6 (ID TIMESTAMP(6) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_6 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_6 "
+    "VALUES (TIMESTAMP '2024-01-01 00:00:00.123456', 'small')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_6 "
+    "VALUES (TIMESTAMP '2024-01-01 00:00:00.123789', 'max')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_3 (ID TIMESTAMP(3) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_3 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_LTZ_6 (ID TIMESTAMP(6) WITH LOCAL TIME ZONE PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP_LTZ_6 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
     "(TENANT_ID NUMBER(9) NOT NULL, ORDER_ID NUMBER(9) NOT NULL, "
     "OTHER_COLUMN NUMBER(9), VALUE VARCHAR2(100), PRIMARY KEY (TENANT_ID, ORDER_ID))",
@@ -229,8 +242,8 @@ WHERE name IN ('oracle_pk_count_mismatch', 'oracle_pk_name_mismatch',
 ----
 0
 
-# Keys at the edge of RisingWave's 28-digit decimal, and DATE keys, are exact: one-row pages
-# keep both rows, and CDC updates the right row.
+# Keys at the edge of RisingWave's 28-digit decimal, DATE keys, and TIMESTAMP(6) keys are exact:
+# one-row pages keep both rows, and CDC updates or deletes the right row.
 statement ok
 CREATE TABLE oracle_pk_number_28_0 (*) WITH (snapshot.batch_size = 1)
 FROM oracle_pk_source TABLE 'APP.RW_PK_NUMBER_28_0';
@@ -246,6 +259,10 @@ FROM oracle_pk_source TABLE 'APP.RW_PK_NUMBER_27_NEG1';
 statement ok
 CREATE TABLE oracle_pk_date (*) WITH (snapshot.batch_size = 1)
 FROM oracle_pk_source TABLE 'APP.RW_PK_DATE';
+
+statement ok
+CREATE TABLE oracle_pk_timestamp_6 (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_TIMESTAMP_6';
 
 query T rowsort retry 30 backoff 1s
 SELECT "ID", "VALUE" FROM oracle_pk_number_28_0;
@@ -271,6 +288,12 @@ SELECT "ID", "VALUE" FROM oracle_pk_date;
 2024-01-01 00:00:00 small
 2024-01-01 00:00:01 max
 
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_timestamp_6;
+----
+2024-01-01 00:00:00.123456 small
+2024-01-01 00:00:00.123789 max
+
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import begin_tx, end_tx
@@ -280,6 +303,9 @@ begin_tx("oracle_pk_edge_dml", [
     "UPDATE APP.RW_PK_NUMBER_27_NEG1 SET VALUE = 'max-updated' WHERE ID = 9999999999999999999999999990",
     "UPDATE APP.RW_PK_DATE SET VALUE = 'max-updated' "
     "WHERE ID = TO_DATE('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS')",
+    "UPDATE APP.RW_PK_TIMESTAMP_6 SET VALUE = 'max-updated' "
+    "WHERE ID = TIMESTAMP '2024-01-01 00:00:00.123789'",
+    "DELETE FROM APP.RW_PK_TIMESTAMP_6 WHERE ID = TIMESTAMP '2024-01-01 00:00:00.123456'",
 ])
 end_tx("oracle_pk_edge_dml")
 PY
@@ -308,6 +334,11 @@ SELECT "ID", "VALUE" FROM oracle_pk_date;
 2024-01-01 00:00:00 small
 2024-01-01 00:00:01 max-updated
 
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_timestamp_6;
+----
+2024-01-01 00:00:00.123789 max-updated
+
 statement ok
 DROP TABLE oracle_pk_number_28_0;
 
@@ -321,6 +352,9 @@ statement ok
 DROP TABLE oracle_pk_date;
 
 statement ok
+DROP TABLE oracle_pk_timestamp_6;
+
+statement ok
 DROP TABLE oracle_pk_discovered;
 
 statement ok
@@ -328,6 +362,33 @@ DROP TABLE oracle_pk_normal_composite;
 
 statement ok
 DROP SOURCE oracle_pk_source CASCADE;
+
+# Debezium's 'connect' mode emits timestamps in milliseconds. A TIMESTAMP(6) key would then differ
+# from the microsecond key read by backfill, so it is rejected. A TIMESTAMP(3) key loses nothing,
+# and a TIMESTAMP WITH LOCAL TIME ZONE key is emitted as a string with all its digits in every mode.
+# Oracle rejects TIMESTAMP WITH TIME ZONE as a key type (ORA-02329).
+statement ok
+CREATE SOURCE oracle_pk_connect_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    debezium.time.precision.mode = 'connect'
+) FORMAT PLAIN ENCODE JSON;
+
+statement error (?s).*cannot be captured with 'debezium.time.precision.mode' = 'connect'.*
+CREATE TABLE oracle_pk_timestamp_6_connect (*)
+FROM oracle_pk_connect_source TABLE 'APP.RW_PK_TIMESTAMP_6';
+
+statement ok
+CREATE TABLE oracle_pk_timestamp_3_connect (*)
+FROM oracle_pk_connect_source TABLE 'APP.RW_PK_TIMESTAMP_3';
+
+statement ok
+CREATE TABLE oracle_pk_timestamp_ltz_6_connect (*)
+FROM oracle_pk_connect_source TABLE 'APP.RW_PK_TIMESTAMP_LTZ_6';
+
+statement ok
+DROP SOURCE oracle_pk_connect_source CASCADE;
 
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

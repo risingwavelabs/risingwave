@@ -18,6 +18,9 @@ package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.source.common.OracleExternalTable.ColumnInfo;
+import com.risingwave.proto.Data.DataType.TypeName;
+import io.debezium.jdbc.TemporalPrecisionMode;
+import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -55,6 +58,7 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
     private final String racNodes;
+    private final TemporalPrecisionMode timePrecisionMode;
 
     public OracleValidator(OracleDbzConnectorConfig config, TableSchema tableSchema)
             throws SQLException {
@@ -76,6 +80,12 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
         this.tableName = config.getTableName();
         this.isCdcSourceJob = config.isCdcSourceJob();
         this.racNodes = config.getRacNodes();
+        this.timePrecisionMode =
+                TemporalPrecisionMode.parse(
+                        config.getResolvedDebeziumProps()
+                                .getProperty(
+                                        RelationalDatabaseConnectorConfig.TIME_PRECISION_MODE
+                                                .name()));
     }
 
     @Override
@@ -270,6 +280,18 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
                                 + columnInfo.dataType()
                                 + " cannot be declared as "
                                 + declaredType);
+            }
+            if (timePrecisionMode == TemporalPrecisionMode.CONNECT
+                    && declaredType == TypeName.TIMESTAMP
+                    && columnInfo.scale() != null
+                    && columnInfo.scale() > 3
+                    && tableSchema.getPrimaryKeys().contains(columnName)) {
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key column '"
+                                + columnName
+                                + "' of Oracle type "
+                                + columnInfo.dataType()
+                                + " cannot be captured with 'debezium.time.precision.mode' = 'connect', which truncates timestamps to milliseconds.\nHint: Remove 'debezium.time.precision.mode' to use the default 'microseconds'.");
             }
         }
     }
