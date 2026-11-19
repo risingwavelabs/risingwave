@@ -35,6 +35,7 @@ steps:
   - label: "docker-build-push: amd64"
     if: |
       build.env("AD_HOC") != "true" &&
+      !(build.env("RW_TARGET_CPU") =~ /^neoverse-/) &&
       build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
@@ -82,6 +83,7 @@ steps:
   - label: "pre build binary: amd64"
     if: |
       build.env("AD_HOC") != "true" &&
+      !(build.env("RW_TARGET_CPU") =~ /^neoverse-/) &&
       build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
@@ -101,6 +103,7 @@ steps:
   - label: "pre build binary: aarch64 "
     if: |
       build.env("AD_HOC") != "true" &&
+      !(build.env("RW_TARGET_CPU") =~ /^neoverse-/) &&
       build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
@@ -122,6 +125,7 @@ steps:
   - label: "docker scout"
     if: |
       build.env("AD_HOC") != "true" &&
+      !(build.env("RW_TARGET_CPU") =~ /^neoverse-/) &&
       build.env("ENABLE_DOCKER_SCOUT") == "true"
     key: docker-scout
     command: "ci/scripts/docker-scout.sh"
@@ -138,6 +142,7 @@ steps:
   - label: "generate notification step"
     if: |
       build.env("AD_HOC") != "true" &&
+      !(build.env("RW_TARGET_CPU") =~ /^neoverse-/) &&
       build.env("ENABLE_DOCKER_SCOUT") == "true"
     depends_on:
       - "docker-scout"
