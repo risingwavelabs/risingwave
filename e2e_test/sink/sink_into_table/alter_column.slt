@@ -692,11 +692,21 @@ alter table m_now_1 add column v3 timestamptz default now() - interval '1 minute
 statement ok
 insert into t_now_1 values (3), (4);
 
+# Rows 1 and 2 existed before the ALTERs and hold the DDL-time snapshot of each default.
 query I rowsort
-select v1 from m_now_1 where v2 >= date '2021-01-01' and v3 < v2;
+select v1 from m_now_1 where v2 >= date '2021-01-01' and v3 >= date '2021-01-01';
 ----
 1
 2
+3
+4
+
+# Rows 3 and 4 were written by the sink after the ALTERs, so both defaults are evaluated as
+# `proctime()` of the same epoch: later than the snapshot and exactly one minute apart.
+query I rowsort
+select v1 from m_now_1
+where v2 > (select v2 from m_now_1 where v1 = 1) and v2 - v3 = interval '1 minute';
+----
 3
 4
 
@@ -707,10 +717,9 @@ statement ok
 insert into t_now_1 values (5);
 
 query I rowsort
-select v1 from m_now_1 where v2 >= date '2021-01-01' and v3 < v2;
+select v1 from m_now_1
+where v2 > (select v2 from m_now_1 where v1 = 1) and v2 - v3 = interval '1 minute';
 ----
-1
-2
 3
 4
 5

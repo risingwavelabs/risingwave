@@ -2643,7 +2643,7 @@ pub fn build_select_node_list(
 
 /// Rewrites `now()` to `proctime()` in a column default expression, so that the compute node can
 /// evaluate it. This mirrors what the frontend does when it plans a sink into a table whose
-/// default columns already exist.
+/// default columns already exist. See <https://github.com/risingwavelabs/risingwave/issues/28095>.
 fn rewrite_now_to_proctime(expr: &mut PbExprNode) {
     match expr.rex_node.as_mut() {
         Some(expr_node::RexNode::Now(_)) => {
