@@ -26,6 +26,8 @@ use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
+use gcloud_bigquery::client::google_cloud_auth;
+use gcloud_bigquery::client::google_cloud_auth::credentials::CredentialsFile;
 use gcloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
 use gcloud_gax::conn::{ConnectionOptions, Environment};
 use gcloud_gax::grpc::{Request, Response, Status};
@@ -35,8 +37,6 @@ use gcloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
 use gcloud_googleapis::cloud::bigquery::storage::v1::{
     AppendRowsRequest, AppendRowsResponse, ProtoRows, ProtoSchema,
 };
-use gcloud_pubsub::client::google_cloud_auth;
-use gcloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
