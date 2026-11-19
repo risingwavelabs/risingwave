@@ -16,7 +16,6 @@
 
 package com.risingwave.connector.source.common;
 
-import com.risingwave.connector.api.source.SourceTypeE;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.Properties;
@@ -58,24 +57,5 @@ public final class ValidatorUtils {
     public static String getSql(String name) {
         assert (storedSqls != null);
         return storedSqls.getProperty(name);
-    }
-
-    public static String getJdbcUrl(
-            SourceTypeE sourceType, String host, String port, String database) {
-        switch (sourceType) {
-            case MYSQL:
-                return String.format("jdbc:mysql://%s:%s/%s", host, port, database);
-            case MARIADB:
-                return String.format("jdbc:mariadb://%s:%s/%s", host, port, database);
-            case POSTGRES:
-                return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
-            case SQL_SERVER:
-                return String.format(
-                        "jdbc:sqlserver://%s:%s;databaseName=%s", host, port, database);
-            case ORACLE:
-                return String.format("jdbc:oracle:thin:@//%s:%s/%s", host, port, database);
-            default:
-                throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
-        }
     }
 }

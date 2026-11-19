@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -25,10 +24,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
-public class OracleValidator extends DatabaseValidator implements AutoCloseable {
+public class OracleValidator extends CdcSourceValidator implements AutoCloseable {
     private static final Set<String> REQUIRED_PRIVILEGES =
             Set.of(
                     "CREATE SESSION",
@@ -56,38 +54,25 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
 
-    public OracleValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
+    public OracleValidator(OracleDbzConnectorConfig config, TableSchema tableSchema)
             throws SQLException {
         this.tableSchema = tableSchema;
         this.pdbName =
                 normalizeIdentifierInConfigOption(
-                        DbzConnectorConfig.ORACLE_PDB_NAME,
-                        userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
-        this.heartbeatTable =
-                OracleHeartbeatTable.parse(
-                        userProps.get(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
-        this.autoInitializeHeartbeatTable =
-                "true"
-                        .equals(
-                                userProps.get(
-                                        DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY));
+                        OracleDbzConnectorConfig.PDB_NAME, config.getPdbName());
+        this.heartbeatTable = OracleHeartbeatTable.parse(config.getHeartbeatTableName());
+        this.autoInitializeHeartbeatTable = config.isAutoInitializeHeartbeatTable();
         var jdbcUrl =
-                ValidatorUtils.getJdbcUrl(
-                        SourceTypeE.ORACLE,
-                        userProps.get(DbzConnectorConfig.HOST),
-                        userProps.get(DbzConnectorConfig.PORT),
+                OracleCdcSource.getJdbcUrl(
+                        config.getHost(),
+                        config.getPort(),
                         normalizeIdentifierInConfigOption(
-                                DbzConnectorConfig.DB_NAME,
-                                userProps.get(DbzConnectorConfig.DB_NAME)));
+                                DbzConnectorConfig.DB_NAME, config.getDbName()));
         this.jdbcConnection =
-                DriverManager.getConnection(
-                        jdbcUrl,
-                        userProps.get(DbzConnectorConfig.USER),
-                        userProps.get(DbzConnectorConfig.PASSWORD));
-        this.schemaName = userProps.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-        this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
-        this.isCdcSourceJob = isCdcSourceJob;
+                DriverManager.getConnection(jdbcUrl, config.getUser(), config.getPassword());
+        this.schemaName = config.getSchemaName();
+        this.tableName = config.getTableName();
+        this.isCdcSourceJob = config.isCdcSourceJob();
     }
 
     @Override
