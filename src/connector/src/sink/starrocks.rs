@@ -20,8 +20,8 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono_tz::Tz;
-use mysql_async::Opts;
 use mysql_async::prelude::Queryable;
+use mysql_async::{Opts, OptsBuilder};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
@@ -29,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use url::form_urlencoded;
 use uuid::Uuid;
 use with_options::WithOptions;
 
@@ -49,7 +48,7 @@ use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
-const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
+const STARROCK_MYSQL_PREFER_SOCKET: bool = false;
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 pub const fn _default_stream_load_http_timeout_ms() -> u64 {
@@ -866,6 +865,27 @@ pub struct StarrocksSchemaClient {
 }
 
 impl StarrocksSchemaClient {
+    fn build_opts(host: &str, port: &str, db: &str, user: &str, password: &str) -> Result<Opts> {
+        let port = port.parse::<u16>().map_err(|err| {
+            SinkError::DorisStarrocksConnect(anyhow!("invalid StarRocks MySQL port: {err}"))
+        })?;
+        // Accept bracketed IPv6 addresses previously handled by the MySQL URL parser.
+        let host = host
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(host);
+        Ok(OptsBuilder::default()
+            .ip_or_hostname(host)
+            .tcp_port(port)
+            .db_name(Some(db))
+            .user(Some(user))
+            .pass(Some(password))
+            .prefer_socket(STARROCK_MYSQL_PREFER_SOCKET)
+            .max_allowed_packet(Some(STARROCK_MYSQL_MAX_ALLOWED_PACKET))
+            .wait_timeout(Some(STARROCK_MYSQL_WAIT_TIMEOUT))
+            .into())
+    }
+
     pub async fn new(
         host: String,
         port: String,
@@ -874,26 +894,7 @@ impl StarrocksSchemaClient {
         user: String,
         password: String,
     ) -> Result<Self> {
-        // username & password may contain special chars, so we need to do URL encoding on them.
-        // Otherwise, Opts::from_url may report a `Parse error`
-        let user = form_urlencoded::byte_serialize(user.as_bytes()).collect::<String>();
-        let password = form_urlencoded::byte_serialize(password.as_bytes()).collect::<String>();
-
-        let conn_uri = format!(
-            "mysql://{}:{}@{}:{}/{}?prefer_socket={}&max_allowed_packet={}&wait_timeout={}",
-            user,
-            password,
-            host,
-            port,
-            db,
-            STARROCK_MYSQL_PREFER_SOCKET,
-            STARROCK_MYSQL_MAX_ALLOWED_PACKET,
-            STARROCK_MYSQL_WAIT_TIMEOUT
-        );
-        let pool = mysql_async::Pool::new(
-            Opts::from_url(&conn_uri)
-                .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
-        );
+        let pool = mysql_async::Pool::new(Self::build_opts(&host, &port, &db, &user, &password)?);
         let conn = pool
             .get_conn()
             .await
@@ -1133,6 +1134,118 @@ mod tests {
             ("starrocks.table".to_owned(), "sink_table".to_owned()),
             ("type".to_owned(), SINK_TYPE_APPEND_ONLY.to_owned()),
         ])
+    }
+
+    fn schema_opts(properties: BTreeMap<String, String>) -> Result<Opts> {
+        let common = StarrocksConfig::from_btreemap(properties)?.common;
+        StarrocksSchemaClient::build_opts(
+            &common.host,
+            &common.mysql_port,
+            &common.database,
+            &common.user,
+            &common.password,
+        )
+    }
+
+    #[test]
+    fn starrocks_schema_opts_preserve_credentials() {
+        for credential in [
+            "",
+            "Example Pass9!",
+            " leading and trailing ",
+            "Example+Pass9!",
+            "Example%2BPass9!",
+            "Example%20Pass9!",
+            "@:/?#[]&=\\\"'",
+            "用户 密码🔑",
+        ] {
+            let mut properties = base_properties();
+            properties.insert("starrocks.user".to_owned(), credential.to_owned());
+            properties.insert("starrocks.password".to_owned(), credential.to_owned());
+            let opts = schema_opts(properties).unwrap();
+            assert_eq!(opts.user(), Some(credential));
+            assert_eq!(opts.pass(), Some(credential));
+        }
+    }
+
+    #[test]
+    fn starrocks_schema_opts_preserve_connection_settings() {
+        for (host, expected_host) in [
+            ("example.invalid", "example.invalid"),
+            ("127.0.0.1", "127.0.0.1"),
+            ("[::1]", "::1"),
+        ] {
+            let mut properties = base_properties();
+            properties.insert("starrocks.host".to_owned(), host.to_owned());
+            properties.insert("starrocks.mysqlport".to_owned(), "19030".to_owned());
+            // Database names must not be interpreted as URL paths or query options.
+            let database = "db /%2F?prefer_socket=true#fragment";
+            properties.insert("starrocks.database".to_owned(), database.to_owned());
+            let opts = schema_opts(properties).unwrap();
+            assert_eq!(opts.ip_or_hostname(), expected_host);
+            assert_eq!(opts.tcp_port(), 19030);
+            assert_eq!(opts.db_name(), Some(database));
+            assert!(!opts.prefer_socket());
+            assert_eq!(opts.max_allowed_packet(), Some(1024));
+            assert_eq!(opts.wait_timeout(), Some(28800));
+        }
+    }
+
+    #[test]
+    fn starrocks_schema_opts_reject_invalid_ports() {
+        for port in ["", "abc", "-1", "65536", "9030/db"] {
+            let mut properties = base_properties();
+            properties.insert("starrocks.mysqlport".to_owned(), port.to_owned());
+            assert!(matches!(
+                schema_opts(properties),
+                Err(SinkError::DorisStarrocksConnect(_))
+            ));
+        }
+    }
+
+    #[cfg(not(madsim))]
+    #[test]
+    fn starrocks_schema_opts_preserve_secret_credentials() {
+        use prost::Message;
+        use risingwave_common::secret::LocalSecretManager;
+        use risingwave_pb::secret::secret::SecretBackend;
+        use risingwave_pb::secret::secret_ref::RefAsType;
+        use risingwave_pb::secret::{PbSecretRef, Secret, SecretMetaBackend};
+
+        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0.into());
+        let manager = LocalSecretManager::global();
+        let user = "Secret User+%2B@";
+        let password = "Secret Pass+%20:/?#密码";
+        let mut properties = base_properties();
+        let mut secret_refs = BTreeMap::new();
+        for (key, id, value) in [
+            ("starrocks.user", 28075, user),
+            ("starrocks.password", 28076, password),
+        ] {
+            properties.remove(key);
+            manager.add_secret(
+                id.into(),
+                Secret {
+                    secret_backend: Some(SecretBackend::Meta(SecretMetaBackend {
+                        value: value.as_bytes().to_vec(),
+                    })),
+                }
+                .encode_to_vec(),
+            );
+            secret_refs.insert(
+                key.to_owned(),
+                PbSecretRef {
+                    secret_id: id.into(),
+                    ref_as: RefAsType::Text.into(),
+                },
+            );
+        }
+        let properties = manager.fill_secrets(properties, secret_refs);
+        manager.remove_secret(28075.into());
+        manager.remove_secret(28076.into());
+        let opts = schema_opts(properties.unwrap()).unwrap();
+        assert_eq!(opts.user(), Some(user));
+        assert_eq!(opts.pass(), Some(password));
     }
 
     #[test]
