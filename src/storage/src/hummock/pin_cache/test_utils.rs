@@ -27,6 +27,7 @@ use risingwave_object_store::object::{
 use tokio::sync::{mpsc, oneshot};
 
 use super::PinCache;
+use crate::hummock::SstableStoreRef;
 use crate::monitor::ObjectStoreMetrics;
 
 type SpaceProbe = Arc<dyn Fn() -> ObjectResult<Option<u64>> + Send + Sync>;
@@ -97,6 +98,22 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
         .await?;
     assert!(pin_cache.publish(token, download));
     Ok(())
+}
+
+pub(in crate::hummock) async fn publish_pin_cache(
+    store: SstableStoreRef,
+    object_id: HummockSstableObjectId,
+    local_store: ObjectStoreRef,
+) -> (SstableStoreRef, Arc<PinCache>) {
+    let pin = PinCache::new(local_store, 1, []).await.unwrap();
+    let path = store.get_sst_data_path(object_id);
+    let size = store.store().metadata(&path).await.unwrap().total_size as u64;
+    pin.register_objects([object_id]);
+    download_and_publish_for_test(&pin, store.store(), path, object_id, size)
+        .await
+        .unwrap();
+    let store = Arc::new(Arc::into_inner(store).unwrap().with_pin_cache(pin.clone()));
+    (store, pin)
 }
 
 pub(in crate::hummock) fn in_memory_object_store() -> ObjectStoreRef {

@@ -26,7 +26,7 @@ impl PinCache {
     ) {
         // Release the shard between objects so a large update does not hold up lookups.
         for id in objects {
-            self.shard(id).write().register_object(id);
+            self.shard(id).state.write().register_object(id);
         }
     }
 
@@ -39,7 +39,7 @@ impl PinCache {
     ) {
         for id in objects {
             // Release the shard before handing the removed publication to GC.
-            let object = self.shard(id).write().objects.remove(&id);
+            let object = self.shard(id).state.write().objects.remove(&id);
             if let Some(mut object) = object
                 && let Some(file) = object.unpublish()
             {
@@ -51,6 +51,7 @@ impl PinCache {
     /// Whether an object is registered, regardless of whether it has a readable local file.
     pub(crate) fn is_registered(&self, object_id: HummockSstableObjectId) -> bool {
         self.shard(object_id)
+            .state
             .read()
             .objects
             .contains_key(&object_id)
