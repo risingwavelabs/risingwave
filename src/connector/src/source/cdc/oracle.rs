@@ -29,8 +29,8 @@ use crate::source::cdc::{
 // ------- Runtime flags -------
 
 impl CdcSourceRuntimeFlags for Oracle {
-    const CAN_BACKFILL: bool = true;
     const CAN_AUTO_INITIALIZE_HEARTBEAT_TABLE: bool = true;
+    const CAN_BACKFILL: bool = true;
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;
     const NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING: bool = true;
 }
