@@ -18,6 +18,7 @@ package com.risingwave.connector.source.oracle;
 
 import com.risingwave.connector.source.SourceTestClient;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.connector.source.common.OracleDbzConnectorConfig;
 import java.sql.Connection;
 import java.time.Duration;
 import java.util.HashMap;
@@ -142,11 +143,11 @@ final class OracleTestFixture implements AutoCloseable {
         properties.put(DbzConnectorConfig.USER, CONNECTOR_USER);
         properties.put(DbzConnectorConfig.PASSWORD, PASSWORD);
         properties.put(DbzConnectorConfig.DB_NAME, CDB);
-        properties.put(DbzConnectorConfig.ORACLE_PDB_NAME, PDB);
-        properties.put(DbzConnectorConfig.ORACLE_SCHEMA_NAME, SOURCE_SCHEMA);
+        properties.put(OracleDbzConnectorConfig.PDB_NAME, PDB);
+        properties.put(DbzConnectorConfig.SCHEMA_NAME, SOURCE_SCHEMA);
         properties.put(DbzConnectorConfig.TABLE_NAME, tableName);
         properties.put(
-                DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME,
+                OracleDbzConnectorConfig.HEARTBEAT_TABLE_NAME,
                 CONNECTOR_USER + "." + HEARTBEAT_TABLE);
         return properties;
     }

@@ -25,6 +25,7 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::parser::{
     BigintUnsignedHandlingMode, ByteStreamSourceParser, DebeziumParser, DebeziumProps,
     EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
@@ -536,8 +537,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
 
-        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
-            get_cdc_json_parse_handling_from_properties(&self.properties);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -545,10 +544,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut upstream = transform_upstream(
             upstream,
             self.output_columns.clone(),
-            timestamp_handling,
-            timestamptz_handling,
-            time_handling,
-            bigint_unsigned_handling,
+            self.properties.clone(),
             handle_toast_columns,
         )
         .boxed()
@@ -1281,12 +1277,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 pub async fn transform_upstream(
     upstream: BoxedMessageStream,
     output_columns: Vec<ColumnDesc>,
-    timestamp_handling: Option<TimestampHandling>,
-    timestamptz_handling: Option<TimestamptzHandling>,
-    time_handling: Option<TimeHandling>,
-    bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
+    properties: BTreeMap<String, String>,
     handle_toast_columns: bool,
 ) {
+    let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+        get_cdc_json_parse_handling_from_properties(&properties);
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
@@ -1309,6 +1304,7 @@ pub async fn transform_upstream(
         props,
         columns_with_meta.clone(),
         Arc::new(SourceContext::dummy()),
+        properties.cdc_source_type().debezium_numeric_handling(),
     )
     .await
     .map_err(StreamExecutorError::connector_error)?;
@@ -1474,7 +1470,7 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns, None, None, None, None, false);
+        let parsed_stream = transform_upstream(upstream, columns, BTreeMap::new(), false);
         pin_mut!(parsed_stream);
         let message = parsed_stream
             .next()
