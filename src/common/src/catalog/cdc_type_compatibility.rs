@@ -419,9 +419,11 @@ mod tests {
             assert!(cdc_source_column_type_compatible(
                 table_type,
                 "int",
-                PbTypeName::Int64,
+                &DataType::Int64,
                 None,
                 true,
+                None,
+                None,
                 None,
             ));
             assert!(cdc_auto_schema_change_existing_type_compatible(
