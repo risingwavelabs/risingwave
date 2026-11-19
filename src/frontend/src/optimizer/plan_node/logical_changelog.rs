@@ -16,6 +16,7 @@ use itertools::Itertools;
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
+use super::stream::StreamPlanNodeMetadata;
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
@@ -256,6 +257,21 @@ impl ToBatch for LogicalChangeLog {
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let input = self.input().to_stream(ctx)?;
+
+        if let Some(key) = &self.core.key_indices {
+            // Upsert deletes only guarantee stream-key columns. Validate before shuffling:
+            // otherwise a tombstone can be routed differently from its preceding insert.
+            if input.stream_kind().is_upsert()
+                && !key.iter().all(|i| input.expect_stream_key().contains(i))
+            {
+                return Err(BindError(
+                    "When producing a changelog from an upsert stream, KEY must be the same as \
+                     or a subset of the stream key. Materialize the input first to use other key columns."
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
 
         let input = if let Some(key) = &self.core.distribution_key_indices {
             RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?

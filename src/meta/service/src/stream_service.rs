@@ -120,6 +120,13 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
+    async fn list_bounded_jobs(
+        &self,
+        _request: Request<ListBoundedJobsRequest>,
+    ) -> TonicResponse<ListBoundedJobsResponse> {
+        unimplemented!("bounded ingestion metadata is implemented in the next layer")
+    }
+
     async fn list_refresh_table_states(
         &self,
         _request: Request<ListRefreshTableStatesRequest>,

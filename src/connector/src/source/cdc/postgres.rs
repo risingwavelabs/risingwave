@@ -19,13 +19,14 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Postgres,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, Postgres, check_alter_with_options_inner, check_common_with_options,
 };
 
 // ------- Runtime flags -------
 
 impl CdcSourceRuntimeFlags for Postgres {
+    const CAN_AUTO_SCHEMA_CHANGE: bool = true;
     const CAN_BACKFILL: bool = true;
     const CAN_BACKFILL_IN_PARALLEL: bool = true;
     const CAN_USE_TRANSACTION_METADATA: bool = true;
@@ -37,8 +38,9 @@ impl CdcSourceRuntimeFlags for Postgres {
 impl CdcSourceDdlValidator for Postgres {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         match props.get("slot.name") {
             None => {
                 // Build a random slot name with UUID
@@ -87,7 +89,7 @@ impl CdcSourceDdlValidator for Postgres {
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         check_alter_with_options_inner(
             Self::CDC_CONNECTOR_NAME,
             props,
@@ -104,3 +106,7 @@ impl CdcSourceDdlValidator for Postgres {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Postgres {}

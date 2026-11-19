@@ -76,7 +76,7 @@ pub async fn handle_query(
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let context = OptimizerContext::from_handler_args(handler_args);
+    let context = OptimizerContext::from_handler_args(handler_args)?;
 
     #[cfg(feature = "datafusion")]
     {
@@ -164,7 +164,7 @@ pub async fn handle_execute(
             // Execute a batch query
             let session = handler_args.session.clone();
             let plan_fragmenter_result = {
-                let context = OptimizerContext::from_handler_args(handler_args);
+                let context = OptimizerContext::from_handler_args(handler_args)?;
                 let plan_result =
                     gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw()?;
                 // Time zone is used by Hummock time travel query.
@@ -228,7 +228,7 @@ pub async fn handle_execute(
             risingwave_sqlparser::ast::DeclareCursor::Query(_) => {
                 let session = handler_args.session.clone();
                 let plan_fragmenter_result = {
-                    let context = OptimizerContext::from_handler_args(handler_args.clone());
+                    let context = OptimizerContext::from_handler_args(handler_args.clone())?;
                     let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?
                         .unwrap_rw()?;
                     gen_batch_plan_fragmenter(&session, plan_result)?

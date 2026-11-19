@@ -299,6 +299,7 @@ high_priority_ratio_in_percent = ""
 prefetch_buffer_capacity_mb = ""
 max_cached_recent_versions_number = 60
 max_prefetch_block_number = 16
+sstable_meta_fetch_concurrency = 1
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
 compactor_memory_limit_mb = ""
@@ -447,6 +448,8 @@ skip_inheritance_filter = false
 set_atomic_write_dir = false
 req_concurrency_limit = 0
 http_concurrent_limit = 0
+opendal_streaming_read_chunk_size = 0
+opendal_streaming_read_chunk_concurrency = 1
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
@@ -474,6 +477,7 @@ list_retry_attempts = 3
 
 [storage.object_store.s3]
 keepalive_ms = 600000
+http_client_rotation_interval_ms = ""
 recv_buffer_size = 2097152
 send_buffer_size = ""
 nodelay = true

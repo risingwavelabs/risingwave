@@ -17,13 +17,11 @@
 package com.risingwave.connector.source.common;
 
 import com.mongodb.ConnectionString;
-import com.risingwave.connector.api.source.SourceTypeE;
 import io.debezium.config.Configuration;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import io.debezium.connector.mongodb.connection.MongoDbConnection;
 import io.debezium.connector.mongodb.connection.MongoDbConnections;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import org.bson.BsonDocument;
 import org.bson.Document;
@@ -31,7 +29,7 @@ import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class MongoDbValidator extends DatabaseValidator implements AutoCloseable {
+public class MongoDbValidator extends CdcSourceValidator implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbValidator.class);
     private static final int VALIDATION_TIMEOUT_SECONDS = 5;
     private static final String VALIDATION_TIMEOUT_MILLIS = "5000";
@@ -54,16 +52,13 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
     static final String INHERITED_ROLES = "inheritedRoles";
     static final String INHERITED_PRIVILEGES = "inheritedPrivileges";
 
-    public MongoDbValidator(Map<String, String> userProps, long sourceId) {
-        this.mongodbUrl = userProps.get("mongodb.url");
+    public MongoDbValidator(MongodbDbzConnectorConfig config) {
+        this.mongodbUrl = config.getMongoUrl();
         this.connStr = new ConnectionString(mongodbUrl);
         this.isShardedCluster = false;
 
-        var connectorConfig =
-                new DbzConnectorConfig(
-                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
         var validationProperties = new Properties();
-        validationProperties.putAll(connectorConfig.getResolvedDebeziumProps());
+        validationProperties.putAll(config.getResolvedDebeziumProps());
         validationProperties.setProperty(
                 MongoDbConnectorConfig.CONNECT_TIMEOUT_MS.name(), VALIDATION_TIMEOUT_MILLIS);
         validationProperties.setProperty(

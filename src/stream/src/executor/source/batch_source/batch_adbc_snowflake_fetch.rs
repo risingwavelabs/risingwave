@@ -20,13 +20,11 @@ use futures::stream;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
-use risingwave_common::array::arrow::arrow_array_58 as arrow;
+use risingwave_common::array::arrow::{arrow_array_58 as arrow, from_arrow58_record_batch};
 use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::source::adbc_snowflake::{
-    AdbcSnowflakeArrowConvert, AdbcSnowflakeProperties,
-};
+use risingwave_connector::source::adbc_snowflake::AdbcSnowflakeProperties;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
@@ -358,14 +356,13 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         split_id: &str,
         batches: Vec<RecordBatch>,
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
-        let converter = AdbcSnowflakeArrowConvert;
         let mut chunks = Vec::new();
 
         for batch in batches {
             // Convert Arrow RecordBatch to RisingWave DataChunk
             // The column order in the RecordBatch matches the Snowflake query result,
             // which is consistent with the schema inferred by get_arrow_schema() in the connector.
-            let data_chunk = converter.chunk_from_record_batch(&batch)?;
+            let data_chunk = from_arrow58_record_batch(&batch)?;
 
             // Convert DataChunk to StreamChunk (all inserts)
             let stream_chunk = StreamChunk::from_parts(

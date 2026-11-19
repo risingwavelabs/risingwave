@@ -29,9 +29,7 @@ use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitR
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 
-use crate::executor::backfill::cdc::cdc_backfill::{
-    get_cdc_json_parse_handling_from_properties, transform_upstream,
-};
+use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
 use crate::executor::backfill::cdc::state_v2::{CdcStateRecord, ParallelizedCdcBackfillState};
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::reader::{
@@ -145,18 +143,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         // If user sets debezium.time.precision.mode to "connect", it means the user can guarantee
         // that the upstream data precision is MilliSecond. In this case, we don't use GuessNumberUnit
         // mode to guess precision, but use Milli mode directly, which can handle extreme timestamps.
-        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
-            get_cdc_json_parse_handling_from_properties(&self.properties);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         let mut upstream = transform_upstream(
             upstream,
             self.output_columns.clone(),
-            timestamp_handling,
-            timestamptz_handling,
-            time_handling,
-            bigint_unsigned_handling,
+            self.properties.clone(),
             handle_toast_columns,
         )
         .boxed();

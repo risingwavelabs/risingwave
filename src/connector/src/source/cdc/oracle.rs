@@ -20,23 +20,25 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Oracle,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY, Oracle,
     check_alter_with_options_inner, check_common_with_options,
 };
 
-const HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY: &str = "heartbeat.table.auto.initialize";
-
 // ------- Runtime flags -------
 
-impl CdcSourceRuntimeFlags for Oracle {}
+impl CdcSourceRuntimeFlags for Oracle {
+    const CAN_AUTO_INITIALIZE_HEARTBEAT_TABLE: bool = true;
+}
 
 // ------- DDL validation -------
 
 impl CdcSourceDdlValidator for Oracle {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         if let Some(value) = props.get(HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY)
             && value.parse::<bool>().map_err(|_| {
                 anyhow!("'{HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY}' must be 'true' or 'false'")
@@ -54,7 +56,7 @@ impl CdcSourceDdlValidator for Oracle {
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         check_alter_with_options_inner(
             Self::CDC_CONNECTOR_NAME,
             props,
@@ -72,3 +74,7 @@ impl CdcSourceDdlValidator for Oracle {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Oracle {}

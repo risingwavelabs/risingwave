@@ -638,7 +638,7 @@ impl HummockEventHandler {
                 )
             }
             ssts => {
-                warn!(
+                debug!(
                     batch_size = ssts.len(),
                     "handle multiple uploaded ssts in batch"
                 );
@@ -743,7 +743,7 @@ impl HummockEventHandler {
             .expect("version update batch must not be empty");
         let latest_pinned_version = &events.last().unwrap().new_pinned_version;
         if events.len() > 1 {
-            warn!(
+            debug!(
                 count = events.len(),
                 "handle multiple version updates in batch"
             );

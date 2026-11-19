@@ -39,6 +39,7 @@ pub mod prelude {
     pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
     pub type PostgresCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Postgres>;
     pub type MysqlCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mysql>;
+    pub type MariadbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mariadb>;
     pub type SqlServerCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::SqlServer>;
     pub type OracleCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Oracle>;
 }
@@ -79,6 +80,7 @@ use utils::feature_gated_source_mod;
 pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
 mod common;
 pub mod iceberg;
+pub mod ingest_mode;
 mod manager;
 pub mod reader;
 pub mod test_source;

@@ -743,6 +743,23 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a < Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+- name: trailing underscore LIKE keeps residual filter with index range
+  sql: |
+    create table t1 (a varchar);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC_'
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: Like(idx.a, 'ABC_':Varchar) }
+      └─BatchScan { table: idx, columns: [idx.a], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a < Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+- name: escaped underscore prefix LIKE uses index range without residual filter
+  sql: |
+    create table t1 (a varchar);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC\_%'
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: idx, columns: [idx.a], scan_ranges: [idx.a >= Utf8("ABC_") AND idx.a < Utf8("ABC`")], distribution: UpstreamHashShard(idx.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);

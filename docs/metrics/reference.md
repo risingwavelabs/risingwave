@@ -77,6 +77,11 @@ Metric names are stable across releases unless explicitly called out. Histograms
 follow Prometheus conventions — a histogram `foo_bar_duration_seconds` produces
 `foo_bar_duration_seconds_bucket{le="..."}`, `_sum`, and `_count` series.
 
+`aws_sdk_retry_counts` is no longer emitted. Its collector depended on the
+obsolete `aws_smithy_client::retry` log target and did not track retries from the
+current AWS SDK. `object_store_request_retry_count` covers RisingWave wrapper
+retries only; it does not provide SDK-internal retry counts.
+
 Every metric defined in the code is captured in `inventory.tsv` with:
 
 | Column        | Meaning                                                   |
@@ -1043,10 +1048,9 @@ after a new version is installed:
 | `object_store_operation_latency`  | histogram         | `media_type`, `type`                 | Per-operation latency histogram. `type` values follow `OperationType` (see §7.3). `media_type` identifies the backend — values include `mem`, `s3` (legacy direct S3), and the OpenDAL-backed names `Fs`, `S3`, `Minio`, `Gcs`, `Azblob`, `Obs`, `Oss`, `Webhdfs` (mixed case is intentional, matches OpenDAL `Scheme` names). |
 | `object_store_operation_bytes`    | histogram         | `type`                               | Per-operation payload size, by operation `type`. |
 | `object_store_failure_count`      | counter        | `type`                               | Failure count — §7.3 / alert in §3.3. |
-| `object_store_request_retry_count`| counter        | `type`                               | RisingWave's object-store wrapper retry counter — incremented by the retry policy in `src/object_store/src/object/mod.rs` when an operation of `type` (the `OperationType` set from §7.3) is retried. Distinct from the underlying AWS SDK's own retry counter (`aws_sdk_retry_counts`). Non-zero sustained rate → degraded upstream. |
+| `object_store_request_retry_count`| counter        | `type`                               | RisingWave's object-store wrapper retry counter — incremented by the retry policy in `src/object_store/src/object/mod.rs` when an operation of `type` (the `OperationType` set from §7.3) is retried. Retries performed internally by the AWS SDK are not included. Non-zero sustained rate → degraded upstream. |
 | `object_store_read_bytes`         | counter           | —                                    | Total bytes read by the compute/compactor process. |
 | `object_store_write_bytes`        | counter           | —                                    | Total bytes written. |
-| `aws_sdk_retry_counts`            | counter           | —                                    | Global AWS SDK retry counter, incremented by the logger's tracing-event hook on every `aws_smithy_client::retry` event. Covers all AWS SDK clients in the process (S3 / Kinesis / etc.), not S3 only. |
 
 ### 10.5 Compactor
 

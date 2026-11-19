@@ -29,7 +29,7 @@ use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::upsert_parser::get_key_column_name;
-use crate::parser::{BytesProperties, ParseResult, ParserFormat};
+use crate::parser::{BytesProperties, ParseResult, ParserFormat, debezium_numeric_handling};
 use crate::source::cdc::CdcMessageType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
@@ -76,6 +76,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                debezium_numeric_handling(&source_ctx.connector_props),
                 BigintUnsignedHandlingMode::Long,
                 false,
             )?,
@@ -266,7 +267,7 @@ mod tests {
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnCatalog;
-    use risingwave_pb::connector_service::{SourceType, cdc_message};
+    use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
@@ -395,7 +396,6 @@ mod tests {
                         } else {
                             cdc_message::CdcMessageType::Data
                         },
-                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -410,7 +410,6 @@ mod tests {
                         "orders".to_owned(),
                         0,
                         cdc_message::CdcMessageType::Data,
-                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -429,7 +428,6 @@ mod tests {
                         } else {
                             cdc_message::CdcMessageType::Data
                         },
-                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -472,7 +470,6 @@ mod tests {
             "orders".to_owned(),
             0,
             cdc_message::CdcMessageType::TransactionMeta,
-            SourceType::Unspecified,
         ));
         let msg_meta = MessageMeta {
             source_meta: &cdc_meta,
@@ -540,7 +537,6 @@ mod tests {
             "mydb.test".to_owned(),
             0,
             cdc_message::CdcMessageType::SchemaChange,
-            SourceType::Mysql,
         ));
         let msg_meta = MessageMeta {
             source_meta: &cdc_meta,

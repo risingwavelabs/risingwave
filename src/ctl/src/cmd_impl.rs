@@ -16,6 +16,7 @@ pub mod await_tree;
 pub mod bench;
 pub mod compute;
 pub mod hummock;
+pub mod log;
 pub mod meta;
 pub mod profile;
 pub mod scale;

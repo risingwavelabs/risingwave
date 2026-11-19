@@ -41,7 +41,8 @@ use thiserror_ext::AsReport as _;
 
 use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
-use crate::error::{ErrorCode, Result, RwError};
+use crate::catalog::RelationKind;
+use crate::error::{Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::session::current::notice_to_user;
@@ -285,6 +286,17 @@ impl TableVersion {
     }
 }
 
+impl From<TableType> for RelationKind {
+    fn from(table_type: TableType) -> Self {
+        match table_type {
+            TableType::Table => Self::Table,
+            TableType::MaterializedView => Self::MaterializedView,
+            TableType::Index | TableType::VectorIndex => Self::Index,
+            TableType::Internal => Self::Internal,
+        }
+    }
+}
+
 impl TableCatalog {
     /// Returns the SQL definition when the table was created, purified with best effort
     /// if it's a table.
@@ -387,16 +399,7 @@ impl TableCatalog {
     /// Returns an error if `DROP` statements are used on the wrong type of table.
     #[must_use]
     pub fn bad_drop_error(&self) -> RwError {
-        let msg = match self.table_type {
-            TableType::MaterializedView => {
-                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
-            }
-            TableType::Index | TableType::VectorIndex => "Use `DROP INDEX` to drop an index.",
-            TableType::Table => "Use `DROP TABLE` to drop a table.",
-            TableType::Internal => "Internal tables cannot be dropped.",
-        };
-
-        ErrorCode::InvalidInputSyntax(msg.to_owned()).into()
+        RelationKind::from(self.table_type).bad_drop_error().into()
     }
 
     /// Get the table catalog's associated source id.

@@ -341,10 +341,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
             rate_limit: value.0.rate_limit.map(|v| v as _),
-            refresh_mode: value
-                .0
-                .refresh_mode
-                .map(|refresh_mode| refresh_mode.to_protobuf()),
+            ingest_mode: value.0.ingest_mode.map(|mode| mode.to_protobuf()),
         }
     }
 }
@@ -512,6 +509,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            unsafe_skip_materializing_exprs: value.0.unsafe_skip_materializing_exprs,
+            is_immutable: value.0.is_immutable,
             is_async: value
                 .0
                 .options

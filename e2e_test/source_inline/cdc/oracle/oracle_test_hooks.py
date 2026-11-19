@@ -109,8 +109,8 @@ def check_heartbeat_creation_error(
     owner = _normalize_identifier(owner, "owner")
     pdb = TEST_ORACLE_PDB
     user = TEST_ORACLE_USER
-    qualified_name = f"{owner}.{TEST_ORACLE_HEARTBEAT_TABLE}"
-    lines = [f"ALTER SESSION SET CONTAINER = {pdb};"]
+    qualified_name = f'"{owner}"."{TEST_ORACLE_HEARTBEAT_TABLE}"'
+    lines = [f'ALTER SESSION SET CONTAINER = "{pdb}";']
     if create_table:
         lines.append(
             f"CREATE TABLE {qualified_name} "
