@@ -93,7 +93,7 @@ impl JsonAccessBuilder {
         if let Some(mode) = config.bigint_unsigned_handling {
             json_parse_options.bigint_unsigned_handling = mode;
         }
-        json_parse_options.handle_toast_columns = config.handle_toast_columns;
+        json_parse_options.handle_postgres_toast_columns = config.handle_postgres_toast_columns;
         Ok(Self {
             value: None,
             payload_start_idx: if config.use_schema_registry { 5 } else { 0 },

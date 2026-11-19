@@ -1,0 +1,97 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP SOURCE IF EXISTS oracle_name_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+# Debezium's default topic naming replaces `$`, `#` and non-ASCII characters with `_`, which would
+# give these tables the same routing key as T_1.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.T_1 (ID NUMBER(9) PRIMARY KEY, V VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.T_1 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.T$1 (ID NUMBER(9) PRIMARY KEY, V VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.T$1 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.T#1 (ID NUMBER(9) PRIMARY KEY, V VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.T#1 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.\"T中1\" (ID NUMBER(9) PRIMARY KEY, V VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.\"T中1\" ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.T_1 VALUES (10, 'snapshot')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.T$1 VALUES (20, 'snapshot')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.T#1 VALUES (30, 'snapshot')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.\"T中1\" VALUES (40, 'snapshot')",
+])
+PY
+
+statement ok
+CREATE SOURCE oracle_name_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+control substitution off
+
+statement ok
+CREATE TABLE oracle_name_underscore (*) FROM oracle_name_source TABLE 'APP.T_1';
+
+statement ok
+CREATE TABLE oracle_name_dollar (*) FROM oracle_name_source TABLE 'APP.T$1';
+
+statement ok
+CREATE TABLE oracle_name_hash (*) FROM oracle_name_source TABLE 'APP.T#1';
+
+statement ok
+CREATE TABLE oracle_name_non_ascii (*) FROM oracle_name_source TABLE 'APP.T中1';
+
+control substitution on
+
+query TIT retry 30 backoff 1s
+SELECT 'underscore', "ID", "V" FROM oracle_name_underscore
+UNION ALL SELECT 'dollar', "ID", "V" FROM oracle_name_dollar
+UNION ALL SELECT 'hash', "ID", "V" FROM oracle_name_hash
+UNION ALL SELECT 'non_ascii', "ID", "V" FROM oracle_name_non_ascii
+ORDER BY 2;
+----
+underscore 10 snapshot
+dollar 20 snapshot
+hash 30 snapshot
+non_ascii 40 snapshot
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.T$1 VALUES (21, 'stream')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.T#1 VALUES (31, 'stream')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.\"T中1\" VALUES (41, 'stream')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.T_1 VALUES (11, 'stream')",
+])
+PY
+
+query TIT retry 30 backoff 1s
+SELECT 'underscore', "ID", "V" FROM oracle_name_underscore
+UNION ALL SELECT 'dollar', "ID", "V" FROM oracle_name_dollar
+UNION ALL SELECT 'hash', "ID", "V" FROM oracle_name_hash
+UNION ALL SELECT 'non_ascii', "ID", "V" FROM oracle_name_non_ascii
+ORDER BY 2;
+----
+underscore 10 snapshot
+underscore 11 stream
+dollar 20 snapshot
+dollar 21 stream
+hash 30 snapshot
+hash 31 stream
+non_ascii 40 snapshot
+non_ascii 41 stream
+
+statement ok
+DROP SOURCE oracle_name_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

@@ -16,7 +16,6 @@
 
 package com.risingwave.connector.source;
 
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.core.SourceHandlerFactory;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.ServerCallStreamObserver;
@@ -31,14 +30,7 @@ public class SourceRequestHandler {
     }
 
     public void handle(ConnectorServiceProto.GetEventStreamRequest request) {
-        var handler =
-                SourceHandlerFactory.createSourceHandler(
-                        SourceTypeE.valueOf(request.getSourceType()),
-                        request.getSourceId(),
-                        request.getStartOffset(),
-                        request.getPropertiesMap(),
-                        request.getSnapshotDone(),
-                        request.getIsSourceJob());
+        var handler = SourceHandlerFactory.createSourceHandler(request);
         handler.startSource(
                 (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                         responseObserver);

@@ -86,6 +86,16 @@ pub struct StorageConfig {
     )]
     pub max_prefetch_block_number: usize,
 
+    /// Maximum number of concurrent `SSTable` metadata fetches per state store scan during
+    /// iterator initialization. Must be greater than 0. The default of 1 fetches sequentially;
+    /// set a larger value to opt in to concurrent fetching. Does not affect point lookups or
+    /// the lazy metadata reads within concatenated `SSTable` iterators.
+    #[serde(
+        default = "default::storage::sstable_meta_fetch_concurrency",
+        deserialize_with = "deserialize_sstable_meta_fetch_concurrency"
+    )]
+    pub sstable_meta_fetch_concurrency: usize,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -238,7 +248,8 @@ pub struct StorageConfig {
     )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
-    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores.
+    /// Capped at `worker_num` * `compactor_max_task_multiplier`, the most a compactor can run.
     #[serde(default = "default::storage::iceberg_compaction_task_parallelism_ratio")]
     pub iceberg_compaction_task_parallelism_ratio: f32,
     /// Whether to enable heuristic output parallelism in iceberg compaction.
@@ -599,6 +610,19 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+fn deserialize_sstable_meta_fetch_concurrency<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.sstable_meta_fetch_concurrency must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
@@ -1155,6 +1179,10 @@ pub mod default {
 
         pub fn compactor_fast_max_compact_task_size() -> u64 {
             2 * 1024 * 1024 * 1024 // 2g
+        }
+
+        pub fn sstable_meta_fetch_concurrency() -> usize {
+            1
         }
 
         pub fn max_prefetch_block_number() -> usize {
