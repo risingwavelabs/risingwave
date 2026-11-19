@@ -1421,24 +1421,15 @@ impl Parser<'_> {
                         time_zone,
                     })
                 }
-                keyword @ (Keyword::ALL | Keyword::ANY | Keyword::SOME) => {
-                    self.expect_token(&Token::LParen)?;
-                    // In upstream's PR of parser-rs, there is `self.parser_subexpr(precedence)` here.
-                    // But it will fail to parse `select 1 = any(null and true);`.
-                    let sub = self.parse_expr()?;
-                    self.expect_token(&Token::RParen)?;
-
-                    // TODO: support `all/any/some(subquery)`.
-                    if let Expr::Subquery(_) = &sub {
-                        parser_err!("ANY/SOME/ALL(Subquery) is not implemented");
-                    }
-
-                    Ok(match keyword {
-                        Keyword::ALL => Expr::AllOp(Box::new(sub)),
-                        // `SOME` is a synonym for `ANY`.
-                        Keyword::ANY | Keyword::SOME => Expr::SomeOp(Box::new(sub)),
-                        _ => unreachable!(),
-                    })
+                Keyword::ALL | Keyword::ANY | Keyword::SOME => {
+                    // `ALL`/`ANY`/`SOME` are only valid as the right-hand operand of a
+                    // binary operator or `[NOT] LIKE`/`ILIKE`/`SIMILAR TO`, where they are
+                    // parsed as a prefix of that operand (see `parse_prefix`). Reaching this
+                    // infix arm means the keyword follows a complete expression, e.g. the
+                    // dangling `any(..)` in `1 = 5 any(array[1, 2])`, which Postgres rejects.
+                    // This arm used to return the `ANY`/`ALL` operand while silently dropping
+                    // `expr`, turning such invalid input into a different query.
+                    parser_err!("syntax error at or near {}", tok.token)
                 }
                 Keyword::NOT
                 | Keyword::IN
