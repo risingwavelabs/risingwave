@@ -669,3 +669,57 @@ drop table t_multi_c2;
 
 statement ok
 drop table m_multi_c;
+
+# add a column with a `now()` default after the sink exists
+statement ok
+create table t_now_1 (v1 int);
+
+statement ok
+create table m_now_1 (v1 int primary key);
+
+statement ok
+create sink s_now_1 into m_now_1 as select v1 from t_now_1;
+
+statement ok
+insert into t_now_1 values (1), (2);
+
+statement ok
+alter table m_now_1 add column v2 timestamptz default now();
+
+statement ok
+alter table m_now_1 add column v3 timestamptz default now() - interval '1 minute';
+
+statement ok
+insert into t_now_1 values (3), (4);
+
+query I rowsort
+select v1 from m_now_1 where v2 >= date '2021-01-01' and v3 < v2;
+----
+1
+2
+3
+4
+
+statement ok
+recover;
+
+statement ok
+insert into t_now_1 values (5);
+
+query I rowsort
+select v1 from m_now_1 where v2 >= date '2021-01-01' and v3 < v2;
+----
+1
+2
+3
+4
+5
+
+statement ok
+drop sink s_now_1;
+
+statement ok
+drop table m_now_1;
+
+statement ok
+drop table t_now_1;
