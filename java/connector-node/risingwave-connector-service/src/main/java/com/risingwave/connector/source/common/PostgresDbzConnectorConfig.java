@@ -19,6 +19,8 @@ package com.risingwave.connector.source.common;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamRequest;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 public class PostgresDbzConnectorConfig extends DbzConnectorConfig {
@@ -36,7 +38,10 @@ public class PostgresDbzConnectorConfig extends DbzConnectorConfig {
     }
 
     public String getJdbcUrl() {
-        return String.format("jdbc:postgresql://%s:%s/%s", getHost(), getPort(), getDbName());
+        // pgjdbc URL-decodes the database component, so encode literal names before interpolation.
+        return String.format(
+                "jdbc:postgresql://%s:%s/%s",
+                getHost(), getPort(), URLEncoder.encode(getDbName(), StandardCharsets.UTF_8));
     }
 
     public String getPubName() {
