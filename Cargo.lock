@@ -3044,18 +3044,18 @@ dependencies = [
 
 [[package]]
 name = "convert_case"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+checksum = "db05ffb6856bf0ecdf6367558a76a0e8a77b1713044eb92845c692100ed50190"
 dependencies = [
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "convert_case"
-version = "0.9.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db05ffb6856bf0ecdf6367558a76a0e8a77b1713044eb92845c692100ed50190"
+checksum = "1af709f1f33454bf52eadfc8c78b3b9ef9cb26fb54d16dc9cd9a7299f899fd1b"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -6319,9 +6319,9 @@ checksum = "8fcfdc7a0362c9f4444381a9e697c79d435fe65b52a37466fc2c1184cee9edc6"
 
 [[package]]
 name = "firestore"
-version = "0.56.0"
+version = "0.57.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73fb9efb3b9602876a1ebbe0faeece30f0b822b514df67eb57bcf671223a79a1"
+checksum = "6513be1346e8d5cac47f1ced296992d497db284b4bc79fc0d3898b2a81f0cf04"
 dependencies = [
  "async-trait",
  "backoff",
@@ -17812,11 +17812,11 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "struct-path"
-version = "0.2.4"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bb4afb8a683e3335fa737ad69e4338f1293debed26ec15c0cfab497e75ad3e3"
+checksum = "b05bfa6139d65db2d06771c76f4fd4d8c0dda9a29fa47173a4a23f4ca6fabc9f"
 dependencies = [
- "convert_case 0.8.0",
+ "convert_case 0.12.0",
 ]
 
 [[package]]
