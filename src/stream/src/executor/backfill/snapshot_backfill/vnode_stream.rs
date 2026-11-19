@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem::{replace, take};
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::task::{Context, Poll, ready};
 
 use futures::stream::{FuturesUnordered, Peekable, StreamFuture};
@@ -26,6 +26,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_storage::table::ChangeLogRow;
+use tokio::task::consume_budget;
 
 use crate::executor::StreamExecutorResult;
 use crate::executor::backfill::utils::create_builder;
@@ -217,7 +218,6 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let capacity = this.data_chunk_builder.batch_size();
-        let mut skipped_rows = 0;
         loop {
             match ready!(this.poll_next_row(cx)) {
                 Ok(Some(change_log_row)) => {
@@ -234,11 +234,7 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
                             new_value,
                             old_value,
                         } if new_value == old_value => {
-                            skipped_rows += 2;
-                            if skipped_rows >= capacity {
-                                cx.waker().wake_by_ref();
-                                break Poll::Pending;
-                            }
+                            ready!(pin!(consume_budget()).poll(cx));
                             continue;
                         }
                         ChangeLogRow::Update {
@@ -430,26 +426,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_yield_after_skipping_noop_updates() {
-        let (tx, rx) = unbounded_channel();
+        let rows = (0..1024)
+            .map(|i| ChangeLogRow::Update {
+                new_value: test_row(i),
+                old_value: test_row(i),
+            })
+            .chain([ChangeLogRow::Insert(test_row(1024))])
+            .map(Ok);
         let mut stream = VnodeStream::new(
-            [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+            [(VirtualNode::ZERO, futures::stream::iter(rows), 0)].into_iter(),
             vec![0],
             DataChunkBuilder::new(DATA_TYPES.clone(), 4),
         );
-        for i in 0..3 {
-            tx.send(Ok(ChangeLogRow::Update {
-                new_value: test_row(i),
-                old_value: test_row(i),
-            }))
-            .unwrap();
-        }
-        tx.send(Ok(ChangeLogRow::Insert(test_row(3)))).unwrap();
-        drop(tx);
         assert!(stream.next().now_or_never().is_none());
         let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(chunk.ops(), &[Op::Insert]);
         assert!(stream.next().await.is_none());
-        stream.assert_progress([(VirtualNode::ZERO, 7, None)]).await;
+        stream
+            .assert_progress([(VirtualNode::ZERO, 2049, None)])
+            .await;
     }
 
     #[tokio::test]
