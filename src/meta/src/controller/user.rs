@@ -151,7 +151,6 @@ impl CatalogController {
         Ok(version)
     }
 
-    #[cfg(test)]
     pub async fn get_user(&self, id: UserId) -> MetaResult<user::Model> {
         let inner = self.inner.read().await;
         let user = User::find_by_id(id)

@@ -1773,12 +1773,14 @@ impl MetaClient {
         &self,
         table_id: TableId,
         concurrency: u32,
+        user_id: UserId,
     ) -> Result<(u64, u32)> {
         let response = self
             .inner
             .warm_up_table_cache(WarmUpTableCacheRequest {
                 table_id,
                 concurrency,
+                user_id: Some(user_id),
             })
             .await?;
         Ok((response.key_count, response.worker_count))

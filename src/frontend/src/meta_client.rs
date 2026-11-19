@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
-use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
+use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, UserId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -165,6 +165,13 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<()>;
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
+
+    async fn warm_up_table_cache(
+        &self,
+        table_id: TableId,
+        concurrency: u32,
+        user_id: UserId,
+    ) -> Result<(u64, u32)>;
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
 
@@ -477,6 +484,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         self.0.get_cluster_recovery_status().await
+    }
+
+    async fn warm_up_table_cache(
+        &self,
+        table_id: TableId,
+        concurrency: u32,
+        user_id: UserId,
+    ) -> Result<(u64, u32)> {
+        self.0
+            .warm_up_table_cache(table_id, concurrency, user_id)
+            .await
     }
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>> {

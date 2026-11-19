@@ -18,6 +18,7 @@ use futures::future::try_join_all;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::WorkerId;
+use risingwave_common::license::Feature;
 use risingwave_meta::hummock::HummockManagerRef;
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_pb::catalog::table::Engine as TableEngine;
@@ -128,6 +129,9 @@ impl ServingService for ServingServiceImpl {
         request: Request<WarmUpTableCacheRequest>,
     ) -> Result<Response<WarmUpTableCacheResponse>, Status> {
         let request = request.into_inner();
+        let user_id = request
+            .user_id
+            .ok_or_else(|| Status::permission_denied("warm-up requires a user identity"))?;
         if request.concurrency == 0 {
             return Err(Status::invalid_argument(
                 "concurrency must be greater than 0",
@@ -139,6 +143,19 @@ impl ServingService for ServingServiceImpl {
             .catalog_controller
             .get_table_by_id(table_id)
             .await?;
+        let user = self
+            .metadata_manager
+            .catalog_controller
+            .get_user(user_id)
+            .await?;
+        if !user.is_super && user.user_id != table.owner {
+            return Err(Status::permission_denied(format!(
+                "only the table owner or a superuser can warm up table {table_id}"
+            )));
+        }
+        Feature::TableCacheWarmUp
+            .check_available()
+            .map_err(|error| Status::permission_denied(error.to_report_string()))?;
         if !table.table_type().supports_cache_warm_up() || table.engine() == TableEngine::Iceberg {
             return Err(Status::invalid_argument(format!(
                 "table {table_id} does not support cache warm-up"

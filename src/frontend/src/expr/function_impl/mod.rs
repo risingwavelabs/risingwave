@@ -28,3 +28,4 @@ mod rw_cluster_id;
 mod rw_epoch_to_ts;
 mod rw_fragment_vnodes;
 mod rw_recovery_status;
+mod rw_warmup;

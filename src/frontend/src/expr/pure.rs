@@ -404,6 +404,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
+            | Type::RwWarmup
             | Type::RwClusterId
             | Type::RwFragmentVnodes
             | Type::RwActorVnodes

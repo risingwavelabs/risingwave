@@ -1393,6 +1393,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(RecoveryStatus::StatusRunning)
     }
 
+    async fn warm_up_table_cache(
+        &self,
+        _table_id: risingwave_common::id::TableId,
+        _concurrency: u32,
+        _user_id: UserId,
+    ) -> RpcResult<(u64, u32)> {
+        unimplemented!()
+    }
+
     async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
         Ok(vec![])
     }

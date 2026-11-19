@@ -34,10 +34,11 @@ use crate::binder::{Binder, BoundCreateView, BoundStatement};
 #[cfg(feature = "datafusion")]
 use crate::datafusion::DfBatchQueryPlanResult;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::{ExprVisitor, FunctionCall, FunctionCallWithLambda};
 use crate::handler::HandlerArgs;
 use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
-use crate::optimizer::plan_node::{BatchPlanRef, Explain};
+use crate::optimizer::plan_node::{BatchPlanRef, Explain, VisitExprsRecursive};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef, SysTableVisitor,
 };
@@ -418,7 +419,25 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
 }
 
 fn must_run_in_local_mode(batch_plan: &BatchPlanRoot) -> bool {
-    SysTableVisitor::has_sys_table(batch_plan)
+    #[derive(Default)]
+    struct LocalExecutionFinder(bool);
+
+    impl ExprVisitor for LocalExecutionFinder {
+        fn visit_function_call(&mut self, call: &FunctionCall) {
+            self.0 |= call.func_type().requires_local_execution();
+            for input in call.inputs() {
+                self.visit_expr(input);
+            }
+        }
+
+        fn visit_function_call_with_lambda(&mut self, call: &FunctionCallWithLambda) {
+            self.visit_function_call(&call.to_full_function_call());
+        }
+    }
+
+    let mut finder = LocalExecutionFinder::default();
+    batch_plan.plan.visit_exprs_recursive(&mut finder);
+    finder.0 || SysTableVisitor::has_sys_table(batch_plan)
 }
 
 fn determine_query_mode(batch_plan: &BatchPlanRoot) -> QueryMode {

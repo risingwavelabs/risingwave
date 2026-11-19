@@ -362,14 +362,6 @@ enum HummockCommands {
 enum RefillCommands {
     /// Collect table cache refill stats from compute nodes.
     Stats,
-    /// Warm up a Hummock-backed table in the streaming compute node caches.
-    WarmUp {
-        #[clap(long)]
-        table_id: TableId,
-        /// Maximum number of vnodes scanned concurrently on each compute node.
-        #[clap(long, default_value_t = 16)]
-        concurrency: u32,
-    },
 }
 
 #[derive(Subcommand)]
@@ -977,10 +969,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::Refill(RefillCommands::Stats)) => {
             cmd_impl::hummock::refill_stats(context).await?
         }
-        Commands::Hummock(HummockCommands::Refill(RefillCommands::WarmUp {
-            table_id,
-            concurrency,
-        })) => cmd_impl::hummock::warm_up_table_cache(context, table_id, concurrency).await?,
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,

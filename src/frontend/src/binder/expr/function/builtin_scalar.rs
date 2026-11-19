@@ -768,6 +768,14 @@ impl Binder {
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_owned()))),
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
+                ("rw_warmup", guard_by_len(|binder, [table_id]| {
+                    if !binder.is_for_batch() {
+                        return Err(ErrorCode::BindError(
+                            "rw_warmup is only supported in batch queries".to_owned(),
+                        ).into());
+                    }
+                    Ok(FunctionCall::new(ExprType::RwWarmup, vec![table_id])?.into())
+                })),
                 ("rw_cluster_id", raw_call(ExprType::RwClusterId)),
                 ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
                 ("rw_fragment_vnodes", raw_call(ExprType::RwFragmentVnodes)),

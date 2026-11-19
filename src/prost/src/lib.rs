@@ -269,6 +269,13 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
+impl expr::expr_node::Type {
+    /// Whether this function requires frontend-local execution.
+    pub fn requires_local_execution(self) -> bool {
+        matches!(self, Self::RwWarmup)
+    }
+}
+
 impl FromStr for crate::expr::agg_call::PbKind {
     type Err = ();
 
