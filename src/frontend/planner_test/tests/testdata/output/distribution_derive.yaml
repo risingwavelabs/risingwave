@@ -35,17 +35,17 @@
     └── StreamExchange Hash([2, 3, 5]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 2 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Lookup
+    Lookup { tables: [ LookupVisibility: 0 ] }
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange NoShuffle from 2
 
@@ -54,9 +54,11 @@
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, visible_pk_bound, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 2 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.k1, ak1.a._row_id, bk1.k1, bk1.b._row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2, 3, 5 ], read pk prefix len hint: 3 }
 
@@ -88,17 +90,17 @@
     └── StreamExchange Hash([2, 3, 5]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 2 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Lookup
+    Lookup { tables: [ LookupVisibility: 0 ] }
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange NoShuffle from 2
 
@@ -107,9 +109,11 @@
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, visible_pk_bound, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 2 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.k1, ak1.a._row_id, bk1.k1, bk1.b._row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2, 3, 5 ], read pk prefix len hint: 3 }
 
@@ -141,17 +145,17 @@
     └── StreamExchange Hash([2, 3, 5]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 2 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Lookup
+    Lookup { tables: [ LookupVisibility: 0 ] }
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange NoShuffle from 2
 
@@ -160,9 +164,11 @@
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, visible_pk_bound, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 2 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.k1, ak1.a._row_id, bk1.k1, bk1.b._row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2, 3, 5 ], read pk prefix len hint: 3 }
 
@@ -194,17 +200,17 @@
     └── StreamExchange Hash([2, 3, 5]) from 5
 
     Fragment 2
-    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 0 ] }
+    StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [ak1.k1, ak1.a._row_id], pk: [k1, a._row_id], dist: UpstreamHashShard(ak1.k1) } { tables: [ StreamScan: 1 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 1 ] }
+    StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [bk1.k1, bk1.b._row_id], pk: [k1, b._row_id], dist: UpstreamHashShard(bk1.k1) } { tables: [ StreamScan: 2 ] }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Lookup
+    Lookup { tables: [ LookupVisibility: 0 ] }
     ├── StreamExchange Hash([0]) from 3
     └── StreamExchange NoShuffle from 2
 
@@ -213,9 +219,11 @@
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, visible_pk_bound, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, k1, a__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 2 { columns: [ vnode, k1, b__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.k1, ak1.a._row_id, bk1.k1, bk1.b._row_id, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2, 3, 5 ], read pk prefix len hint: 3 }
 

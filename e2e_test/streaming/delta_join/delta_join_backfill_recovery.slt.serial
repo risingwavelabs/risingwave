@@ -1,0 +1,94 @@
+# Changes of the other input during the backfill of a delta join must not join with the rows that
+# the backfill has not emitted yet, which would count them twice.
+
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+set streaming_parallelism = 2;
+
+statement ok
+create table l (k int, v int);
+
+statement ok
+create index i_l on l(k);
+
+statement ok
+create table r (k int, v int);
+
+statement ok
+create index i_r on r(k);
+
+statement ok
+insert into l select g, g from generate_series(1, 4000) g;
+
+statement ok
+insert into r select g, -g from generate_series(1, 1000) g;
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+set backfill_rate_limit = 100;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+create materialized view v as
+select count(*) as c, sum(l.v) as sl, sum(r.v) as sr from l join r on l.k = r.k;
+
+statement ok
+set background_ddl = false;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+# These changes are made while the backfill of `l` is in progress, and match rows of `l` both
+# before and after the backfill position.
+
+statement ok
+insert into r select g, -g from generate_series(1001, 4000) g;
+
+statement ok
+update l set v = v + 100000 where k % 2 = 0;
+
+statement ok
+delete from r where k % 3 = 0;
+
+statement ok
+update r set v = v - 1 where k % 5 = 0;
+
+# Recover in the middle of the backfill. The lookups must restore which rows they can see.
+statement ok
+recover;
+
+statement ok
+insert into r select g, -g from generate_series(4001, 4500) g;
+
+statement ok
+insert into l select g, g from generate_series(4001, 4500) g;
+
+statement ok
+wait;
+
+query I
+select count(*) from (
+  select c, sl, sr from v
+  except
+  select count(*), sum(l.v), sum(r.v) from l join r on l.k = r.k
+);
+----
+0
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table l;
+
+statement ok
+drop table r;

@@ -832,6 +832,9 @@ message DeltaIndexJoinNode {
   repeated uint32 output_indices = 11;
   // Whether each pair of `left_key` and `right_key` matches nulls.
   repeated bool null_safe = 12;
+  // The visibility table of the lookup of the left arrangement, which is backfilled. See
+  // `LookupNode.visibility_table`.
+  catalog.Table left_visibility_table = 13;
 }
 
 message HopWindowNode {
@@ -1042,6 +1045,10 @@ message LookupNode {
   // key column that does not match nulls joins with nothing. If empty, nulls always match, as in
   // plans created by older versions.
   repeated bool null_safe = 8;
+  // Set when the arrangement input is the output of a backfill. The lookup then only sees the rows
+  // the backfill has emitted: for each vnode, the rows whose primary key is no greater than the
+  // largest primary key on the arrangement input. This table persists that bound per vnode.
+  catalog.Table visibility_table = 9;
 }
 
 // WatermarkFilter needs to filter the upstream data by the water mark.

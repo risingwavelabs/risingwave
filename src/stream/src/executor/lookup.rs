@@ -20,9 +20,10 @@ mod sides;
 use self::cache::LookupCache;
 use self::sides::*;
 mod impl_;
-
+mod visibility;
 pub use impl_::LookupExecutorParams;
 
+use self::visibility::ArrangementVisibility;
 use crate::executor::prelude::*;
 
 #[cfg(test)]
@@ -69,6 +70,13 @@ pub struct LookupExecutor<S: StateStore, SD: ValueRowSerde> {
     /// The join key columns on the stream side that never match a null. A stream row with a null
     /// in any of them joins with nothing.
     null_unsafe_stream_key_indices: Vec<usize>,
+
+    /// The rows of the arrangement that can be seen, if the arrangement input is the output of a
+    /// backfill.
+    visibility: Option<ArrangementVisibility<S>>,
+
+    /// The primary key columns of the arrangement in its rows.
+    arrangement_pk_in_output: Vec<usize>,
 
     /// The cache for arrangement side.
     lookup_cache: LookupCache,

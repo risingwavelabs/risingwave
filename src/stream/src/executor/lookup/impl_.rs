@@ -26,11 +26,11 @@ use risingwave_storage::store::PrefetchOptions;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::ReplicatedStateTable;
+use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::join::builder::JoinStreamChunkBuilder;
-use crate::executor::lookup::LookupExecutor;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
+use crate::executor::lookup::{ArrangementVisibility, LookupExecutor};
 use crate::executor::monitor::LookupExecutorMetrics;
 use crate::executor::prelude::*;
 
@@ -95,6 +95,10 @@ pub struct LookupExecutorParams<S: StateStore, SD: ValueRowSerde> {
 
     pub state_table: ReplicatedStateTable<S, SD>,
 
+    /// The state table persisting the visible rows of the arrangement, if the arrangement input is
+    /// the output of a backfill. See [`ArrangementVisibility`].
+    pub visibility_table: Option<StateTable<S>>,
+
     pub watermark_epoch: AtomicU64Ref,
 
     pub chunk_size: usize,
@@ -115,6 +119,7 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             null_safe,
             column_mapping,
             state_table: storage_table,
+            visibility_table,
             watermark_epoch,
             chunk_size,
         } = params;
@@ -202,6 +207,10 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             "mismatched output schema"
         );
 
+        let arrangement_pk_in_output = storage_table
+            .pk_in_output_indices()
+            .expect("primary key of the arrangement should be in its output");
+
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
             storage_table.table_id(),
@@ -231,6 +240,8 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             column_mapping,
             key_indices_mapping,
             null_unsafe_stream_key_indices,
+            visibility: visibility_table.map(ArrangementVisibility::new),
+            arrangement_pk_in_output,
             lookup_cache: LookupCache::new(watermark_epoch, metrics_info),
             chunk_size,
         }
@@ -287,6 +298,9 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             .state_table
             .init_epoch(first_barrier.epoch)
             .await?;
+        if let Some(visibility) = &mut self.visibility {
+            visibility.init(first_barrier.epoch).await?;
+        }
 
         #[for_await]
         for msg in input {
@@ -303,6 +317,9 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
                         // ready, so we can forward barrier now.
+                        if let Some(visibility) = &mut self.visibility {
+                            visibility.commit(barrier.epoch).await?;
+                        }
                         yield Message::Barrier(barrier.clone());
                     }
                 }
@@ -314,6 +331,23 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                         self.arrangement.state_table.write_chunk(chunk.clone());
                     }
 
+                    if let Some(visibility) = &mut self.visibility {
+                        // Every row on the arrangement input has been emitted by the backfill.
+                        let mut pk_buf = vec![];
+                        for chunk in &arrangement_chunks {
+                            for (_, row) in chunk.rows() {
+                                let pk = row.project(&self.arrangement_pk_in_output);
+                                let vnode = self.arrangement.state_table.compute_vnode_by_pk(pk);
+                                pk_buf.clear();
+                                self.arrangement
+                                    .state_table
+                                    .pk_serde()
+                                    .serialize(pk, &mut pk_buf);
+                                visibility.observe(vnode, &pk_buf);
+                            }
+                        }
+                    }
+
                     for chunk in arrangement_chunks {
                         self.lookup_cache
                             .apply_batch(chunk, &self.arrangement.key_indices)
@@ -322,6 +356,9 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                     if !self.arrangement.use_current_epoch {
                         // When look prev epoch, arrange ready will always come after stream
                         // barrier. So we yield barrier now.
+                        if let Some(visibility) = &mut self.visibility {
+                            visibility.commit(barrier.epoch).await?;
+                        }
                         yield Message::Barrier(barrier);
                     }
                 }
@@ -403,7 +440,21 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                 .await?;
 
             pin_mut!(all_data_iter);
+            let mut pk_buf = vec![];
             while let Some(row) = all_data_iter.try_next().await? {
+                if let Some(visibility) = &self.visibility {
+                    // Skip the rows that the backfill has not emitted yet.
+                    let pk = (&row).project(&self.arrangement_pk_in_output);
+                    let vnode = self.arrangement.state_table.compute_vnode_by_pk(pk);
+                    pk_buf.clear();
+                    self.arrangement
+                        .state_table
+                        .pk_serde()
+                        .serialize(pk, &mut pk_buf);
+                    if !visibility.is_visible(vnode, &pk_buf) {
+                        continue;
+                    }
+                }
                 all_rows.push(row);
             }
         }
