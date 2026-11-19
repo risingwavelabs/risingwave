@@ -502,16 +502,7 @@ impl CacheRefillTask {
 
             if admits as f64 / contexts.len() as f64 >= context.config.threshold {
                 let sstable_store = context.sstable_store.clone();
-                let context = context.clone();
-                let future = async move {
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
-
-                    let permit = context.concurrency.acquire().await.unwrap();
-
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
-
-                    let now = Instant::now();
-
+                let refill = async move {
                     let data = sstable_store
                         .store()
                         .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone())
@@ -540,22 +531,29 @@ impl CacheRefillTask {
                         .await
                         .map_err(HummockError::file_cache)?;
 
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_success_duration
-                        .observe(now.elapsed().as_secs_f64());
-                    drop(permit);
-
                     Ok::<_, HummockError>(())
                 };
-                futures.push(future);
+                futures.push(async move {
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+                    let permit = context.concurrency.clone().acquire_owned().await.unwrap();
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+                    let now = Instant::now();
+                    let task = tokio::spawn(async move {
+                        let _permit = permit;
+                        refill.await?;
+                        GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_success_duration
+                            .observe(now.elapsed().as_secs_f64());
+                        Ok::<_, HummockError>(())
+                    });
+                    // A refill timeout drops this future. Cancel the range instead of detaching it.
+                    let mut task = scopeguard::guard(task, |task| task.abort());
+                    if let Err(e) = (&mut *task).await.expect("data refill range task failed") {
+                        tracing::error!(error = %e.as_report(), "data cache refill task error");
+                    }
+                });
             }
         }
-
-        let futures = futures.into_iter().map(|future| async move {
-            if let Err(e) = future.await {
-                tracing::error!(error = %e.as_report(), "data cache refill task error");
-            }
-        });
 
         join_all(futures).await;
     }
