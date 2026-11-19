@@ -119,6 +119,10 @@ Caused by these errors (recent errors listed first):
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium.
 
 
+# The license is checked before the WITH options and the upstream database.
+statement error feature OracleCdcSource is not available based on your license
+CREATE SOURCE oracle_cdc_license WITH (connector = 'oracle-cdc') FORMAT PLAIN ENCODE JSON;
+
 # Set the license key to default. In debug mode, this will set the license key to a paid tier key.
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;

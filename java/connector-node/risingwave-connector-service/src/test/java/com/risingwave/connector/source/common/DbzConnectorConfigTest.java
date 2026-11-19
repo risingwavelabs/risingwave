@@ -28,6 +28,7 @@ import io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource;
 import java.lang.management.ManagementFactory;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.management.ObjectName;
 import org.junit.Test;
@@ -49,6 +50,48 @@ public class DbzConnectorConfigTest {
                 SourceType.POSTGRES,
                 sourceId,
                 Map.of("cdc.source.wait.streaming.start.timeout", "3600"));
+    }
+
+    @Test
+    public void postgresJdbcUrlPreservesLiteralDatabaseName() {
+        for (var database :
+                new String[] {
+                    "sales",
+                    "sales+east",
+                    "sales%2Beast",
+                    "sales%",
+                    "sales?sslmode=disable",
+                    "sales?user=other&password=other",
+                    "sales east",
+                    "sales/east",
+                    "sales#east",
+                    "sales&east=west",
+                    "sales\"east",
+                    "销售"
+                }) {
+            var config =
+                    (PostgresDbzConnectorConfig)
+                            createConfig(
+                                    SourceType.POSTGRES,
+                                    46,
+                                    Map.of(
+                                            "hostname", "example.invalid",
+                                            "port", "5432",
+                                            "database.name", database));
+            var expected = new Properties();
+            expected.setProperty("PGHOST", "example.invalid");
+            expected.setProperty("PGPORT", "5432");
+            expected.setProperty("PGDBNAME", database);
+
+            // Exercise the URL shared by validation and publication creation without connecting.
+            assertEquals(
+                    database,
+                    expected,
+                    org.postgresql.Driver.parseURL(config.getJdbcUrl(), new Properties()));
+            assertEquals(database, config.getDbName());
+            assertEquals(
+                    database, config.getResolvedDebeziumProps().getProperty("database.dbname"));
+        }
     }
 
     @Test

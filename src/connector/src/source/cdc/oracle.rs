@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use risingwave_common::bail;
+use risingwave_common::license::{Feature, FeatureNotAvailable};
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
@@ -29,6 +30,9 @@ use crate::source::cdc::{
 
 impl CdcSourceRuntimeFlags for Oracle {
     const CAN_AUTO_INITIALIZE_HEARTBEAT_TABLE: bool = true;
+    const CAN_BACKFILL: bool = true;
+    const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;
+    const NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING: bool = true;
 }
 
 // ------- DDL validation -------
@@ -50,6 +54,10 @@ impl CdcSourceDdlValidator for Oracle {
             bail!("'{HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY}' requires 'heartbeat.table.name'");
         }
         Ok(())
+    }
+
+    fn check_license() -> Result<(), FeatureNotAvailable> {
+        Feature::OracleCdcSource.check_available()
     }
 
     fn check_alter_with_options(
