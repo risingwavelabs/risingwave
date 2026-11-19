@@ -86,3 +86,18 @@
         │ └─StreamTableScan { table: t, columns: [t.v, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(*VALUES*_0.column_0) }
           └─StreamValues { rows: [['cn':Varchar, 'China':Varchar, 0:Int64], ['us':Varchar, 'United States':Varchar, 1:Int64]] }
+- name: Preserve the CTE projection type when eliminating a true filter
+  sql: |
+    create table t (c0 int);
+    with q as (
+      select cast(t.c0 > cast(null as int) as int) as c0 from t
+    )
+    select c0 from q where false
+    union all
+    select c0 from q where true;
+  batch_plan: |-
+    BatchUnion { all: true }
+    ├─BatchValues { rows: [] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [(t.c0 > null:Int32)::Int32 as $expr1] }
+        └─BatchScan { table: t, columns: [t.c0], distribution: SomeShard }
