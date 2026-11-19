@@ -26,6 +26,17 @@ use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
+use gcloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
+use gcloud_gax::conn::{ConnectionOptions, Environment};
+use gcloud_gax::grpc::{Request, Response, Status};
+use gcloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
+    MissingValueInterpretation, ProtoData, Rows as AppendRowsRequestRows,
+};
+use gcloud_googleapis::cloud::bigquery::storage::v1::{
+    AppendRowsRequest, AppendRowsResponse, ProtoRows, ProtoSchema,
+};
+use gcloud_pubsub::client::google_cloud_auth;
+use gcloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
@@ -33,17 +44,6 @@ use gcp_bigquery_client::model::query_response::ResultSet;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
-use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
-use google_cloud_gax::conn::{ConnectionOptions, Environment};
-use google_cloud_gax::grpc::{Request, Response, Status};
-use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
-    MissingValueInterpretation, ProtoData, Rows as AppendRowsRequestRows,
-};
-use google_cloud_googleapis::cloud::bigquery::storage::v1::{
-    AppendRowsRequest, AppendRowsResponse, ProtoRows, ProtoSchema,
-};
-use google_cloud_pubsub::client::google_cloud_auth;
-use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use parking_lot::Mutex;
 use phf::{Set, phf_set};
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
@@ -922,7 +922,7 @@ static CHANGE_SEQUENCE_CLOCK: ChangeSequenceClock = ChangeSequenceClock::new();
 pub async fn resp_to_stream(
     resp_stream: impl Future<
         Output = std::result::Result<
-            Response<google_cloud_gax::grpc::Streaming<AppendRowsResponse>>,
+            Response<gcloud_gax::grpc::Streaming<AppendRowsResponse>>,
             Status,
         >,
     >
@@ -946,7 +946,7 @@ pub async fn resp_to_stream(
                         append_rows_response.row_errors
                     )));
                 }
-                if let Some(google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
+                if let Some(gcloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
                             return Err(SinkError::BigQuery(anyhow::anyhow!(
                                 "bigquery insert error {:?}",
                                 status
@@ -1021,10 +1021,8 @@ impl StorageWriterClient {
 
     fn bigquery_grpc_auth_config() -> google_cloud_auth::project::Config<'static> {
         let mut auth_config = google_cloud_auth::project::Config::default();
-        auth_config =
-            auth_config.with_audience(google_cloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE);
-        auth_config =
-            auth_config.with_scopes(&google_cloud_bigquery::grpc::apiv1::conn_pool::SCOPES);
+        auth_config = auth_config.with_audience(gcloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE);
+        auth_config = auth_config.with_scopes(&gcloud_bigquery::grpc::apiv1::conn_pool::SCOPES);
         auth_config
     }
 }
@@ -1131,8 +1129,8 @@ mod test {
     use std::assert_matches;
     use std::collections::{BTreeMap, HashMap};
 
-    use google_cloud_gax::conn::Environment;
-    use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
+    use gcloud_gax::conn::Environment;
+    use gcloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
         ProtoData, Rows as AppendRowsRequestRows,
     };
     use prost_reflect::{DynamicMessage, ReflectMessage};
@@ -1491,7 +1489,10 @@ mod test {
         );
 
         let rows = write_and_decode(
-            sink_config("append-only", &[("bigquery.change_sequence_number", "true")]),
+            sink_config(
+                "append-only",
+                &[("bigquery.change_sequence_number", "true")],
+            ),
             chunks(),
         );
         for name in [CHANGE_TYPE, CHANGE_SEQUENCE_NUMBER] {

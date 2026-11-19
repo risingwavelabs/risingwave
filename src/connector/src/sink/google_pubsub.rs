@@ -15,15 +15,15 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
-use google_cloud_gax::conn::Environment;
-use google_cloud_gax::grpc::Status;
-use google_cloud_googleapis::pubsub::v1::PubsubMessage;
-use google_cloud_pubsub::apiv1;
-use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
-use google_cloud_pubsub::client::google_cloud_auth::project;
-use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
-use google_cloud_pubsub::client::{Client, ClientConfig};
-use google_cloud_pubsub::publisher::Publisher;
+use gcloud_gax::conn::Environment;
+use gcloud_gax::grpc::Status;
+use gcloud_googleapis::pubsub::v1::PubsubMessage;
+use gcloud_pubsub::apiv1;
+use gcloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use gcloud_pubsub::client::google_cloud_auth::project;
+use gcloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
+use gcloud_pubsub::client::{Client, ClientConfig};
+use gcloud_pubsub::publisher::Publisher;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::env_var::env_var_is_true;
@@ -49,7 +49,7 @@ mod delivery_future {
     use anyhow::Context;
     use futures::future::try_join_all;
     use futures::{FutureExt, TryFuture, TryFutureExt};
-    use google_cloud_pubsub::publisher::Awaiter;
+    use gcloud_pubsub::publisher::Awaiter;
 
     use crate::sink::SinkError;
 
