@@ -263,6 +263,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqExecutor2".to_owned(),
         None,
         None,
+        std::num::NonZeroUsize::MIN,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -333,6 +334,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
+        std::num::NonZeroUsize::MIN,
     ));
 
     let mut stream = scan.execute();
@@ -415,6 +417,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
+        std::num::NonZeroUsize::MIN,
     ));
 
     let mut stream = scan.execute();
@@ -456,14 +459,16 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         None,
     )
     .await;
-    let table = BatchTable::for_test(
-        memory_state_store.clone(),
-        TableId::from(0x42),
-        column_descs.clone(),
-        vec![OrderType::ascending()],
-        vec![0],
-        vec![0, 1, 2],
-    );
+    let make_table = || {
+        BatchTable::for_test(
+            memory_state_store.clone(),
+            TableId::from(0x42),
+            column_descs.clone(),
+            vec![OrderType::ascending()],
+            vec![0],
+            vec![0, 1, 2],
+        )
+    };
 
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch).await?;
@@ -485,7 +490,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         .unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
-        table,
+        make_table(),
         vec![ScanRange::full()],
         true,
         test_batch_query_epoch(),
@@ -493,6 +498,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
+        std::num::NonZeroUsize::MIN,
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);
@@ -528,5 +534,35 @@ async fn test_row_seq_scan() -> StreamResult<()> {
             .collect::<Vec<_>>(),
         vec![Some(5)]
     );
+    // A miss frees a slot. Keep input order and stop before the trailing full scan
+    // once two hits have been buffered, even when the output chunk is larger.
+    for concurrency in [1_usize, 3] {
+        let mut ranges = [0_i32, 2, 1, 2]
+            .into_iter()
+            .map(|key| ScanRange {
+                pk_prefix: OwnedRow::new(vec![Some(key.into())]),
+                ..ScanRange::full()
+            })
+            .collect_vec();
+        ranges.push(ScanRange::full());
+        let mut rows = Box::new(RowSeqScanExecutor::new(
+            make_table(),
+            ranges,
+            false,
+            test_batch_query_epoch(),
+            8,
+            "point reads".to_owned(),
+            Some(2),
+            None,
+            concurrency.try_into().unwrap(),
+        ))
+        .execute();
+        let chunk = rows.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.column_at(0).as_int32().iter().collect_vec(),
+            vec![Some(2), Some(1)]
+        );
+        assert!(rows.next().await.is_none());
+    }
     Ok(())
 }

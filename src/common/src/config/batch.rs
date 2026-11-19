@@ -20,6 +20,10 @@ use super::*;
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct BatchConfig {
+    /// Maximum independent point reads in a row scan. 1 preserves serial reads.
+    #[serde(default = "default_point_get_concurrency")]
+    pub point_get_concurrency: std::num::NonZeroUsize,
+
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
@@ -153,4 +157,8 @@ pub mod default {
             vec!["primary_key".to_owned()]
         }
     }
+}
+
+fn default_point_get_concurrency() -> std::num::NonZeroUsize {
+    std::num::NonZeroUsize::new(1).unwrap()
 }
