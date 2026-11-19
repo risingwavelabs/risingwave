@@ -47,7 +47,7 @@ use crate::consistency::consistency_panic;
 use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
-use crate::executor::mview::cache::{MaterializeCache, toast};
+use crate::executor::mview::cache::{MaterializeCache, placeholder};
 use crate::executor::prelude::*;
 use crate::executor::{BarrierInner, BarrierMutationType};
 use crate::task::LocalBarrierManager;
@@ -92,11 +92,16 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// The cache for conflict handling. `None` if conflict behavior is `NoCheck`.
     materialize_cache: Option<MaterializeCache>,
 
-    /// Indices of columns that may carry a Debezium unchanged-TOAST placeholder
-    /// (PostgreSQL CDC only). Mirrors the value passed into `MaterializeCache`.
-    /// Used at runtime to prevent the `Overwrite -> NoCheck` downgrade from
-    /// bypassing the placeholder replacement path.
-    toastable_column_indices: Option<Vec<usize>>,
+    /// Indices of columns whose value Debezium may replace with its placeholder when an UPDATE
+    /// leaves them unchanged and the upstream did not log them. On conflict, a placeholder in
+    /// these columns is replaced with the stored row's value.
+    ///
+    /// PostgreSQL TOAST values are one case. Oracle LOB, XML and extended string values are
+    /// another.
+    ///
+    /// Mirrors the value passed into `MaterializeCache`. Used at runtime to prevent the
+    /// `Overwrite -> NoCheck` downgrade from bypassing the placeholder replacement path.
+    placeholder_column_indices: Option<Vec<usize>>,
 
     conflict_behavior: ConflictBehavior,
 
@@ -248,16 +253,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
 
-        // Extract TOAST-able column indices from table columns.
-        // Only for PostgreSQL CDC tables.
-        let toastable_column_indices = if table_catalog.cdc_table_type()
-            == risingwave_pb::catalog::table::CdcTableType::Postgres
-        {
-            let toastable_indices: Vec<usize> = table_columns
+        // Extract placeholder column indices from table columns.
+        // Only for PostgreSQL and Oracle CDC tables.
+        let placeholder_column_indices = if matches!(
+            table_catalog.cdc_table_type(),
+            risingwave_pb::catalog::table::CdcTableType::Postgres
+                | risingwave_pb::catalog::table::CdcTableType::Oracle
+        ) {
+            let placeholder_column_indices: Vec<usize> = table_columns
                 .iter()
                 .enumerate()
                 .filter_map(|(index, column)| match &column.data_type {
-                    // Currently supports TOAST updates for:
+                    // Currently supports placeholders for:
                     // - jsonb (DataType::Jsonb)
                     // - varchar (DataType::Varchar)
                     // - bytea (DataType::Bytea)
@@ -265,7 +272,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // - One-dimensional arrays of the above types (DataType::List)
                     //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
 
-                    // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
+                    // For details on how placeholders are detected, see comments in `is_debezium_placeholder`.
                     DataType::Varchar
                     | DataType::List(_)
                     | DataType::Bytea
@@ -275,10 +282,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 })
                 .collect();
 
-            if toastable_indices.is_empty() {
+            if placeholder_column_indices.is_empty() {
                 None
             } else {
-                Some(toastable_indices)
+                Some(placeholder_column_indices)
             }
         } else {
             None
@@ -353,10 +360,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 row_serde,
                 version_column_indices.clone(),
                 conflict_behavior,
-                toastable_column_indices.clone(),
+                placeholder_column_indices.clone(),
                 cache_metrics,
             ),
-            toastable_column_indices,
+            placeholder_column_indices,
             conflict_behavior,
             cleaned_by_ttl_watermark,
             version_column_indices,
@@ -439,20 +446,20 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 // while outputting inconsistent changes to downstream which no one will subscribe to.
                                 // For tables with watermark TTL (indicated by `cleaned_by_ttl_watermark`), conflict check must be enabled.
                                 // TODO(ttl): differentiate between table consistency and downstream consistency.
-                                // When the table carries TOAST-able columns (PostgreSQL CDC), the
-                                // `MaterializeCache` is the only place where the Debezium
-                                // unchanged-TOAST placeholder is detected and swapped for the row's
-                                // previous value. Demoting to `NoCheck` would let the placeholder land
-                                // in state, so only demote chunks without any placeholder (e.g. the
-                                // snapshot rows of a CDC backfill).
+                                // When the table carries placeholder columns (PostgreSQL or Oracle
+                                // CDC), the `MaterializeCache` is the only place where the Debezium
+                                // placeholder is detected and swapped for the row's previous value.
+                                // Demoting to `NoCheck` would let the placeholder land in state, so
+                                // only demote chunks without any placeholder (e.g. the snapshot rows
+                                // of a CDC backfill).
                                 let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
                                     self.conflict_behavior
                                     && !self.state_table.is_consistent_op()
                                     && !self.cleaned_by_ttl_watermark
                                     && self.version_column_indices.is_empty()
-                                    && self.toastable_column_indices.as_ref().is_none_or(
+                                    && self.placeholder_column_indices.as_ref().is_none_or(
                                         |indices| {
-                                            !toast::chunk_has_unavailable_value(&chunk, indices)
+                                            !placeholder::chunk_has_placeholder(&chunk, indices)
                                         },
                                     ) {
                                     ConflictBehavior::NoCheck
@@ -530,9 +537,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         }
                                     }
                                     ConflictBehavior::NoCheck => {
-                                        // Demoted TOAST chunks bypass the cache: write them through so a
+                                        // Demoted chunks bypass the cache: write them through so a
                                         // later placeholder is not filled from a stale cached row.
-                                        if self.toastable_column_indices.is_some()
+                                        if self.placeholder_column_indices.is_some()
                                             && let Some(cache) = &mut self.materialize_cache
                                         {
                                             cache.write_through(&chunk, &self.state_table);
@@ -1184,7 +1191,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         table_id: TableId,
         keys: Vec<ColumnOrder>,
         column_ids: Vec<risingwave_common::catalog::ColumnId>,
-        toastable_column_indices: Vec<usize>,
+        placeholder_column_indices: Vec<usize>,
     ) -> Self {
         Self::for_test_inner(
             input,
@@ -1196,7 +1203,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             ConflictBehavior::Overwrite,
             None,
             None,
-            Some(toastable_column_indices),
+            Some(placeholder_column_indices),
             false,
         )
         .await
@@ -1214,7 +1221,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         conflict_behavior: ConflictBehavior,
         stream_key: Option<Vec<usize>>,
         ttl_column: Option<usize>,
-        toastable_column_indices: Option<Vec<usize>>,
+        placeholder_column_indices: Option<Vec<usize>>,
         may_have_downstream: bool,
     ) -> Self {
         use risingwave_common::util::iter_util::ZipEqFast;
@@ -1273,10 +1280,10 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 row_serde,
                 vec![],
                 conflict_behavior,
-                toastable_column_indices.clone(),
+                placeholder_column_indices.clone(),
                 cache_metrics,
             ),
-            toastable_column_indices,
+            placeholder_column_indices,
             conflict_behavior,
             cleaned_by_ttl_watermark: ttl_column.is_some(),
             version_column_indices: vec![],

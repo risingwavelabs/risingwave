@@ -538,14 +538,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut total_snapshot_row_count = state.row_count as u64;
 
         // Only postgres-cdc connector may trigger TOAST.
-        let handle_toast_columns: bool =
+        let handle_postgres_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream = transform_upstream(
             upstream,
             self.output_columns.clone(),
             self.properties.clone(),
-            handle_toast_columns,
+            handle_postgres_toast_columns,
         )
         .boxed()
         .peekable();
@@ -1278,7 +1278,7 @@ pub async fn transform_upstream(
     upstream: BoxedMessageStream,
     output_columns: Vec<ColumnDesc>,
     properties: BTreeMap<String, String>,
-    handle_toast_columns: bool,
+    handle_postgres_toast_columns: bool,
 ) {
     let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
         get_cdc_json_parse_handling_from_properties(&properties);
@@ -1289,7 +1289,7 @@ pub async fn transform_upstream(
             timestamptz_handling,
             time_handling,
             bigint_unsigned_handling,
-            handle_toast_columns,
+            handle_postgres_toast_columns,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),

@@ -144,13 +144,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         // that the upstream data precision is MilliSecond. In this case, we don't use GuessNumberUnit
         // mode to guess precision, but use Milli mode directly, which can handle extreme timestamps.
         // Only postgres-cdc connector may trigger TOAST.
-        let handle_toast_columns: bool =
+        let handle_postgres_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         let mut upstream = transform_upstream(
             upstream,
             self.output_columns.clone(),
             self.properties.clone(),
-            handle_toast_columns,
+            handle_postgres_toast_columns,
         )
         .boxed();
         let mut next_reset_barrier = Some(first_barrier);

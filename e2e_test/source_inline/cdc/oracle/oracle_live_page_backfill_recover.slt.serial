@@ -1,0 +1,205 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP SOURCE IF EXISTS oracle_recovery_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID NUMBER(9) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID, VALUE) "
+    "SELECT LEVEL, 'initial-' || TO_CHAR(LEVEL) FROM DUAL CONNECT BY LEVEL <= 1000",
+])
+PY
+
+# Begin the Oracle update before source creation and keep it uncommitted.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx
+begin_tx("oracle_recovery_source", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'recovered-long' WHERE ID = 1",
+])
+PY
+
+statement ok
+CREATE SOURCE oracle_recovery_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true',
+    -- Keep periodic heartbeat writes outside the recovery scenario.
+    debezium.heartbeat.interval.ms = '3600000'
+) FORMAT PLAIN ENCODE JSON;
+
+# Checkpoint a prefix and pause backfill before committing another transaction.
+statement ok
+SET backfill_rate_limit = 2;
+
+statement ok
+CREATE TABLE oracle_recovery_table (
+    "ID" INT PRIMARY KEY, "VALUE" VARCHAR
+) WITH (snapshot.batch_size = 5)
+FROM oracle_recovery_source TABLE 'APP.RW_LIVE_PAGE';
+
+statement ok
+SET backfill_rate_limit = DEFAULT;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_backfills
+from oracle_test_hooks import check_backfill_prefix, check_paused_backfill
+begin_backfills(
+    ["oracle_recovery_table"],
+    before_backfill_pause_hook=check_backfill_prefix,
+    before_backfill_pause_hook_kwargs={"min_pk": 5},
+    after_backfill_pause_hook=check_paused_backfill,
+    after_backfill_pause_hook_kwargs={"min_pk": 5, "max_pk": 35},
+)
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx, end_tx
+from oracle_test_hooks import check_source_offset
+begin_tx("oracle_recovery_other", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'other-committed' WHERE ID = 50",
+])
+end_tx(
+    "oracle_recovery_other",
+    after_tx_end_hook=check_source_offset,
+    after_tx_end_hook_kwargs={
+        "source": "oracle_recovery_source",
+        "snapshot_pending_transactions": {"oracle_recovery_source": True},
+    },
+)
+PY
+
+# Recover while the original transaction is still open. Its checkpointed prefix
+# must be restored, and its uncommitted update must remain invisible.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_backfill_unchanged
+execute_sqls(
+    ["RECOVER;"],
+    after_sqls_hook=check_backfill_unchanged,
+    after_sqls_hook_kwargs={"table": "oracle_recovery_table"},
+)
+PY
+
+query T
+SELECT "VALUE" FROM oracle_recovery_table WHERE "ID" = 1;
+----
+initial-1
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import end_tx, end_backfills
+from oracle_test_hooks import check_backfill_finished
+end_tx("oracle_recovery_source")
+end_backfills(
+    ["oracle_recovery_table"],
+    after_backfill_resume_hook=check_backfill_finished,
+)
+PY
+
+query T retry 90 backoff 1s
+SELECT "VALUE" FROM oracle_recovery_table WHERE "ID" = 1;
+----
+recovered-long
+
+# Validate the resumed backfill before another recovery or further CDC mutations.
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_recovery_table;
+----
+1000
+
+# Count missing, unexpected, or incorrect rows: zero means the entire table matches.
+query I retry 60 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
+                    WHEN id = 50 THEN 'other-committed'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id)
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_recovery_table t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+# Recover again after completion, then verify that ordinary CDC resumes.
+statement ok
+FLUSH;
+
+statement ok
+RECOVER;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx, end_tx
+from oracle_test_hooks import check_source_offset
+begin_tx("oracle_after_recovery", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'after-recovery' WHERE ID = 50",
+    "DELETE FROM APP.RW_LIVE_PAGE WHERE ID = 2",
+    "INSERT INTO APP.RW_LIVE_PAGE VALUES (1001, 'after-recovery-insert')",
+])
+end_tx(
+    "oracle_after_recovery",
+    after_tx_end_hook=check_source_offset,
+    after_tx_end_hook_kwargs={
+        "source": "oracle_recovery_source",
+        "snapshot_pending_transactions": {"oracle_recovery_source": False},
+    },
+)
+PY
+
+query T retry 90 backoff 1s
+SELECT "VALUE" FROM oracle_recovery_table WHERE "ID" = 50;
+----
+after-recovery
+
+statement ok
+SET backfill_rate_limit = 1000;
+
+statement ok
+CREATE TABLE oracle_recovery_table_new (*)
+FROM oracle_recovery_source TABLE 'APP.RW_LIVE_PAGE';
+
+# Zero mismatches means the existing table survived both recoveries and all CDC changes.
+query I retry 60 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
+                    WHEN id = 50 THEN 'after-recovery'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id) WHERE id <> 2
+    UNION ALL SELECT 1001, 'after-recovery-insert'
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_recovery_table t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+# The new table must independently backfill the current rows with zero mismatches.
+query I retry 60 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
+                    WHEN id = 50 THEN 'after-recovery'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id) WHERE id <> 2
+    UNION ALL SELECT 1001, 'after-recovery-insert'
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_recovery_table_new t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+statement ok
+DROP SOURCE oracle_recovery_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

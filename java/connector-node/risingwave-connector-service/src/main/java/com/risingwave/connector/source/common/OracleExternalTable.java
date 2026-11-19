@@ -363,13 +363,15 @@ final class OracleExternalTable {
             statement.setString(2, tableName);
             try (var result = statement.executeQuery()) {
                 while (result.next()) {
-                    var precision = nullableInteger(result, "DATA_PRECISION");
-                    var scale = nullableInteger(result, "DATA_SCALE");
+                    var columnInfo =
+                            new ColumnInfo(
+                                    result.getString("DATA_TYPE"),
+                                    nullableInteger(result, "DATA_PRECISION"),
+                                    nullableInteger(result, "DATA_SCALE"));
                     columns.add(
                             new OracleColumn(
                                     result.getString("COLUMN_NAME"),
-                                    oracleTypeToRisingWaveType(
-                                            result.getString("DATA_TYPE"), precision, scale),
+                                    oracleTypeToRisingWaveType(columnInfo),
                                     "Y".equals(result.getString("NULLABLE"))));
                 }
             }
@@ -377,7 +379,7 @@ final class OracleExternalTable {
         return columns;
     }
 
-    private static List<String> discoverPrimaryKeys(
+    static List<String> discoverPrimaryKeys(
             Connection connection, String schemaName, String tableName) throws SQLException {
         var primaryKeys = new ArrayList<String>();
         try (var statement =
@@ -478,19 +480,24 @@ final class OracleExternalTable {
                         + "or binary CHAR/VARCHAR2 in an AL32UTF8 database");
     }
 
-    private static Data.DataType oracleTypeToRisingWaveType(
-            String rawType, Integer precision, Integer scale) throws SQLException {
-        var oracleType = rawType.toUpperCase(Locale.ROOT);
+    /**
+     * Returns the RisingWave type that {@code CREATE TABLE (*)} derives for an Oracle column, and
+     * throws for Oracle types that are not supported at all. Source validation accepts only this
+     * type for a declared column. Unlike the other connectors, Oracle does not use {@code
+     * Binding.validateCdcSourceColumnType}: it discovers schemas and reads snapshots over JDBC, so
+     * the type mapping lives here in Java.
+     */
+    static Data.DataType oracleTypeToRisingWaveType(ColumnInfo columnInfo) throws SQLException {
+        var oracleType = columnInfo.dataType().toUpperCase(Locale.ROOT);
         var typeName =
                 switch (oracleType) {
                     case "BINARY_FLOAT" -> TypeName.FLOAT;
                     case "BINARY_DOUBLE" -> TypeName.DOUBLE;
-                        // Oracle FLOAT and its aliases are NUMBER subtypes with binary precision,
-                        // not
-                        // IEEE-754 values. Preserve their decimal semantics.
+                        // Oracle FLOAT and its aliases are NUMBER subtypes with binary
+                        // precision, not IEEE-754 values. Preserve their decimal semantics.
                     case "FLOAT", "REAL", "DOUBLE PRECISION" -> TypeName.DECIMAL;
                     case "NUMBER", "DECIMAL", "NUMERIC", "INTEGER", "INT", "SMALLINT" ->
-                            oracleNumberType(precision, scale);
+                            oracleNumberType(columnInfo.precision(), columnInfo.scale());
                     case "CHAR",
                                     "NCHAR",
                                     "VARCHAR",
@@ -498,13 +505,9 @@ final class OracleExternalTable {
                                     "NVARCHAR2",
                                     "CLOB",
                                     "NCLOB",
-                                    "LONG",
-                                    "ROWID",
-                                    "UROWID",
-                                    "XMLTYPE" ->
+                                    "ROWID" ->
                             TypeName.VARCHAR;
-                    case "RAW", "LONG RAW", "BLOB" -> TypeName.BYTEA;
-                    case "BOOLEAN" -> TypeName.BOOLEAN;
+                    case "RAW", "BLOB" -> TypeName.BYTEA;
                     case "DATE" -> TypeName.TIMESTAMP;
                     default -> {
                         if (oracleType.startsWith("TIMESTAMP")) {
@@ -512,7 +515,8 @@ final class OracleExternalTable {
                                     ? TypeName.TIMESTAMPTZ
                                     : TypeName.TIMESTAMP;
                         }
-                        throw new SQLException("Unsupported Oracle data type: " + rawType);
+                        throw new SQLException(
+                                "Unsupported Oracle data type: " + columnInfo.dataType());
                     }
                 };
         return Data.DataType.newBuilder().setTypeName(typeName).build();
@@ -622,10 +626,12 @@ final class OracleExternalTable {
         }
     }
 
-    private static Integer nullableInteger(ResultSet result, String column) throws SQLException {
+    static Integer nullableInteger(ResultSet result, String column) throws SQLException {
         var value = result.getInt(column);
         return result.wasNull() ? null : value;
     }
+
+    record ColumnInfo(String dataType, Integer precision, Integer scale) {}
 
     private record OracleColumn(String name, Data.DataType dataType, boolean nullable) {}
 }

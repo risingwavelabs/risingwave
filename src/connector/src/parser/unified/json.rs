@@ -200,7 +200,13 @@ pub struct JsonParseOptions {
     pub struct_handling: StructHandling,
     pub bigint_unsigned_handling: BigintUnsignedHandlingMode,
     pub ignoring_keycase: bool,
-    pub handle_toast_columns: bool,
+    /// Convert Debezium's placeholder for an unchanged TOAST value into a sentinel of the column
+    /// type, which the materialize executor replaces with the stored value.
+    ///
+    /// PostgreSQL CDC only: the placeholder is a string, and `jsonb` and pgvector `vector`
+    /// columns cannot hold it as is, so the parser must convert it. Placeholders in `varchar`
+    /// and `bytea` columns need no conversion.
+    pub handle_postgres_toast_columns: bool,
 }
 
 impl Default for JsonParseOptions {
@@ -227,7 +233,7 @@ impl JsonParseOptions {
         struct_handling: StructHandling::Strict,
         bigint_unsigned_handling: BigintUnsignedHandlingMode::Long, // default to long mode
         ignoring_keycase: true,
-        handle_toast_columns: false,
+        handle_postgres_toast_columns: false,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
@@ -243,7 +249,7 @@ impl JsonParseOptions {
         struct_handling: StructHandling::AllowJsonString,
         bigint_unsigned_handling: BigintUnsignedHandlingMode::Long, // default to long mode
         ignoring_keycase: true,
-        handle_toast_columns: false,
+        handle_postgres_toast_columns: false,
     };
 
     pub fn new_for_debezium(
@@ -252,7 +258,7 @@ impl JsonParseOptions {
         time_handling: TimeHandling,
         numeric_handling: NumericHandling,
         bigint_unsigned_handling: BigintUnsignedHandlingMode,
-        handle_toast_columns: bool,
+        handle_postgres_toast_columns: bool,
     ) -> Self {
         Self {
             bytea_handling: ByteaHandling::Base64,
@@ -269,7 +275,7 @@ impl JsonParseOptions {
             struct_handling: StructHandling::Strict,
             bigint_unsigned_handling,
             ignoring_keycase: true,
-            handle_toast_columns,
+            handle_postgres_toast_columns,
         }
     }
 
@@ -730,7 +736,7 @@ impl JsonParseOptions {
             // that the materialize executor recognises and replaces with the old row value.
             (DataType::Vector(size), ValueType::String) => {
                 let s = value.as_str().unwrap();
-                if self.handle_toast_columns
+                if self.handle_postgres_toast_columns
                     && s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len()
                     && s == DEBEZIUM_UNAVAILABLE_VALUE
                 {
@@ -779,7 +785,7 @@ impl JsonParseOptions {
                 // Check if this value is the Debezium unavailable value (TOAST handling for postgres-cdc).
                 // Debezium will base64 encode the bytea type placeholder.
                 // When a placeholder is encountered, it is converted into a jsonb format placeholder to match the original type.
-                match self.handle_toast_columns {
+                match self.handle_postgres_toast_columns {
                     true => JsonbVal::from_debezium_unavailable_value(value.as_str().unwrap())
                         .map_err(|_| create_error())?
                         .into(),
