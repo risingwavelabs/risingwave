@@ -1,0 +1,114 @@
+# Changes of the other inputs during the backfill of a multi-way delta join must not join with the
+# rows that the backfill has not emitted yet. The first input `a` joins with both `b` and `c`, so
+# the backfilled input is the leaf `b`.
+
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+set streaming_parallelism = 2;
+
+statement ok
+create table a (x int, y int, v int);
+
+statement ok
+create index i_a_x on a(x);
+
+statement ok
+create index i_a_y on a(y);
+
+statement ok
+create table b (x int, v int);
+
+statement ok
+create index i_b_x on b(x);
+
+statement ok
+create table c (y int, v int);
+
+statement ok
+create index i_c_y on c(y);
+
+statement ok
+insert into a select g, g, g from generate_series(1, 3000) g;
+
+statement ok
+insert into b select g, g from generate_series(1, 3000) g;
+
+statement ok
+insert into c select g, g from generate_series(1, 1000) g;
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+set backfill_rate_limit = 100;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+create materialized view v as
+select count(*) as n, sum(a.v) as sa, sum(b.v) as sb, sum(c.v) as sc
+from a join b on a.x = b.x join c on a.y = c.y;
+
+statement ok
+set background_ddl = false;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+# These changes are made while the backfill of `b` is in progress.
+
+statement ok
+insert into c select g, g from generate_series(1001, 3000) g;
+
+statement ok
+update a set v = v + 100000 where x % 2 = 0;
+
+statement ok
+update b set v = v + 200000 where x % 3 = 0;
+
+statement ok
+delete from c where y % 5 = 0;
+
+statement ok
+delete from a where x % 7 = 0;
+
+# Recover in the middle of the backfill. The lookups must restore which rows they can see.
+statement ok
+recover;
+
+statement ok
+insert into a select g, g, g from generate_series(3001, 3500) g;
+
+statement ok
+insert into b select g, g from generate_series(3001, 3500) g;
+
+statement ok
+wait;
+
+query I
+select count(*) from (
+  select n, sa, sb, sc from v
+  except
+  select count(*), sum(a.v), sum(b.v), sum(c.v)
+  from a join b on a.x = b.x join c on a.y = c.y
+);
+----
+0
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
+
+statement ok
+drop table c;

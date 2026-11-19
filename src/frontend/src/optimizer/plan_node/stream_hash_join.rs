@@ -280,6 +280,11 @@ impl StreamHashJoin {
             .expect("StreamHashJoin should store predicate as EqJoinPredicate")
     }
 
+    /// The output columns, as column indices of the concatenation of the left and right inputs.
+    pub fn output_indices(&self) -> &[usize] {
+        &self.core.output_indices
+    }
+
     /// Convert this hash join to a delta join plan
     pub fn into_delta_join(self) -> StreamDeltaJoin {
         StreamDeltaJoin::new(self.core).unwrap()

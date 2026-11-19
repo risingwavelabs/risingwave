@@ -136,6 +136,8 @@ mod pull_up_correlated_project_value_rule;
 pub use pull_up_correlated_project_value_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
+mod multiway_index_delta_join_rule;
+pub use multiway_index_delta_join_rule::*;
 mod left_deep_tree_join_ordering_rule;
 pub use left_deep_tree_join_ordering_rule::*;
 mod apply_agg_transpose_rule;
@@ -312,6 +314,7 @@ macro_rules! for_all_rules {
             , { MaxOneRowEliminateRule }
             , { DistinctAggRule }
             , { IndexDeltaJoinRule }
+            , { MultiwayIndexDeltaJoinRule }
             , { MergeMultiJoinRule }
             , { ProjectEliminateRule }
             , { ProjectJoinMergeRule }

@@ -50,6 +50,89 @@
     select * from a join b on a.a1 = b.b1 ;
   expected_outputs:
   - stream_plan
+- name: multi-way delta join with different join keys
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create index i_b2 on b(b2);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    /* each path looks up the other inputs, and b is looked up on both join keys */
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+  expected_outputs:
+  - stream_plan
+- name: multi-way delta join on the same join key
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    select a.a2, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on a.a1 = c.c1;
+  expected_outputs:
+  - stream_plan
+- name: four-way delta join with primary keys and indexes
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int primary key, a2 int);
+    create table b (b1 int primary key, b2 int);
+    create index i_b2 on b(b2);
+    create table c (c1 int primary key, c2 int);
+    create table d (d1 int, d2 int);
+    create index i_d1 on d(d1);
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1 join d on c.c1 = d.d1;
+  expected_outputs:
+  - stream_plan
+- name: multi-way delta join drops conditions implied by transitivity
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    select * from a join b on a.a1 = b.b1 join c on b.b1 = c.c1 and a.a1 = c.c1;
+  expected_outputs:
+  - stream_plan
+- name: multi-way delta join with a cyclic join graph falls back
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create index i_a2 on a(a2);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create index i_b2 on b(b2);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    create index i_c2 on c(c2);
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1 and c.c2 = a.a2;
+  expected_outputs:
+  - stream_plan
+- name: multi-way delta join without the required index falls back
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create table c (c1 int, c2 int);
+    /* c has no index on c1 */
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+  expected_outputs:
+  - stream_plan
 - name: delta join does not use an index that lacks a column of the scan
   sql: |
     set rw_streaming_enable_delta_join = true;

@@ -41,7 +41,7 @@ use risingwave_pb::stream_plan::{
     StreamNode, StreamScanType,
 };
 
-use self::rewrite::build_delta_join_without_arrange;
+use self::rewrite::{build_delta_join_without_arrange, build_multiway_delta_join};
 use crate::catalog::FragmentId;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
@@ -642,6 +642,9 @@ fn build_fragment(
         };
 
         // handle join logic
+        if let NodeBody::MultiwayDeltaIndexJoin(_) = stream_node.node_body.as_ref().unwrap() {
+            return build_multiway_delta_join(state, current_fragment, stream_node);
+        }
         if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
         {
             if delta_index_join.get_join_type()? == JoinType::Inner
