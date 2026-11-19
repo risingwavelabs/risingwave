@@ -992,17 +992,95 @@ pub mod tests {
     }
 
     #[test]
+    fn test_scan_prefetch_modes_defaults_and_overrides() {
+        use storage::{ReadPrefetchMode, ScanPrefetchConfig};
+
+        fn resolved(config: &ScanPrefetchConfig) -> [ReadPrefetchMode; 5] {
+            [
+                config.prefix_mode(),
+                config.changelog_mode(),
+                config.range_scan_mode(),
+                config.snapshot_backfill_mode(),
+                config.locality_backfill_mode(),
+            ]
+        }
+        let defaults = RwConfig::default();
+        assert_eq!(
+            resolved(&defaults.storage.scan_prefetch),
+            [
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::ColdRanges
+            ]
+        );
+        assert_eq!(defaults.storage.max_prefetch_block_number, 16);
+        assert_eq!(defaults.storage.scan_prefetch.max_blocks, None);
+        assert_eq!(defaults.storage.scan_prefetch.max_bytes.get(), 1024 * 1024);
+        let comparison: RwConfig =
+            toml::from_str(include_str!("../../../config/cold-range-prefetch.toml")).unwrap();
+        assert_eq!(
+            resolved(&comparison.storage.scan_prefetch),
+            [ReadPrefetchMode::ColdRanges; 5]
+        );
+        assert!(
+            comparison
+                .storage
+                .object_store
+                .enable_hummock_read_coalescing
+        );
+        assert!(
+            comparison
+                .storage
+                .object_store
+                .read_scheduler
+                .use_dedicated_io_runtime
+        );
+        assert_eq!(
+            comparison
+                .storage
+                .object_store
+                .read_scheduler
+                .max_read_bytes,
+            comparison.storage.scan_prefetch.max_bytes
+        );
+
+        let mixed: RwConfig = toml::from_str(
+            r#"[storage.scan_prefetch]
+mode = "disabled"
+prefix_mode = "cold_ranges"
+locality_backfill_mode = "cold_ranges"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            resolved(&mixed.storage.scan_prefetch),
+            [
+                ReadPrefetchMode::ColdRanges,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::Disabled,
+                ReadPrefetchMode::ColdRanges,
+            ]
+        );
+    }
+
+    #[test]
     fn test_read_optimization_controls_reject_zero_limits() {
-        for (section, fields) in [(
-            "storage.object_store.read_scheduler",
-            vec![
-                "dedicated_io_runtime_workers",
-                "max_batch_requests",
-                "max_admitted_groups",
-                "max_inflight_reads",
-                "max_read_bytes",
-            ],
-        )] {
+        for (section, fields) in [
+            ("storage.scan_prefetch", vec!["max_blocks", "max_bytes"]),
+            (
+                "storage.object_store.read_scheduler",
+                vec![
+                    "dedicated_io_runtime_workers",
+                    "max_batch_requests",
+                    "max_admitted_groups",
+                    "max_inflight_reads",
+                    "max_read_bytes",
+                ],
+            ),
+        ] {
             for field in fields {
                 assert!(
                     toml::from_str::<RwConfig>(&format!("[{section}]\n{field} = 0")).is_err(),
@@ -1010,7 +1088,10 @@ pub mod tests {
                 );
             }
         }
-        for section in ["storage.object_store.read_scheduler"] {
+        for section in [
+            "storage.scan_prefetch",
+            "storage.object_store.read_scheduler",
+        ] {
             assert!(
                 toml::from_str::<RwConfig>(&format!("[{section}]\nmisspelled_limit = 1")).is_err(),
                 "{section}"

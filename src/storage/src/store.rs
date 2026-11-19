@@ -459,34 +459,68 @@ pub trait StateStoreReadVector: StaticSendSync {
     ) -> impl StorageFuture<'a, Vec<O>>;
 }
 
-/// Controls block-stream prefetch for range scans. Prefetching may increase the memory footprint
-/// of the CN process because the prefetched blocks cannot be evicted.
+/// Identifies which scan policy to resolve before building SST iterators.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrefetchContext {
+    #[default]
+    Disabled,
+    /// Use the storage instance's ordinary range-scan policy.
+    RangeScan,
+    /// Use the storage instance's prefix-scan policy.
+    PrefixScan,
+    /// Use the storage instance's ordinary Snapshot Backfill source policy.
+    SnapshotBackfill,
+    /// Use the storage instance's Locality Backfill policy. Resolved before building SST iterators.
+    LocalityBackfill,
+}
+
+/// Controls bounded scan prefetch. ColdRanges retains cache entries/lookups and
+/// encoded range reads until consumption or iterator release.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// Enables prefetch for range-scan iterators. Point gets do not inherit this setting.
-    pub prefetch: bool,
+    pub context: PrefetchContext,
     /// Caller and tracing classification for large queries. Leaf SST iterators do not consume it.
     pub for_large_query: bool,
 }
 
 impl PrefetchOptions {
     pub fn prefetch_for_large_range_scan() -> Self {
+        Self::new(true, true)
+    }
+
+    pub fn prefetch_for_small_range_scan() -> Self {
+        Self::new(true, false)
+    }
+
+    pub fn prefetch_for_prefix_scan() -> Self {
+        // Resolve the caller-specific policy before constructing SST iterators.
         Self {
-            prefetch: true,
+            context: PrefetchContext::PrefixScan,
+            for_large_query: false,
+        }
+    }
+
+    pub fn prefetch_for_snapshot_backfill() -> Self {
+        Self {
+            context: PrefetchContext::SnapshotBackfill,
             for_large_query: true,
         }
     }
 
-    pub fn prefetch_for_small_range_scan() -> Self {
+    pub fn prefetch_for_locality_backfill() -> Self {
         Self {
-            prefetch: true,
+            context: PrefetchContext::LocalityBackfill,
             for_large_query: false,
         }
     }
 
     pub fn new(prefetch: bool, for_large_query: bool) -> Self {
         Self {
-            prefetch,
+            context: if prefetch {
+                PrefetchContext::RangeScan
+            } else {
+                PrefetchContext::Disabled
+            },
             for_large_query,
         }
     }
@@ -494,17 +528,21 @@ impl PrefetchOptions {
 
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
-        Self {
-            prefetch: value.prefetch,
-            for_large_query: value.for_large_query,
-        }
+        Self::new(value.prefetch, value.for_large_query)
     }
 }
 
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            prefetch: value.prefetch,
+            // Preserve the existing trace encoding: prefix scans replay on demand,
+            // while ordinary/backfill scans use the configured range-scan policy.
+            prefetch: matches!(
+                value.context,
+                PrefetchContext::RangeScan
+                    | PrefetchContext::SnapshotBackfill
+                    | PrefetchContext::LocalityBackfill
+            ),
             for_large_query: value.for_large_query,
         }
     }

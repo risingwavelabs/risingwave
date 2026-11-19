@@ -60,6 +60,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_recent_filter(Arc::new(NoneRecentFilter::default().into())).await
 }
 
+pub async fn mock_sstable_store_with_scan_prefetch(
+    config: risingwave_common::config::storage::ScanPrefetchConfig,
+) -> SstableStoreRef {
+    let mut store = mock_sstable_store().await;
+    Arc::get_mut(&mut store).unwrap().scan_prefetch = config;
+    store
+}
+
 pub async fn mock_sstable_store_with_recent_filter(
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
 ) -> SstableStoreRef {
@@ -108,6 +116,7 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
 
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
+        scan_prefetch: Default::default(),
 
         recent_filter,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),

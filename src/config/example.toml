@@ -371,6 +371,16 @@ algorithm = "Lru"
 [storage.cache.vector_meta_cache_eviction_config]
 algorithm = "Lru"
 
+[storage.scan_prefetch]
+mode = ""
+prefix_mode = ""
+changelog_mode = ""
+range_scan_mode = ""
+snapshot_backfill_mode = ""
+locality_backfill_mode = ""
+max_blocks = ""
+max_bytes = 1048576
+
 [storage.data_file_cache]
 dir = ""
 direct_io = false
