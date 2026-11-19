@@ -679,19 +679,23 @@ pub struct PulsarOauthCommon {
 
 fn create_credential_temp_file(
     credentials: &[u8],
+    temp_dir: &Path,
 ) -> ConnectorResult<(String, Option<NamedTempFile>)> {
-    // Pulsar reads the URL path without percent-decoding it. Use a URL-safe directory,
-    // even when the configured system temp directory contains spaces or other escapes.
-    let temp_dir = std::env::temp_dir();
-    let temp_dir_url = Url::from_directory_path(&temp_dir)
+    // Pulsar reads the URL path without percent-decoding it. Reject an incompatible
+    // temp directory instead of silently choosing another location for credentials.
+    let temp_dir_url = Url::from_directory_path(temp_dir)
         .map_err(|_| anyhow!("failed to convert pulsar credentials temp directory to URL"))?;
-    let temp_dir = if Path::new(temp_dir_url.path()) == temp_dir {
-        temp_dir.as_path()
-    } else {
-        Path::new("/tmp")
-    };
-    let mut f = NamedTempFile::new_in(temp_dir)
-        .context("failed to create temp file for pulsar credentials")?;
+    if Path::new(temp_dir_url.path()) != temp_dir {
+        bail!(
+            "Pulsar OAuth requires a temporary directory whose path does not need URL encoding; set TMPDIR to an existing writable directory without spaces or other URL-escaped characters"
+        );
+    }
+    let mut f = NamedTempFile::new_in(temp_dir).with_context(|| {
+        format!(
+            "failed to create temp file for pulsar credentials in {}",
+            temp_dir.display()
+        )
+    })?;
     f.write_all(credentials)?;
     f.as_file().sync_all()?;
     let url = Url::from_file_path(f.path())
@@ -785,7 +789,7 @@ impl PulsarCommon {
         match url.scheme() {
             "s3" => {
                 let credentials = load_file_descriptor_from_s3(url, aws_auth_props).await?;
-                create_credential_temp_file(&credentials)
+                create_credential_temp_file(&credentials, &std::env::temp_dir())
             }
             "file" => {
                 let path = url
@@ -799,7 +803,7 @@ impl PulsarCommon {
                 let credentials = tokio::fs::read(&path).await.with_context(|| {
                     format!("failed to read pulsar credentials file: {}", path.display())
                 })?;
-                create_credential_temp_file(&credentials)
+                create_credential_temp_file(&credentials, &std::env::temp_dir())
             }
             _ => bail!(
                 "invalid credentials_url scheme '{}', only file://, s3://, and absolute file paths are supported",
@@ -1412,6 +1416,36 @@ where
 #[cfg(all(test, not(madsim)))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pulsar_credentials_temp_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let credentials = b"test credentials";
+        let (url, file) = create_credential_temp_file(credentials, directory.path()).unwrap();
+        let file = file.unwrap();
+        assert_eq!(file.path().parent(), Some(directory.path()));
+        assert_eq!(
+            std::fs::read(Url::parse(&url).unwrap().path()).unwrap(),
+            credentials
+        );
+
+        let missing_directory = directory.path().join("missing");
+        let error = create_credential_temp_file(credentials, &missing_directory).unwrap_err();
+        assert!(error.to_string().contains("failed to create temp file"));
+        assert!(!missing_directory.exists());
+    }
+
+    #[test]
+    fn test_pulsar_credentials_temp_directory_requires_url_encoding() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["space here", "hash#", "query?", "percent%", "凭据"] {
+            let temp_dir = directory.path().join(name);
+            std::fs::create_dir(&temp_dir).unwrap();
+            let error = create_credential_temp_file(b"test credentials", &temp_dir).unwrap_err();
+            assert!(error.to_string().contains("set TMPDIR"));
+            assert_eq!(std::fs::read_dir(temp_dir).unwrap().count(), 0);
+        }
+    }
 
     #[test]
     fn test_kinit_cmd_quoted_and_args_validated() {
