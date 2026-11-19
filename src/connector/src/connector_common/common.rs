@@ -677,11 +677,26 @@ pub struct PulsarOauthCommon {
     pub scope: Option<String>,
 }
 
-fn create_credential_temp_file(credentials: &[u8]) -> std::io::Result<NamedTempFile> {
-    let mut f = NamedTempFile::new()?;
+fn create_credential_temp_file(
+    credentials: &[u8],
+) -> ConnectorResult<(String, Option<NamedTempFile>)> {
+    // Pulsar reads the URL path without percent-decoding it. Use a URL-safe directory,
+    // even when the configured system temp directory contains spaces or other escapes.
+    let temp_dir = std::env::temp_dir();
+    let temp_dir_url = Url::from_directory_path(&temp_dir)
+        .map_err(|_| anyhow!("failed to convert pulsar credentials temp directory to URL"))?;
+    let temp_dir = if Path::new(temp_dir_url.path()) == temp_dir {
+        temp_dir.as_path()
+    } else {
+        Path::new("/tmp")
+    };
+    let mut f = NamedTempFile::new_in(temp_dir)
+        .context("failed to create temp file for pulsar credentials")?;
     f.write_all(credentials)?;
     f.as_file().sync_all()?;
-    Ok(f)
+    let url = Url::from_file_path(f.path())
+        .map_err(|_| anyhow!("failed to convert pulsar credentials temp file path to URL"))?;
+    Ok((url.into(), Some(f)))
 }
 
 impl PulsarCommon {
@@ -756,8 +771,10 @@ impl PulsarCommon {
             bail!("credentials file does not exist: {}", oauth.credentials_url);
         }
 
-        // Return absolute path with file:// prefix
-        Ok((format!("file://{}", oauth.credentials_url), None))
+        let url = Url::from_file_path(path)
+            .map_err(|_| anyhow!("failed to convert pulsar credentials file path to URL"))?;
+        self.handle_pulsar_credentials_url(&url, aws_auth_props)
+            .await
     }
 
     pub(crate) async fn handle_pulsar_credentials_url(
@@ -768,17 +785,22 @@ impl PulsarCommon {
         match url.scheme() {
             "s3" => {
                 let credentials = load_file_descriptor_from_s3(url, aws_auth_props).await?;
-                let temp_file = create_credential_temp_file(&credentials)
-                    .context("failed to create temp file for pulsar credentials")?;
-
-                let temp_path = temp_file
-                    .path()
-                    .to_str()
-                    .context("temp file path is not valid UTF-8")?;
-
-                Ok((format!("file://{}", temp_path), Some(temp_file)))
+                create_credential_temp_file(&credentials)
             }
-            "file" => Ok((url.to_string(), None)),
+            "file" => {
+                let path = url
+                    .to_file_path()
+                    .map_err(|_| anyhow!("invalid local pulsar credentials file URL"))?;
+                // Pulsar's OAuth2 provider opens url.path() literally. Keep ordinary paths
+                // unchanged, but copy files whose URL encoding would change that path.
+                if Path::new(url.path()) == path {
+                    return Ok((url.to_string(), None));
+                }
+                let credentials = tokio::fs::read(&path).await.with_context(|| {
+                    format!("failed to read pulsar credentials file: {}", path.display())
+                })?;
+                create_credential_temp_file(&credentials)
+            }
             _ => bail!(
                 "invalid credentials_url scheme '{}', only file://, s3://, and absolute file paths are supported",
                 url.scheme()
