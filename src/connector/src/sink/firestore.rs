@@ -169,7 +169,9 @@ impl FirestoreConfig {
                 Ok(Token::new(
                     "Bearer".to_owned(),
                     "owner".to_owned().into(),
-                    chrono::Utc::now() + chrono::Duration::hours(1),
+                    (std::time::SystemTime::now() + Duration::from_secs(3600))
+                        .try_into()
+                        .expect("an hour from now is a valid timestamp"),
                 ))
             });
             (vec![], TokenSourceType::ExternalSource(Box::new(source)))

@@ -6319,17 +6319,17 @@ checksum = "8fcfdc7a0362c9f4444381a9e697c79d435fe65b52a37466fc2c1184cee9edc6"
 
 [[package]]
 name = "firestore"
-version = "0.50.0"
+version = "0.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3441119ffd86c299a9a6e2e769f3bd59b970c33faf19bcc11e5d09534e45d55"
+checksum = "46e51660f8e56ffbbcbb524dd7e01612d47680f9bc9e4b5b306ef37e05f894d3"
 dependencies = [
  "async-trait",
  "backoff",
- "chrono",
  "futures",
  "gcloud-sdk",
  "hex",
  "hyper",
+ "jiff",
  "rand 0.10.1",
  "rsb_derive",
  "rvstruct",
@@ -6825,7 +6825,7 @@ dependencies = [
  "base64 0.22.1",
  "gcloud-metadata",
  "home",
- "jsonwebtoken",
+ "jsonwebtoken 10.4.0",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -6925,16 +6925,16 @@ dependencies = [
 
 [[package]]
 name = "gcloud-sdk"
-version = "0.30.2"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6199c9b08260f184baff83a5a61efc5533e69624ac5d49a76ef5f6afe0962347"
+checksum = "ae0e5ee4726919531561eadf5b9c560e1f3f7dcb4f6ea05996681d2fb6b7e2c5"
 dependencies = [
  "async-trait",
  "bytes",
- "chrono",
  "futures",
  "hyper",
- "jsonwebtoken",
+ "jiff",
+ "jsonwebtoken 11.1.0",
  "once_cell",
  "prost 0.14.3",
  "prost-types 0.14.3",
@@ -8444,6 +8444,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
 dependencies = [
  "aws-lc-rs",
+ "base64 0.22.1",
+ "getrandom 0.2.11",
+ "js-sys",
+ "pem 3.0.6",
+ "serde",
+ "serde_json",
+ "signature",
+ "simple_asn1",
+ "zeroize",
+]
+
+[[package]]
+name = "jsonwebtoken"
+version = "11.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75fe14a82d81e5f5af639997db37d8b96045938a7ac6ab18cdbe1c7467e05e1"
+dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.11",
  "js-sys",
@@ -12013,7 +12030,7 @@ dependencies = [
  "bytes",
  "futures",
  "itertools 0.14.0",
- "jsonwebtoken",
+ "jsonwebtoken 10.4.0",
  "ldap3",
  "madsim-tokio",
  "openssl",
@@ -15134,7 +15151,7 @@ dependencies = [
  "expect-test",
  "humansize",
  "jsonbb",
- "jsonwebtoken",
+ "jsonwebtoken 10.4.0",
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
