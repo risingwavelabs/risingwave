@@ -217,6 +217,7 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let capacity = this.data_chunk_builder.batch_size();
+        let mut skipped_rows = 0;
         loop {
             match ready!(this.poll_next_row(cx)) {
                 Ok(Some(change_log_row)) => {
@@ -232,7 +233,14 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
                         ChangeLogRow::Update {
                             new_value,
                             old_value,
-                        } if new_value == old_value => continue,
+                        } if new_value == old_value => {
+                            skipped_rows += 2;
+                            if skipped_rows >= capacity {
+                                cx.waker().wake_by_ref();
+                                break Poll::Pending;
+                            }
+                            continue;
+                        }
                         ChangeLogRow::Update {
                             new_value,
                             old_value,
@@ -418,6 +426,30 @@ mod tests {
         assert_eq!(chunk.ops(), &[Op::Insert, Op::Insert]);
         assert!(stream.next().await.is_none());
         stream.assert_progress([(VirtualNode::ZERO, 4, None)]).await;
+    }
+
+    #[tokio::test]
+    async fn test_yield_after_skipping_noop_updates() {
+        let (tx, rx) = unbounded_channel();
+        let mut stream = VnodeStream::new(
+            [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+            vec![0],
+            DataChunkBuilder::new(DATA_TYPES.clone(), 4),
+        );
+        for i in 0..3 {
+            tx.send(Ok(ChangeLogRow::Update {
+                new_value: test_row(i),
+                old_value: test_row(i),
+            }))
+            .unwrap();
+        }
+        tx.send(Ok(ChangeLogRow::Insert(test_row(3)))).unwrap();
+        drop(tx);
+        assert!(stream.next().now_or_never().is_none());
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk.ops(), &[Op::Insert]);
+        assert!(stream.next().await.is_none());
+        stream.assert_progress([(VirtualNode::ZERO, 7, None)]).await;
     }
 
     #[tokio::test]
