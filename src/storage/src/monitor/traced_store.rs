@@ -152,6 +152,7 @@ impl<S> TracedStateStore<S, TableSnapshot> {
     }
 }
 
+// Hummock replay tracing uses scalar reads so every key has a Get trace record.
 impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, TableSnapshot> {
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,

@@ -388,6 +388,11 @@ state_store_write_batch_duration	histogram	table_id	Total time of batched write 
 state_store_write_batch_size	histogram	table_id	Total size of batched write that have been issued to state store		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_write_batch_tuple_counts	counter	table_id	Total number of batched write kv pairs requests that have been issued to state store		src/storage/src/monitor/hummock_state_store_metrics.rs
 uploading_memory_size	gauge		the size of uploading SSTs memory usage		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_get_batch_concurrency	histogram	table_id	Configured per-batch concurrency clipped to the input key count		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_duration	histogram	table_id	Latency of one explicit point-read batch		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_in_flight	gauge	table_id	Active explicit point batches		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_keys	histogram	table_id	Input keys per explicit point batch, including duplicates and missing keys		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_outcomes	counter	table_id,outcome	Explicit point batches completed, failed or cancelled		src/storage/src/monitor/monitored_storage_metrics.rs
 state_store_get_duration	histogram	table_id	Total latency of get that have been issued to state store		src/storage/src/monitor/monitored_storage_metrics.rs
 state_store_get_key_size	histogram	table_id	Total key bytes of get that have been issued to state store		src/storage/src/monitor/monitored_storage_metrics.rs
 state_store_get_value_size	histogram	table_id	Total value bytes that have been requested from remote storage		src/storage/src/monitor/monitored_storage_metrics.rs

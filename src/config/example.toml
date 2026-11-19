@@ -372,6 +372,8 @@ algorithm = "Lru"
 algorithm = "Lru"
 
 [storage.read_batch]
+enabled = false
+concurrency = 10
 meta_reuse = false
 meta_max_entries = 16
 meta_max_bytes = 1048576

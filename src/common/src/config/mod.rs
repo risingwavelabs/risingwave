@@ -1004,6 +1004,14 @@ pub mod tests {
     }
 
     #[test]
+    fn test_native_point_batch_defaults_and_limits() {
+        let config = RwConfig::default().storage.read_batch;
+        assert!(!config.enabled);
+        assert_eq!(config.concurrency.get(), 10);
+        assert!(toml::from_str::<RwConfig>("[storage.read_batch]\nconcurrency = 0").is_err());
+    }
+
+    #[test]
     fn test_storage_sstable_meta_fetch_concurrency() {
         let default: RwConfig = toml::from_str("").unwrap();
         assert_eq!(default.storage.sstable_meta_fetch_concurrency, 1);
