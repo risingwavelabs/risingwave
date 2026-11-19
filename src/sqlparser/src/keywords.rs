@@ -109,6 +109,7 @@ define_keywords!(
     BY,
     BYTEA,
     CACHE,
+    CACHE_REFILL_POLICY,
     CALL,
     CALLED,
     CANCEL,

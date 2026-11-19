@@ -150,7 +150,9 @@ fn apply_and_check_version_deltas(
     }
     let after = reference_counts(&version, pinned);
     let target = PinnedVersion::new(version, mpsc::unbounded_channel().0);
-    let membership_changes = index.advance_version(&sst_deltas, target, Some(&deltas), pinned);
+    let membership_changes = index.advance_version(&sst_deltas, target, Some(&deltas), |table| {
+        pinned.contains(table)
+    });
     assert_reference_counts(index, pinned);
     assert_eq!(
         membership_changes.inserted,
@@ -233,7 +235,7 @@ fn test_membership_tracks_physical_references() {
     // Unit-level reference transitions; SDK-applied Meta transitions are covered by
     // test_pin_reference_counts_match_versions_across_batch_boundaries below.
     let mut pinned: HashSet<_> = tables.into();
-    let mut index = PinCacheMembershipIndex::new(empty.clone(), &pinned);
+    let mut index = PinCacheMembershipIndex::new(empty.clone(), |table| pinned.contains(table));
     assert_reference_counts(&index, &pinned);
     let target = only_b.clone();
     let sst_deltas = &[SstDeltaInfo {
@@ -242,7 +244,9 @@ fn test_membership_tracks_physical_references() {
     }];
     let raw_deltas: Option<&[HummockVersionDelta]> =
         Some(&[intra_level_delta(&[], &branches[1..], 0)]);
-    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, |table| {
+        pinned.contains(table)
+    });
     assert_reference_counts(&index, &pinned);
     assert_eq!(membership_changes.inserted, [1001.into()].into());
     // A new logical reference must not add physical membership twice.
@@ -253,7 +257,9 @@ fn test_membership_tracks_physical_references() {
     }];
     let raw_deltas: Option<&[HummockVersionDelta]> =
         Some(&[intra_level_delta(&[], &branches[..1], 0)]);
-    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, |table| {
+        pinned.contains(table)
+    });
     assert_reference_counts(&index, &pinned);
     assert!(membership_changes.inserted.is_empty() && membership_changes.removed.is_empty());
     let membership_changes = index.advance_version(
@@ -263,7 +269,7 @@ fn test_membership_tracks_physical_references() {
         }],
         only_b.clone(),
         Some(&[intra_level_delta(&branches[..1], &[], 0)]),
-        &pinned,
+        |table| pinned.contains(table),
     );
     assert_reference_counts(&index, &pinned);
     assert!(membership_changes.inserted.is_empty() && membership_changes.removed.is_empty());
@@ -274,7 +280,7 @@ fn test_membership_tracks_physical_references() {
         }],
         empty,
         Some(&[intra_level_delta(&branches[1..], &[], 0)]),
-        &pinned,
+        |table| pinned.contains(table),
     );
     assert_reference_counts(&index, &pinned);
     assert_eq!(membership_changes.removed, [1001.into()].into());
@@ -288,12 +294,15 @@ fn test_membership_tracks_physical_references() {
         (HashSet::new(), HashSet::new(), HashSet::from([1001.into()])),
         (tables.into(), HashSet::from([1001.into()]), HashSet::new()),
     ] {
-        let membership_changes =
-            PinCacheMembershipChanges::between_policies(&versions, &pinned, &pinned_tables);
+        let membership_changes = PinCacheMembershipChanges::between_policies(
+            &versions,
+            |table| pinned.contains(table),
+            |table| pinned_tables.contains(table),
+        );
         assert_eq!(membership_changes.inserted, inserted);
         assert_eq!(membership_changes.removed, removed);
         pinned = pinned_tables;
-        index.rebuild_for_policy(&pinned);
+        index.rebuild_for_policy(|table| pinned.contains(table));
         assert_reference_counts(&index, &pinned);
         assert!(index.object_ref_counts.is_empty());
     }
@@ -304,7 +313,9 @@ fn test_membership_tracks_physical_references() {
         (HashSet::from([tables[1]]), HashSet::new()),
     ] {
         let membership_changes =
-            PinCacheMembershipChanges::between_versions(&only_b, &both, &pinned_tables);
+            PinCacheMembershipChanges::between_versions(&only_b, &both, |table| {
+                pinned_tables.contains(table)
+            });
         assert_eq!(membership_changes.inserted, expected_inserted);
         assert!(membership_changes.removed.is_empty());
     }
@@ -313,14 +324,18 @@ fn test_membership_tracks_physical_references() {
     let target = both.clone();
     let sst_deltas = &[];
     let raw_deltas: Option<&[HummockVersionDelta]> = None;
-    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, |table| {
+        pinned.contains(table)
+    });
     assert_reference_counts(&index, &pinned);
     assert_eq!(membership_changes.inserted, [1001.into()].into());
     assert!(membership_changes.removed.is_empty());
     let target = both;
     let sst_deltas = &[];
     let raw_deltas: Option<&[HummockVersionDelta]> = Some(&[]);
-    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, |table| {
+        pinned.contains(table)
+    });
     assert_reference_counts(&index, &pinned);
     assert!(membership_changes.inserted.is_empty() && membership_changes.removed.is_empty());
 
@@ -527,11 +542,12 @@ fn test_pin_reference_counts_match_versions_across_batch_boundaries() {
     for batch_size in [1, 2, deltas.len()] {
         let initial = PinnedVersion::new(initial.clone(), mpsc::unbounded_channel().0);
         let pinned: HashSet<_> = tables.into();
-        let mut index = PinCacheMembershipIndex::new(initial.clone(), &pinned);
+        let mut index =
+            PinCacheMembershipIndex::new(initial.clone(), |table| pinned.contains(table));
         let membership_changes = PinCacheMembershipChanges::between_policies(
             &[initial],
-            &HashSet::new(),
-            &tables.into(),
+            |_| false,
+            |table| tables.contains(table),
         );
         assert_eq!(membership_changes.inserted, [shared.object_id].into());
         assert_reference_counts(&index, &pinned);

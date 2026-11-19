@@ -46,6 +46,33 @@ pub enum AlterSchemaOperation {
     SwapRenameSchema { target_schema: ObjectName },
 }
 
+/// A job default, or explicit policies for selected physical tables.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AlterCacheRefillPolicy {
+    /// None resets the selected policies to inheritance.
+    pub policy: Option<SetVariableValue>,
+    /// An empty list addresses the job default.
+    pub table_ids: Vec<u32>,
+}
+
+impl fmt::Display for AlterCacheRefillPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(policy) = &self.policy {
+            write!(f, "SET CACHE_REFILL_POLICY = {policy}")?;
+        } else {
+            write!(f, "RESET CACHE_REFILL_POLICY")?;
+        }
+        if !self.table_ids.is_empty() {
+            write!(
+                f,
+                " FOR TABLES ({})",
+                display_comma_separated(&self.table_ids)
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlterRateLimitType {
     Source,
@@ -154,6 +181,7 @@ pub enum AlterTableOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    CacheRefillPolicy(AlterCacheRefillPolicy),
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -198,6 +226,7 @@ pub enum AlterIndexOperation {
         resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
+    CacheRefillPolicy(AlterCacheRefillPolicy),
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -247,6 +276,7 @@ pub enum AlterViewOperation {
     AsQuery {
         query: Box<Query>,
     },
+    CacheRefillPolicy(AlterCacheRefillPolicy),
     /// `SET CONFIG ( streaming.some_config_key = <some_config_value>, .. )`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -284,6 +314,7 @@ pub enum AlterSinkOperation {
         resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
+    CacheRefillPolicy(AlterCacheRefillPolicy),
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -346,6 +377,7 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    CacheRefillPolicy(AlterCacheRefillPolicy),
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -528,6 +560,7 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::CacheRefillPolicy(policy) => write!(f, "{policy}"),
             AlterTableOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -595,6 +628,7 @@ impl fmt::Display for AlterIndexOperation {
                     write!(f, "RESET RESOURCE_GROUP{}", deferred)
                 }
             }
+            AlterIndexOperation::CacheRefillPolicy(policy) => write!(f, "{policy}"),
             AlterIndexOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -661,6 +695,7 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::AsQuery { query } => {
                 write!(f, "AS {}", query)
             }
+            AlterViewOperation::CacheRefillPolicy(policy) => write!(f, "{policy}"),
             AlterViewOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -717,6 +752,7 @@ impl fmt::Display for AlterSinkOperation {
                     write!(f, "RESET RESOURCE_GROUP{}", deferred)
                 }
             }
+            AlterSinkOperation::CacheRefillPolicy(policy) => write!(f, "{policy}"),
             AlterSinkOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -814,6 +850,7 @@ impl fmt::Display for AlterSourceOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSourceOperation::CacheRefillPolicy(policy) => write!(f, "{policy}"),
             AlterSourceOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
