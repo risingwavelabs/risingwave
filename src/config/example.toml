@@ -446,6 +446,7 @@ skip_inheritance_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+enable_hummock_read_coalescing = false
 req_concurrency_limit = 0
 http_concurrent_limit = 0
 opendal_streaming_read_chunk_size = 0
@@ -488,6 +489,16 @@ identity_resolution_timeout_s = 5
 retry_unknown_service_error = false
 retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
 use_opendal = true
+
+[storage.object_store.read_scheduler]
+use_dedicated_io_runtime = false
+dedicated_io_runtime_workers = 2
+max_batch_requests = 16
+max_admitted_groups = 64
+max_inflight_reads = 32
+reuse_inflight_reads = false
+max_read_bytes = 262144
+max_gap_bytes = 0
 
 [system]
 barrier_interval_ms = 1000

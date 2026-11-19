@@ -10,6 +10,9 @@ repository = { workspace = true }
 [package.metadata.cargo-machete]
 ignored = ["aws-credential-types"]
 
+[features]
+test = []
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }

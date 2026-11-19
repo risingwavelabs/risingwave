@@ -218,6 +218,7 @@ pub struct StorageConfig {
     /// 2. Some special configuration of Backend
     /// 3. Retry and timeout configuration
     #[serde(default)]
+    #[config_doc(nested)]
     pub object_store: ObjectStoreConfig,
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
@@ -557,7 +558,7 @@ pub struct FileCacheConfig {
 
 /// The subsections `[storage.object_store]`.
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct ObjectStoreConfig {
     // alias is for backward compatibility
     #[serde(
@@ -575,6 +576,14 @@ pub struct ObjectStoreConfig {
     /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    /// Coalesce concurrent small range reads in the Hummock state store on S3 and MinIO.
+    #[serde(default)]
+    pub enable_hummock_read_coalescing: bool,
+    /// Scheduling bounds used when Hummock read coalescing is enabled. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub read_scheduler: ReadSchedulerConfig,
 
     /// Maximum number of concurrent object store requests (read, `streaming_read`, metadata, etc.).
     /// 0 means unlimited. When set to a positive value, a semaphore will be used to limit
@@ -612,6 +621,60 @@ pub struct ObjectStoreConfig {
     pub upload_part_size: usize,
 }
 
+/// Object-store range coalescing and dispatch.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ReadSchedulerConfig {
+    /// Run scheduled object reads on a small runtime shared by all schedulers in the process.
+    #[serde(default)]
+    pub use_dedicated_io_runtime: bool,
+    /// Worker threads for the shared process runtime. All schedulers using it
+    /// must specify the same count. Applies when dedicated I/O is enabled.
+    #[serde(default = "default_dedicated_io_runtime_workers")]
+    pub dedicated_io_runtime_workers: NonZeroUsize,
+    /// Maximum logical reads in one coalesced group.
+    #[serde(default = "default_read_scheduler_batch_requests")]
+    pub max_batch_requests: NonZeroUsize,
+    /// Maximum groups from queue admission through completion. A read can join
+    /// a compatible pending group without taking another slot.
+    #[serde(
+        default = "default_read_admitted_groups",
+        deserialize_with = "deserialize_read_permits"
+    )]
+    pub max_admitted_groups: NonZeroUsize,
+    /// Maximum concurrent scheduled physical reads, including individual range-error fallbacks.
+    /// Each ordinary object read or merged GET consumes one slot.
+    #[serde(
+        default = "default_read_inflight_reads",
+        deserialize_with = "deserialize_read_permits"
+    )]
+    pub max_inflight_reads: NonZeroUsize,
+    /// Share a scheduled GET with fully covered reads, including waiters blocked on group admission.
+    #[serde(default)]
+    pub reuse_inflight_reads: bool,
+    /// Maximum byte span for coalescing. Larger reads are scheduled individually with their original bounds.
+    #[serde(default = "default_read_window_bytes")]
+    pub max_read_bytes: NonZeroUsize,
+    /// Maximum unread gap between neighboring ranges in the same object. The merged
+    /// range including all gaps must fit `max_read_bytes`. Zero only merges contiguous
+    /// and overlapping ranges.
+    #[serde(default)]
+    pub max_gap_bytes: usize,
+}
+
+fn deserialize_read_permits<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<NonZeroUsize, D::Error> {
+    validate_read_permits(NonZeroUsize::deserialize(deserializer)?)
+}
+
+fn validate_read_permits<E: serde::de::Error>(value: NonZeroUsize) -> Result<NonZeroUsize, E> {
+    if value.get() > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err(E::custom("read scheduler limit exceeds semaphore capacity"));
+    }
+    Ok(value)
+}
+
 fn deserialize_sstable_meta_fetch_concurrency<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -623,6 +686,22 @@ where
         ));
     }
     Ok(value)
+}
+
+fn default_read_window_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(256 * 1024).unwrap()
+}
+fn default_read_scheduler_batch_requests() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
+fn default_dedicated_io_runtime_workers() -> NonZeroUsize {
+    NonZeroUsize::new(2).unwrap()
+}
+fn default_read_inflight_reads() -> NonZeroUsize {
+    NonZeroUsize::new(32).unwrap()
+}
+fn default_read_admitted_groups() -> NonZeroUsize {
+    NonZeroUsize::new(64).unwrap()
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
