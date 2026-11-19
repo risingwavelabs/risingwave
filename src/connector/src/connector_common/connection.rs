@@ -352,10 +352,8 @@ pub struct ElasticsearchConnection(pub BTreeMap<String, String>);
 #[async_trait]
 impl Connection for ElasticsearchConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
-        const CONNECTOR: &str = "elasticsearch";
-
         let config = ElasticSearchOpenSearchConfig::try_from(self)?;
-        let client = config.build_client(CONNECTOR)?;
+        let client = config.build_elasticsearch_client()?;
         client.ping().await?;
         Ok(())
     }
