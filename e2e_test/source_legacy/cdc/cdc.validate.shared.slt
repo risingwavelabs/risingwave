@@ -114,7 +114,7 @@ create source oracle_unsafe_pdb_name with (
 
 
 # invalid auto schema change option
-statement error Oracle CDC auto schema change is not supported
+statement error auto schema change for connector oracle-cdc
 create source oracle_invalid_schema_change with (
  connector = 'oracle-cdc',
  hostname = 'oracle',
