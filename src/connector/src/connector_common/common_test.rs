@@ -172,8 +172,7 @@ mod tests {
                 let error = auth.initialize().await.unwrap_err().to_string();
                 assert!(
                     error.contains("failed to discover OAuth2 token endpoint"),
-                    "credential loading failed for {}: {error}",
-                    oauth.credentials_url
+                    "credential loading failed: {error}"
                 );
 
                 let temp_file = temp_file.expect("encoded paths need a temporary file");
