@@ -3,7 +3,7 @@
   "packageManager": "pnpm@10.14.0",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "gen-proto": "./scripts/generate_proto.sh",
     "lint": "prettier --check . && eslint .",
