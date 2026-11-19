@@ -6319,9 +6319,9 @@ checksum = "8fcfdc7a0362c9f4444381a9e697c79d435fe65b52a37466fc2c1184cee9edc6"
 
 [[package]]
 name = "firestore"
-version = "0.47.1"
+version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "657d4dd7b4687a2b5782e9adb0233ed5e0dc72604c0962acca0f762390b58516"
+checksum = "6e99c9f24c82c782f1e72709983ec9ed1356b2a5ee0d3bc7db6ca8e7d3236eef"
 dependencies = [
  "async-trait",
  "backoff",
@@ -6330,7 +6330,7 @@ dependencies = [
  "gcloud-sdk",
  "hex",
  "hyper",
- "rand 0.9.5",
+ "rand 0.10.1",
  "rsb_derive",
  "rvstruct",
  "serde",
@@ -6825,7 +6825,7 @@ dependencies = [
  "base64 0.22.1",
  "gcloud-metadata",
  "home",
- "jsonwebtoken 10.4.0",
+ "jsonwebtoken",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -6925,20 +6925,20 @@ dependencies = [
 
 [[package]]
 name = "gcloud-sdk"
-version = "0.28.4"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59d30ac259b5f3b6461044b7a8d043f85f72cfd29d94e7dbc29757c561f88182"
+checksum = "6b5b58d8683fa308be9bc58caece4972315a0b2547f9da16962511f0915d5b53"
 dependencies = [
  "async-trait",
  "bytes",
  "chrono",
  "futures",
  "hyper",
- "jsonwebtoken 9.3.1",
+ "jsonwebtoken",
  "once_cell",
  "prost 0.14.3",
  "prost-types 0.14.3",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "secret-vault-value",
  "serde",
  "serde_json",
@@ -8435,21 +8435,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "jsonwebtoken"
-version = "9.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
-dependencies = [
- "base64 0.22.1",
- "js-sys",
- "pem 3.0.6",
- "ring",
- "serde",
- "serde_json",
- "simple_asn1",
 ]
 
 [[package]]
@@ -12028,7 +12013,7 @@ dependencies = [
  "bytes",
  "futures",
  "itertools 0.14.0",
- "jsonwebtoken 10.4.0",
+ "jsonwebtoken",
  "ldap3",
  "madsim-tokio",
  "openssl",
@@ -15149,7 +15134,7 @@ dependencies = [
  "expect-test",
  "humansize",
  "jsonbb",
- "jsonwebtoken 10.4.0",
+ "jsonwebtoken",
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
