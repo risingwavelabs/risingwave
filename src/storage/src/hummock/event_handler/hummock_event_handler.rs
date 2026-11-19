@@ -54,6 +54,7 @@ use crate::hummock::event_handler::{
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
+use crate::hummock::object_id_manager::ObjectIndexUploads;
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
 use crate::hummock::table_cache_metadata::TableCacheMetadata;
 use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager};
@@ -337,6 +338,7 @@ pub(crate) struct HummockEventHandler {
     recent_versions: Arc<ArcSwap<RecentVersions>>,
 
     uploader: HummockUploader,
+    object_index_uploads: Arc<ObjectIndexUploads>,
     refiller: CacheRefiller,
     table_cache_metadata: TableCacheMetadata,
     version_updates: VersionUpdateQueue,
@@ -418,6 +420,7 @@ impl HummockEventHandler {
             state_store_metrics,
             recent_versions,
             buffer_tracker,
+            object_id_manager.object_index_uploads().clone(),
             Arc::new(move |payload, task_info| {
                 static NEXT_UPLOAD_TASK_ID: LazyLock<AtomicUsize> =
                     LazyLock::new(|| AtomicUsize::new(0));
@@ -472,6 +475,7 @@ impl HummockEventHandler {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         recent_versions: RecentVersions,
         buffer_tracker: BufferTracker,
+        object_index_uploads: Arc<ObjectIndexUploads>,
         spawn_upload_task: SpawnUploadTask,
         refiller: CacheRefiller,
         table_cache_metadata: TableCacheMetadata,
@@ -518,6 +522,7 @@ impl HummockEventHandler {
             read_version_mapping,
             local_read_versions: Default::default(),
             uploader,
+            object_index_uploads,
             refiller,
             table_cache_metadata,
             version_updates,
@@ -679,6 +684,10 @@ impl HummockEventHandler {
         );
 
         self.uploader.clear(table_ids.clone());
+        // Recovery drains outstanding commits at meta before resetting these tables. A
+        // checkpoint that did commit is already protected by meta's version references.
+        self.object_index_uploads
+            .discard_sealed_on_reset(table_ids.as_ref());
 
         if table_ids.is_none() {
             assert!(
@@ -752,6 +761,10 @@ impl HummockEventHandler {
             .metrics
             .event_handler_on_apply_version_update
             .start_timer();
+        // Watermark queries run on this same event loop, so none can observe the
+        // temporary protections removed before the committed version is published.
+        self.object_index_uploads
+            .prune_for_version(latest_pinned_version);
         self.recent_versions.rcu(|prev_recent_versions| {
             let mut recent_versions =
                 prev_recent_versions.with_new_version(first_event.new_pinned_version.clone());
@@ -964,11 +977,18 @@ impl HummockEventHandler {
                     .update_streaming_table_vnodes(table_id, self.streaming_table_vnodes(table_id));
             }
             HummockEvent::GetMinUncommittedObjectId { result_tx } => {
-                let _ = result_tx
-                    .send(self.uploader.min_uncommitted_object_id())
-                    .inspect_err(|e| {
-                        error!("unable to send get_min_uncommitted_sst_id result: {:?}", e);
-                    });
+                let min_id = self
+                    .uploader
+                    .min_uncommitted_object_id()
+                    .into_iter()
+                    .chain(self.object_index_uploads.min_uncommitted_id())
+                    .min();
+                let _ = result_tx.send(min_id).inspect_err(|e| {
+                    error!(
+                        "unable to send get_min_uncommitted_object_id result: {:?}",
+                        e
+                    );
+                });
             }
             HummockEvent::GetTableCacheRefillMonitorSnapshot { result_tx } => {
                 let _ = result_tx
@@ -1177,6 +1197,7 @@ mod tests {
             metrics.clone(),
             RecentVersions::new(version, 10, metrics.clone()),
             BufferTracker::from_storage_opts(&opts, &metrics),
+            Default::default(),
             spawn_upload_task,
             refiller,
             metadata,
@@ -1475,6 +1496,7 @@ mod tests {
             metrics.clone(),
             RecentVersions::new(pinned_version, 10, metrics.clone()),
             BufferTracker::from_storage_opts(&storage_opt, &metrics),
+            Default::default(),
             spawn_upload_task,
             refiller,
             metadata,
@@ -1601,6 +1623,7 @@ mod tests {
             metrics.clone(),
             RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
             BufferTracker::from_storage_opts(&storage_opt, &metrics),
+            Default::default(),
             Arc::new(move |_, info| {
                 assert_eq!(info.epochs.len(), 1);
                 let epoch = info.epochs[0];
@@ -1783,6 +1806,7 @@ mod tests {
             metrics.clone(),
             RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
             buffer_tracker,
+            Default::default(),
             spawn_task,
             refiller,
             metadata,

@@ -43,6 +43,8 @@ use crate::store::{InitOptions, SealCurrentEpochOptions};
 #[async_trait::async_trait]
 pub trait ObjectIndexFileIdManager: Send + Sync {
     async fn get_new_file_object_id(&self) -> HummockResult<HummockRawObjectId>;
+    /// Releases an unsealed file that will not be included in an index update.
+    fn discard_unsealed_file(&self, id: HummockRawObjectId);
     /// Gives a background task independent ownership of its unsealed uploads.
     fn new_upload_scope(self: Arc<Self>) -> ObjectIndexFileIdManagerRef;
 }
@@ -56,6 +58,8 @@ impl ObjectIndexFileIdManager for ObjectIdManager {
     async fn get_new_file_object_id(&self) -> HummockResult<HummockRawObjectId> {
         self.get_new_object_id().await
     }
+
+    fn discard_unsealed_file(&self, _id: HummockRawObjectId) {}
 
     fn new_upload_scope(self: Arc<Self>) -> ObjectIndexFileIdManagerRef {
         Arc::new(TrackedObjectIndexFileIdManager {
@@ -76,8 +80,14 @@ struct TrackedObjectIndexFileIdManager {
 impl ObjectIndexFileIdManager for TrackedObjectIndexFileIdManager {
     async fn get_new_file_object_id(&self) -> HummockResult<HummockRawObjectId> {
         let id = self.inner.get_new_object_id().await?;
-        self.inner.track_object_index_upload(id, &self.owner);
+        self.inner.object_index_uploads().track(id, &self.owner);
         Ok(id)
+    }
+
+    fn discard_unsealed_file(&self, id: HummockRawObjectId) {
+        self.inner
+            .object_index_uploads()
+            .discard_unsealed(id, &self.owner);
     }
 
     fn new_upload_scope(self: Arc<Self>) -> ObjectIndexFileIdManagerRef {
@@ -248,7 +258,7 @@ impl<W: ObjectIndexWriterImpl> HummockObjectIndexWriter<W> {
             .writer_impl
             .seal_current_epoch(next_epoch, &self.version_update_notifier_tx.borrow());
         if let Some(add) = &add {
-            self.ctx.object_id_manager.seal_object_index_uploads(
+            self.ctx.object_id_manager.object_index_uploads().seal(
                 self.ctx.table_id,
                 epoch.prev,
                 added_object_ids(add),

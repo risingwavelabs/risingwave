@@ -616,6 +616,7 @@ impl HummockStorage {
         )
     }
 
+    /// Discards pending writes during recovery, after in-flight commits have settled.
     pub async fn clear_shared_buffer(&self) {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
@@ -624,6 +625,7 @@ impl HummockStorage {
         rx.await.expect("should wait success");
     }
 
+    /// Discards pending writes for the reset tables, after their in-flight commits have settled.
     pub async fn clear_tables(&self, table_ids: HashSet<TableId>) {
         if !table_ids.is_empty() {
             let (tx, rx) = oneshot::channel();
@@ -688,11 +690,7 @@ impl HummockStorage {
         self.hummock_event_sender
             .send(HummockEvent::GetMinUncommittedObjectId { result_tx: tx })
             .expect("should send success");
-        let sst_id = rx.await.expect("should await success");
-        let object_index_id = self
-            .object_id_manager
-            .min_uncommitted_object_index_id(&self.version_update_notifier_tx.borrow());
-        sst_id.into_iter().chain(object_index_id).min()
+        rx.await.expect("should await success")
     }
 
     pub async fn sync(

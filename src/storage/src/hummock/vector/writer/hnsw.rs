@@ -175,10 +175,13 @@ impl HnswFlatIndexWriter {
                 .await?;
             self.sstable_store
                 .insert_hnsw_graph_cache(object_id, pb_graph);
-            self.flushed_graph_file = Some(HnswGraphFileInfo {
+            if let Some(superseded) = self.flushed_graph_file.replace(HnswGraphFileInfo {
                 object_id,
                 file_size: size as _,
-            });
+            }) {
+                self.object_id_manager
+                    .discard_unsealed_file(superseded.object_id.as_raw());
+            }
             let file_size = new_file.file_size as _;
             self.unseal_vector_files.push(new_file);
             Ok(file_size)

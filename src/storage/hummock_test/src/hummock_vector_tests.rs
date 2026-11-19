@@ -192,6 +192,16 @@ async fn test_flat_vector() {
         .commit_epoch(epoch1, res)
         .await
         .unwrap();
+    test_env.wait_sync_committed_version().await;
+    // Version publication removes the committed file without a Full GC watermark query.
+    // The sealed file from epoch2 still needs protection.
+    assert_eq!(
+        test_env
+            .storage
+            .object_id_manager()
+            .tracked_object_index_upload_count_for_test(),
+        1
+    );
 
     let res = test_env
         .storage
@@ -204,6 +214,13 @@ async fn test_flat_vector() {
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
+    assert_eq!(
+        test_env
+            .storage
+            .object_id_manager()
+            .tracked_object_index_upload_count_for_test(),
+        0
+    );
 
     let query = gen_vector(VECTOR_DIM);
     let top_n = 10;
@@ -292,6 +309,55 @@ async fn test_flat_vector() {
 }
 
 #[tokio::test]
+async fn test_vector_gc_protection_on_reset() {
+    let test_env = prepare_hummock_test_env().await;
+    let storage = &test_env.storage;
+    let base_epoch = test_epoch(233);
+    let epoch = base_epoch.next_epoch();
+    let next_epoch = epoch.next_epoch();
+    let table_ids = [TableId::new(233), TableId::new(234)];
+
+    let mut protected_ids = vec![];
+    for table_id in table_ids {
+        test_env
+            .register_vector_index(
+                table_id,
+                base_epoch,
+                PbVectorIndexInit {
+                    info: Some(PbVectorIndexInfo {
+                        dimension: 4,
+                        distance_type: PbDistanceType::InnerProduct as _,
+                        config: Some(vector_index_info::PbConfig::Flat(PbFlatIndexConfig {})),
+                    }),
+                },
+            )
+            .await;
+        storage.start_epoch(epoch, HashSet::from([table_id]));
+        let mut writer = storage
+            .new_vector_writer(NewVectorWriterOptions { table_id })
+            .await;
+        writer.init_for_test(epoch).await.unwrap();
+        writer.insert(gen_vector(4).to_ref(), gen_info(0)).unwrap();
+        writer.flush().await.unwrap();
+        writer.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+        let synced = storage
+            .seal_and_sync_epoch(epoch, HashSet::from([table_id]))
+            .await
+            .unwrap();
+        assert_eq!(synced.object_index_adds.len(), 1);
+        drop(writer);
+        // The synced checkpoint might still commit after the local writer exits.
+        protected_ids.push(storage.min_uncommitted_object_id().await.unwrap());
+    }
+
+    assert_eq!(protected_ids[0], protected_ids[1]);
+    storage.clear_tables(HashSet::from([table_ids[0]])).await;
+    assert!(storage.min_uncommitted_object_id().await.unwrap() > protected_ids[0]);
+    storage.clear_shared_buffer().await;
+    assert_eq!(storage.min_uncommitted_object_id().await, None);
+}
+
+#[tokio::test]
 async fn test_hnsw_vector() {
     const TEST_TABLE_ID: TableId = TableId::new(233);
     const VECTOR_DIM: usize = 128;
@@ -340,9 +406,13 @@ async fn test_hnsw_vector() {
     };
 
     let epoch1_vectors = (0..100).map(|_| next_input()).collect_vec();
-    for (vec, info) in &epoch1_vectors {
+    for (index, (vec, info)) in epoch1_vectors.iter().enumerate() {
         vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
+        if index == 49 {
+            // The final flush supersedes this graph, but both vector files must commit.
+            vector_writer.flush().await.unwrap();
+        }
     }
 
     let epoch2 = epoch1.next_epoch();
@@ -387,6 +457,7 @@ async fn test_hnsw_vector() {
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
+    assert_eq!(test_env.storage.min_uncommitted_object_id().await, None);
 
     fn on_nearest_item(
         _vec: VectorRef<'_>,
