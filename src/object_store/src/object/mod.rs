@@ -47,6 +47,7 @@ pub mod object_metrics;
 
 pub mod prefix;
 mod read_scheduler;
+pub mod refill_timing;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use read_scheduler::ReadScheduler;
@@ -786,14 +787,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 result
             };
 
-            let res = retry_request(
+            let physical = retry_request(
                 builder,
                 &self.config,
                 operation_type,
                 self.object_store_metrics.clone(),
                 media_type,
-            )
-            .await;
+            );
+            let res = if media_type == "S3" && refill_timing::is_refill() {
+                refill_timing::measure(physical).await
+            } else {
+                physical.await
+            };
 
             read_guard.finish(&res);
             if let Err(e) = &res

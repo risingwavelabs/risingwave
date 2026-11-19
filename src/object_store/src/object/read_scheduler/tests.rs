@@ -682,6 +682,7 @@ async fn queued_group_stays_mergeable_until_physical_task_starts() {
                 let (response, receiver) = oneshot::channel();
                 let mut state = groups.pending.lock().unwrap();
                 let request = ReadRequest {
+                    refill: false,
                     path: "file".to_owned(),
                     range: ReadRange::Mergeable(range.clone()),
                     response,
@@ -818,6 +819,7 @@ async fn stopping_dispatcher_cancels_physical_reads() {
             permit,
             ReadRange::Mergeable(0..1),
             vec![ReadRequest {
+                refill: false,
                 path: "file".to_owned(),
                 range: ReadRange::Mergeable(0..1),
                 response,
@@ -886,6 +888,7 @@ async fn cancellation_after_planning_is_accounted_before_dispatch() {
         for start in [0, 4, 8] {
             let (response, receiver) = oneshot::channel();
             requests.push(ReadRequest {
+                refill: false,
                 path: "file".to_owned(),
                 range: ReadRange::Mergeable(start..start + 4),
                 response,

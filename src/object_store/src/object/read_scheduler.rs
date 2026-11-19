@@ -95,6 +95,7 @@ impl ReadRange {
 }
 
 struct StagedRead {
+    refill: bool,
     path: String,
     range: ReadRange,
     response: oneshot::Sender<ReadResult>,
@@ -110,6 +111,7 @@ impl StagedRead {
         queued: Option<&prometheus::IntGauge>,
     ) -> ReadRequest {
         ReadRequest {
+            refill: self.refill,
             path: self.path,
             range: self.range,
             response: self.response,
@@ -122,6 +124,7 @@ impl StagedRead {
 }
 
 struct ReadRequest {
+    refill: bool,
     path: String,
     range: ReadRange,
     response: oneshot::Sender<ReadResult>,
@@ -613,6 +616,7 @@ impl ReadScheduler {
         let (response, receiver) = oneshot::channel();
         (
             StagedRead {
+                refill: super::refill_timing::is_refill(),
                 path: path.to_owned(),
                 range,
                 response,

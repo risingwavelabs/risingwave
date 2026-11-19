@@ -170,6 +170,7 @@ impl ObjectStore for OpendalObjectStore {
             )));
         }
 
+        crate::object::refill_timing::body_collected();
         Ok(data.to_bytes())
     }
 

@@ -284,6 +284,7 @@ impl ReadGroup {
         } else {
             None
         };
+        let refill = self.requests.iter().all(|request| request.refill);
         let physical = async {
             let _permit = reservation.start();
             if partial_overlap_bytes > 0 {
@@ -306,7 +307,7 @@ impl ReadGroup {
                 .read_scheduler_physical_duration
                 .with_label_values(&[media_type, "group"])
                 .start_timer();
-            read(path, span.clone()).await
+            super::super::refill_timing::with_origin(refill, read(path, span.clone())).await
         };
         let initial_members = self.requests.len();
         let result = if let Some(flight) = flight {
@@ -400,6 +401,7 @@ impl ReadGroup {
             join_all(self.requests.into_iter().map(|mut request| async move {
                 let path = request.path.clone();
                 let range = request.range.clone();
+                let refill = request.refill;
                 let future = async {
                     // The merged read released its permit before fallback. Each child
                     // shares the same physical budget and can be cancelled while waiting.
@@ -423,7 +425,7 @@ impl ReadGroup {
                         .read_scheduler_physical_duration
                         .with_label_values(&[media_type, "fallback"])
                         .start_timer();
-                    read(path, range).await
+                    super::super::refill_timing::with_origin(refill, read(path, range)).await
                 };
                 if let Some(result) =
                     read_while_wanted(std::slice::from_mut(&mut request), future).await

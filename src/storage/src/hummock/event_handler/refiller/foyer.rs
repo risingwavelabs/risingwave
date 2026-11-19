@@ -512,10 +512,12 @@ impl CacheRefillTask {
 
                     let now = Instant::now();
 
-                    let data = sstable_store
-                        .store()
-                        .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone())
-                        .await?;
+                    let store = sstable_store.store();
+                    let path = sstable_store.get_sst_data_path(task.sst.id);
+                    let data = risingwave_object_store::object::refill_timing::refill_get(
+                        store.read(&path, range.clone()),
+                    )
+                    .await?;
                     let mut apply_disk_cache_futures = vec![];
                     for (w, r, uc) in contexts {
                         let offset = r.start - range.start;
