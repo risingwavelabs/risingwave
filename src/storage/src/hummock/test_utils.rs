@@ -367,6 +367,40 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
     )
 }
 
+/// Sorted rows define the physical table/vnode layout; one entry per block exposes boundaries.
+pub async fn gen_test_sstable_with_table_vnodes(
+    store: &SstableStoreRef,
+    object: u64,
+    rows: &[(TableId, usize)],
+) -> (TableHolder, SstableInfo) {
+    let mut options = default_builder_opt_for_test();
+    options.block_capacity = 1;
+    let mut tables: Vec<_> = rows.iter().map(|(table, _)| table.as_raw_id()).collect();
+    tables.dedup();
+    gen_test_sstable_with_table_ids(
+        options,
+        object,
+        rows.iter().map(|&(table, vnode)| {
+            (
+                FullKey {
+                    user_key: UserKey::for_test(
+                        table,
+                        risingwave_hummock_sdk::key::prefix_slice_with_vnode(
+                            VirtualNode::from_index(vnode),
+                            b"key",
+                        ),
+                    ),
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                },
+                HummockValue::put(Bytes::from_static(b"value")),
+            )
+        }),
+        store.clone(),
+        tables,
+    )
+    .await
+}
+
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
 pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     opts: SstableBuilderOptions,

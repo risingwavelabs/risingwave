@@ -184,7 +184,7 @@ async fn test_disk_space_rejection_precedes_local_io() {
                 "missing".into()
             )
             .await,
-        Err(super::refill::PinCacheDownloadError::CapacityRejected)
+        Err(super::PinCacheDownloadError::CapacityRejected)
     ));
 
     assert!(cache.storage.lock().uploads.is_empty());
@@ -631,10 +631,7 @@ async fn test_disk_space_query_failure_does_not_start_local_io() {
         .await
         .err()
         .unwrap();
-    assert!(matches!(
-        &error,
-        super::refill::PinCacheDownloadError::Io(_)
-    ));
+    assert!(matches!(&error, super::PinCacheDownloadError::Io(_)));
     assert!(error.to_string().contains("filesystem space query failed"));
     assert!(
         !dir.path().exists(),
