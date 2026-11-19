@@ -67,14 +67,6 @@ pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_i
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 /// Comma-separated upstream columns to leave out of a CDC table created with `(*)`.
 pub const CDC_COLUMN_EXCLUDE_LIST: &str = "column.exclude.list";
-
-/// Parse the value of `column.exclude.list`, e.g. `'a, b'`.
-pub fn parse_cdc_column_exclude_list(list: &str) -> HashSet<String> {
-    list.split(',')
-        .map(|c| c.trim().to_owned())
-        .filter(|c| !c.is_empty())
-        .collect()
-}
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 pub const CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY: &str =
     "cdc.source.needs.offset.commit.on.checkpoint";
@@ -93,6 +85,14 @@ pub const ORACLE_CDC_CONNECTOR: &str = Oracle::CDC_CONNECTOR_NAME;
 /// Build a unique CDC table identifier from a source ID and external table name
 pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> String {
     format!("{}.{}", source_id, external_table_name)
+}
+
+/// Parse the value of `column.exclude.list`, e.g. `'a, b'`.
+pub fn parse_cdc_column_exclude_list(list: &str) -> HashSet<String> {
+    list.split(',')
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
+        .collect()
 }
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {

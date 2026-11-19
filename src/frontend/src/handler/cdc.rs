@@ -411,7 +411,6 @@ pub(crate) fn sanity_check_for_table_on_cdc_source(
     Ok(())
 }
 
-/// Derive the schema of a CDC table from its upstream external table.
 /// Derive the schema of a CDC table created with `(*)` from the upstream table, leaving out the
 /// columns listed in `column.exclude.list`.
 pub(crate) async fn bind_cdc_table_schema_externally(
