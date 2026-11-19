@@ -344,7 +344,7 @@ pub async fn handle(
             create_source::handle_create_source(handler_args, stmt).await
         }
         Statement::CreateSink { stmt } => {
-            create_sink::handle_create_sink(handler_args, stmt, false).await
+            Box::pin(create_sink::handle_create_sink(handler_args, stmt, false)).await
         }
         Statement::CreateSubscription { stmt } => {
             create_subscription::handle_create_subscription(handler_args, stmt).await
@@ -397,6 +397,7 @@ pub async fn handle(
                     args,
                     returns,
                     params,
+                    with_options,
                 )
                 .await
             }
@@ -1681,8 +1682,8 @@ pub async fn handle(
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare)
         }
-        Statement::Vacuum { object_name, full } => {
-            vacuum::handle_vacuum(handler_args, object_name, full).await
+        Statement::Vacuum { object_name, mode } => {
+            vacuum::handle_vacuum(handler_args, object_name, mode).await
         }
         Statement::Refresh { table_name } => {
             refresh::handle_refresh(handler_args, table_name).await

@@ -77,11 +77,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
         let vnodes = if partition_by_indices.is_empty() {
             None
         } else {
-            Some(std::sync::Arc::new(
-                params
-                    .vnode_bitmap
-                    .expect("vnodes not set for hash-distributed GapFill"),
-            ))
+            Some(std::sync::Arc::new(params.vnode_bitmap))
         };
 
         let state_table =

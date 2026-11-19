@@ -17,11 +17,11 @@ arc-swap = { workspace = true }
 assert_matches = "1"
 async-trait = "0.1"
 await-tree = { workspace = true }
-base64-url = { version = "3.0.0" }
+base64-url = { version = "4.0.1" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = "7"
+comfy-table = "8"
 crepe = "0.2"
 easy-ext = "1"
 educe = "0.6"

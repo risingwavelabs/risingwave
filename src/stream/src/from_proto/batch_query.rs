@@ -51,7 +51,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let table = BatchTable::new_partial(
             state_store,
             column_ids,
-            params.vnode_bitmap.map(Into::into),
+            Some(params.vnode_bitmap.into()),
             table_desc,
         );
         assert_eq!(table.schema().data_types(), params.info.schema.data_types());

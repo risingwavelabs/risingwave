@@ -68,6 +68,7 @@ mod commit_epoch;
 mod compaction;
 pub mod sequence;
 mod table_change_log;
+pub use table_change_log::CommittedTableChangeLogProgress;
 pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
@@ -196,6 +197,8 @@ pub struct HummockManager {
     /// In-memory cache of prefetched compaction task ids to reduce per-task DB round-trips.
     prefetched_compaction_task_ids: PrefetchedSequence,
     table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
+    /// Progress table id to its upstream table id and latest safe truncate epoch.
+    table_change_log_progress: parking_lot::RwLock<HashMap<TableId, (TableId, u64)>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -387,6 +390,7 @@ impl HummockManager {
             gc_manager,
             prefetched_compaction_task_ids: PrefetchedSequence::new(),
             table_id_to_table_option: RwLock::new(HashMap::new()),
+            table_change_log_progress: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
         let version_stat_metrics = instance.metrics.clone();

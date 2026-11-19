@@ -215,3 +215,65 @@ drop table t4;
 
 statement ok
 drop table wide;
+
+# Changelog over a singleton input, and a downstream job over that changelog.
+statement ok
+create table single_t (v int);
+
+statement ok
+create materialized view single_mv as select count(*) as c from single_t;
+
+statement ok
+create materialized view single_log as with x as changelog from single_mv select * from x;
+
+statement ok
+insert into single_t values (1), (2);
+
+statement ok
+insert into single_t values (3);
+
+statement ok
+delete from single_t where v = 1;
+
+# changelog_op: 1 = insert, 3 = update insert, 4 = update delete
+query II
+select c, changelog_op from single_log order by _changelog_row_id;
+----
+0 1
+0 4
+2 3
+2 4
+3 3
+3 4
+2 3
+
+statement ok
+create materialized view single_log_downstream as select c, changelog_op, _changelog_row_id as id from single_log;
+
+statement ok
+insert into single_t values (4);
+
+query II
+select c, changelog_op from single_log_downstream order by id;
+----
+0 1
+0 4
+2 3
+2 4
+3 3
+3 4
+2 3
+2 4
+3 3
+
+statement ok
+drop materialized view single_log_downstream;
+
+statement ok
+drop materialized view single_log;
+
+statement ok
+drop materialized view single_mv;
+
+statement ok
+drop table single_t;

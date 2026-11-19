@@ -28,7 +28,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
-use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
+use risingwave_sqlparser::ast::SqlOptionRedactionRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
@@ -128,10 +128,14 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
+    /// Interval of scanning Iceberg table locations for orphan files.
+    pub iceberg_orphan_file_cleanup_interval_sec: u64,
     /// Maximum time to wait for an iceberg compaction task report before the lease expires.
     pub iceberg_compaction_report_timeout_sec: u64,
     /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
     pub iceberg_compaction_config_refresh_interval_sec: u64,
+    /// Whether to schedule one compaction for every Iceberg sink when meta starts.
+    pub iceberg_compaction_schedule_on_startup: bool,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
@@ -280,7 +284,11 @@ pub struct MetaOpts {
 
     pub compaction_group_merge_dimension_threshold: f64,
 
-    // The private key for the secret store, used when the secret is stored in the meta.
+    /// The private key for the secret store, used when the secret is stored in the meta.
+    ///
+    /// Never serialize this: `MetaOpts` is dumped as JSON into the `META_NODE_START` event log
+    /// on every meta startup
+    #[serde(skip)]
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
     pub temp_secret_file_dir: String,
@@ -298,7 +306,7 @@ pub struct MetaOpts {
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
-    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+    pub sql_option_redaction: SqlOptionRedactionRef,
 
     pub cdc_table_split_init_sleep_interval_splits: u64,
     pub cdc_table_split_init_sleep_duration_millis: u64,
@@ -330,8 +338,10 @@ impl MetaOpts {
             time_travel_vacuum_max_version_count: None,
             vacuum_spin_interval_ms: 0,
             iceberg_gc_interval_sec: 3600,
+            iceberg_orphan_file_cleanup_interval_sec: 7 * 24 * 60 * 60,
             iceberg_compaction_report_timeout_sec: 30 * 60,
             iceberg_compaction_config_refresh_interval_sec: 60,
+            iceberg_compaction_schedule_on_startup: false,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             checkpoint_compression_algorithm:
@@ -405,7 +415,7 @@ impl MetaOpts {
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
-            redact_sql_option_keywords: Arc::new(Default::default()),
+            sql_option_redaction: Arc::new(Default::default()),
             cdc_table_split_init_sleep_interval_splits: 1000,
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,
@@ -605,5 +615,22 @@ impl MetaSrvEnv {
         )
         .await
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_secret_store_private_key_is_not_serialized() {
+        let opts = MetaOpts::test(false);
+        assert!(opts.secret_store_private_key.is_some());
+
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(
+            !json.contains("secret_store_private_key"),
+            "secret_store_private_key must not be serialized into MetaOpts JSON"
+        );
     }
 }

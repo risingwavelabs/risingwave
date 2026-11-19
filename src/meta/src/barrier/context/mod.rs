@@ -15,12 +15,14 @@
 mod context_impl;
 pub(crate) mod recovery;
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::{JobId, PartialGraphId};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -40,7 +42,6 @@ use crate::barrier::{
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::{
     IcebergPkIndexPreCommitMetadata, IcebergPkIndexSinkManager,
 };
@@ -70,6 +71,7 @@ impl CreateIndependentStreamingJobCommandInfo {
                 }
             }
             kind @ IndependentStreamingJobType::BatchRefresh { .. } => kind,
+            IndependentStreamingJobType::IcebergV3 => IndependentStreamingJobType::IcebergV3,
         };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,
@@ -93,9 +95,13 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     async fn abort_and_mark_blocked(
         &self,
         recovery: RecoveryStart,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) -> MetaResult<()>;
-    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()>;
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()>;
     fn resolve_log_store_epoch<'a>(
         &'a self,
         upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
@@ -106,9 +112,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Run the post-collect work of `command`, carried by the barrier of `epoch`, after the
+    /// barrier has been collected and committed.
     fn post_collect_command(
         &self,
         command: PostCollectCommand,
+        epoch: EpochPair,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     fn notify_creating_job_failed(
@@ -204,8 +213,6 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     sink_manager: SinkCoordinatorManager,
 
     pub(super) iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
-
-    pub(super) iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -222,7 +229,6 @@ impl GlobalBarrierWorkerContextImpl {
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -236,7 +242,6 @@ impl GlobalBarrierWorkerContextImpl {
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
-            iceberg_compaction_manager,
         }
     }
 

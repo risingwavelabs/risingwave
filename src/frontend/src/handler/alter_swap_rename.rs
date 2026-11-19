@@ -113,6 +113,14 @@ pub async fn handle_swap_rename(
                 catalog_reader.get_source_by_name(db_name, src_schema_path, &src_obj_name)?;
             let (target_source, _) =
                 catalog_reader.get_source_by_name(db_name, target_schema_path, &target_obj_name)?;
+            if src_source.associated_table_id.is_some()
+                || target_source.associated_table_id.is_some()
+            {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "Use `ALTER TABLE` to alter a table with connector.".to_owned(),
+                )
+                .into());
+            }
             check_swap_rename_privilege(&session, src_source.owner, target_source.owner)?;
 
             (src_source.id, target_source.id).into()

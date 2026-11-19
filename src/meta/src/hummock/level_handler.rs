@@ -56,13 +56,6 @@ impl LevelHandler {
         self.compacting_files.contains_key(sst_id)
     }
 
-    pub fn pending_task_id_by_sst(
-        &self,
-        sst_id: &HummockSstableId,
-    ) -> Option<HummockCompactionTaskId> {
-        self.compacting_files.get(sst_id).cloned()
-    }
-
     pub fn is_level_pending_compact(&self, level: &Level) -> bool {
         level
             .table_infos
@@ -106,13 +99,6 @@ impl LevelHandler {
 
     pub fn pending_file_count(&self) -> usize {
         self.compacting_files.len()
-    }
-
-    pub fn pending_file_size(&self) -> u64 {
-        self.pending_tasks
-            .iter()
-            .map(|task| task.total_file_size)
-            .sum::<u64>()
     }
 
     pub fn pending_output_file_size(&self, target_level: u32) -> u64 {

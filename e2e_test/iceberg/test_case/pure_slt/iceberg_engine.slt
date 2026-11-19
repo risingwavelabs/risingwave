@@ -79,6 +79,10 @@ select * from t for system_time as of '2222-12-10 11:48:06';
 ----
 1 xxx drop-me
 
+# Time travel is batch only: a streaming job can't read a fixed snapshot.
+statement error time travel in a streaming job
+create materialized view mv_time_travel as select * from t for system_time as of '2222-12-10 11:48:06';
+
 statement ok
 alter table t drop column extra;
 

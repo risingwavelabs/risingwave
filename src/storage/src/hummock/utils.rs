@@ -350,27 +350,6 @@ impl Drop for MemoryTracker {
     }
 }
 
-/// Check whether the items in `sub_iter` is a subset of the items in `full_iter`, and meanwhile
-/// preserve the order.
-pub fn check_subset_preserve_order<T: Eq>(
-    sub_iter: impl Iterator<Item = T>,
-    mut full_iter: impl Iterator<Item = T>,
-) -> bool {
-    for sub_iter_item in sub_iter {
-        let mut found = false;
-        for full_iter_item in full_iter.by_ref() {
-            if sub_iter_item == full_iter_item {
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            return false;
-        }
-    }
-    true
-}
-
 static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 
 /// This function is intended to be called during compute node initialization if the storage
@@ -511,86 +490,6 @@ pub(crate) async fn do_update_sanity_check(
             }
         }
     }
-}
-
-pub fn cmp_delete_range_left_bounds(a: Bound<&Bytes>, b: Bound<&Bytes>) -> Ordering {
-    match (a, b) {
-        // only right bound of delete range can be `Unbounded`
-        (Unbounded, _) | (_, Unbounded) => unreachable!(),
-        (Included(x), Included(y)) | (Excluded(x), Excluded(y)) => x.cmp(y),
-        (Included(x), Excluded(y)) => x.cmp(y).then(Ordering::Less),
-        (Excluded(x), Included(y)) => x.cmp(y).then(Ordering::Greater),
-    }
-}
-
-pub(crate) fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
-    match (left, right) {
-        // only right bound of delete range can be `Unbounded`
-        (Unbounded, _) => unreachable!(),
-        (_, Unbounded) => true,
-        (Included(x), Included(y)) => x <= y,
-        (Included(x), Excluded(y)) | (Excluded(x), Included(y)) | (Excluded(x), Excluded(y)) => {
-            x < y
-        }
-    }
-}
-
-#[expect(dead_code)]
-pub(crate) fn filter_with_delete_range<'a>(
-    kv_iter: impl Iterator<Item = (TableKey<Bytes>, KeyOp)> + 'a,
-    mut delete_ranges_iter: impl Iterator<Item = &'a (Bound<Bytes>, Bound<Bytes>)> + 'a,
-) -> impl Iterator<Item = (TableKey<Bytes>, KeyOp)> + 'a {
-    let mut range = delete_ranges_iter.next();
-    if let Some((range_start, range_end)) = range {
-        assert!(
-            validate_delete_range(range_start, range_end),
-            "range_end {:?} smaller than range_start {:?}",
-            range_start,
-            range_end
-        );
-    }
-    kv_iter.filter(move |(key, _)| {
-        if let Some(range_bound) = range {
-            if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
-                == Ordering::Less
-            {
-                true
-            } else if range_bound.contains(key.as_ref()) {
-                false
-            } else {
-                // Key has exceeded the current key range. Advance to the next range.
-                loop {
-                    range = delete_ranges_iter.next();
-                    if let Some(range_bound) = range {
-                        assert!(
-                            validate_delete_range(&range_bound.0, &range_bound.1),
-                            "range_end {:?} smaller than range_start {:?}",
-                            range_bound.0,
-                            range_bound.1
-                        );
-                        if cmp_delete_range_left_bounds(Included(key), range_bound.0.as_ref())
-                            == Ordering::Less
-                        {
-                            // Not fall in the next delete range
-                            break true;
-                        } else if range_bound.contains(key.as_ref()) {
-                            // Fall in the next delete range
-                            break false;
-                        } else {
-                            // Exceed the next delete range. Go to the next delete range if there is
-                            // any in the next loop
-                            continue;
-                        }
-                    } else {
-                        // No more delete range.
-                        break true;
-                    }
-                }
-            }
-        } else {
-            true
-        }
-    })
 }
 
 /// Wait for the `committed_epoch` of `table_id` to reach `wait_epoch`.

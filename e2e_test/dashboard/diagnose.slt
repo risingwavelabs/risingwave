@@ -1,0 +1,28 @@
+# Exercise database filtering through the diagnostic HTTP API.
+skipif madsim
+statement ok
+drop database if exists diagnose_filter_a;
+
+skipif madsim
+statement ok
+drop database if exists diagnose_filter_b;
+
+skipif madsim
+statement ok
+create database diagnose_filter_a;
+
+skipif madsim
+statement ok
+create database diagnose_filter_b;
+
+skipif madsim
+system ok
+python3 e2e_test/dashboard/diagnose.py
+
+skipif madsim
+statement ok
+drop database diagnose_filter_a;
+
+skipif madsim
+statement ok
+drop database diagnose_filter_b;

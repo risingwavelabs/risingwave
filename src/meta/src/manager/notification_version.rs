@@ -55,13 +55,18 @@ impl NotificationVersionGenerator {
     }
 
     pub async fn increase_version(&mut self) {
+        self.increase_version_by(1).await;
+    }
+
+    pub async fn increase_version_by(&mut self, delta: u64) {
+        assert!(delta > 0, "notification version delta must be positive");
         CatalogVersion::update(catalog_version::ActiveModel {
             name: Set(VersionCategory::Notification),
-            version: Set((self.current_version + 1) as i64),
+            version: Set((self.current_version + delta) as i64),
         })
         .exec(&self.conn)
         .await
         .unwrap();
-        self.current_version += 1;
+        self.current_version += delta;
     }
 }

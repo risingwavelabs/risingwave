@@ -35,7 +35,7 @@ impl KinesisMeta {
 
 pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
     SourceMessage {
-        key: Some(value.partition_key.clone().into_bytes()),
+        key: value.partition_key.clone().map(String::into_bytes),
         payload: Some(value.data.clone().into_inner()),
         offset: value.sequence_number.clone(),
         split_id,

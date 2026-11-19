@@ -16,14 +16,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
-use rand::Rng;
 use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
@@ -36,15 +35,17 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_desc, get_supported_additional_columns,
-    source_add_partition_offset_cols,
+    build_additional_column_desc, source_add_partition_offset_cols,
 };
 use risingwave_connector::parser::{
     AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
     SchemaLocation, SpecificParserConfig, TimestamptzHandling,
-    fetch_json_schema_and_map_to_columns,
+    fetch_json_schema_and_map_to_columns, fetch_pulsar_json_schema_and_map_to_columns,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
+use risingwave_connector::schema::pulsar_schema::{
+    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig,
+};
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
     SCHEMA_REGISTRY_CA_PEM_PATH, SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD,
@@ -52,10 +53,10 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY,
+    CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CdcSourceDdlValidator, CdcSourceRuntimeFlags,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -69,16 +70,16 @@ use risingwave_connector::source::{
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
-use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
+use risingwave_pb::plan_common::source_ingest_mode::{IngestMode, SourceIngestModeStreaming};
+use risingwave_pb::plan_common::{EncodeType, FormatType, SourceIngestMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
     ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
@@ -95,7 +96,7 @@ use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
     reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_table::{
@@ -112,7 +113,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options, resolve_source_refresh_mode_in_with_option,
+    resolve_secret_ref_in_with_options, resolve_source_ingest_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -120,9 +121,10 @@ mod external_schema;
 pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
+use external_schema::{format_to_prost, row_encode_to_prost};
 mod validate;
+pub use validate::validate_compatibility;
 use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
-pub use validate::{validate_compatibility, validate_heartbeat_interval};
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
@@ -142,8 +144,8 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
 fn try_consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Option<AstString> {
-    format_encode_options.remove(key).map(AstString)
+) -> Option<String> {
+    format_encode_options.remove(key)
 }
 
 fn try_consume_schema_registry_config_from_options(
@@ -164,10 +166,27 @@ fn try_consume_schema_registry_config_from_options(
     });
 }
 
+/// Returns whether the Pulsar schema is used, with `schema.pulsar.url` set directly or as a secret.
+pub(crate) fn uses_pulsar_schema<V>(
+    format_encode_options: &BTreeMap<String, String>,
+    format_encode_secret_refs: &BTreeMap<String, V>,
+) -> bool {
+    format_encode_options.contains_key(PULSAR_SCHEMA_URL_KEY)
+        || format_encode_secret_refs.contains_key(PULSAR_SCHEMA_URL_KEY)
+}
+
+fn try_consume_pulsar_schema_config_from_options(
+    format_encode_options: &mut BTreeMap<String, String>,
+) {
+    for key in [PULSAR_SCHEMA_URL_KEY, PULSAR_SCHEMA_AUTH_TOKEN_KEY] {
+        try_consume_string_from_options(format_encode_options, key);
+    }
+}
+
 fn consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Result<AstString> {
+) -> Result<String> {
     try_consume_string_from_options(format_encode_options, key).ok_or(RwError::from(ProtocolError(
         format!("missing field {} in options", key),
     )))
@@ -523,6 +542,16 @@ pub(crate) async fn bind_source_pk(
     sql_defined_pk_names: Vec<String>,
     with_properties: &WithOptionsSecResolved,
 ) -> Result<Vec<String>> {
+    if with_properties.is_iceberg_update_source() {
+        if sql_defined_pk_names.is_empty() {
+            return Err(InvalidInputSyntax(
+                "Iceberg streaming_updates requires a SQL PRIMARY KEY for retracting ingestion"
+                    .to_owned(),
+            )
+            .into());
+        }
+        return Ok(sql_defined_pk_names);
+    }
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let include_key_column_name: Option<String> = {
         // iter columns to check if contains additional columns from key part
@@ -746,19 +775,34 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<(WithOptions, SourceRefreshMode)> {
+) -> Result<(WithOptions, SourceIngestMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(format_encode, &mut with_properties)?;
-    let refresh_mode = {
-        let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
-        if is_create_source && refresh_mode.is_some() {
+    // The planner and executors decide the ingestion mode from plaintext options only, while
+    // connector property extraction would also read a secret value.
+    if with_properties.is_iceberg_connector()
+        && with_properties
+            .secret_ref()
+            .contains_key(risingwave_connector::source::iceberg::STREAMING_UPDATES_KEY)
+    {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "streaming_updates cannot be provided as a SECRET; use a plaintext 'true' or 'false'"
+                .to_owned(),
+        )));
+    }
+    let (_, secret_refs) =
+        resolve_secret_ref_in_with_options(with_properties.clone(), &handler_args.session)?
+            .into_parts();
+    validate_compatibility(format_encode, &mut with_properties, &secret_refs)?;
+    let ingest_mode = {
+        let ingest_mode = resolve_source_ingest_mode_in_with_option(&mut with_properties)?;
+        if is_create_source && ingest_mode.is_some() {
             return Err(RwError::from(ProtocolError(
                 "`refresh_mode` only supported for CREATE TABLE".to_owned(),
             )));
         }
 
-        refresh_mode.unwrap_or(SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+        ingest_mode.unwrap_or(SourceIngestMode {
+            ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
         })
     };
 
@@ -772,7 +816,36 @@ pub fn bind_connector_props(
             with_properties.get_connector().unwrap(),
         ))));
     }
-    if is_create_source && create_cdc_source_job {
+    if with_properties.is_cdc_connector() {
+        if with_properties.contains_key(CDC_TRANSACTIONAL_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_TRANSACTIONAL_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave enables transaction metadata itself for the connectors that support it",
+                CDC_TRANSACTIONAL_KEY
+            ))));
+        }
+        if with_properties.contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave sets it itself for the connectors that commit offsets to the upstream database",
+                CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY
+            ))));
+        }
+        if with_properties
+            .secret_ref()
+            .contains_key(AUTO_SCHEMA_CHANGE_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "'{}' cannot be provided as a SECRET; use a plaintext 'true' or 'false'",
+                AUTO_SCHEMA_CHANGE_KEY
+            ))));
+        }
         if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
             && value.parse::<bool>().map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
@@ -781,9 +854,28 @@ pub fn bind_connector_props(
                 ))
             })?
         {
+            if !dispatch_cdc_source_type!(
+                with_properties.cdc_source_type(),
+                T,
+                T::CAN_AUTO_SCHEMA_CHANGE,
+                false
+            ) {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "auto schema change for connector {}",
+                        with_properties.get_connector().unwrap()
+                    ),
+                    format!(
+                        "Remove the '{}' option or set it to false",
+                        AUTO_SCHEMA_CHANGE_KEY
+                    ),
+                )
+                .into());
+            }
             Feature::CdcAutoSchemaChange.check_available()?;
         }
-
+    }
+    if is_create_source && create_cdc_source_job {
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
@@ -804,22 +896,7 @@ pub fn bind_connector_props(
             );
         }
     }
-    if with_properties.is_mysql_cdc_connector() {
-        // Generate a random server id for mysql cdc source if needed
-        // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-        // group (that is, different from any other server id being used by any master or slave)
-        with_properties
-            .entry("server.id".to_owned())
-            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
-    }
-    Ok((with_properties, refresh_mode))
-}
-
-fn must_wait_cdc_offset_before_report(with_properties: &WithOptions) -> bool {
-    matches!(
-        with_properties.get_connector().as_deref(),
-        Some(MYSQL_CDC_CONNECTOR) | Some(SQL_SERVER_CDC_CONNECTOR)
-    )
+    Ok((with_properties, ingest_mode))
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -898,7 +975,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-    refresh_mode: SourceRefreshMode,
+    ingest_mode: SourceIngestMode,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -942,7 +1019,10 @@ pub async fn bind_create_source_or_table_with_connector(
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
     if with_properties.is_iceberg_connector() {
-        if is_create_source && !sql_pk_names.is_empty() {
+        if is_create_source
+            && !with_properties.is_iceberg_update_source()
+            && !sql_pk_names.is_empty()
+        {
             return Err(ErrorCode::NotSupported(
                 "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
                     .to_owned(),
@@ -1158,8 +1238,9 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        refresh_mode: Some(refresh_mode),
+        ingest_mode: Some(ingest_mode),
     };
+    source.validate_iceberg_update_source()?;
     Ok(source)
 }
 
@@ -1192,7 +1273,7 @@ pub async fn handle_create_source(
         return handle_create_cdc_table_source(handler_args, stmt).await;
     }
 
-    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -1201,7 +1282,12 @@ pub async fn handle_create_source(
     }
 
     if overwrite_options.source_rate_limit == Some(0)
-        && must_wait_cdc_offset_before_report(&handler_args.with_options)
+        && dispatch_cdc_source_type!(
+            handler_args.with_options.cdc_source_type(),
+            T,
+            T::NEEDS_NON_EMPTY_INITIAL_OFFSET,
+            false
+        )
     {
         let connector = handler_args.with_options.get_connector().unwrap();
         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
@@ -1210,11 +1296,16 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, ingest_mode) = bind_connector_props(&handler_args, &format_encode, true)?;
     if let Some(connector) = with_properties.get_connector() {
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
+
+    // Check the CREATE privilege before `bind_columns_from_source`, which may fetch from
+    // user-supplied URLs (schema registry, schema file).
+    let (schema_name, _) =
+        Binder::resolve_schema_qualified_name(&session.database(), &stmt.source_name)?;
+    session.get_database_and_schema_id_for_create(schema_name)?;
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -1252,7 +1343,7 @@ pub async fn handle_create_source(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
@@ -1382,7 +1473,7 @@ async fn handle_create_cdc_table_source(
         .into());
     }
 
-    let (cdc_with_options, external_table_name) = derive_with_options_for_cdc_table(
+    let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
         &upstream_source.with_properties,
         cdc_table_info.external_table_name.clone(),
     )?;
@@ -1502,7 +1593,7 @@ async fn handle_create_cdc_table_source(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: None,
-        refresh_mode: upstream_source.refresh_mode,
+        ingest_mode: upstream_source.ingest_mode,
     };
 
     session
@@ -1516,7 +1607,7 @@ pub(super) fn generate_stream_graph_for_source(
     handler_args: HandlerArgs,
     source_catalog: SourceCatalog,
 ) -> Result<PbStreamFragmentGraph> {
-    let context = OptimizerContext::from_handler_args(handler_args);
+    let context = OptimizerContext::from_handler_args(handler_args)?;
     let source_node = LogicalSource::with_catalog(
         Rc::new(source_catalog),
         SourceNodeKind::CreateSharedSource,
@@ -1534,6 +1625,10 @@ pub(super) fn generate_stream_graph_for_source(
     Ok(graph)
 }
 
+#[cfg(all(test, not(madsim)))]
+#[path = "create_source/iceberg_update_test.rs"]
+mod iceberg_update_tests;
+
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
@@ -1544,6 +1639,7 @@ pub mod tests {
     };
     use risingwave_common::config::FrontendConfig;
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_connector::parser::additional_columns::get_kafka_header_item_datatype;
     use risingwave_pb::plan_common::EncodeType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -1946,6 +2042,68 @@ pub mod tests {
         drop(catalog_reader);
 
         let sql =
+            "CREATE SOURCE s_nats (v1 int) include header 'trace-id' as nats_header with (connector = 'nats') format plain encode json".to_owned();
+        frontend.run_sql(sql).await.unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s_nats",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s_nats");
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "nats_header",
+                    Bytea,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
+        drop(catalog_reader);
+
+        // Bare `INCLUDE header AS ...` -- list-of-struct dispatch through the NATS DDL path.
+        let sql =
+            "CREATE SOURCE s_nats_all (v1 int) include header as nats_all_headers with (connector = 'nats') format plain encode json".to_owned();
+        frontend.run_sql(sql).await.unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s_nats_all",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s_nats_all");
+        let all_headers_col = source
+            .columns
+            .iter()
+            .find(|c| c.name() == "nats_all_headers")
+            .expect("nats_all_headers column present");
+        assert_eq!(
+            all_headers_col.data_type(),
+            &DataType::list(get_kafka_header_item_datatype()),
+        );
+        drop(catalog_reader);
+
+        let sql =
             "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json".to_owned();
         match frontend.run_sql(sql).await {
             Err(e) => {
@@ -1955,6 +2113,50 @@ pub mod tests {
                 )
             }
             _ => unreachable!(),
+        }
+    }
+
+    /// The CREATE privilege must be checked before the schema is fetched from a user-supplied
+    /// URL (schema registry or schema file). Otherwise a user without CREATE on the schema can
+    /// still make the frontend send the request, and only then get "permission denied".
+    #[tokio::test]
+    async fn test_create_privilege_checked_before_schema_fetch() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("CREATE USER no_create_user")
+            .await
+            .unwrap();
+        let user_id = frontend
+            .session_ref()
+            .env()
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name("no_create_user")
+            .unwrap()
+            .id;
+        let user_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "no_create_user".to_owned(),
+            user_id,
+        );
+
+        // Nothing listens on this port, so if the request is sent at all it fails with a
+        // connection error instead of "permission denied".
+        let with_and_format = "WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:1', topic = 't') \
+             FORMAT PLAIN ENCODE AVRO (schema.registry = 'http://127.0.0.1:1')";
+        let create_source = format!("CREATE SOURCE s {with_and_format}");
+        let create_table = format!("CREATE TABLE t {with_and_format}");
+
+        for sql in [create_source, create_table] {
+            let err = frontend
+                .run_sql_with_session(user_session.clone(), sql)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("permission denied for schema \"public\": \"CREATE\""),
+                "{err:?}"
+            );
         }
     }
 }

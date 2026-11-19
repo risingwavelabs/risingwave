@@ -15,7 +15,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -31,13 +33,15 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    IcebergPkIndexSinkMetadata, PbTableChangeLogProgress,
+};
 
 use crate::barrier::CreateStreamingJobCommandInfo;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
-use crate::hummock::NewTableFragmentInfo;
+use crate::hummock::{CommittedTableChangeLogProgress, NewTableFragmentInfo};
 
 #[expect(clippy::type_complexity)]
 pub(super) fn collect_resp_info(
@@ -49,6 +53,7 @@ pub(super) fn collect_resp_info(
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
     Vec<IcebergPkIndexSinkMetadata>,
+    Vec<CommittedTableChangeLogProgress>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, _> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
@@ -56,6 +61,14 @@ pub(super) fn collect_resp_info(
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     let mut vector_index_adds = HashMap::new();
     let mut iceberg_pk_index_sink_metadata = Vec::new();
+    type SubscriberKey = (FragmentId, TableId, TableId);
+    struct TableChangeLogProgressAggregate {
+        vnode_bitmap: Bitmap,
+        min_truncate_epoch: u64,
+    }
+    let mut table_change_log_reports =
+        HashMap::<SubscriberKey, TableChangeLogProgressAggregate>::new();
+    let mut invalid_table_change_log_subscribers = HashSet::new();
 
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
@@ -83,7 +96,91 @@ pub(super) fn collect_resp_info(
                 .expect("non-duplicate");
         }
         iceberg_pk_index_sink_metadata.extend(resp.iceberg_pk_index_sink_metadata);
+        for report in resp.table_change_log_progress {
+            let PbTableChangeLogProgress {
+                fragment_id,
+                upstream_table_id,
+                progress_table_id,
+                min_truncate_epoch,
+                vnode_bitmap,
+            } = report;
+            let key = (fragment_id, upstream_table_id, progress_table_id);
+            let Some(vnode_bitmap) = vnode_bitmap else {
+                tracing::warn!(
+                    %fragment_id,
+                    %upstream_table_id,
+                    %progress_table_id,
+                    "ignore missing table change log progress vnode bitmap"
+                );
+                invalid_table_change_log_subscribers.insert(key);
+                continue;
+            };
+            let vnode_bitmap = Bitmap::from(&vnode_bitmap);
+            if !vnode_bitmap.any() {
+                tracing::warn!(
+                    %fragment_id,
+                    %upstream_table_id,
+                    %progress_table_id,
+                    "ignore empty table change log progress vnode bitmap"
+                );
+                invalid_table_change_log_subscribers.insert(key);
+                continue;
+            }
+            match table_change_log_reports.entry(key) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(TableChangeLogProgressAggregate {
+                        vnode_bitmap,
+                        min_truncate_epoch,
+                    });
+                }
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let progress = entry.get_mut();
+                    if progress.vnode_bitmap.len() != vnode_bitmap.len()
+                        || (&progress.vnode_bitmap & &vnode_bitmap).any()
+                    {
+                        tracing::warn!(
+                            %fragment_id,
+                            %upstream_table_id,
+                            %progress_table_id,
+                            "ignore inconsistent table change log progress vnode ownership"
+                        );
+                        invalid_table_change_log_subscribers.insert(key);
+                        continue;
+                    }
+                    progress.vnode_bitmap |= &vnode_bitmap;
+                    progress.min_truncate_epoch =
+                        progress.min_truncate_epoch.min(min_truncate_epoch);
+                }
+            }
+        }
     }
+
+    let table_change_log_progress = table_change_log_reports
+        .into_iter()
+        .filter_map(
+            |(key @ (fragment_id, upstream_table_id, progress_table_id), progress)| {
+                if invalid_table_change_log_subscribers.contains(&key) {
+                    return None;
+                }
+                if !progress.vnode_bitmap.all() {
+                    tracing::warn!(
+                        %fragment_id,
+                        %upstream_table_id,
+                        %progress_table_id,
+                        covered_vnode_count = progress.vnode_bitmap.count_ones(),
+                        vnode_count = progress.vnode_bitmap.len(),
+                        "ignore incomplete table change log progress vnode coverage"
+                    );
+                    return None;
+                }
+                Some(CommittedTableChangeLogProgress {
+                    upstream_table_id,
+                    progress_table_id,
+                    truncate_epoch: progress.min_truncate_epoch,
+                })
+            },
+        )
+        .collect();
 
     (
         sst_to_worker,
@@ -104,6 +201,7 @@ pub(super) fn collect_resp_info(
         old_value_ssts,
         vector_index_adds,
         iceberg_pk_index_sink_metadata,
+        table_change_log_progress,
     )
 }
 
@@ -142,6 +240,7 @@ pub(super) fn collect_independent_job_commit_epoch_info(
         old_value_sst,
         vector_index_adds,
         iceberg_pk_index_sink_metadata,
+        table_change_log_progress,
     ) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
     let commit_info = &mut task.commit_info;
@@ -186,6 +285,9 @@ pub(super) fn collect_independent_job_commit_epoch_info(
     };
     task.iceberg_pk_index_pre_commit_metadata
         .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
+    commit_info
+        .table_change_log_progress
+        .extend(table_change_log_progress);
 }
 
 pub(super) type NodeToCollect = HashSet<WorkerId>;
@@ -366,9 +468,62 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
 mod tests {
     use std::collections::HashSet;
 
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::id::FragmentId;
     use risingwave_common::util::epoch::EpochPair;
+    use risingwave_pb::stream_service::BarrierCompleteResponse;
+    use risingwave_pb::stream_service::barrier_complete_response::PbTableChangeLogProgress;
 
-    use super::BarrierItemCollector;
+    use super::{BarrierItemCollector, collect_resp_info};
+
+    #[test]
+    fn table_change_log_progress_requires_complete_vnode_coverage() {
+        let report = |vnodes: &[usize], truncate_epoch| PbTableChangeLogProgress {
+            fragment_id: FragmentId::new(10),
+            upstream_table_id: TableId::new(20),
+            progress_table_id: TableId::new(30),
+            min_truncate_epoch: truncate_epoch,
+            vnode_bitmap: Some(Bitmap::from_indices(4, vnodes).to_protobuf()),
+        };
+        let responses = vec![
+            BarrierCompleteResponse {
+                table_change_log_progress: vec![report(&[0, 1], 100)],
+                ..Default::default()
+            },
+            BarrierCompleteResponse {
+                table_change_log_progress: vec![report(&[2, 3], 80)],
+                ..Default::default()
+            },
+        ];
+
+        let (_, _, _, _, _, _, progress) = collect_resp_info(responses);
+        assert_eq!(progress.len(), 1);
+        let progress = &progress[0];
+        assert_eq!(progress.upstream_table_id, TableId::new(20));
+        assert_eq!(progress.progress_table_id, TableId::new(30));
+        assert_eq!(progress.truncate_epoch, 80);
+
+        let incomplete_responses = vec![BarrierCompleteResponse {
+            table_change_log_progress: vec![report(&[0, 1], 100)],
+            ..Default::default()
+        }];
+        let (_, _, _, _, _, _, progress) = collect_resp_info(incomplete_responses);
+        assert!(progress.is_empty());
+
+        let overlapping_responses = vec![
+            BarrierCompleteResponse {
+                table_change_log_progress: vec![report(&[0, 1, 2], 100)],
+                ..Default::default()
+            },
+            BarrierCompleteResponse {
+                table_change_log_progress: vec![report(&[2, 3], 80)],
+                ..Default::default()
+            },
+        ];
+        let (_, _, _, _, _, _, progress) = collect_resp_info(overlapping_responses);
+        assert!(progress.is_empty());
+    }
 
     /// The finishing-jobs collector is fed only on the sparse subset of barriers where a
     /// snapshot-backfill job finishes, so enqueued epochs are not contiguous. Enqueuing a barrier

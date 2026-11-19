@@ -136,9 +136,7 @@ async fn bind_columns_from_source_for_non_cdc(
     )?;
 
     fn get_key_message_name(options: &mut BTreeMap<String, String>) -> Option<String> {
-        consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
-            .map(|ele| Some(ele.0))
-            .unwrap_or(None)
+        consume_string_from_options(options, KEY_MESSAGE_NAME_KEY).ok()
     }
     fn get_sr_name_strategy_check(
         options: &mut BTreeMap<String, String>,
@@ -188,10 +186,10 @@ async fn bind_columns_from_source_for_non_cdc(
             stream_source_info.use_schema_registry = use_schema_registry;
             stream_source_info
                 .row_schema_location
-                .clone_from(&row_schema_location.0);
+                .clone_from(&row_schema_location);
             stream_source_info
                 .proto_message_name
-                .clone_from(&message_name.0);
+                .clone_from(&message_name);
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
@@ -207,13 +205,18 @@ async fn bind_columns_from_source_for_non_cdc(
             )
         }
         (format @ (Format::Plain | Format::Upsert | Format::Debezium), Encode::Avro) => {
-            if format_encode_options_to_consume
+            if format_encode_options_to_consume.contains_key(PULSAR_SCHEMA_URL_KEY) {
+                // Pulsar schema options are parsed by `SpecificParserConfig` and remain in the
+                // catalog format options. They deliberately do not populate the legacy
+                // Confluent-oriented `row_schema_location` fields.
+            } else if format_encode_options_to_consume
                 .remove(AWS_GLUE_SCHEMA_ARN_KEY)
                 .is_none()
             {
                 // Legacy logic that assumes either `schema.location` or confluent `schema.registry`.
                 // The handling of newly added aws glue is centralized in `connector::parser`.
-                // TODO(xiangjinwu): move these option parsing to `connector::parser` as well.
+                // TODO(xiangjinwu): move these option parsing to `connector::parser` as well,
+                // together with schema registry logic in `validate::validate_compatibility`
 
                 let (row_schema_location, use_schema_registry) =
                     get_schema_location(&mut format_encode_options_to_consume)?;
@@ -236,9 +239,8 @@ async fn bind_columns_from_source_for_non_cdc(
                 stream_source_info.use_schema_registry = use_schema_registry;
                 stream_source_info
                     .row_schema_location
-                    .clone_from(&row_schema_location.0);
-                stream_source_info.proto_message_name =
-                    message_name.unwrap_or(AstString("".into())).0;
+                    .clone_from(&row_schema_location);
+                stream_source_info.proto_message_name = message_name.unwrap_or_default();
                 stream_source_info.key_message_name =
                     get_key_message_name(&mut format_encode_options_to_consume);
                 stream_source_info.name_strategy =
@@ -257,13 +259,13 @@ async fn bind_columns_from_source_for_non_cdc(
         }
         (Format::Plain, Encode::Csv) => {
             let chars =
-                consume_string_from_options(&mut format_encode_options_to_consume, "delimiter")?.0;
+                consume_string_from_options(&mut format_encode_options_to_consume, "delimiter")?;
             let delimiter = get_delimiter(chars.as_str()).context("failed to parse delimiter")?;
             let has_header = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
                 "without_header",
             )
-            .map(|s| s.0 == "false")
+            .map(|s| s == "false")
             .unwrap_or(true);
 
             if is_kafka && has_header {
@@ -304,16 +306,30 @@ async fn bind_columns_from_source_for_non_cdc(
                 );
             }
 
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
+            if let Some(config) =
+                PulsarSchemaConfig::from_options(&format_encode_options_to_consume)?
+            {
+                Some(
+                    extract_pulsar_json_table_schema(
+                        &config,
+                        &options_with_secret,
+                        &mut format_encode_options_to_consume,
+                    )
+                    .await?,
+                )
+            } else {
+                let schema_config =
+                    get_json_schema_location(&mut format_encode_options_to_consume)?;
+                stream_source_info.use_schema_registry =
+                    json_schema_infer_use_schema_registry(&schema_config);
 
-            extract_json_table_schema(
-                &schema_config,
-                &options_with_secret,
-                &mut format_encode_options_to_consume,
-            )
-            .await?
+                extract_json_table_schema(
+                    &schema_config,
+                    &options_with_secret,
+                    &mut format_encode_options_to_consume,
+                )
+                .await?
+            }
         }
         (Format::None, Encode::None) => {
             if options_with_secret.is_iceberg_connector() {
@@ -419,7 +435,7 @@ fn bind_columns_from_source_for_cdc(
     Ok((Some(columns), stream_source_info))
 }
 
-fn format_to_prost(format: &Format) -> FormatType {
+pub(super) fn format_to_prost(format: &Format) -> FormatType {
     match format {
         Format::Native => FormatType::Native,
         Format::Plain => FormatType::Plain,
@@ -431,7 +447,7 @@ fn format_to_prost(format: &Format) -> FormatType {
         Format::None => FormatType::None,
     }
 }
-fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
+pub(super) fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
     match row_encode {
         Encode::Native => EncodeType::Native,
         Encode::Json => EncodeType::Json,
@@ -448,7 +464,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
 
 pub fn get_schema_location(
     format_encode_options: &mut BTreeMap<String, String>,
-) -> Result<(AstString, bool)> {
+) -> Result<(String, bool)> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
     match (schema_location, schema_registry) {
@@ -468,17 +484,18 @@ pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
             let mut options = WithOptions::try_from(schema.row_options()).unwrap();
-            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
+            uses_pulsar_schema(&options, options.secret_ref())
+                || matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
         }
         _ => false,
     }
 }
 
 #[inline]
-fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Option<i32>> {
+fn get_name_strategy_or_default(name_strategy: Option<String>) -> Result<Option<i32>> {
     match name_strategy {
         None => Ok(None),
-        Some(name) => Ok(Some(name_strategy_from_str(name.0.as_str())
+        Some(name) => Ok(Some(name_strategy_from_str(name.as_str())
             .ok_or_else(|| RwError::from(ProtocolError(format!("\
             expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy, but got {}", name))))? as i32)),
     }

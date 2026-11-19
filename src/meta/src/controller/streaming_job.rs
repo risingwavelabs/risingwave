@@ -38,10 +38,14 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type, match_sink_name_str,
+};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
@@ -60,9 +64,6 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
-use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
-};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -108,8 +109,8 @@ pub struct AbortCreatingJobResult {
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
-    /// The aborted sinks; the caller should clear their iceberg maintenance state via
-    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    /// The aborted sinks; the caller should retire their maintenance state and stop their
+    /// coordinators, using only sinks actually removed.
     pub aborted_sink_ids: Vec<SinkId>,
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
@@ -127,7 +128,7 @@ pub struct CancelStreamingJobInfo {
 }
 
 #[derive(Debug)]
-pub struct IndependentJobChangeLogInfo {
+pub struct CommittedEpochTruncateJob {
     pub job_id: JobId,
     pub state_table_ids: HashSet<TableId>,
     pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
@@ -136,7 +137,15 @@ pub struct IndependentJobChangeLogInfo {
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
-    pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
+    pub progress_table_subscribers: Vec<ProgressTableChangeLogSubscriber>,
+    pub committed_epoch_truncate_jobs: Vec<CommittedEpochTruncateJob>,
+}
+
+#[derive(Debug)]
+pub struct ProgressTableChangeLogSubscriber {
+    pub subscriber_job_id: JobId,
+    pub upstream_table_id: TableId,
+    pub progress_table_id: TableId,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -225,6 +234,30 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
     }
 }
 
+fn update_source_node_rate_limit(
+    node: &mut PbNodeBody,
+    rate_limit: Option<u32>,
+) -> MetaResult<bool> {
+    let (properties, current_limit) = match node {
+        PbNodeBody::Source(node) => match &mut node.source_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        PbNodeBody::StreamFsFetch(node) => match &mut node.node_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        _ => return Ok(false),
+    };
+    if properties.is_iceberg_update_source() {
+        return Err(MetaError::invalid_parameter(
+            "Iceberg streaming_updates does not support rate limiting",
+        ));
+    }
+    *current_limit = rate_limit;
+    Ok(true)
+}
+
 fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -> MetaResult<bool> {
     let PbNodeBody::Sink(node) = node else {
         return Ok(false);
@@ -268,7 +301,7 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let jobs: Vec<JobId> = StreamingJobModel::find()
+        let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -278,13 +311,40 @@ impl CatalogController {
             )
             .into_tuple::<JobId>()
             .all(&inner.db)
-            .await?;
-        let mut job_info: HashMap<_, _> = jobs
+            .await?
             .into_iter()
+            .collect();
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode, TableIdArray)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(FragmentTypeMask::intersects_any([
+                FragmentTypeFlag::IcebergWithPkIndexWriter,
+                FragmentTypeFlag::SnapshotBackfillStreamScan,
+            ]))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let iceberg_job_ids: HashSet<_> = fragments
+            .iter()
+            .filter(|(_, _, fragment_type_mask, _, _)| {
+                FragmentTypeMask::from(*fragment_type_mask)
+                    .contains(FragmentTypeFlag::IcebergWithPkIndexWriter)
+            })
+            .map(|(_, job_id, _, _, _)| *job_id)
+            .collect();
+        let mut committed_epoch_truncate_job_info: HashMap<_, _> = committed_epoch_truncate_job_ids
+            .into_iter()
+            .filter(|job_id| !iceberg_job_ids.contains(job_id))
             .map(|job_id| {
                 (
                     job_id,
-                    IndependentJobChangeLogInfo {
+                    CommittedEpochTruncateJob {
                         job_id,
                         state_table_ids: HashSet::new(),
                         upstream_table_snapshot_epochs: HashMap::new(),
@@ -292,25 +352,55 @@ impl CatalogController {
                 )
             })
             .collect();
-        if !job_info.is_empty() {
-            let fragments = Fragment::find()
-                .filter(fragment::Column::JobId.is_in(job_info.keys().copied()))
-                .all(&inner.db)
-                .await?;
-            for fragment in fragments {
-                let info = job_info
-                    .get_mut(&fragment.job_id)
-                    .expect("job should exist");
-                info.state_table_ids
-                    .extend(fragment.state_table_ids.inner_ref().iter().copied());
+        let mut progress_table_subscribers = Vec::new();
+        for (fragment_id, job_id, fragment_type_mask, stream_node, state_table_ids) in fragments {
+            let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
+            if iceberg_job_ids.contains(&job_id) {
+                if !fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
+                    continue;
+                }
                 let mut collection_error = None;
-                visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
                     let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
                         Ok(scan_type) => scan_type,
                         Err(err) => {
                             collection_error = Some(anyhow::Error::new(err).context(format!(
                                 "invalid persisted stream scan type {} in job {} fragment {}",
-                                stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                                stream_scan.stream_scan_type, job_id, fragment_id
+                            )));
+                            return;
+                        }
+                    };
+                    if scan_type != StreamScanType::SnapshotBackfill {
+                        return;
+                    }
+                    let Some(progress_table) = stream_scan.state_table.as_ref() else {
+                        collection_error = Some(anyhow!(
+                            "snapshot backfill in Iceberg V3 job {} has no progress table",
+                            job_id
+                        ));
+                        return;
+                    };
+                    progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                        subscriber_job_id: job_id,
+                        upstream_table_id: stream_scan.table_id,
+                        progress_table_id: progress_table.id,
+                    });
+                });
+                if let Some(err) = collection_error {
+                    return Err(err.into());
+                }
+            } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
+                info.state_table_ids
+                    .extend(state_table_ids.inner_ref().iter().copied());
+                let mut collection_error = None;
+                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                        Ok(scan_type) => scan_type,
+                        Err(err) => {
+                            collection_error = Some(anyhow::Error::new(err).context(format!(
+                                "invalid persisted stream scan type {} in job {} fragment {}",
+                                stream_scan.stream_scan_type, job_id, fragment_id
                             )));
                             return;
                         }
@@ -326,7 +416,7 @@ impl CatalogController {
                             if entry.get() != &stream_scan.snapshot_backfill_epoch {
                                 collection_error = Some(anyhow!(
                                     "job {} has inconsistent snapshot epochs for upstream table {}",
-                                    fragment.job_id,
+                                    job_id,
                                     stream_scan.table_id
                                 ));
                             }
@@ -341,13 +431,14 @@ impl CatalogController {
                 }
             }
         }
-        let independent_jobs = job_info
+        let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
             .into_values()
             .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
-            independent_jobs,
+            progress_table_subscribers,
+            committed_epoch_truncate_jobs,
         })
     }
 
@@ -699,18 +790,11 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
 
                 if table.refreshable {
-                    let trigger_interval_secs = src
-                        .as_ref()
-                        .and_then(|source_catalog| source_catalog.refresh_mode)
-                        .and_then(
-                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
-                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
-                                    refresh_interval_sec,
-                                })) => refresh_interval_sec,
-                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
-                                None => None,
-                            },
-                        );
+                    let trigger_interval_secs = IngestMode::from_proto(
+                        src.as_ref()
+                            .and_then(|source_catalog| source_catalog.ingest_mode.as_ref()),
+                    )?
+                    .refresh_interval_sec();
 
                     RefreshJob::insert(refresh_job::ActiveModel {
                         table_id: Set(table.id),
@@ -1212,7 +1296,8 @@ impl CatalogController {
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
             // so we need to notify the frontend to delete them here.
-            self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
+            let _version = self
+                .notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
         let aborted_sink_ids = objects_to_abort
@@ -1485,15 +1570,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let mut notifications = self.frontend_notification_batch();
         if let Some(objects) = creating_objects {
-            self.notify_frontend(
+            notifications.add(
                 NotificationOperation::Add,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects,
                     dependencies: vec![],
                 }),
-            )
-            .await;
+            );
         }
 
         let Some((
@@ -1506,6 +1591,9 @@ impl CatalogController {
             updated_user_info,
         )) = replace_sink_post_collect
         else {
+            if let Some(version) = notifications.publish().await {
+                tracing::debug!(job_id = %job_id, version, "notified frontend of creating streaming job");
+            }
             return Ok(None);
         };
 
@@ -1520,28 +1608,27 @@ impl CatalogController {
                 old_fragment_ids.iter().map(|id| *id as _).collect(),
             );
 
-        let _ = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                build_object_group_for_delete(old_objects),
-            )
-            .await;
+        notifications.add(
+            NotificationOperation::Delete,
+            build_object_group_for_delete(old_objects),
+        );
 
-        let _ = self
-            .notify_frontend(
-                // The replacement sink is not pre-notified to frontend while creating, so the
-                // cutover should add the new finalized sink after deleting the old one.
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: new_objects,
-                    dependencies,
-                }),
-            )
-            .await;
+        // The replacement sink is not pre-notified to frontend while creating, so the cutover
+        // should add the new finalized sink after deleting the old one.
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: new_objects,
+                dependencies,
+            }),
+        );
 
-        if !updated_user_info.is_empty() {
-            let _ = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the replacement notification batch contains the replacement sink");
+        tracing::debug!(job_id = %job_id, version, "notified frontend of replacement streaming job");
 
         Ok(Some(old_state_table_ids))
     }
@@ -1691,20 +1778,21 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects,
-                    dependencies,
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            notification_op,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects,
+                dependencies,
+            }),
+        );
 
         // notify users about the default privileges
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the streaming job notification batch contains the streaming job");
 
         inner
             .creating_table_finish_notifier
@@ -1952,25 +2040,26 @@ impl CatalogController {
             new_fragment_ids.iter().map(|id| *id as _).collect(),
         );
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects,
+                dependencies: vec![],
+            }),
+        );
 
         if let Some((user_infos, to_drop_objects)) = delete_notification_objs {
-            self.notify_users_update(user_infos).await;
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Delete,
-                    build_object_group_for_delete(to_drop_objects),
-                )
-                .await;
+            Self::add_users_update_notifications(&mut notifications, user_infos);
+            notifications.add(
+                NotificationOperation::Delete,
+                build_object_group_for_delete(to_drop_objects),
+            );
         }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the replacement notification batch contains the updated object");
 
         Ok(version)
     }
@@ -2505,6 +2594,15 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
+        if source
+            .with_properties
+            .inner_ref()
+            .is_iceberg_update_source()
+        {
+            return Err(MetaError::invalid_parameter(
+                "Iceberg streaming_updates does not support rate limiting",
+            ));
+        }
         let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id.as_job_id()]
@@ -2900,14 +2998,21 @@ impl CatalogController {
 
         // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
         if !skip_alter_on_fly_check {
-            let prop_keys: Vec<String> = alter_props
-                .keys()
-                .chain(alter_secret_refs.keys())
-                .cloned()
-                .collect();
-            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-                &connector, &prop_keys,
-            )?;
+            dispatch_cdc_source_type!(
+                CdcSourceType::from(connector.as_str()),
+                T,
+                T::check_alter_with_options(&alter_props, &alter_secret_refs)?,
+                {
+                    let prop_keys: Vec<String> = alter_props
+                        .keys()
+                        .chain(alter_secret_refs.keys())
+                        .cloned()
+                        .collect();
+                    risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                        &connector, &prop_keys,
+                    )?
+                }
+            );
         }
 
         let mut options_with_secret = WithOptionsSecResolved::new(
@@ -3078,14 +3183,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.notify_frontend(
-            NotificationOperation::Update,
-            NotificationInfo::ObjectGroup(PbObjectGroup {
-                objects: to_update_objs,
-                dependencies: vec![],
-            }),
-        )
-        .await;
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: to_update_objs,
+                    dependencies: vec![],
+                }),
+            )
+            .await;
 
         Ok(options_with_secret)
     }
@@ -3103,7 +3209,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
             .map_err(|e| SinkError::Config(anyhow!(e)))?
@@ -3112,7 +3218,9 @@ impl CatalogController {
         if let Statement::CreateSink { stmt } = &mut stmt {
             update_stmt_with_props(&mut stmt.with_properties.0, &props)?;
         } else {
-            panic!("definition is not a create sink statement")
+            return Err(MetaError::invalid_parameter(
+                "cannot alter an internal Iceberg sink; use ALTER TABLE ... CONNECTOR WITH (...) instead",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -3173,7 +3281,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
 
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
@@ -3194,7 +3302,9 @@ impl CatalogController {
             }
             update_stmt_with_props(with_options, &props)?;
         } else {
-            panic!("definition is not a create iceberg table statement")
+            return Err(MetaError::invalid_parameter(
+                "definition is not a create iceberg table statement",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -3592,37 +3702,7 @@ impl CatalogController {
             for (sink, _obj) in sinks_with_objs {
                 let sink_id = sink.sink_id;
 
-                // Validate that sink props can be altered
-                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-                    Some(connector) => {
-                        let connector_type = connector.to_lowercase();
-                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
-                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-                        match_sink_name_str!(
-                            connector_type.as_str(),
-                            SinkType,
-                            {
-                                let mut new_sink_props = sink.properties.0.clone();
-                                new_sink_props.extend(alter_props.clone());
-                                SinkType::validate_alter_config_change(
-                                    &new_sink_props,
-                                    &alter_props,
-                                )
-                            },
-                            |sink: &str| Err(SinkError::Config(anyhow!(
-                                "unsupported sink type {}",
-                                sink
-                            )))
-                        )?
-                    }
-                    None => {
-                        return Err(SinkError::Config(anyhow!(
-                            "connector not specified when alter sink"
-                        ))
-                        .into());
-                    }
-                };
+                validate_sink_props(&sink, &alter_props, &prop_keys)?;
 
                 let mut new_sink_props = sink.properties.0.clone();
                 new_sink_props.extend(alter_props.clone());
@@ -3727,14 +3807,15 @@ impl CatalogController {
 
         // Notify frontend about all updated objects
         if !updated_objects.is_empty() {
-            self.notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: updated_objects,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
+            let _version = self
+                .notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects: updated_objects,
+                        dependencies: vec![],
+                    }),
+                )
+                .await;
         }
 
         Ok((
@@ -3755,20 +3836,15 @@ impl CatalogController {
             let mut found = Ok(false);
             match throttle_type {
                 ThrottleType::Source => {
-                    visit_stream_node_mut(stream_node, |node| match node {
-                        PbNodeBody::Source(node) => {
-                            if let Some(node_inner) = &mut node.source_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                    visit_stream_node_mut(stream_node, |node| {
+                        if found.is_err() {
+                            return;
                         }
-                        PbNodeBody::StreamFsFetch(node) => {
-                            if let Some(node_inner) = &mut node.node_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                        match update_source_node_rate_limit(node, rate_limit) {
+                            Ok(true) => found = Ok(true),
+                            Ok(false) => {}
+                            Err(err) => found = Err(err),
                         }
-                        _ => {}
                     });
                 }
                 ThrottleType::Backfill => {
@@ -3921,32 +3997,39 @@ impl CatalogController {
     }
 }
 
-fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> MetaResult<()> {
-    // Validate that props can be altered
-    match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-        Some(connector) => {
-            let connector_type = connector.to_lowercase();
-            let field_names: Vec<String> = props.keys().cloned().collect();
-            check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-            match_sink_name_str!(
-                connector_type.as_str(),
-                SinkType,
-                {
-                    let mut new_props = sink.properties.0.clone();
-                    new_props.extend(props.clone());
-                    SinkType::validate_alter_config_change(&new_props, props)
-                },
-                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-            )?
-        }
-        None => {
-            return Err(
-                SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
-            );
-        }
+/// Validates altering `alter_props` of a sink. `altered_field_names` are all the keys being
+/// altered, including secret-backed ones that are not part of `alter_props`.
+fn validate_sink_props(
+    sink: &sink::Model,
+    alter_props: &BTreeMap<String, String>,
+    altered_field_names: &[String],
+) -> MetaResult<()> {
+    let Some(connector) = sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) else {
+        return Err(SinkError::Config(anyhow!("connector not specified when alter sink")).into());
     };
+    let connector_type = connector.to_lowercase();
+    check_sink_allow_alter_on_fly_fields(&connector_type, altered_field_names)
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+    // Validate against the config the sink actually runs with: properties stored as secrets
+    // live in `secret_ref` rather than `properties`, and some of them are required fields.
+    let mut new_props = LocalSecretManager::global()
+        .fill_secrets(
+            sink.properties.0.clone(),
+            sink.secret_ref
+                .as_ref()
+                .map(|secret_ref| secret_ref.to_protobuf())
+                .unwrap_or_default(),
+        )
+        .map_err(MetaError::from)?;
+    new_props.extend(alter_props.clone());
+
+    match_sink_name_str!(
+        connector_type.as_str(),
+        SinkType,
+        SinkType::validate_alter_config_change(&new_props, alter_props),
+        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+    )?;
     Ok(())
 }
 
@@ -4020,46 +4103,59 @@ async fn ensure_source_props_not_set_by_connection(
     Ok(())
 }
 
+fn update_sink_node_props(
+    node: &mut PbNodeBody,
+    sink_id: SinkId,
+    props: &BTreeMap<String, String>,
+) -> bool {
+    let sink_desc = match node {
+        PbNodeBody::Sink(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexWriter(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => &mut node.sink_desc,
+        PbNodeBody::CompactionResolver(node) if node.sink_id == sink_id => {
+            node.properties.extend(props.clone());
+            return true;
+        }
+        _ => return false,
+    };
+    if let Some(sink_desc) = sink_desc
+        && sink_desc.id == sink_id
+    {
+        sink_desc.properties.extend(props.clone());
+        true
+    } else {
+        false
+    }
+}
+
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
     props: BTreeMap<String, String>,
 ) -> MetaResult<()> {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
         .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
         .filter(fragment::Column::JobId.eq(sink_id))
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| {
-            *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
-        })
-        .filter_map(|(id, _, stream_node)| {
+        .filter_map(|(id, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
             visit_stream_node_mut(&mut stream_node, |node| {
-                if let PbNodeBody::Sink(node) = node
-                    && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id
-                {
-                    sink_desc.properties.extend(props.clone());
-                    found = true;
-                }
+                found |= update_sink_node_props(node, sink_id, &props);
             });
             if found { Some((id, stream_node)) } else { None }
         })
         .collect_vec();
-    assert!(
-        !fragments.is_empty(),
-        "sink id should be used by at least one fragment"
-    );
+    if fragments.is_empty() {
+        return Err(MetaError::invalid_parameter(format!(
+            "sink {sink_id} is not used by any fragment"
+        )));
+    }
     for (id, stream_node) in fragments {
         Fragment::update(fragment::ActiveModel {
             fragment_id: Set(id),
@@ -4144,9 +4240,66 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_pb::stream_plan::{
+        CompactionResolverNode, IcebergWithPkIndexPositionDeleteMergerNode,
+        IcebergWithPkIndexWriterNode, SinkDesc, SinkNode,
+    };
     use risingwave_sqlparser::ast::{SqlOption, Statement};
 
-    use super::{Parser, merge_with_options};
+    use super::{Parser, PbNodeBody, SinkId, merge_with_options, update_sink_node_props};
+
+    #[test]
+    fn test_update_sink_props_in_all_sink_nodes() {
+        let sink_id = SinkId::new(42);
+        let props = BTreeMap::from([("enable_compaction".to_owned(), "true".to_owned())]);
+        let sink_desc = SinkDesc {
+            id: sink_id,
+            properties: BTreeMap::from([
+                ("connector".to_owned(), "iceberg".to_owned()),
+                ("enable_compaction".to_owned(), "false".to_owned()),
+            ]),
+            ..Default::default()
+        };
+        let nodes = [
+            PbNodeBody::Sink(Box::new(SinkNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(Box::new(
+                IcebergWithPkIndexPositionDeleteMergerNode {
+                    sink_desc: Some(sink_desc.clone()),
+                },
+            )),
+            PbNodeBody::CompactionResolver(Box::new(CompactionResolverNode {
+                sink_id,
+                properties: sink_desc.properties,
+                ..Default::default()
+            })),
+        ];
+        for mut node in nodes {
+            assert!(!update_sink_node_props(&mut node, SinkId::new(43), &props));
+            assert!(update_sink_node_props(&mut node, sink_id, &props));
+            let properties = match &node {
+                PbNodeBody::Sink(node) => &node.sink_desc.as_ref().unwrap().properties,
+                PbNodeBody::IcebergWithPkIndexWriter(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::CompactionResolver(node) => &node.properties,
+                _ => unreachable!(),
+            };
+            assert_eq!(properties["enable_compaction"], "true");
+            assert_eq!(properties["connector"], "iceberg");
+        }
+    }
 
     #[test]
     fn test_merge_with_options_normalizes_altered_option_name() {

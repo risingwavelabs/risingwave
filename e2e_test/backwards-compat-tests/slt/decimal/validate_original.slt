@@ -1,0 +1,46 @@
+query II
+SELECT count(*), sum(v) FROM decimal_pk;
+----
+2012 2201078
+
+# Point lookups compute the vnode from the hash of the literal. Several literals use a different
+# scale from the stored key.
+query RI
+SELECT k, v FROM decimal_pk
+WHERE k IN (
+    0.00, 1.50, -1.500, 1000, 123456789.9876543210, 0.0000000000000000000000000001,
+    7.9228162514264337593543950335, 79228162514264337593543950335,
+    -79228162514264337593543950335, 'NaN', 'Infinity', '-Infinity',
+    1000000.125, 1000125.0, 1000250
+)
+ORDER BY v;
+----
+0 1
+1.5 2
+-1.5 3
+1000.00 4
+123456789.987654321 5
+0.0000000000000000000000000001 6
+7.9228162514264337593543950335 7
+79228162514264337593543950335 8
+-79228162514264337593543950335 9
+NaN 10
+Infinity 11
+-Infinity 12
+1000000.125 101
+1000125 1100
+1000250 2100
+
+query III
+SELECT count(*), sum(cnt), sum(total) FROM decimal_agg;
+----
+40 2000 2001000
+
+query I
+SELECT count(*) FROM (
+    SELECT g, count(*) AS cnt, sum(v) AS total FROM decimal_src GROUP BY g
+    EXCEPT
+    SELECT g, cnt, total FROM decimal_agg
+) AS diff;
+----
+0

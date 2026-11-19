@@ -15,10 +15,13 @@
 use std::future::{Future, poll_fn};
 use std::iter::once;
 use std::pin::pin;
+use std::sync::Arc;
 use std::task::Poll;
 
 use futures::FutureExt;
 use futures::future::join_all;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, ResetPartialGraphsRequest,
@@ -30,6 +33,44 @@ use risingwave_pb::stream_service::{
 use super::*;
 use crate::task::TEST_PARTIAL_GRAPH_ID;
 use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+
+#[test]
+fn test_table_change_log_progress_local_preaggregation() {
+    let progress = |actor_id, vnodes: &[usize], truncate_epoch| TableChangeLogProgress {
+        actor_id: ActorId::new(actor_id),
+        fragment_id: FragmentId::new(10),
+        upstream_table_id: TableId::new(20),
+        progress_table_id: TableId::new(30),
+        vnode_bitmap: Arc::new(Bitmap::from_indices(8, vnodes)),
+        truncate_epoch,
+    };
+    let reports = vec![progress(1, &[0, 1], 100), progress(2, &[2, 3], 80)];
+
+    let aggregated = aggregate_table_change_log_progress(reports);
+    assert_eq!(aggregated.len(), 1);
+    let aggregated = &aggregated[0];
+    assert_eq!(aggregated.min_truncate_epoch, 80);
+    assert_eq!(
+        Bitmap::from(aggregated.vnode_bitmap.as_ref().unwrap()),
+        Bitmap::from_indices(8, [0, 1, 2, 3])
+    );
+
+    let overlapping = vec![progress(1, &[0, 1], 100), progress(2, &[1, 2], 80)];
+    assert!(aggregate_table_change_log_progress(overlapping).is_empty());
+
+    let inconsistent_lengths = vec![
+        progress(1, &[0, 1], 100),
+        TableChangeLogProgress {
+            actor_id: ActorId::new(2),
+            fragment_id: FragmentId::new(10),
+            upstream_table_id: TableId::new(20),
+            progress_table_id: TableId::new(30),
+            vnode_bitmap: Arc::new(Bitmap::from_indices(4, [2, 3])),
+            truncate_epoch: 80,
+        },
+    ];
+    assert!(aggregate_table_change_log_progress(inconsistent_lengths).is_empty());
+}
 
 #[tokio::test]
 async fn test_reject_exchange_request_with_stale_partial_graph_term() -> StreamResult<()> {

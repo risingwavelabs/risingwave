@@ -28,6 +28,7 @@
 
 - [Develop Connectors](./connector/intro.md)
     - [Source](./connector/source.md)
+    - [Iceberg streaming updates](./connector/iceberg-streaming-updates.md)
 - [Continuous Integration](./ci.md)
 
 ---
@@ -36,6 +37,7 @@
 
 - [Architecture Design](./design/architecture-design.md)
 - [Streaming Engine](./design/streaming-overview.md)
+    - [Asynchronous Projection](./design/async-projection.md)
     - [Checkpoint](./design/checkpoint.md)
     - [Aggregation](./design/aggregation.md)
     - [Row Pattern Recognition (MATCH_RECOGNIZE)](./design/match-recognize.md)

@@ -61,7 +61,7 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
         dispatchers: Vec<stream_plan::Dispatcher>,
         actor_context: &ActorContextRef,
         sync: &stream_plan::SyncLogStoreNode,
-        vnode_bitmap: Option<Bitmap>,
+        vnode_bitmap: Bitmap,
         state_store: S,
     ) -> StreamResult<Self> {
         let chunk_size = actor_context.config.developer.chunk_size;
@@ -85,8 +85,7 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
             .sync_log_store_pause_duration_ms;
         let max_buffer_size = actor_context.config.developer.sync_log_store_buffer_size;
 
-        let serde =
-            LogStoreRowSerde::new(table, vnode_bitmap.map(Into::into), &KV_LOG_STORE_V2_INFO);
+        let serde = LogStoreRowSerde::new(table, vnode_bitmap.into(), &KV_LOG_STORE_V2_INFO);
         let log_store_context = SyncKvLogStoreContext {
             table_id: table.id,
             fragment_id,
@@ -584,7 +583,7 @@ mod tests {
         };
         let pk_info = &KV_LOG_STORE_V2_INFO;
         let table = gen_test_log_store_table(pk_info);
-        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
         let serde = LogStoreRowSerde::new(&table, vnodes, pk_info);
         let log_store_config = SyncKvLogStoreContext {
             table_id: table.id,

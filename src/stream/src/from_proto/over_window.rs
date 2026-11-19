@@ -55,11 +55,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             .map(ColumnOrder::from_protobuf)
             .map(|o| (o.column_index, o.order_type))
             .unzip();
-        let vnodes = Some(Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for EOWC over window"),
-        ));
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
             .enable_preload_all_rows_by_config(&params.config)
             .build()

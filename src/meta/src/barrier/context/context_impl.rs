@@ -14,11 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::{JobId, PartialGraphId, SinkId};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
@@ -46,15 +48,18 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
-use crate::manager::LocalNotification;
 use crate::manager::iceberg_pk_index_sink::{
-    IcebergPkIndexPreCommitMetadata, group_pre_commit_metadata,
+    IcebergPkIndexPreCommitMetadata, build_iceberg_config, group_pre_commit_metadata,
+    is_iceberg_pk_index_sink,
 };
 use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
+use crate::manager::{LocalNotification, StreamingJob};
 use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{RefreshStage, SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
+
+const DRAIN_OLD_SINK_COMMITS_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 fn resolve_since_timestamp_log_store_epoch(
     table_id: TableId,
@@ -168,7 +173,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn abort_and_mark_blocked(
         &self,
         recovery: RecoveryStart,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) -> MetaResult<()> {
         let (database_id, database_job_ids) = match &recovery {
             RecoveryStart::Global => (None, None),
@@ -178,23 +183,23 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             } => (Some(*database_id), Some(job_ids.clone())),
         };
         if database_id.is_none() {
-            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason.into()));
         }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
+        self.iceberg_pk_index_sink_manager
+            .start_recovery(database_job_ids.as_ref());
         self.sink_manager.start_recovery(recovery).await?;
-
-        if let Some(job_ids) = database_job_ids {
-            self.iceberg_pk_index_sink_manager.unregister_jobs(job_ids);
-        } else {
-            self.iceberg_pk_index_sink_manager.reset();
-        }
         Ok(())
     }
 
-    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()> {
         let recovery = match &options {
             MarkReadyOptions::Database(database_id) => RecoverySucceeded::Database(*database_id),
             MarkReadyOptions::Global { failed_databases } => RecoverySucceeded::Global {
@@ -204,6 +209,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.sink_manager.recovery_succeeded(recovery).await?;
         let is_global = matches!(&options, MarkReadyOptions::Global { .. });
         self.scheduled_barriers.mark_ready(options);
+        // Compaction reads settled coordinator state only after the queues are ready.
+        self.iceberg_pk_index_sink_manager
+            .on_jobs_ready(&running_job_ids)
+            .await;
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
@@ -275,16 +284,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         let (serving_workers, fragment_serving_infos) =
             fetch_serving_infos(&self.metadata_manager).await?;
 
-        self.env
-            .notification_manager()
-            .notify_hummock(
-                Operation::Update,
-                Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                    table_cache_refill_policies: Some(policies),
-                    ..Default::default()
-                }),
-            )
-            .await;
+        self.env.notification_manager().notify_hummock(
+            Operation::Update,
+            Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(policies),
+                ..Default::default()
+            }),
+        );
         sync_serving_table_vnode_mappings_to_hummock(
             &self.env.notification_manager_ref(),
             &self.serving_vnode_mapping,
@@ -296,8 +302,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument("post_collect_command({command})")]
-    async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        Box::pin(command.post_collect(self)).await
+    async fn post_collect_command(
+        &self,
+        command: PostCollectCommand,
+        epoch: EpochPair,
+    ) -> MetaResult<()> {
+        Box::pin(command.post_collect(self, epoch)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -628,12 +638,57 @@ impl GlobalBarrierWorkerContextImpl {
     }
 }
 
+async fn drain_old_sink_coordinator(
+    barrier_manager_context: &GlobalBarrierWorkerContextImpl,
+    old_sink_id: SinkId,
+    target_epoch: u64,
+) -> MetaResult<()> {
+    let wait_result = tokio::time::timeout(
+        DRAIN_OLD_SINK_COMMITS_TIMEOUT,
+        barrier_manager_context
+            .sink_manager
+            .drain_and_stop_coordinator(old_sink_id, target_epoch),
+    )
+    .await;
+    let pending_epoch_count = barrier_manager_context
+        .metadata_manager
+        .catalog_controller
+        .count_pending_sink_epochs(old_sink_id)
+        .await?;
+
+    match wait_result {
+        Ok(Ok(())) if pending_epoch_count == 0 => Ok(()),
+        Ok(Ok(())) => Err(anyhow::anyhow!(
+            "pending exactly-once sink epochs remain before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+            old_sink_id,
+            target_epoch,
+            pending_epoch_count,
+        )
+        .into()),
+        Ok(Err(err)) => Err(err
+            .context(format!(
+                "failed to drain old sink commits before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+                old_sink_id, target_epoch, pending_epoch_count,
+            ))
+            .into()),
+        Err(_) => Err(anyhow::anyhow!(
+            "timed out draining old sink commits before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}, timeout={:?}",
+            old_sink_id,
+            target_epoch,
+            pending_epoch_count,
+            DRAIN_OLD_SINK_COMMITS_TIMEOUT,
+        )
+        .into()),
+    }
+}
+
 impl PostCollectCommand {
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(
         self,
         barrier_manager_context: &GlobalBarrierWorkerContextImpl,
+        epoch: EpochPair,
     ) -> MetaResult<()> {
         match self {
             PostCollectCommand::Command(_) => {}
@@ -678,6 +733,22 @@ impl PostCollectCommand {
                     .await?;
             }
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
+                // PK-index maintenance runs in Meta, not in the ordinary sink executor.
+                // Refresh it explicitly so an idle sink also observes ALTER immediately.
+                for object_id in obj_id_map_props.keys() {
+                    if let Some(sink) = barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .get_sink_by_id(object_id.as_sink_id())
+                        .await?
+                        && is_iceberg_pk_index_sink(&sink.properties)
+                    {
+                        let config = build_iceberg_config(&sink)?;
+                        barrier_manager_context
+                            .iceberg_pk_index_sink_manager
+                            .on_sink_config_changed(sink.id, config);
+                    }
+                }
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
                     .source_manager
@@ -796,6 +867,7 @@ impl PostCollectCommand {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
                     replace_sink,
+                    streaming_job,
                     ..
                 } = info;
                 let new_job_id = stream_job_fragments.stream_job_id();
@@ -810,6 +882,15 @@ impl PostCollectCommand {
                     } else {
                         None
                     };
+
+                if let Some(old_sink_id) = replace_sink {
+                    // Deleting the old sink object cascades `pending_sink_state`. This barrier is
+                    // the cutover and has been committed to Hummock, so let the old sink's
+                    // coordinator commit its pending epochs up to `epoch.prev` and stop, then
+                    // assert the durable state before deleting the old sink object.
+                    drain_old_sink_coordinator(barrier_manager_context, old_sink_id, epoch.prev)
+                        .await?;
+                }
 
                 let old_state_table_ids = barrier_manager_context
                     .metadata_manager
@@ -837,15 +918,24 @@ impl PostCollectCommand {
                         .await;
                 }
 
-                if let Some(old_sink_id) = replace_sink {
+                // The coordinator is registered before CREATE is submitted, but its
+                // compaction results cannot be applied until the independent job is running.
+                if let StreamingJob::Sink(sink, _) = &streaming_job
+                    && is_iceberg_pk_index_sink(&sink.properties)
+                {
                     barrier_manager_context
-                        .sink_manager
-                        .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
+                        .iceberg_pk_index_sink_manager
+                        .on_jobs_ready(&HashSet::from([sink.id.as_job_id()]))
                         .await;
+                }
+
+                if let Some(old_sink_id) = replace_sink {
                     cleanup_dropped_streaming_jobs(
                         &barrier_manager_context.refresh_manager,
                         &barrier_manager_context.hummock_manager,
                         &barrier_manager_context.metadata_manager,
+                        &barrier_manager_context.sink_manager,
+                        &barrier_manager_context.iceberg_pk_index_sink_manager,
                         [old_sink_id.as_job_id()],
                         old_state_table_ids.expect("replace sink should return old state tables"),
                         "replace_sink",
@@ -923,6 +1013,8 @@ impl PostCollectCommand {
                     &barrier_manager_context.refresh_manager,
                     &barrier_manager_context.hummock_manager,
                     &barrier_manager_context.metadata_manager,
+                    &barrier_manager_context.sink_manager,
+                    &barrier_manager_context.iceberg_pk_index_sink_manager,
                     [],
                     to_drop_state_table_ids.clone(),
                     "replace_streaming_job",

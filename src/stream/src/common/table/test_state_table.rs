@@ -2620,3 +2620,111 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
         2
     );
 }
+
+/// A pk-prefix watermark hides the rows below it from reads at once, not only once committed.
+#[tokio::test]
+async fn test_pending_watermark_hides_rows() {
+    use futures::TryStreamExt;
+    use risingwave_common::row::Row;
+
+    use crate::common::table::state_table::StateTableBuilder;
+
+    /// The keys returned by a forward scan, by a reverse scan, and by point gets.
+    async fn visible_keys(state_table: &StateTable<HummockStorage>) -> [Vec<i32>; 3] {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+        let key = |row: OwnedRow| row.datum_at(0).unwrap().into_int32();
+        let forward: Vec<OwnedRow> = state_table
+            .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let backward: Vec<OwnedRow> = state_table
+            .rev_iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let mut found = vec![];
+        for k in 0..=5 {
+            let pk = OwnedRow::new(vec![Some(k.into())]);
+            let exists = state_table.exists(&pk).await.unwrap();
+            assert_eq!(exists, state_table.get_row(&pk).await.unwrap().is_some());
+            if exists {
+                found.push(k);
+            }
+        }
+        [
+            forward.into_iter().map(key).collect(),
+            backward.into_iter().map(key).collect(),
+            found,
+        ]
+    }
+
+    const TEST_TABLE_ID: TableId = TableId::new(233);
+    let mut table = gen_pbtable(
+        TEST_TABLE_ID,
+        vec![
+            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ],
+        vec![OrderType::ascending()],
+        vec![0],
+        0,
+    );
+    table.watermark_indices = vec![0];
+    table.clean_watermark_indices = vec![0];
+    let row = |k: i32| OwnedRow::new(vec![Some(k.into()), Some(k.into())]);
+
+    for preload in [false, true] {
+        let test_env = prepare_hummock_test_env().await;
+        test_env.register_table(table.clone()).await;
+        let mut config = StreamingConfig::default();
+        config.developer.default_enable_mem_preload_state_table = preload;
+        let mut state_table: StateTable<HummockStorage> =
+            StateTableBuilder::new(&table, test_env.storage.clone(), None)
+                .enable_preload_all_rows_by_config(&config)
+                .build()
+                .await;
+
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+        test_env
+            .storage
+            .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+        state_table.init_epoch(epoch).await.unwrap();
+        for k in 1..=4 {
+            state_table.insert(row(k));
+        }
+        epoch.inc_for_test();
+        test_env
+            .storage
+            .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+        state_table.commit_for_test(epoch).await.unwrap();
+        test_env.commit_epoch(epoch.prev).await;
+
+        // Rows written in the epoch of the watermark, before it.
+        state_table.insert(row(0));
+        state_table.insert(row(5));
+        state_table.update_watermark(ScalarImpl::Int32(3));
+        let expected = [vec![3, 4, 5], vec![5, 4, 3], vec![3, 4, 5]];
+        assert_eq!(
+            visible_keys(&state_table).await,
+            expected,
+            "preload: {preload}, before the commit"
+        );
+
+        epoch.inc_for_test();
+        test_env
+            .storage
+            .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+        state_table.commit_for_test(epoch).await.unwrap();
+        test_env.commit_epoch(epoch.prev).await;
+        assert_eq!(
+            visible_keys(&state_table).await,
+            expected,
+            "preload: {preload}, after the commit"
+        );
+    }
+}

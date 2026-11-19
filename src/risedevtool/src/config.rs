@@ -212,8 +212,12 @@ impl ConfigExpander {
                     "pulsar" => ServiceConfig::Pulsar(serde_yaml::from_str(&out_str)?),
                     "redis" => ServiceConfig::Redis(serde_yaml::from_str(&out_str)?),
                     "clickhouse" => ServiceConfig::ClickHouse(serde_yaml::from_str(&out_str)?),
+                    "doris" => ServiceConfig::Doris(serde_yaml::from_str(&out_str)?),
+                    "starrocks" => ServiceConfig::Starrocks(serde_yaml::from_str(&out_str)?),
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
+                    "mariadb" => ServiceConfig::MariaDb(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
+                    "oracle" => ServiceConfig::Oracle(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),
                     "mongodb" => ServiceConfig::MongoDb(serde_yaml::from_str(&out_str)?),
                     "elasticsearch" => {

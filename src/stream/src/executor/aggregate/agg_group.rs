@@ -439,8 +439,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
             // This actually also prevents inconsistent negative row count from being worse.
-            // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
-            // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
+            // Note that `row_count` also counts rows whose input is NULL or filtered out, so it can't
+            // tell whether e.g. `sum` has no input left. For retractable input, the frontend pairs such
+            // calls with a `count` of the same input to output NULL in that case.
             self.reset(funcs)?;
         }
         let mut stats = AggStateCacheStats::default();

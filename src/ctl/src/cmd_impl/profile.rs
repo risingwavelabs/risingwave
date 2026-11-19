@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use chrono::prelude::Local;
-use clap::ValueEnum;
 use futures::future::try_join_all;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
@@ -26,15 +25,7 @@ use tokio::fs::{File, create_dir_all};
 use tokio::io::AsyncWriteExt;
 
 use crate::CtlContext;
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-#[clap(rename_all = "kebab-case")]
-pub enum ProfileWorkerType {
-    Frontend,
-    ComputeNode,
-    Compactor,
-    Meta,
-}
+pub use crate::common::WorkerTypeArg as ProfileWorkerType;
 
 pub async fn cpu_profile(
     context: &CtlContext,
@@ -172,16 +163,7 @@ fn selected_worker_types(values: &[ProfileWorkerType]) -> HashSet<WorkerType> {
             WorkerType::Meta,
         ]);
     }
-    values.iter().map(|value| to_worker_type(*value)).collect()
-}
-
-fn to_worker_type(value: ProfileWorkerType) -> WorkerType {
-    match value {
-        ProfileWorkerType::Frontend => WorkerType::Frontend,
-        ProfileWorkerType::ComputeNode => WorkerType::ComputeNode,
-        ProfileWorkerType::Compactor => WorkerType::Compactor,
-        ProfileWorkerType::Meta => WorkerType::Meta,
-    }
+    values.iter().copied().map(WorkerType::from).collect()
 }
 
 fn worker_type_label(worker_type: WorkerType) -> &'static str {

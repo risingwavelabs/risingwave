@@ -47,13 +47,11 @@ pub use self::postgres::{
     postgres_cell_to_scalar_impl, postgres_cell_to_scalar_impl_strict, postgres_row_to_owned_row,
     postgres_row_to_owned_row_with_strict_pk,
 };
-pub use self::sql_server::{
-    ScalarImplTiberiusWrapper, sql_server_row_to_owned_row,
-    sql_server_row_to_owned_row_with_strict_pk,
-};
+pub use self::sql_server::{ScalarImplTiberiusWrapper, SqlServerRowDecoder};
 pub use self::unified::Access;
 pub use self::unified::json::{
-    BigintUnsignedHandlingMode, JsonAccess, TimeHandling, TimestampHandling, TimestamptzHandling,
+    BigintUnsignedHandlingMode, JsonAccess, NumericHandling, TimeHandling, TimestampHandling,
+    TimestamptzHandling,
 };
 use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
@@ -61,10 +59,22 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceMessageEventStream, SourceChunkStream, SourceColumnDesc, SourceColumnType,
-    SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent, SourceMeta,
-    SourceReaderEvent,
+    BoxSourceMessageEventStream, ConnectorProperties, SourceChunkStream, SourceColumnDesc,
+    SourceColumnType, SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent,
+    SourceMeta, SourceReaderEvent,
 };
+
+/// Returns how the Debezium JSON accessors of a parser handle numeric values: by the policy of the
+/// native CDC connector, or without parsing numbers from strings when the Debezium events arrive
+/// through a transport connector such as Kafka.
+fn debezium_numeric_handling(connector_props: &ConnectorProperties) -> NumericHandling {
+    match connector_props.native_cdc_type() {
+        Some(cdc_type) => cdc_type.debezium_numeric_handling(),
+        None => NumericHandling::Relax {
+            string_parsing: false,
+        },
+    }
+}
 
 fn decode_row_with_strict_pk(
     connector_name: &str,
@@ -269,8 +279,7 @@ impl<'a> MessageMeta<'a> {
                     CDC_TABLE_NAME_COLUMN_NAME,
                     "unexpected cdc meta column name"
                 );
-                // For CDC sources, extract_table_name() strips the database prefix:
-                cdc_meta.extract_table_name()
+                Some(cdc_meta.full_table_name.as_str().into())
             }
 
             // For other cases, return `None`.
@@ -611,8 +620,14 @@ impl ByteStreamSourceParserImpl {
                 Ok(Self::Plain(parser))
             }
             (ProtocolProperties::Debezium(_), _) => {
-                let parser =
-                    DebeziumParser::new(parser_config.specific, rw_columns, source_ctx).await?;
+                let numeric_handling = debezium_numeric_handling(&source_ctx.connector_props);
+                let parser = DebeziumParser::new(
+                    parser_config.specific,
+                    rw_columns,
+                    source_ctx,
+                    numeric_handling,
+                )
+                .await?;
                 Ok(Self::Debezium(parser))
             }
             (ProtocolProperties::Maxwell, _) => {

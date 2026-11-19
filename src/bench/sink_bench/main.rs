@@ -384,7 +384,7 @@ async fn consume_log_stream<S: Sink>(
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
             coordinator,
         )));
-        sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
+        sink_writer_param.vnode_bitmap = Bitmap::ones(1);
     }
     let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
     match log_sinker.consume_log_and_sink(&mut log_reader).await {

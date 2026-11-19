@@ -397,6 +397,51 @@ pub struct ClickHouseConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct DorisConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub query_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub admin_user: String,
+    pub admin_password: String,
+
+    pub image: String,
+    pub user_managed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct StarrocksConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub query_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub admin_user: String,
+    pub admin_password: String,
+    pub database_is_disposable: bool,
+
+    pub image: String,
+    pub user_managed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub enum Application {
     Metastore,
     Connector,
@@ -426,6 +471,23 @@ pub struct MySqlConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct MariaDbConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub port: u16,
+    pub address: String,
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct PostgresConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -445,6 +507,27 @@ pub struct PostgresConfig {
 
     // Inject latency into any network calls to the postgres service.
     pub latency_ms: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct OracleConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub pdb: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -609,8 +692,12 @@ pub enum ServiceConfig {
     Pulsar(PulsarConfig),
     Redis(RedisConfig),
     ClickHouse(ClickHouseConfig),
+    Doris(DorisConfig),
+    Starrocks(StarrocksConfig),
     MySql(MySqlConfig),
+    MariaDb(MariaDbConfig),
     Postgres(PostgresConfig),
+    Oracle(OracleConfig),
     SqlServer(SqlServerConfig),
     MongoDb(MongoDbConfig),
     ElasticSearch(ElasticSearchConfig),
@@ -628,8 +715,11 @@ pub enum TaskGroup {
     Kafka,
     Pubsub,
     Pulsar,
+    Starrocks,
     MySql,
+    MariaDb,
     Postgres,
+    Oracle,
     SqlServer,
     MongoDb,
     ElasticSearch,
@@ -638,6 +728,7 @@ pub enum TaskGroup {
     Mqtt,
     Redis,
     ClickHouse,
+    Doris,
     Lakekeeper,
     Moat,
 }
@@ -661,9 +752,13 @@ impl ServiceConfig {
             Self::Pulsar(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::ClickHouse(c) => &c.id,
+            Self::Doris(c) => &c.id,
+            Self::Starrocks(c) => &c.id,
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
+            Self::MariaDb(c) => &c.id,
             Self::Postgres(c) => &c.id,
+            Self::Oracle(c) => &c.id,
             Self::SqlServer(c) => &c.id,
             Self::MongoDb(c) => &c.id,
             Self::ElasticSearch(c) => &c.id,
@@ -695,9 +790,13 @@ impl ServiceConfig {
             Self::Pulsar(c) => Some(c.http_port),
             Self::Redis(c) => Some(c.port),
             Self::ClickHouse(c) => Some(c.http_port),
+            Self::Doris(c) => Some(c.query_port),
+            Self::Starrocks(c) => Some(c.query_port),
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
+            Self::MariaDb(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
+            Self::Oracle(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
             Self::MongoDb(c) => Some(c.port),
             Self::ElasticSearch(c) => Some(c.port),
@@ -728,9 +827,13 @@ impl ServiceConfig {
             Self::Pulsar(c) => c.user_managed,
             Self::Redis(c) => c.user_managed,
             Self::ClickHouse(c) => c.user_managed,
+            Self::Doris(c) => c.user_managed,
+            Self::Starrocks(c) => c.user_managed,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
+            Self::MariaDb(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
+            Self::Oracle(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::MongoDb(c) => c.user_managed,
             Self::ElasticSearch(c) => c.user_managed,
@@ -762,6 +865,8 @@ impl ServiceConfig {
             ServiceConfig::Pulsar(_) => Pulsar,
             ServiceConfig::Redis(_) => Redis,
             ServiceConfig::ClickHouse(_) => ClickHouse,
+            ServiceConfig::Doris(_) => Doris,
+            ServiceConfig::Starrocks(_) => Starrocks,
             ServiceConfig::MySql(my_sql_config) => {
                 if matches!(my_sql_config.application, Application::Metastore) {
                     RisingWave
@@ -769,6 +874,7 @@ impl ServiceConfig {
                     MySql
                 }
             }
+            ServiceConfig::MariaDb(_) => MariaDb,
             ServiceConfig::Postgres(postgres_config) => {
                 if matches!(postgres_config.application, Application::Metastore) {
                     RisingWave
@@ -776,6 +882,7 @@ impl ServiceConfig {
                     Postgres
                 }
             }
+            ServiceConfig::Oracle(_) => Oracle,
             ServiceConfig::SqlServer(_) => SqlServer,
             ServiceConfig::MongoDb(_) => MongoDb,
             ServiceConfig::ElasticSearch(_) => ElasticSearch,

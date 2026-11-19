@@ -64,3 +64,70 @@
           │   └─StreamDml { columns: [v, _row_id] }
           │     └─StreamSource
           └─StreamUpstreamSinkUnion
+- name: subquery in generated column
+  sql: |
+    explain create table t (v text as (select 'a'));
+  planner_error: 'failed to bind the expression in generated column "v": Failed to bind expression: (SELECT ''a''): Invalid input syntax: subqueries are not allowed in GENERATED COLUMN'
+- name: NOT NULL on a generated column is checked on its computed value
+  sql: |
+    explain create table t (v int, g int not null as v + 1);
+  explain_output: |
+    StreamMaterialize { columns: [v, g, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull($expr1) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamUnion { all: true }
+          ├─StreamExchange { dist: HashShard(_row_id) }
+          │ └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }
+          │   └─StreamDml { columns: [v, _row_id] }
+          │     └─StreamSource
+          └─StreamUpstreamSinkUnion
+- name: NOT NULL on a column after a generated column checks that column
+  sql: |
+    explain create table t (g int as null::int, v int not null);
+  explain_output: |
+    StreamMaterialize { columns: [g, v, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull(v) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamUnion { all: true }
+          ├─StreamExchange { dist: HashShard(_row_id) }
+          │ └─StreamProject { exprs: [null:Int32, v, _row_id] }
+          │   └─StreamDml { columns: [v, _row_id] }
+          │     └─StreamSource
+          └─StreamUpstreamSinkUnion
+- name: sink into a table without a column list matches the columns after a generated column
+  sql: |
+    create table t (id int primary key, g int as id + 1, v int);
+    create table s (id int primary key, v int);
+    explain create sink sk into t as select id, v from s;
+  explain_output: |
+    StreamProject { exprs: [s.id, (s.id + 1:Int32) as $expr1, s.v] }
+    └─StreamProject { exprs: [s.id, s.v] }
+      └─StreamSink { type: upsert, columns: [id, v], downstream_pk: [s.id] }
+        └─StreamTableScan { table: s, columns: [id, v] }
+- name: non-append-only sink into a table whose primary key comes after a generated column
+  sql: |
+    create table t (v int, g int as v + 1, w int primary key);
+    create table s (v int, w int primary key);
+    explain create sink sk into t as select v, w from s;
+  explain_output: |
+    StreamProject { exprs: [s.v, (s.v + 1:Int32) as $expr1, s.w] }
+    └─StreamProject { exprs: [s.v, s.w] }
+      └─StreamSink { type: upsert, columns: [v, w], downstream_pk: [s.w] }
+        └─StreamTableScan { table: s, columns: [v, w] }
+- name: non-append-only sink into a table whose primary key comes after a generated column, with a column list
+  sql: |
+    create table t (v int, g int as v + 1, w int primary key);
+    create table s (v int, w int primary key);
+    explain create sink sk into t (w, v) as select w, v from s;
+  explain_output: |
+    StreamProject { exprs: [s.v, (s.v + 1:Int32) as $expr1, s.w] }
+    └─StreamProject { exprs: [s.v, s.w] }
+      └─StreamSink { type: upsert, columns: [w, v], downstream_pk: [s.w] }
+        └─StreamProject { exprs: [s.w, s.v] }
+          └─StreamTableScan { table: s, columns: [v, w] }
+- name: non-append-only sink into a table with a generated primary key is rejected
+  sql: |
+    create table t (v int, g int primary key as v + 1, w int);
+    create table s (v int primary key, w int);
+    explain create sink sk into t as select v, w from s;
+  planner_error: 'Invalid input syntax: When using non append only sink into table, the primary key of the table must be included in the sink result.'

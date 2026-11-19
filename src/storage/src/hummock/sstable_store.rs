@@ -110,7 +110,50 @@ impl<T> Deref for VectorMetaFileHolder<T> {
     }
 }
 
-pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
+/// Meta-cache value with the existing bincode format and allocation-free filter sizing.
+///
+/// A separate type lets this cache override `Code::estimated_size` without changing
+/// `Sstable`'s serde implementation or conflicting with Foyer's serde blanket impl.
+#[derive(Debug)]
+pub struct SstableMetaCacheValue(Box<Sstable>);
+
+impl From<Sstable> for SstableMetaCacheValue {
+    fn from(sstable: Sstable) -> Self {
+        Self(Box::new(sstable))
+    }
+}
+
+impl Deref for SstableMetaCacheValue {
+    type Target = Sstable;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Sstable> for SstableMetaCacheValue {
+    fn as_ref(&self) -> &Sstable {
+        &self.0
+    }
+}
+
+impl foyer::Code for SstableMetaCacheValue {
+    fn encode(&self, writer: &mut impl std::io::Write) -> foyer::Result<()> {
+        bincode::serialize_into(writer, &self.0).map_err(foyer::Error::bincode_error)
+    }
+
+    fn decode(reader: &mut impl std::io::Read) -> foyer::Result<Self> {
+        bincode::deserialize_from(reader)
+            .map(Self)
+            .map_err(foyer::Error::bincode_error)
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.0.serde_encoded_size()
+    }
+}
+
+pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, SstableMetaCacheValue>;
 
 pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
 
@@ -196,7 +239,7 @@ pub struct SstableStoreConfig {
     pub use_new_object_prefix_strategy: bool,
     pub skip_bloom_filter_in_serde: bool,
 
-    pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    pub meta_cache: HybridCache<HummockSstableObjectId, SstableMetaCacheValue>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
 
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
@@ -204,10 +247,10 @@ pub struct SstableStoreConfig {
 }
 
 pub struct SstableStore {
-    path: String,
+    path: Arc<str>,
     store: ObjectStoreRef,
 
-    meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    meta_cache: HybridCache<HummockSstableObjectId, SstableMetaCacheValue>,
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
@@ -241,7 +284,7 @@ impl SstableStore {
         // error until first write attempt.
 
         Self {
-            path: config.path,
+            path: config.path.into(),
             store: config.store,
 
             meta_cache: config.meta_cache,
@@ -271,10 +314,12 @@ impl SstableStore {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
             .with_shards(1)
-            .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                std::mem::size_of::<HummockSstableObjectId>()
-                    + value.estimated_meta_cache_memory_weight()
-            })
+            .with_weighter(
+                |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
+                    std::mem::size_of::<HummockSstableObjectId>()
+                        + value.estimated_meta_cache_memory_weight()
+                },
+            )
             .storage()
             .build()
             .await
@@ -292,7 +337,7 @@ impl SstableStore {
             .map_err(HummockError::foyer_error)?;
 
         Ok(Self {
-            path,
+            path: path.into(),
             store,
 
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
@@ -315,11 +360,6 @@ impl SstableStore {
             .await?;
         self.meta_cache.remove(&object_id);
         // TODO(MrCroxx): support group remove in foyer.
-        Ok(())
-    }
-
-    pub fn delete_cache(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
-        self.meta_cache.remove(&object_id);
         Ok(())
     }
 
@@ -486,7 +526,7 @@ impl SstableStore {
         let store = self.store.clone();
 
         let file_size = sst.meta.estimated_size;
-        let data_path = Arc::new(self.get_sst_data_path(object_id));
+        let data_path = self.get_sst_data_path(object_id);
 
         let disable_cache: fn() -> bool = || {
             fail_point!("disable_block_cache", |_| true);
@@ -677,11 +717,25 @@ impl SstableStore {
     }
 
     pub fn get_object_data_path(&self, object_id: HummockObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(
-            object_id.as_raw().as_raw_id(),
+        Self::build_object_data_path(
+            &self.store,
+            &self.path,
             self.use_new_object_prefix_strategy,
+            object_id,
+        )
+    }
+
+    fn build_object_data_path(
+        store: &ObjectStoreRef,
+        directory: &str,
+        use_new_object_prefix_strategy: bool,
+        object_id: HummockObjectId,
+    ) -> String {
+        let prefix = store.get_object_prefix(
+            object_id.as_raw().as_raw_id(),
+            use_new_object_prefix_strategy,
         );
-        risingwave_hummock_sdk::get_object_data_path(&obj_prefix, &self.path, object_id)
+        risingwave_hummock_sdk::get_object_data_path(&prefix, directory, object_id)
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
@@ -711,7 +765,7 @@ impl SstableStore {
     pub async fn sstable_cached(
         &self,
         sst_obj_id: HummockSstableObjectId,
-    ) -> HummockResult<Option<HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>> {
+    ) -> HummockResult<Option<TableHolder>> {
         self.meta_cache
             .get(&sst_obj_id)
             .await
@@ -726,23 +780,28 @@ impl SstableStore {
     ) -> HummockResult<TableHolder> {
         let object_id = sstable_info_ref.object_id;
         let store = self.store.clone();
-        let meta_path = self.get_sst_data_path(object_id);
+        let directory = self.path.clone();
+        let use_new_prefix = self.use_new_object_prefix_strategy;
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
         let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
 
         let fetch = self.meta_cache.get_or_fetch(&object_id, || async move {
+            let meta_path = Self::build_object_data_path(
+                &store,
+                &directory,
+                use_new_prefix,
+                HummockObjectId::Sstable(object_id),
+            );
             let now = Instant::now();
             let buf = store
                 .read(&meta_path, range)
                 .instrument_await("get_meta_response".verbose())
                 .await?;
-            let meta = SstableMeta::decode(&buf[..])?;
-
-            let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
+            let sst = Sstable::from_meta_bytes(object_id, &buf, skip_bloom_filter_in_serde)?;
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-            Ok::<_, anyhow::Error>(Box::new(sst))
+            Ok::<_, anyhow::Error>(SstableMetaCacheValue::from(sst))
         });
 
         stats.cache_meta_block_total += 1;
@@ -761,11 +820,9 @@ impl SstableStore {
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
-        start_after: Option<String>,
-        limit: Option<usize>,
     ) -> HummockResult<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
+        let raw_iter = self.store.list(&list_path).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", SST_OBJECT_SUFFIX))),
             Err(_) => future::ready(true),
@@ -783,22 +840,8 @@ impl SstableStore {
 
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
         let sst = Sstable::new(object_id, meta, self.skip_bloom_filter_in_serde);
-        self.meta_cache.insert(object_id, Box::new(sst));
-    }
-
-    pub fn insert_block_cache(
-        &self,
-        object_id: HummockSstableObjectId,
-        block_index: u64,
-        block: Box<Block>,
-    ) {
-        self.block_cache.insert(
-            SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: block_index,
-            },
-            block,
-        );
+        self.meta_cache
+            .insert(object_id, SstableMetaCacheValue::from(sst));
     }
 
     pub fn get_prefetch_memory_usage(&self) -> usize {
@@ -833,7 +876,7 @@ impl SstableStore {
         Ok(BlockDataStream::new(reader, metas))
     }
 
-    pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {
+    pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, SstableMetaCacheValue> {
         &self.meta_cache
     }
 

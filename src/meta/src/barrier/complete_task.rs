@@ -109,8 +109,9 @@ impl CompleteBarrierTask {
                 .start_timer();
 
             // Iceberg pk-index sink metadata is handled in four steps around Hummock `commit_epoch`:
-            //   1. pre_commit: merge ordinary reports with optional compaction metadata and persist
-            //      one pending row per sink under `pending_sink_state`.
+            //   1. pre_commit: aggregate ordinary reports, or compaction metadata with resolver
+            //      reports in a compaction End epoch, and persist one pending row per sink under
+            //      `pending_sink_state`.
             //   2. commit_epoch: advance hummock.
             //   3. commit: drive iceberg overwrite_files for queued epochs.
             //   4. advance_committed_epochs: advance the per-partial-graph committed epoch cursor.
@@ -143,7 +144,7 @@ impl CompleteBarrierTask {
                 let elapsed_secs = info.elapsed_secs();
                 notifiers.extend(info.notifier);
                 context
-                    .post_collect_command(info.post_collect_command)
+                    .post_collect_command(info.post_collect_command, info.barrier_info.epoch())
                     .await?;
                 if job_id.is_none() {
                     Self::report_complete_event(

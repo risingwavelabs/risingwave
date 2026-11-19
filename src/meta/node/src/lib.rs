@@ -31,8 +31,10 @@ use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
+use risingwave_meta::barrier::snapshot_backfill_max_pending_barrier_num;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
+use risingwave_sqlparser::ast::SqlOptionRedaction;
 pub use rpc::{ElectionClient, ElectionMember};
 use server::rpc_serve;
 pub use server::started::get as is_server_started;
@@ -406,12 +408,18 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_orphan_file_cleanup_interval_sec: config
+                    .meta
+                    .iceberg_orphan_file_cleanup_interval_sec,
                 iceberg_compaction_report_timeout_sec: config
                     .meta
                     .iceberg_compaction_report_timeout_sec,
                 iceberg_compaction_config_refresh_interval_sec: config
                     .meta
                     .iceberg_compaction_config_refresh_interval_sec,
+                iceberg_compaction_schedule_on_startup: config
+                    .meta
+                    .iceberg_compaction_schedule_on_startup,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -574,13 +582,10 @@ pub fn start(
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
-                redact_sql_option_keywords: Arc::new(
-                    config
-                        .batch
-                        .redact_sql_option_keywords
-                        .into_iter()
-                        .collect(),
-                ),
+                sql_option_redaction: Arc::new(SqlOptionRedaction::new(
+                    config.batch.redact_sql_option_keywords,
+                    config.batch.redact_sql_option_allowlist,
+                )),
                 cdc_table_split_init_sleep_interval_splits: config
                     .meta
                     .cdc_table_split_init_sleep_interval_splits,
@@ -643,6 +648,21 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.iceberg_compaction_config_refresh_interval_sec == 0 {
         let error_msg = "`iceberg_compaction_config_refresh_interval_sec` must be greater than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    // A snapshot backfill partial graph drains its queued catch-up barriers only when a new
+    // upstream barrier arrives, and that barrier is queued first, so the queue shrinks by at
+    // most `limit - 1` per upstream barrier. A limit of 1 could never empty the queue.
+    if snapshot_backfill_max_pending_barrier_num(
+        config.streaming.in_flight_barrier_nums,
+        config
+            .streaming
+            .snapshot_backfill_barrier_amplification_factor,
+    ) < 2
+    {
+        let error_msg = "`in_flight_barrier_nums` times `snapshot_backfill_barrier_amplification_factor` must be at least 2";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

@@ -72,8 +72,7 @@ pub struct JoinEntry {
 
 impl EstimateSize for JoinEntry {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the cached rows, not the overhead of the hash map itself.
         self.kv_heap_size.size()
     }
 }

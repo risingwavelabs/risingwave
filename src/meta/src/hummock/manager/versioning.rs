@@ -264,14 +264,12 @@ impl HummockManager {
         tracing::debug!("Hummock stopped write is updated: {:#?}", new_write_limits);
         trigger_write_stop_stats(&self.metrics, &new_write_limits);
         cg_manager.write_limit = new_write_limits;
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Add,
-                Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
-                    write_limits: cg_manager.write_limit.clone(),
-                }),
-            );
+        self.env.notification_manager().notify_hummock(
+            Operation::Add,
+            Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
+                write_limits: cg_manager.write_limit.clone(),
+            }),
+        );
         true
     }
 
@@ -320,6 +318,7 @@ impl HummockManager {
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
                 &mut versioning.table_change_log,
+                &self.gc_manager.change_log_retention,
                 self.env.notification_manager(),
                 None,
                 &self.metrics,

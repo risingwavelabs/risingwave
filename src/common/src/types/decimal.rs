@@ -1000,6 +1000,193 @@ mod tests {
         }
     }
 
+    /// Locks the formats through which a decimal reaches persisted state, data placement, or
+    /// other nodes:
+    /// - the hash input decides the vnode of rows distributed by a decimal column, and is folded
+    ///   into persisted aggregation states such as `approx_count_distinct` registers;
+    /// - the memcomparable and value encodings are stored in state tables, and the value encoding
+    ///   also holds constants in the catalog;
+    /// - the protobuf array encoding is the wire format between nodes.
+    ///
+    /// Existing clusters depend on these bytes. Changing an existing entry is a breaking change
+    /// that silently misplaces or misreads data, as happened to `jsonb` in #25336. A future
+    /// representation may only add entries for values that could not be represented before.
+    #[test]
+    fn test_encoding_backward_compatible() {
+        use std::fmt::Write as _;
+        use std::hash::Hasher;
+
+        use crate::array::{Array as _, DataChunk, DecimalArray};
+        use crate::hash::VirtualNode;
+        use crate::row::OwnedRow;
+        use crate::types::{ScalarImpl, hash_datum};
+        use crate::util::sort_util::OrderType;
+        use crate::util::{memcmp_encoding, value_encoding};
+
+        /// Records the bytes fed into a hasher, one entry per write, so that the expectation
+        /// does not depend on the hash function.
+        #[derive(Default)]
+        struct RecordingHasher(Vec<Vec<u8>>);
+
+        impl Hasher for RecordingHasher {
+            fn write(&mut self, bytes: &[u8]) {
+                self.0.push(bytes.to_vec());
+            }
+
+            fn finish(&self) -> u64 {
+                unreachable!()
+            }
+        }
+
+        let values = [
+            "0",
+            "-0.00",
+            "1",
+            "1.000",
+            "-1.5",
+            "1000.00",
+            "123456789.987654321",
+            "0.0000000000000000000000000001",
+            "7.9228162514264337593543950335",
+            "79228162514264337593543950335",
+            "-79228162514264337593543950335",
+            "NaN",
+            "Infinity",
+            "-Infinity",
+        ];
+
+        let mut actual = String::new();
+        for s in values {
+            let decimal = Decimal::from_str(s).unwrap();
+            let datum = Some(ScalarImpl::Decimal(decimal));
+
+            let mut hasher = RecordingHasher::default();
+            hash_datum(&datum, &mut hasher);
+            let hash_input = hasher.0.iter().map(hex::encode).join(" ");
+
+            let vnode = VirtualNode::compute_row(
+                OwnedRow::new(vec![datum.clone()]),
+                &[0],
+                VirtualNode::COUNT_FOR_COMPAT,
+            );
+            let chunk = DataChunk::new(vec![DecimalArray::from_iter([decimal]).into_ref()], 1);
+            let chunk_vnodes =
+                VirtualNode::compute_chunk(&chunk, &[0], VirtualNode::COUNT_FOR_COMPAT);
+            assert_eq!(chunk_vnodes, [vnode]);
+
+            let memcmp = memcmp_encoding::encode_value(&datum, OrderType::ascending()).unwrap();
+            let decoded =
+                memcmp_encoding::decode_value(&DataType::Decimal, &memcmp, OrderType::ascending())
+                    .unwrap();
+            assert_eq!(decoded, datum);
+
+            let value = value_encoding::serialize_datum(&datum);
+            let decoded =
+                value_encoding::deserialize_datum(&value[..], &DataType::Decimal).unwrap();
+            assert_eq!(decoded, datum);
+
+            let mut protobuf = vec![];
+            decimal.to_protobuf(&mut protobuf).unwrap();
+            let decoded = Decimal::from_protobuf(&mut &protobuf[..]).unwrap();
+            assert_eq!(decoded, decimal);
+
+            writeln!(actual, "{s}").unwrap();
+            writeln!(actual, "  hash input: {hash_input}").unwrap();
+            writeln!(actual, "  vnode:      {}", vnode.to_index()).unwrap();
+            writeln!(actual, "  memcmp:     {}", hex::encode(&memcmp)).unwrap();
+            writeln!(actual, "  value:      {}", hex::encode(&value)).unwrap();
+            writeln!(actual, "  protobuf:   {}", hex::encode(&protobuf)).unwrap();
+        }
+
+        expect_test::expect![[r#"
+            0
+              hash input: 0100000000000000 00000000 00000000 00000000 00000000
+              vnode:      7
+              memcmp:     0015
+              value:      0100000000000000000000000000000000
+              protobuf:   00000000000000000000000000000000
+            -0.00
+              hash input: 0100000000000000 00000000 00000000 00000000 00000000
+              vnode:      7
+              memcmp:     0015
+              value:      0100000200000000000000000000000000
+              protobuf:   00000200000000000000000000000000
+            1
+              hash input: 0100000000000000 01000000 00000000 00000000 00000000
+              vnode:      150
+              memcmp:     001802
+              value:      0100000000010000000000000000000000
+              protobuf:   00000000010000000000000000000000
+            1.000
+              hash input: 0100000000000000 01000000 00000000 00000000 00000000
+              vnode:      150
+              memcmp:     001802
+              value:      0100000300e80300000000000000000000
+              protobuf:   00000300e80300000000000000000000
+            -1.5
+              hash input: 0100000000000000 0f000000 00000000 00000000 00000180
+              vnode:      92
+              memcmp:     0012fc9b
+              value:      01000001800f0000000000000000000000
+              protobuf:   000001800f0000000000000000000000
+            1000.00
+              hash input: 0100000000000000 e8030000 00000000 00000000 00000000
+              vnode:      66
+              memcmp:     001914
+              value:      0100000200a08601000000000000000000
+              protobuf:   00000200a08601000000000000000000
+            123456789.987654321
+              hash input: 0100000000000000 b1fa52e0 4b9bb601 00000000 00000900
+              vnode:      99
+              memcmp:     001c032f5b87b3c5996d4114
+              value:      0100000900b1fa52e04b9bb60100000000
+              protobuf:   00000900b1fa52e04b9bb60100000000
+            0.0000000000000000000000000001
+              hash input: 0100000000000000 01000000 00000000 00000000 00001c00
+              vnode:      203
+              memcmp:     0016f202
+              value:      0100001c00010000000000000000000000
+              protobuf:   00001c00010000000000000000000000
+            7.9228162514264337593543950335
+              hash input: 0100000000000000 ffffffff ffffffff ffffffff 00001c00
+              vnode:      246
+              memcmp:     00180fb93921331d35574b774757bf0746
+              value:      0100001c00ffffffffffffffffffffffff
+              protobuf:   00001c00ffffffffffffffffffffffff
+            79228162514264337593543950335
+              hash input: 0100000000000000 ffffffff ffffffff ffffffff 00000000
+              vnode:      171
+              memcmp:     00220f0fb93921331d35574b774757bf0746
+              value:      0100000000ffffffffffffffffffffffff
+              protobuf:   00000000ffffffffffffffffffffffff
+            -79228162514264337593543950335
+              hash input: 0100000000000000 ffffffff ffffffff ffffffff 00000080
+              vnode:      139
+              memcmp:     0008f0f046c6decce2caa8b488b8a840f8b9
+              value:      0100000080ffffffffffffffffffffffff
+              protobuf:   00000080ffffffffffffffffffffffff
+            NaN
+              hash input: 0300000000000000
+              vnode:      138
+              memcmp:     0024
+              value:      0101000000000000000000000000000000
+              protobuf:   01000000000000000000000000000000
+            Infinity
+              hash input: 0200000000000000
+              vnode:      20
+              memcmp:     0023
+              value:      0102000000000000000000000000000000
+              protobuf:   02000000000000000000000000000000
+            -Infinity
+              hash input: 0000000000000000
+              vnode:      105
+              memcmp:     0007
+              value:      0103000000000000000000000000000000
+              protobuf:   03000000000000000000000000000000
+        "#]]
+        .assert_eq(&actual);
+    }
+
     #[test]
     fn test_decimal_estimate_size() {
         let decimal = Decimal::NegativeInf;

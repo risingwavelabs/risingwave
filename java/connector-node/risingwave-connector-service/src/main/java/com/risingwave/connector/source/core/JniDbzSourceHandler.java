@@ -16,14 +16,14 @@
 
 package com.risingwave.connector.source.core;
 
-import static com.risingwave.proto.ConnectorServiceProto.SourceType.POSTGRES;
-
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
+import com.risingwave.connector.source.common.CdcSource;
+import com.risingwave.connector.source.common.CdcSourceFactory;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
-import com.risingwave.connector.source.common.DbzSourceUtils;
+import com.risingwave.connector.source.common.PostgresCdcSource;
+import com.risingwave.connector.source.common.PostgresDbzConnectorConfig;
 import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -42,14 +42,11 @@ public class JniDbzSourceHandler {
     private final DbzCdcEngineRunner runner;
     private final CdcSourceChannel channel;
 
-    public JniDbzSourceHandler(DbzConnectorConfig config, CdcSourceChannel channel) {
+    public JniDbzSourceHandler(
+            CdcSource source, DbzConnectorConfig config, CdcSourceChannel channel) {
         this.config = config;
-        this.runner = DbzCdcEngineRunner.create(config, channel);
+        this.runner = DbzCdcEngineRunner.create(source, config, channel);
         this.channel = channel;
-
-        if (runner == null) {
-            throw new CdcConnectorException("Failed to create engine runner");
-        }
     }
 
     public long getSourceId() {
@@ -64,22 +61,12 @@ public class JniDbzSourceHandler {
             var request =
                     ConnectorServiceProto.GetEventStreamRequest.parseFrom(
                             getEventStreamRequestBytes);
-            boolean isCdcSourceJob = request.getIsSourceJob();
-
-            if (request.getSourceType() == POSTGRES) {
-                DbzSourceUtils.createPostgresPublicationInSourceExecutor(
-                        request.getPropertiesMap(), request.getSourceId());
+            var source = CdcSourceFactory.createSource(request);
+            var config = source.getConfig();
+            if (config instanceof PostgresDbzConnectorConfig postgresConfig) {
+                PostgresCdcSource.createPublication(postgresConfig);
             }
-
-            var config =
-                    new DbzConnectorConfig(
-                            SourceTypeE.valueOf(request.getSourceType()),
-                            request.getSourceId(),
-                            request.getStartOffset(),
-                            request.getPropertiesMap(),
-                            request.getSnapshotDone(),
-                            isCdcSourceJob);
-            JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channel);
+            JniDbzSourceHandler handler = new JniDbzSourceHandler(source, config, channel);
             handler.start();
         } catch (Throwable t) {
             LOG.error("runJniDbzSourceThread throws an exception.", t);
@@ -122,11 +109,15 @@ public class JniDbzSourceHandler {
             JniDbzSourceRegistry.register(this);
 
             // Start the engine
-            var startOk = runner.start();
-            if (!sendHandshakeMessage(runner, channel, startOk)) {
+            // A null send only probes receiver liveness; it does not enqueue a message.
+            var startOk = runner.start(() -> channel.send(null));
+            if (!sendHandshakeMessage(channel, startOk)) {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
+                return;
+            }
+            if (!startOk) {
                 return;
             }
 
@@ -156,7 +147,6 @@ public class JniDbzSourceHandler {
                     LOG.info(
                             "Engine#{}: JNI receiver closed, stop the engine",
                             config.getSourceId());
-                    runner.stop();
                     return;
                 }
             }
@@ -167,19 +157,19 @@ public class JniDbzSourceHandler {
             // correct error propagation.
             channel.sendError(t.getMessage());
 
+        } finally {
             try {
                 runner.stop();
             } catch (Exception e) {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+            } finally {
+                // remove the handler from registry
+                JniDbzSourceRegistry.unregister(this);
             }
-        } finally {
-            // remove the handler from registry
-            JniDbzSourceRegistry.unregister(this);
         }
     }
 
-    private boolean sendHandshakeMessage(
-            DbzCdcEngineRunner runner, CdcSourceChannel channel, boolean startOk) throws Exception {
+    private boolean sendHandshakeMessage(CdcSourceChannel channel, boolean startOk) {
         // send a handshake message to notify the Source executor
         // if the handshake is not ok, the split reader will return error to source
         // actor
@@ -191,12 +181,6 @@ public class JniDbzSourceHandler {
                         .setSourceId(config.getSourceId())
                         .setControl(controlInfo)
                         .build();
-        var success = channel.send(handshakeMsg.toByteArray());
-        if (!success) {
-            LOG.info(
-                    "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
-            runner.stop();
-        }
-        return success;
+        return channel.send(handshakeMsg.toByteArray());
     }
 }

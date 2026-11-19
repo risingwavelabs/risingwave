@@ -37,15 +37,21 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table = node.get_state_table()?;
-        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let state_table = StateTableBuilder::new(table, store, vnodes)
             .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
+        // Unlike the stream key, the dedup columns are in the pk order of the state table.
+        let dedup_cols = node
+            .dedup_column_indices
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
         let exec = AppendOnlyDedupExecutor::new(
             params.actor_context,
             input,
-            params.info.stream_key.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
+            dedup_cols,
             state_table,
             params.watermark_epoch,
             params.executor_stats.clone(),

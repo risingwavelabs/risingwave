@@ -183,8 +183,7 @@ impl ClusterController {
         {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::Node(worker.clone()))
-                .await;
+                .notify_frontend_without_version(Operation::Add, Info::Node(worker.clone()));
         }
         self.env
             .notification_manager()
@@ -200,8 +199,7 @@ impl ClusterController {
         {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Delete, Info::Node(worker.clone()))
-                .await;
+                .notify_frontend_without_version(Operation::Delete, Info::Node(worker.clone()));
         }
 
         // Keep license manager in sync with the latest cluster resource.

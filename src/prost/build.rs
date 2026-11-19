@@ -177,6 +177,9 @@ for_all_wrapped_id_fields! (
         BatchQueryCommittedEpoch {
             hummock_version_id: HummockVersionId,
         }
+        BatchQueryLatestCommittedEpoch {
+            hummock_version_id: HummockVersionId,
+        }
         WorkerNode {
             id: WorkerId,
         }
@@ -332,6 +335,9 @@ for_all_wrapped_id_fields! (
         }
         GetTablesResponse {
             tables: TableId,
+        }
+        RemoveIcebergTableOrphanFilesRequest {
+            sink_id: SinkId,
         }
         ReplaceJobPlan.ReplaceSink {
             old_sink_id: SinkId,
@@ -571,6 +577,7 @@ for_all_wrapped_id_fields! (
         }
         SubscribeIcebergCompactionEventRequest.ReportTask {
             task_id: IcebergCompactionTaskId,
+            sink_id: SinkId,
         }
     }
     meta {
@@ -684,6 +691,10 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
             worker_id: WorkerId,
         }
+        ListBoundedJobsResponse.BoundedJob {
+            job_id: JobId,
+            source_id: SourceId,
+        }
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
@@ -739,6 +750,9 @@ for_all_wrapped_id_fields! (
             upstream_fragment_ids: FragmentId,
             state_table_ids: TableId,
             table_id: JobId,
+        }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
         }
         WorkerReschedule {
             worker_actor_diff: WorkerId,
@@ -833,6 +847,9 @@ for_all_wrapped_id_fields! (
         }
         LoadFinishMutation {
             associated_source_id: SourceId,
+        }
+        LoadId {
+            source_id: SourceId,
         }
         LookupNode {
             table_id: TableId,
@@ -968,12 +985,20 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
             associated_source_id: SourceId,
         }
+        BarrierCompleteResponse.LoadProgress {
+            reporter_actor_id: ActorId,
+        }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
         }
         BarrierCompleteResponse.RefreshFinishedActor {
             reporter_actor_id: ActorId,
             table_id: TableId,
+        }
+        BarrierCompleteResponse.TableChangeLogProgress {
+            fragment_id: FragmentId,
+            upstream_table_id: TableId,
+            progress_table_id: TableId,
         }
         GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id: HummockRawObjectId,
@@ -1005,6 +1030,9 @@ for_all_wrapped_id_fields! (
         }
         StreamingControlStreamResponse.ResetPartialGraphResponse {
             partial_graph_id: PartialGraphId,
+        }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
         }
     }
     task_service {
@@ -1269,6 +1297,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
+        .type_attribute(
+            "stream_plan.EowcOverWindowNodeVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
         .type_attribute(
             "plan_common.ColumnDescVersion",
             "#[derive(prost_helpers::Version)]",

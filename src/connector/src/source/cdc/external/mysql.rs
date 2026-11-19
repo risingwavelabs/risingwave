@@ -21,8 +21,7 @@ use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
-use mysql_common::params::Params;
-use mysql_common::value::Value;
+use mysql_async::{Params, Value};
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     CDC_OFFSET_COLUMN_NAME, CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema,
@@ -45,6 +44,7 @@ pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row_with_strict_pk;
 use crate::source::CdcTableSnapshotSplit;
+use crate::source::cdc::MARIADB_CDC_CONNECTOR;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
     ExternalTableConfig, ExternalTableReader, SchemaTableName,
@@ -61,7 +61,7 @@ use crate::source::cdc::external::{
 /// * `port` - MySQL server port
 /// * `username` - MySQL username
 /// * `password` - MySQL password
-/// * `database` - Database name
+/// * `database` - Optional default database; omit for server-wide queries
 /// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
 ///
 /// # Returns
@@ -71,43 +71,129 @@ pub fn build_mysql_connection_pool(
     port: u16,
     username: &str,
     password: &str,
-    database: &str,
+    database: Option<&str>,
     ssl_mode: SslMode,
 ) -> mysql_async::Pool {
-    let mut opts_builder = mysql_async::OptsBuilder::default()
+    let opts_builder = mysql_async::OptsBuilder::default()
         .user(Some(username))
         .pass(Some(password))
         .ip_or_hostname(host)
         .tcp_port(port)
-        .db_name(Some(database));
-
-    opts_builder = match ssl_mode {
-        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-        // verify-ca and verify-full are same as required for mysql now
-        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-            let ssl_without_verify = mysql_async::SslOpts::default()
-                .with_danger_accept_invalid_certs(true)
-                .with_danger_skip_domain_validation(true);
-            opts_builder.ssl_opts(Some(ssl_without_verify))
-        }
-    };
+        .db_name(database)
+        .ssl_opts(mysql_ssl_opts(ssl_mode));
 
     mysql_async::Pool::new(opts_builder)
 }
 
+/// Build a `MariaDB` pool with certificate verification for `verify-ca` and `verify-full`.
+/// Use `None` for server-wide queries and a concrete database for table access.
+pub fn build_mariadb_connection_pool(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    database: Option<&str>,
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<&str>,
+) -> mysql_async::Pool {
+    let opts_builder = mysql_async::OptsBuilder::default()
+        .user(Some(username))
+        .pass(Some(password))
+        .ip_or_hostname(host)
+        .tcp_port(port)
+        .db_name(database)
+        .ssl_opts(mariadb_ssl_opts(ssl_mode, ssl_root_cert));
+    mysql_async::Pool::new(opts_builder)
+}
+
+fn mysql_ssl_opts(ssl_mode: SslMode) -> Option<mysql_async::SslOpts> {
+    match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => None,
+        // Preserve the existing MySQL behavior: all TLS modes skip verification.
+        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => Some(
+            mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true),
+        ),
+    }
+}
+
+fn mariadb_ssl_opts(
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<&str>,
+) -> Option<mysql_async::SslOpts> {
+    match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => None,
+        SslMode::Required => Some(
+            mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true),
+        ),
+        SslMode::VerifyCa | SslMode::VerifyFull => {
+            let mut ssl_opts = mysql_async::SslOpts::default();
+            if let Some(root_cert) = ssl_root_cert {
+                ssl_opts =
+                    ssl_opts.with_root_certs(vec![std::path::PathBuf::from(root_cert).into()]);
+            }
+            if matches!(ssl_mode, SslMode::VerifyCa) {
+                ssl_opts = ssl_opts.with_danger_skip_domain_validation(true);
+            }
+            Some(ssl_opts)
+        }
+    }
+}
+
+fn build_external_table_connection_pool(config: &ExternalTableConfig) -> mysql_async::Pool {
+    if config.connector == MARIADB_CDC_CONNECTOR {
+        build_mariadb_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            Some(&config.database),
+            config.ssl_mode.clone(),
+            config.ssl_root_cert.as_deref(),
+        )
+    } else {
+        build_mysql_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            Some(&config.database),
+            config.ssl_mode.clone(),
+        )
+    }
+}
+
+fn schema_ssl_mode(config: &ExternalTableConfig) -> ConnectorResult<sqlx::mysql::MySqlSslMode> {
+    Ok(match config.ssl_mode {
+        SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+        SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
+        SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
+        SslMode::VerifyCa if config.connector == MARIADB_CDC_CONNECTOR => {
+            sqlx::mysql::MySqlSslMode::VerifyCa
+        }
+        SslMode::VerifyFull if config.connector == MARIADB_CDC_CONNECTOR => {
+            sqlx::mysql::MySqlSslMode::VerifyIdentity
+        }
+        _ => return Err(anyhow!("unsupported SSL mode").into()),
+    })
+}
+
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct MySqlOffset {
+pub struct MysqlOffset {
     pub filename: String,
     pub position: u64,
 }
 
-impl MySqlOffset {
+impl MysqlOffset {
     pub fn new(filename: String, position: u64) -> Self {
         Self { filename, position }
     }
 }
 
-impl MySqlOffset {
+impl MysqlOffset {
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
         let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
             .with_context(|| format!("invalid upstream offset: {}", offset))?;
@@ -125,29 +211,29 @@ impl MySqlOffset {
     }
 }
 
-pub struct MySqlExternalTable {
+pub struct MysqlExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
     pk_comparisons: Vec<CdcKeyComparison>,
 }
 
-impl MySqlExternalTable {
+impl MysqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to mysql");
-        let options = MySqlConnectOptions::new()
+        let mut options = MySqlConnectOptions::new()
             .username(&config.username)
             .password(&config.password)
             .host(&config.host)
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
-            .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
-                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
-                SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
-                _ => {
-                    return Err(anyhow!("unsupported SSL mode").into());
-                }
-            });
+            .ssl_mode(schema_ssl_mode(&config)?);
+
+        if config.connector == MARIADB_CDC_CONNECTOR
+            && matches!(config.ssl_mode, SslMode::VerifyCa | SslMode::VerifyFull)
+            && let Some(root_cert) = &config.ssl_root_cert
+        {
+            options = options.ssl_ca(root_cert);
+        }
 
         let connection = MySqlPool::connect_with(options).await?;
         let mut schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
@@ -248,15 +334,8 @@ impl MySqlExternalTable {
         config: &ExternalTableConfig,
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
-        let pool = build_mysql_connection_pool(
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.username,
-            &config.password,
-            &config.database,
-            config.ssl_mode.clone(),
-        );
-        let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
+        let pool = build_external_table_connection_pool(config);
+        let pk_infos = MysqlExternalTableReader::query_upstream_pk_infos(
             &pool,
             &config.database,
             &config.table,
@@ -540,7 +619,7 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
     Ok(dtype)
 }
 
-pub struct MySqlExternalTableReader {
+pub struct MysqlExternalTableReader {
     rw_schema: Schema,
     pk_indices: Vec<usize>,
     field_names: String,
@@ -550,7 +629,7 @@ pub struct MySqlExternalTableReader {
     is_mariadb: bool,
 }
 
-impl ExternalTableReader for MySqlExternalTableReader {
+impl ExternalTableReader for MysqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.pool.get_conn().await?;
 
@@ -573,7 +652,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
         drop(conn);
-        Ok(CdcOffset::MySql(MySqlOffset {
+        Ok(CdcOffset::Mysql(MysqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
         }))
@@ -612,7 +691,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 }
 
-impl MySqlExternalTableReader {
+impl MysqlExternalTableReader {
     /// Get MySQL version from the connection
     async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8, bool)> {
         let mut conn = pool.get_conn().await?;
@@ -647,14 +726,7 @@ impl MySqlExternalTableReader {
     ) -> ConnectorResult<Self> {
         let database = config.database.clone();
         let table = config.table.clone();
-        let pool = build_mysql_connection_pool(
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.username,
-            &config.password,
-            &config.database,
-            config.ssl_mode,
-        );
+        let pool = build_external_table_connection_pool(&config);
 
         let field_names = rw_schema
             .fields
@@ -666,6 +738,7 @@ impl MySqlExternalTableReader {
         // Query MySQL primary key infos for type casting.
         let upstream_mysql_pk_infos =
             Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        Self::validate_upstream_pk_columns(&upstream_mysql_pk_infos, &rw_schema, &pk_indices)?;
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
         let mysql_version = (major_version, minor_version);
@@ -689,12 +762,16 @@ impl MySqlExternalTableReader {
 
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         // schema name is the database name in mysql
-        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
+        format!(
+            "`{}`.`{}`",
+            table_name.schema_name.replace('`', "``"),
+            table_name.table_name.replace('`', "``")
+        )
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
         Box::new(move |offset| {
-            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+            Ok(CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(
                 offset,
             )?))
         })
@@ -709,12 +786,16 @@ impl MySqlExternalTableReader {
         let mut conn = pool.get_conn().await?;
 
         // Query primary key columns and their data types.
-        let sql = "SELECT COLUMN_NAME, COLUMN_TYPE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = ?
-            AND TABLE_NAME = ?
-            AND COLUMN_KEY = 'PRI'
-            ORDER BY ORDINAL_POSITION";
+        let sql = "SELECT s.COLUMN_NAME, c.COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.STATISTICS AS s
+            JOIN INFORMATION_SCHEMA.COLUMNS AS c
+              ON c.TABLE_SCHEMA = s.TABLE_SCHEMA
+             AND c.TABLE_NAME = s.TABLE_NAME
+             AND c.COLUMN_NAME = s.COLUMN_NAME
+            WHERE s.TABLE_SCHEMA = ?
+              AND s.TABLE_NAME = ?
+              AND s.INDEX_NAME = 'PRIMARY'
+            ORDER BY s.SEQ_IN_INDEX";
 
         let rs: Vec<mysql_async::Row> = conn.exec(sql, (database, table)).await?;
 
@@ -730,6 +811,45 @@ impl MySqlExternalTableReader {
         drop(conn);
 
         Ok(column_infos)
+    }
+
+    fn validate_upstream_pk_columns(
+        upstream_pk_infos: &[(String, ColumnType)],
+        rw_schema: &Schema,
+        pk_indices: &[usize],
+    ) -> ConnectorResult<()> {
+        let expected_pk_names = pk_indices
+            .iter()
+            .map(|&index| rw_schema.fields[index].name.as_str())
+            .collect_vec();
+        let upstream_pk_names = upstream_pk_infos
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect_vec();
+
+        if upstream_pk_names.is_empty() {
+            return Err(anyhow!(
+                "upstream MySQL primary key metadata is empty; expected columns {:?}",
+                expected_pk_names
+            )
+            .into());
+        }
+
+        if upstream_pk_names.len() != expected_pk_names.len()
+            || upstream_pk_names
+                .iter()
+                .zip_eq_fast(&expected_pk_names)
+                .any(|(upstream, expected)| !upstream.eq_ignore_ascii_case(expected))
+        {
+            return Err(anyhow!(
+                "upstream MySQL primary key columns {:?} do not match expected columns {:?}",
+                upstream_pk_names,
+                expected_pk_names
+            )
+            .into());
+        }
+
+        Ok(())
     }
 
     /// Check whether a column is `BIGINT UNSIGNED`.
@@ -807,8 +927,9 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
+                .enumerate()
                 .zip_eq_fast(start_pk_row.into_iter())
-                .map(|(pk, datum)| {
+                .map(|((idx, pk), datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
@@ -840,7 +961,7 @@ impl MySqlExternalTableReader {
                             }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        ConnectorResult::Ok((pk.to_lowercase(), val))
+                        ConnectorResult::Ok((format!("p{}", idx), val))
                     } else {
                         bail!("primary key {} cannot be null", pk);
                     }
@@ -889,34 +1010,22 @@ impl MySqlExternalTableReader {
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
-        conditions.push(format!(
-            "({} > :{})",
-            Self::quote_column(&columns[0]),
-            columns[0].to_lowercase()
-        ));
+        conditions.push(format!("({} > :p0)", Self::quote_column(&columns[0])));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!(
-                        "({} = :{})",
-                        Self::quote_column(col),
-                        col.to_lowercase()
-                    ));
+                    condition.push_str(&format!("({} = :p{})", Self::quote_column(col), j));
                 } else {
-                    condition.push_str(&format!(
-                        " AND ({} = :{})",
-                        Self::quote_column(col),
-                        col.to_lowercase()
-                    ));
+                    condition.push_str(&format!(" AND ({} = :p{})", Self::quote_column(col), j));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
-                " AND ({} > :{})",
+                " AND ({} > :p{})",
                 Self::quote_column(&columns[i - 1]),
-                columns[i - 1].to_lowercase()
+                i - 1
             ));
             conditions.push(format!("({})", condition));
         }
@@ -928,7 +1037,7 @@ impl MySqlExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("`{}`", column)
+        format!("`{}`", column.replace('`', "``"))
     }
 }
 
@@ -944,14 +1053,84 @@ mod tests {
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
     use super::{
-        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, pk_column_comparisons_from_infos,
-        primary_key_names, type_name_to_mysql_type,
+        mariadb_ssl_opts, mysql_ssl_opts, mysql_type_is_unsigned_bigint, mysql_type_to_rw_type,
+        pk_column_comparisons_from_infos, primary_key_names, schema_ssl_mode,
+        type_name_to_mysql_type,
     };
-    use crate::source::cdc::external::mysql::MySqlExternalTable;
+    use crate::connector_common::SslMode;
+    use crate::source::cdc::external::mysql::MysqlExternalTable;
     use crate::source::cdc::external::{
-        CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
+        CdcOffset, ExternalTableConfig, ExternalTableReader, MysqlExternalTableReader, MysqlOffset,
         SchemaTableName,
     };
+
+    #[test]
+    fn test_mysql_ssl_modes() {
+        assert!(mysql_ssl_opts(SslMode::Disabled).is_none());
+        assert!(mysql_ssl_opts(SslMode::Preferred).is_none());
+
+        for mode in [SslMode::Required, SslMode::VerifyCa, SslMode::VerifyFull] {
+            let opts = mysql_ssl_opts(mode).unwrap();
+            assert!(opts.accept_invalid_certs());
+            assert!(opts.skip_domain_validation());
+            assert!(opts.root_certs().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_mariadb_ssl_modes() {
+        assert!(mariadb_ssl_opts(SslMode::Disabled, None).is_none());
+        assert!(mariadb_ssl_opts(SslMode::Preferred, None).is_none());
+
+        let required = mariadb_ssl_opts(SslMode::Required, None).unwrap();
+        assert!(required.accept_invalid_certs());
+        assert!(required.skip_domain_validation());
+
+        let verify_ca = mariadb_ssl_opts(SslMode::VerifyCa, Some("/tmp/ca.pem")).unwrap();
+        assert!(!verify_ca.accept_invalid_certs());
+        assert!(verify_ca.skip_domain_validation());
+        assert_eq!(verify_ca.root_certs().len(), 1);
+
+        let verify_full = mariadb_ssl_opts(SslMode::VerifyFull, None).unwrap();
+        assert!(!verify_full.accept_invalid_certs());
+        assert!(!verify_full.skip_domain_validation());
+    }
+
+    #[test]
+    fn test_schema_ssl_modes_preserve_mysql_behavior() {
+        for (mode, expected) in [
+            (SslMode::Disabled, sqlx::mysql::MySqlSslMode::Disabled),
+            (SslMode::Preferred, sqlx::mysql::MySqlSslMode::Preferred),
+            (SslMode::Required, sqlx::mysql::MySqlSslMode::Required),
+            (SslMode::VerifyCa, sqlx::mysql::MySqlSslMode::VerifyCa),
+            (
+                SslMode::VerifyFull,
+                sqlx::mysql::MySqlSslMode::VerifyIdentity,
+            ),
+        ] {
+            let expected = std::mem::discriminant(&expected);
+            let config = ExternalTableConfig {
+                connector: "mysql-cdc".to_owned(),
+                ssl_mode: mode.clone(),
+                ..Default::default()
+            };
+            let mysql_mode = schema_ssl_mode(&config);
+            if matches!(mode, SslMode::VerifyCa | SslMode::VerifyFull) {
+                assert!(mysql_mode.is_err());
+            } else {
+                assert_eq!(std::mem::discriminant(&mysql_mode.unwrap()), expected);
+            }
+
+            let mariadb_config = ExternalTableConfig {
+                connector: "mariadb-cdc".to_owned(),
+                ..config
+            };
+            assert_eq!(
+                std::mem::discriminant(&schema_ssl_mode(&mariadb_config).unwrap()),
+                expected
+            );
+        }
+    }
 
     fn parse_mysql_type_name(ty_name: &str) -> ColumnType {
         type_name_to_mysql_type(ty_name).unwrap()
@@ -988,7 +1167,7 @@ mod tests {
 
     #[test]
     fn test_pk_column_comparisons_follow_requested_order() {
-        let table = MySqlExternalTable {
+        let table = MysqlExternalTable {
             column_descs: vec![],
             pk_names: vec!["signed_id".to_owned(), "unsigned_id".to_owned()],
             pk_comparisons: vec![CdcKeyComparison::Native, CdcKeyComparison::UnsignedInt64],
@@ -1032,6 +1211,45 @@ mod tests {
                 CdcKeyComparison::Native,
             ]
         );
+    }
+
+    #[test]
+    fn test_validate_upstream_pk_columns() {
+        let rw_schema = Schema::new(vec![
+            Field::with_name(DataType::Int64, "id"),
+            Field::with_name(DataType::Varchar, "tenant"),
+        ]);
+        let int_type = || ColumnType::BigInt(Default::default());
+        let validate = |pk_infos: &[(String, ColumnType)]| {
+            MysqlExternalTableReader::validate_upstream_pk_columns(pk_infos, &rw_schema, &[0, 1])
+        };
+
+        let valid_pk_infos = vec![
+            ("id".to_owned(), int_type()),
+            ("tenant".to_owned(), int_type()),
+        ];
+        assert!(validate(&valid_pk_infos).is_ok());
+
+        for invalid_pk_infos in [
+            // incorrect order
+            vec![
+                ("tenant".to_owned(), int_type()),
+                ("id".to_owned(), int_type()),
+            ],
+            // incomplete
+            vec![("id".to_owned(), int_type())],
+            // extra index
+            vec![
+                ("id".to_owned(), int_type()),
+                ("tenant".to_owned(), int_type()),
+                ("extra".to_owned(), int_type()),
+            ],
+        ] {
+            assert!(
+                validate(&invalid_pk_infos).is_err(),
+                "unexpectedly accepted {invalid_pk_infos:?}"
+            );
+        }
     }
 
     #[test]
@@ -1131,13 +1349,14 @@ mod tests {
             password: "123456".to_owned(),
             database: "mydb".to_owned(),
             schema: "".to_owned(),
+            pdb_name: None,
             table: "part".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,
             encrypt: "false".to_owned(),
         };
 
-        let table = MySqlExternalTable::connect(config).await.unwrap();
+        let table = MysqlExternalTable::connect(config).await.unwrap();
         println!("columns: {:?}", table.column_descs);
         println!("primary keys: {:?}", table.pk_names);
     }
@@ -1145,14 +1364,14 @@ mod tests {
     #[test]
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_owned()];
-        let expr = MySqlExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(`id` > :id)");
+        let expr = MysqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(`id` > :p0)");
 
         let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
-        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        let expr = MysqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
-            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+            "(`aa` > :p0) OR ((`aa` = :p0) AND (`bb` > :p1)) OR ((`aa` = :p0) AND (`bb` = :p1) AND (`cc` > :p2))"
         );
     }
 
@@ -1164,11 +1383,11 @@ mod tests {
         let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
         let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
 
-        let off0 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off0_str).unwrap());
-        let off1 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off1_str).unwrap());
-        let off2 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off2_str).unwrap());
-        let off3 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off3_str).unwrap());
-        let off4 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off4_str).unwrap());
+        let off0 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off0_str).unwrap());
+        let off1 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off1_str).unwrap());
+        let off2 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off2_str).unwrap());
+        let off3 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off3_str).unwrap());
+        let off4 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off4_str).unwrap());
 
         assert!(off0 <= off1);
         assert!(off1 > off2);
@@ -1200,14 +1419,14 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema, vec![0])
+        let reader = MysqlExternalTableReader::new(config, rw_schema, vec![0])
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
         let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
-        let parser = MySqlExternalTableReader::get_cdc_offset_parser();
+        let parser = MysqlExternalTableReader::get_cdc_offset_parser();
         println!("parsed offset: {:?}", parser(off0_str).unwrap());
         let table_name = SchemaTableName {
             schema_name: "mytest".to_owned(),

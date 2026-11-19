@@ -16,15 +16,15 @@
 
 package com.risingwave.connector.source.core;
 
+import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
-import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
-import io.debezium.config.CommonConnectorConfig;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,15 +38,16 @@ public class DbzCdcEngineRunner {
     private final DbzConnectorConfig config;
 
     public static DbzCdcEngineRunner newCdcEngineRunner(
-            DbzConnectorConfig config, StreamObserver<GetEventStreamResponse> responseObserver) {
+            CdcSource source,
+            DbzConnectorConfig config,
+            StreamObserver<GetEventStreamResponse> responseObserver) {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
             var engine =
                     new DbzCdcEngine(
-                            config.getSourceType(),
-                            config.getSourceId(),
-                            config.getResolvedDebeziumProps(),
+                            source,
+                            config,
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -71,49 +72,46 @@ public class DbzCdcEngineRunner {
         return runner;
     }
 
-    public static DbzCdcEngineRunner create(DbzConnectorConfig config, CdcSourceChannel channel) {
-        DbzCdcEngineRunner runner = new DbzCdcEngineRunner(config);
-        try {
-            var sourceId = config.getSourceId();
-            final DbzCdcEngineRunner finalRunner = runner;
-            var engine =
-                    new DbzCdcEngine(
-                            config.getSourceType(),
-                            config.getSourceId(),
-                            config.getResolvedDebeziumProps(),
-                            (success, message, error) -> {
-                                if (!success) {
-                                    LOG.error(
-                                            "engine#{} terminated with error. message: {}",
+    /**
+     * Creates the runner for the JNI path. A failure to build the engine propagates to the caller.
+     */
+    public static DbzCdcEngineRunner create(
+            CdcSource source, DbzConnectorConfig config, CdcSourceChannel channel) {
+        var runner = new DbzCdcEngineRunner(config);
+        var sourceId = config.getSourceId();
+        var engine =
+                new DbzCdcEngine(
+                        source,
+                        config,
+                        (success, message, error) -> {
+                            if (!success) {
+                                LOG.error(
+                                        "engine#{} terminated with error. message: {}",
+                                        sourceId,
+                                        message,
+                                        error);
+                                String errorMsg =
+                                        (error != null && error.getMessage() != null
+                                                ? error.getMessage()
+                                                : message);
+                                if (!channel.sendError(errorMsg)) {
+                                    LOG.warn(
+                                            "engine#{} unable to send error message: {}",
                                             sourceId,
-                                            message,
-                                            error);
-                                    String errorMsg =
-                                            (error != null && error.getMessage() != null
-                                                    ? error.getMessage()
-                                                    : message);
-                                    if (!channel.sendError(errorMsg)) {
-                                        LOG.warn(
-                                                "engine#{} unable to send error message: {}",
-                                                sourceId,
-                                                errorMsg);
-                                    }
-                                    // We need to stop the engine runner on debezium engine failure
-                                    try {
-                                        finalRunner.stop();
-                                    } catch (Exception e) {
-                                        LOG.warn("failed to stop the engine#{}", sourceId, e);
-                                    }
-                                } else {
-                                    LOG.info("engine#{} stopped normally. {}", sourceId, message);
+                                            errorMsg);
                                 }
-                            });
+                                // We need to stop the engine runner on debezium engine failure
+                                try {
+                                    runner.stop();
+                                } catch (Exception e) {
+                                    LOG.warn("failed to stop the engine#{}", sourceId, e);
+                                }
+                            } else {
+                                LOG.info("engine#{} stopped normally. {}", sourceId, message);
+                            }
+                        });
 
-            runner.withEngine(engine);
-        } catch (Exception e) {
-            LOG.error("failed to create the CDC engine", e);
-            runner = null;
-        }
+        runner.withEngine(engine);
         return runner;
     }
 
@@ -129,9 +127,20 @@ public class DbzCdcEngineRunner {
         this.engine = engine;
     }
 
+    DbzCdcEngineRunner(DbzConnectorConfig config, DbzCdcEngine engine) {
+        this(config);
+        this.engine = engine;
+    }
+
     /** Start to run the cdc engine */
     public boolean start() throws InterruptedException {
-        if (isRunning()) {
+        return start(() -> true);
+    }
+
+    public boolean start(BooleanSupplier shouldContinue) throws InterruptedException {
+        // The engine must be stoppable as soon as it is submitted, including while waiting
+        // for streaming readiness. A completion callback may also stop it during startup.
+        if (!running.compareAndSet(false, true)) {
             LOG.info("engine#{} already started", engine.getId());
             return true;
         }
@@ -141,26 +150,25 @@ public class DbzCdcEngineRunner {
         boolean startOk = true;
         // For backfill source, we need to wait for the streaming source to start before proceeding
         if (config.isBackfillSource()) {
-            var databaseServerName =
-                    config.getResolvedDebeziumProps()
-                            .getProperty(CommonConnectorConfig.TOPIC_PREFIX.name());
             startOk =
-                    DbzSourceUtils.waitForStreamingRunning(
-                            config.getSourceType(),
-                            databaseServerName,
-                            config.getWaitStreamingStartTimeout());
+                    config.waitForStreamingRunning(
+                            () -> isRunning() && shouldContinue.getAsBoolean());
         }
 
-        running.set(true);
+        startOk = startOk && isRunning();
         LOG.info("engine#{} start ok: {}", engine.getId(), startOk);
         return startOk;
     }
 
     public void stop() throws Exception {
-        if (isRunning()) {
-            engine.stop();
-            cleanUp();
-            LOG.info("engine#{} terminated", engine.getId());
+        if (running.compareAndSet(true, false)) {
+            try {
+                engine.stop();
+                LOG.info("engine#{} terminated", engine.getId());
+            } finally {
+                // Interrupt the runner thread even if closing the engine fails.
+                executor.shutdownNow();
+            }
         }
     }
 
@@ -174,11 +182,5 @@ public class DbzCdcEngineRunner {
 
     public DbzChangeEventConsumer getChangeEventConsumer() {
         return engine.getChangeEventConsumer();
-    }
-
-    private void cleanUp() {
-        running.set(false);
-        // interrupt the runner thread if it is still running
-        executor.shutdownNow();
     }
 }

@@ -39,30 +39,31 @@ macro_rules! log_error {
     };
 }
 pub(crate) use log_error;
-use risingwave_pb::plan_common::additional_column;
-use risingwave_pb::plan_common::additional_column::ColumnType;
 
-use crate::parser::{AccessError, AccessResult};
-use crate::source::cdc::DebeziumCdcMeta;
+fn get_topic<'a>(
+    props: &'a BTreeMap<String, String>,
+    connector_topic_key: &str,
+) -> ConnectorResult<&'a String> {
+    const TOPIC_KEY: &str = "topic";
 
-/// get kafka topic name
+    if let Some(topic) = props.get(connector_topic_key) {
+        return Ok(topic);
+    }
+    if let Some(topic) = props.get(TOPIC_KEY) {
+        return Ok(topic);
+    }
+
+    bail!("Must specify '{}' or '{}'", connector_topic_key, TOPIC_KEY)
+}
+
+/// Get the Kafka topic name.
 pub(super) fn get_kafka_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
-    const KAFKA_TOPIC_KEY1: &str = "kafka.topic";
-    const KAFKA_TOPIC_KEY2: &str = "topic";
+    get_topic(props, "kafka.topic")
+}
 
-    if let Some(topic) = props.get(KAFKA_TOPIC_KEY1) {
-        return Ok(topic);
-    }
-    if let Some(topic) = props.get(KAFKA_TOPIC_KEY2) {
-        return Ok(topic);
-    }
-
-    // config
-    bail!(
-        "Must specify '{}' or '{}'",
-        KAFKA_TOPIC_KEY1,
-        KAFKA_TOPIC_KEY2
-    )
+/// Get the Pulsar topic name.
+pub(super) fn get_pulsar_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
+    get_topic(props, "pulsar.topic")
 }
 
 /// download bytes from http(s) url
@@ -126,27 +127,11 @@ pub fn extract_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
     }
 }
 
-pub fn extract_cdc_meta_column<'a>(
-    cdc_meta: &'a DebeziumCdcMeta,
-    column_type: &additional_column::ColumnType,
-    column_name: &str,
-) -> AccessResult<DatumRef<'a>> {
-    match column_type {
-        ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
-        ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
-        // `table_name` in additional columns should be the object name only, not the routing key
-        // (which can be `schema.table` or `db.table` depending on the connector).
-        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name_only()),
-        _ => Err(AccessError::UnsupportedAdditionalColumn {
-            name: column_name.to_owned(),
-        }),
-    }
-}
-
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
         SourceMeta::Pulsar(pulsar_meta) => pulsar_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        SourceMeta::Nats(nats_meta) => nats_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
         _ => None,
     }
 }
@@ -169,6 +154,7 @@ pub fn extract_header_inner_from_meta<'a>(
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         SourceMeta::Pulsar(pulsar_meta) => pulsar_meta.extract_header_inner(inner_field, data_type),
+        SourceMeta::Nats(nats_meta) => nats_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         _ => None,
     }
 }
@@ -177,5 +163,44 @@ pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
     match meta {
         SourceMeta::Nats(nats_meta) => Some(nats_meta.extract_subject()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_nats::HeaderMap;
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+
+    use super::*;
+    use crate::source::nats::source::NatsMeta;
+
+    fn nats_meta(subject: &str, headers: Option<HeaderMap>) -> SourceMeta {
+        SourceMeta::Nats(NatsMeta {
+            subject: subject.to_owned(),
+            headers,
+        })
+    }
+
+    #[test]
+    fn extract_headers_from_meta_dispatches_to_nats() {
+        let mut headers = HeaderMap::new();
+        headers.insert("k", "v");
+        let meta = nats_meta("subj", Some(headers));
+
+        let datum = extract_headers_from_meta(&meta).expect("outer Option");
+        assert!(matches!(datum, Some(ScalarImpl::List(_))));
+    }
+
+    #[test]
+    fn extract_header_inner_from_meta_dispatches_to_nats() {
+        let mut headers = HeaderMap::new();
+        headers.insert("trace", "abc");
+        let meta = nats_meta("subj", Some(headers));
+        let pb = DataType::Varchar.to_protobuf();
+
+        let result = extract_header_inner_from_meta(&meta, "trace", Some(&pb))
+            .unwrap()
+            .to_owned_datum();
+        assert_eq!(result, Some(ScalarImpl::Utf8("abc".into())));
     }
 }

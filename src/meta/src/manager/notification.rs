@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -42,6 +43,36 @@ pub type NotificationVersion = u64;
 /// NOTE(kwannoel): This is just ignored, used in background DDL
 pub const IGNORED_NOTIFICATION_VERSION: u64 = 0;
 
+/// A batch of frontend notifications that belong to the same catalog update.
+///
+/// Publishing the batch assigns consecutive catalog notification versions to its notifications.
+/// Therefore, waiting for the returned final version also waits for every earlier notification in
+/// the batch to be processed.
+pub struct FrontendNotificationBatch<'a> {
+    notification_manager: &'a NotificationManager,
+    pending: Vec<(Operation, Info)>,
+}
+
+impl<'a> FrontendNotificationBatch<'a> {
+    pub fn new(notification_manager: &'a NotificationManager) -> Self {
+        Self {
+            notification_manager,
+            pending: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, operation: Operation, info: Info) {
+        self.pending.push((operation, info));
+    }
+
+    #[must_use]
+    pub async fn publish(self) -> Option<NotificationVersion> {
+        self.notification_manager
+            .notify_frontend_batch(self.pending)
+            .await
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum LocalNotification {
     WorkerNodeDeleted(WorkerNode),
@@ -55,15 +86,20 @@ pub enum LocalNotification {
 }
 
 #[derive(Debug)]
-struct Target {
-    subscribe_type: SubscribeType,
-    // `None` indicates sending to all subscribers of `subscribe_type`.
-    worker_key: Option<WorkerKey>,
+enum Target {
+    Subscribers {
+        subscribe_type: SubscribeType,
+        // `None` indicates sending to all subscribers of `subscribe_type`.
+        worker_key: Option<WorkerKey>,
+    },
+    /// The sender of one subscribe call. By the time the task is delivered, the worker may have
+    /// subscribed again and replaced its entry in the sender map.
+    Sender(UnboundedSender<Notification>),
 }
 
 impl From<SubscribeType> for Target {
     fn from(value: SubscribeType) -> Self {
-        Self {
+        Self::Subscribers {
             subscribe_type: value,
             worker_key: None,
         }
@@ -75,6 +111,8 @@ struct Task {
     target: Target,
     operation: Operation,
     info: Info,
+    /// `None` means using the latest version published to the notification queue without
+    /// incrementing it.
     version: Option<NotificationVersion>,
 }
 
@@ -96,14 +134,18 @@ impl NotificationManager {
         let version_generator = NotificationVersionGenerator::new(meta_store_impl)
             .await
             .unwrap();
+        let mut latest_version = version_generator.current_version();
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
+                if let Some(version) = task.version {
+                    latest_version = version;
+                }
                 let response = SubscribeResponse {
                     status: None,
                     operation: task.operation as i32,
                     info: Some(task.info),
-                    version: task.version.unwrap_or_default(),
+                    version: latest_version,
                 };
                 core.lock().notify(task.target, response);
             }
@@ -153,26 +195,55 @@ impl NotificationManager {
         version
     }
 
-    /// Add a notification to the waiting queue and return immediately
+    /// Assign consecutive versions to a frontend notification batch and enqueue the complete batch
+    /// while holding the version generator lock.
+    async fn notify_frontend_batch(
+        &self,
+        notifications: Vec<(Operation, Info)>,
+    ) -> Option<NotificationVersion> {
+        let batch_len: NotificationVersion = notifications.len().try_into().unwrap();
+        if batch_len == 0 {
+            return None;
+        }
+
+        let mut version_guard = self.version_generator.lock().await;
+        let first_version = version_guard.current_version() + 1;
+        version_guard.increase_version_by(batch_len).await;
+        let final_version = version_guard.current_version();
+
+        for ((operation, info), version) in notifications
+            .into_iter()
+            .zip_eq_debug(first_version..=final_version)
+        {
+            self.notify(
+                SubscribeType::Frontend.into(),
+                operation,
+                info,
+                Some(version),
+            );
+        }
+
+        Some(final_version)
+    }
+
+    /// Add a notification using the latest version published to the queue without incrementing it.
     #[inline(always)]
     fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
         self.notify(target, operation, info, None);
     }
 
+    /// Queue the snapshot behind every notification published before it was read. The observer
+    /// manager filters out such notifications only if they arrive before the snapshot.
     pub fn notify_snapshot(
         &self,
         sender: UnboundedSender<Notification>,
         meta_snapshot: MetaSnapshot,
     ) {
-        let response = SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(meta_snapshot)),
-            version: Default::default(),
-        };
-        let _ = sender.send(Ok(response)).inspect_err(|err| {
-            tracing::warn!("Failed to notify direct subscriber: {}", err.as_report());
-        });
+        self.notify_without_version(
+            Target::Sender(sender),
+            Operation::Snapshot,
+            Info::Snapshot(meta_snapshot),
+        );
     }
 
     pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
@@ -186,11 +257,13 @@ impl NotificationManager {
         }
     }
 
+    #[must_use]
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
             .await
     }
 
+    #[must_use]
     pub async fn notify_frontend_object_info(
         &self,
         operation: Operation,
@@ -209,30 +282,15 @@ impl NotificationManager {
         .await
     }
 
-    pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Hummock.into(), operation, info)
-            .await
-    }
-
-    pub(crate) async fn notify_hummock_targeted_update(
-        &self,
-        worker_key: WorkerKey,
-        info: Info,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            Target {
+    pub(crate) fn notify_hummock_targeted_update(&self, worker_key: WorkerKey, info: Info) {
+        self.notify_without_version(
+            Target::Subscribers {
                 subscribe_type: SubscribeType::Hummock,
                 worker_key: Some(worker_key),
             },
             Operation::Update,
             info,
-        )
-        .await
-    }
-
-    pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
-            .await
+        );
     }
 
     pub fn notify_compute_without_version(&self, operation: Operation, info: Info) {
@@ -243,11 +301,11 @@ impl NotificationManager {
         self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
     }
 
-    pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
+    pub fn notify_hummock(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
     }
 
-    pub fn notify_compactor_without_version(&self, operation: Operation, info: Info) {
+    pub fn notify_compactor(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Compactor.into(), operation, info)
     }
 
@@ -364,13 +422,25 @@ impl NotificationManagerCore {
             };
         }
 
-        let senders = self.senders_of(target.subscribe_type);
+        let (subscribe_type, worker_key) = match target {
+            Target::Subscribers {
+                subscribe_type,
+                worker_key,
+            } => (subscribe_type, worker_key),
+            Target::Sender(sender) => {
+                let _ = sender.send(Ok(response)).inspect_err(|err| {
+                    tracing::warn!("Failed to send snapshot: {}", err.as_report());
+                });
+                return;
+            }
+        };
+        let senders = self.senders_of(subscribe_type);
 
-        if let Some(worker_key) = target.worker_key {
+        if let Some(worker_key) = worker_key {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
                     let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
+                        warn_send_failure!(subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -383,7 +453,7 @@ impl NotificationManagerCore {
                 sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
+                        warn_send_failure!(subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });
@@ -431,11 +501,50 @@ mod tests {
         assert!(rx2.try_recv().is_err());
         assert!(rx3.try_recv().is_err());
 
-        mgr.notify_frontend(Operation::Add, Info::Database(Default::default()))
+        let version = mgr
+            .notify_frontend(Operation::Add, Info::Database(Default::default()))
             .await;
         assert!(rx1.try_recv().is_err());
-        assert!(rx2.recv().await.is_some());
-        assert!(rx3.recv().await.is_some());
+        let frontend_notification = rx2.recv().await.unwrap().unwrap();
+        assert_eq!(frontend_notification.version, version);
+        assert_eq!(
+            rx3.recv().await.unwrap().unwrap().version,
+            frontend_notification.version
+        );
+
+        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
+        assert_eq!(
+            rx1.recv().await.unwrap().unwrap().version,
+            frontend_notification.version
+        );
+    }
+
+    #[tokio::test]
+    async fn test_frontend_notification_batch_assigns_consecutive_versions() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Frontend, worker_key, tx);
+
+        let initial_version = mgr.current_version().await;
+        let mut batch = FrontendNotificationBatch::new(&mgr);
+        batch.add(Operation::Add, Info::Database(Default::default()));
+        batch.add(Operation::Add, Info::Schema(Default::default()));
+        let published_version = batch
+            .publish()
+            .await
+            .expect("the test notification batch contains two notifications");
+
+        assert_eq!(published_version, initial_version + 2);
+        assert_eq!(mgr.current_version().await, published_version);
+        assert_eq!(
+            rx.recv().await.unwrap().unwrap().version,
+            initial_version + 1
+        );
+        assert_eq!(rx.recv().await.unwrap().unwrap().version, published_version);
     }
 
     #[tokio::test]
@@ -456,10 +565,12 @@ mod tests {
         mgr.insert_sender(SubscribeType::Hummock, worker_key2.clone(), hummock_tx2);
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), frontend_tx1);
 
-        mgr.notify_hummock_targeted_update(worker_key1, Info::Database(Default::default()))
-            .await;
+        let version = mgr.current_version().await;
+        mgr.notify_hummock_targeted_update(worker_key1, Info::Database(Default::default()));
 
-        assert!(hummock_rx1.recv().await.is_some());
+        let notification = hummock_rx1.recv().await.unwrap().unwrap();
+        assert_eq!(notification.version, version);
+        assert_eq!(mgr.current_version().await, version);
         assert!(hummock_rx2.try_recv().is_err());
         assert!(frontend_rx1.try_recv().is_err());
     }
@@ -481,10 +592,36 @@ mod tests {
         assert!(rx1.recv().await.is_some());
         assert!(rx2.try_recv().is_err());
 
-        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()))
-            .await;
+        let version = mgr.current_version().await;
+        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
         assert!(rx1.try_recv().is_err());
-        assert!(rx2.recv().await.is_some());
+        let notification = rx2.recv().await.unwrap().unwrap();
+        assert_eq!(notification.version, version);
+        assert_eq!(mgr.current_version().await, version);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_arrives_after_notification_it_covers() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Frontend, worker_key, tx.clone());
+
+        // The test runtime has one thread and `notify_frontend` does not yield after queueing, so
+        // the notification is still in the queue when the snapshot is sent.
+        let version = mgr
+            .notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        mgr.notify_snapshot(tx, MetaSnapshot::default());
+
+        let first = rx.recv().await.unwrap().unwrap();
+        assert!(matches!(first.info, Some(Info::Database(_))));
+        assert_eq!(first.version, version);
+        let second = rx.recv().await.unwrap().unwrap();
+        assert!(matches!(second.info, Some(Info::Snapshot(_))));
     }
 
     #[tokio::test]

@@ -320,7 +320,7 @@ mod tests {
             .start_epoch(epoch1, HashSet::from_iter([table.id]));
 
         let prepare_state = async |vnodes: &Arc<Bitmap>, chunk: &StreamChunk| {
-            let serde = LogStoreRowSerde::new(&table, Some(vnodes.clone()), pk_info);
+            let serde = LogStoreRowSerde::new(&table, vnodes.clone(), pk_info);
             let (read_state, mut write_state) = new_log_store_state(
                 TEST_TABLE_ID,
                 test_env

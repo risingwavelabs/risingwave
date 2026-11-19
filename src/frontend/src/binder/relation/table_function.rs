@@ -91,6 +91,13 @@ impl Binder {
             )));
         };
 
+        if with_ordinality && func_name.eq_ignore_ascii_case("mssql_query") {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "WITH ORDINALITY is not supported for mssql_query".to_owned(),
+            )
+            .into());
+        }
+
         self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);

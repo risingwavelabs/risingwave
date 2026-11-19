@@ -187,8 +187,10 @@ impl<S: StateStore> NowExecutor<S> {
                     yield Message::Barrier(barrier);
                 }
 
-                // Extract timestamp from the current epoch.
-                if let Some(datum) = &last_timestamp_datum
+                // Only throttle UpdateCurrent. GenerateSeries stores the last emitted series
+                // value, which cannot advance if the throttled increment is smaller than its interval.
+                if let NowMode::UpdateCurrent = &mode
+                    && let Some(datum) = &last_timestamp_datum
                     && let Some(progress_ratio) = progress_ratio
                     && progress_ratio > 1.0
                 {
@@ -606,7 +608,112 @@ mod tests {
 
     #[tokio::test]
     async fn test_now_generate_series() -> StreamExecutorResult<()> {
-        TIME_ZONE::scope("UTC".to_owned(), test_now_generate_series_inner()).await
+        for progress_ratio in [None, Some(2.0)] {
+            TIME_ZONE::scope(
+                "UTC".to_owned(),
+                test_now_generate_series_inner(progress_ratio),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_now_generate_series_with_progress_ratio() -> StreamExecutorResult<()> {
+        TIME_ZONE::scope("UTC".to_owned(), async {
+            let state_store = create_state_store();
+            let mode = || NowMode::GenerateSeries {
+                start_timestamp: "2021-04-01T00:00:00Z".parse().unwrap(),
+                // Greater than barrier_interval_ms (1000) * progress_ratio (2).
+                interval: Interval::from_millis(10_000),
+            };
+            let (tx, mut now) =
+                create_executor_with_progress_ratio(mode(), &state_store, Some(2.0)).await;
+
+            tx.send(Barrier::new_test_barrier(test_epoch(5000)))
+                .unwrap();
+            now.next_unwrap_ready_barrier()?;
+            assert_eq!(
+                now.next_unwrap_ready_chunk()?.compact_vis(),
+                StreamChunk::from_pretty("TZ\n+ 2021-04-01T00:00:00Z")
+            );
+            assert_eq!(
+                now.next_unwrap_ready_watermark()?,
+                Watermark::new(
+                    0,
+                    DataType::Timestamptz,
+                    "2021-04-01T00:00:05Z"
+                        .parse::<Timestamptz>()
+                        .unwrap()
+                        .into(),
+                )
+            );
+            now.next_unwrap_pending();
+
+            // Watermarks must advance even when no new series value is emitted.
+            // The old throttle would regress the watermark from 5s to 2s and stall there.
+            for (curr, prev, expected_watermark) in [
+                (6000, 5000, "2021-04-01T00:00:06Z"),
+                (10_000, 6000, "2021-04-01T00:00:10Z"),
+                (11_000, 10_000, "2021-04-01T00:00:11Z"),
+            ] {
+                tx.send(Barrier::with_prev_epoch_for_test(
+                    test_epoch(curr),
+                    test_epoch(prev),
+                ))
+                .unwrap();
+                now.next_unwrap_ready_barrier()?;
+                if curr == 10_000 {
+                    assert_eq!(
+                        now.next_unwrap_ready_chunk()?.compact_vis(),
+                        StreamChunk::from_pretty("TZ\n+ 2021-04-01T00:00:10Z")
+                    );
+                }
+                assert_eq!(
+                    now.next_unwrap_ready_watermark()?,
+                    Watermark::new(
+                        0,
+                        DataType::Timestamptz,
+                        expected_watermark.parse::<Timestamptz>().unwrap().into(),
+                    )
+                );
+                now.next_unwrap_pending();
+            }
+
+            // Recover after a barrier with no new series value. Catch up from the persisted
+            // series cursor, preserving every interval rather than jumping to the barrier time.
+            drop((tx, now));
+            let (tx, mut now) =
+                create_executor_with_progress_ratio(mode(), &state_store, Some(2.0)).await;
+            tx.send(Barrier::with_prev_epoch_for_test(
+                test_epoch(35_000),
+                test_epoch(11_000),
+            ))
+            .unwrap();
+            now.next_unwrap_ready_barrier()?;
+            assert_eq!(
+                now.next_unwrap_ready_chunk()?.compact_vis(),
+                StreamChunk::from_pretty(
+                    "TZ
+                    + 2021-04-01T00:00:20Z
+                    + 2021-04-01T00:00:30Z"
+                )
+            );
+            assert_eq!(
+                now.next_unwrap_ready_watermark()?,
+                Watermark::new(
+                    0,
+                    DataType::Timestamptz,
+                    "2021-04-01T00:00:35Z"
+                        .parse::<Timestamptz>()
+                        .unwrap()
+                        .into(),
+                )
+            );
+            now.next_unwrap_pending();
+            Ok(())
+        })
+        .await
     }
 
     #[cfg(not(madsim))]
@@ -912,17 +1019,20 @@ mod tests {
         Ok(())
     }
 
-    async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {
+    async fn test_now_generate_series_inner(
+        progress_ratio: Option<f32>,
+    ) -> StreamExecutorResult<()> {
         let start_timestamp = Timestamptz::from_secs(1617235190).unwrap(); // 2021-03-31 23:59:50 UTC
         let interval = Interval::from_millis(1000); // 1s interval
 
         let state_store = create_state_store();
-        let (tx, mut now) = create_executor(
+        let (tx, mut now) = create_executor_with_progress_ratio(
             NowMode::GenerateSeries {
                 start_timestamp,
                 interval,
             },
             &state_store,
+            progress_ratio,
         )
         .await;
 
@@ -980,12 +1090,13 @@ mod tests {
 
         // Recovery
         drop((tx, now));
-        let (tx, mut now) = create_executor(
+        let (tx, mut now) = create_executor_with_progress_ratio(
             NowMode::GenerateSeries {
                 start_timestamp,
                 interval,
             },
             &state_store,
+            progress_ratio,
         )
         .await;
 

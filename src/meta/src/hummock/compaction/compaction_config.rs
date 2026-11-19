@@ -118,9 +118,12 @@ impl CompactionConfigBuilder {
             .max_space_reclaim_bytes(opt.max_space_reclaim_bytes)
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
+            .enable_emergency_picker(opt.enable_emergency_picker)
             .max_level(opt.max_level as u64)
             .sst_allowed_trivial_move_min_size(Some(opt.sst_allowed_trivial_move_min_size))
             .sst_allowed_trivial_move_max_count(Some(opt.sst_allowed_trivial_move_max_count))
+            .max_l0_compact_level_count(Some(opt.max_l0_compact_level_count))
+            .disable_auto_group_scheduling(Some(opt.disable_auto_group_scheduling))
             .max_overlapping_level_size(Some(opt.max_overlapping_level_size))
             .emergency_level0_sst_file_count(Some(opt.emergency_level0_sst_file_count))
             .emergency_level0_sub_level_partition(Some(opt.emergency_level0_sub_level_partition))
@@ -228,8 +231,10 @@ builder_field! {
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
+    enable_emergency_picker: bool,
     sst_allowed_trivial_move_min_size: Option<u64>,
     sst_allowed_trivial_move_max_count: Option<u32>,
+    max_l0_compact_level_count: Option<u32>,
     disable_auto_group_scheduling: Option<bool>,
     max_overlapping_level_size: Option<u64>,
     emergency_level0_sst_file_count: Option<u32>,
@@ -243,7 +248,51 @@ builder_field! {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::config::RwConfig;
+
     use super::{CompactionConfigBuilder, validate_compaction_config};
+
+    #[test]
+    fn test_compaction_config_from_toml() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [meta.compaction_config]
+            level0_max_compact_file_number = 20
+            max_l0_compact_level_count = 10
+            max_compaction_bytes = 1073741824
+            "#,
+        )
+        .unwrap();
+        let config = CompactionConfigBuilder::with_opt(&config.meta.compaction_config).build();
+
+        assert_eq!(config.level0_max_compact_file_number, 20);
+        assert_eq!(config.max_l0_compact_level_count, Some(10));
+        assert_eq!(config.max_compaction_bytes, 1_073_741_824);
+    }
+
+    #[test]
+    fn test_compaction_config_flags_from_toml() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [meta.compaction_config]
+            enable_emergency_picker = false
+            disable_auto_group_scheduling = true
+            "#,
+        )
+        .unwrap();
+        let config = CompactionConfigBuilder::with_opt(&config.meta.compaction_config).build();
+
+        assert!(!config.enable_emergency_picker);
+        assert_eq!(config.disable_auto_group_scheduling, Some(true));
+    }
+
+    #[test]
+    fn test_compaction_config_defaults_from_toml() {
+        let config: RwConfig = toml::from_str("").unwrap();
+        let config = CompactionConfigBuilder::with_opt(&config.meta.compaction_config).build();
+
+        assert_eq!(config, CompactionConfigBuilder::new().build());
+    }
 
     #[test]
     fn test_validate_compaction_config_accepts_missing_filter_config() {

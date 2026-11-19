@@ -158,8 +158,8 @@ def _(outer_panels: Panels):
                     "Total size of chunks buffered in a barrier",
                     [
                         panels.target(
-                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (fragment_id, actor_id, relation) * on(actor_id) group_left(relation) {metric('sink_info')}",
-                            "sink {{fragment_id}} {{relation}} - actor {{actor_id}}",
+                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (fragment_id, sink_id, actor_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                            "sink {{sink_id}} {{sink_name}} - fragment {{fragment_id}} - actor {{actor_id}}",
                         ),
                     ],
                 ),

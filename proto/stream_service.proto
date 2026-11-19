@@ -60,7 +60,8 @@ message BarrierCompleteResponse {
     uint64 consumed_epoch = 3;
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
-    uint64 pending_epoch_lag = 5;
+    reserved 5;
+    reserved "pending_epoch_lag";
     // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
     uint64 buffered_rows = 6;
     uint32 fragment_id = 7;
@@ -93,6 +94,8 @@ message BarrierCompleteResponse {
   uint64 epoch = 9;
   reserved 10;
   reserved "database_id";
+  // Deprecated: replaced by `LoadProgress`. Removed later in this stack, once executors and
+  // meta use it.
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
@@ -109,6 +112,8 @@ message BarrierCompleteResponse {
   repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
   reserved 14, 15;
   reserved "truncate_tables", "refresh_finished_tables";
+  // Deprecated: replaced by `LoadProgress`. Removed later in this stack, once executors and
+  // meta use it.
   // SourceExecutor reports the source list is finished, and then
   // meta will issue a ListFinish barrier to notify the source to start loading.
   message ListFinishedSource {
@@ -120,6 +125,23 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
+  // Progress of a finite load, reported by its actors.
+  message LoadProgress {
+    // Lister only: all input has been assigned to the readers.
+    message ListFinished {}
+    // Reader only: all input assigned to this actor has been read.
+    message ReaderDone {}
+    message Failed {}
+
+    uint32 reporter_actor_id = 1;
+    stream_plan.LoadId load_id = 2;
+    oneof progress {
+      ListFinished list_finished = 3;
+      ReaderDone reader_done = 4;
+      Failed failed = 5;
+    }
+  }
+  repeated LoadProgress load_progress = 21;
   // SourceExecutor reports that CDC source has updated offset at least once.
   // Meta will mark the CDC source as created only after receiving this notification.
   message CdcSourceOffsetUpdated {
@@ -144,6 +166,16 @@ message BarrierCompleteResponse {
     uint32 table_id = 2;
   }
   repeated RefreshFinishedActor refresh_finished_actors = 19;
+  message TableChangeLogProgress {
+    uint32 fragment_id = 1;
+    uint32 upstream_table_id = 2;
+    uint32 progress_table_id = 3;
+    // Minimum truncate epoch across the vnodes covered by this report.
+    uint64 min_truncate_epoch = 4;
+    // Vnodes covered by this compute node's locally aggregated progress.
+    common.Buffer vnode_bitmap = 5;
+  }
+  repeated TableChangeLogProgress table_change_log_progress = 20;
 }
 
 message StreamingControlStreamRequest {
@@ -212,9 +244,22 @@ message GetMinUncommittedObjectIdResponse {
   uint64 min_uncommitted_object_id = 1;
 }
 
+message WarmUpTableCacheRequest {
+  uint32 table_id = 1;
+  common.Buffer vnode_bitmap = 2;
+  uint64 committed_epoch = 3;
+  // Maximum number of vnodes scanned concurrently on this compute node.
+  uint32 concurrency = 4;
+}
+
+message WarmUpTableCacheResponse {
+  uint64 key_count = 1;
+}
+
 service StreamService {
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
   rpc GetMinUncommittedObjectId(GetMinUncommittedObjectIdRequest) returns (GetMinUncommittedObjectIdResponse);
+  rpc WarmUpTableCache(WarmUpTableCacheRequest) returns (WarmUpTableCacheResponse);
 }
 
 // TODO: Lifecycle management for actors.

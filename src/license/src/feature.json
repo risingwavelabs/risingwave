@@ -117,6 +117,21 @@
             "description": "Ingest data into tables through the WebSocket API.",
             "type": "string",
             "const": "WebSocketIngest"
+        },
+        {
+            "description": "Delivering data to Firestore.",
+            "type": "string",
+            "const": "FirestoreSink"
+        },
+        {
+            "description": "Delivering data to Turbopuffer.",
+            "type": "string",
+            "const": "TurbopufferSink"
+        },
+        {
+            "description": "Delivering data to Iceberg with a primary key index.",
+            "type": "string",
+            "const": "IcebergSinkWithPkIndex"
         }
     ]
 }

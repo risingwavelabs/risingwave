@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
@@ -28,11 +27,11 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
+public class PostgresValidator extends CdcSourceValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
     private static final int CDC_TABLE_TYPE =
             Catalog.Table.CdcTableType.CDC_TABLE_TYPE_POSTGRES.getNumber();
-    private final Map<String, String> userProps;
+    private final PostgresDbzConnectorConfig config;
 
     private final TableSchema tableSchema;
 
@@ -46,8 +45,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     private final String slotName;
 
     private final boolean pubAutoCreate;
-
-    private static final String AWS_RDS_HOST = "amazonaws.com";
     private final boolean isAwsRds;
 
     // Whether the properties to validate is shared by multiple tables.
@@ -69,42 +66,21 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    public PostgresValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
+    public PostgresValidator(PostgresDbzConnectorConfig config, TableSchema tableSchema)
             throws SQLException {
-        this.userProps = userProps;
+        this.config = config;
         this.tableSchema = tableSchema;
-
-        var dbHost = userProps.get(DbzConnectorConfig.HOST);
-        var dbPort = userProps.get(DbzConnectorConfig.PORT);
-        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
-
-        var user = userProps.get(DbzConnectorConfig.USER);
-        var password = userProps.get(DbzConnectorConfig.PASSWORD);
-        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
-
-        // Determine if this is AWS RDS (priority from high to low):
-        // 1. Explicit user configuration via 'postgres.is.aws.rds'
-        // 2. Automatic detection via hostname containing 'amazonaws.com'
-        // 3. Test-only parameter 'test.only.force.rds' (for backward compatibility)
-        this.isAwsRds =
-                Boolean.parseBoolean(
-                                userProps.getOrDefault(DbzConnectorConfig.PG_IS_AWS_RDS, "false"))
-                        || dbHost.contains(AWS_RDS_HOST)
-                        || userProps
-                                .getOrDefault(DbzConnectorConfig.PG_TEST_ONLY_FORCE_RDS, "false")
-                                .equalsIgnoreCase("true");
-        this.dbName = dbName;
-        this.user = user;
-        this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
-        this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
-        this.pubName = userProps.get(DbzConnectorConfig.PG_PUB_NAME);
-        this.slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
-
-        this.pubAutoCreate =
-                userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
-        this.isCdcSourceJob = isCdcSourceJob;
+        this.user = config.getUser();
+        this.jdbcConnection =
+                DriverManager.getConnection(config.getJdbcUrl(), user, config.getPassword());
+        this.isAwsRds = config.isAwsRds();
+        this.dbName = config.getDbName();
+        this.schemaName = config.getSchemaName();
+        this.tableName = config.getTableName();
+        this.pubName = config.getPubName();
+        this.slotName = config.getSlotName();
+        this.pubAutoCreate = config.isPubAutoCreate();
+        this.isCdcSourceJob = config.isCdcSourceJob();
         try {
             this.pgVersion = jdbcConnection.getMetaData().getDatabaseMajorVersion();
         } catch (SQLException e) {
@@ -184,21 +160,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     @Override
     boolean isCdcSourceJob() {
         return isCdcSourceJob;
-    }
-
-    /** For Citus which is a distributed version of PG */
-    public void validateDistributedTable() throws SQLException {
-        try (var stmt =
-                jdbcConnection.prepareStatement(ValidatorUtils.getSql("citus.distributed_table"))) {
-            stmt.setString(1, schemaName + "." + tableName);
-            var res = stmt.executeQuery();
-            while (res.next()) {
-                var ret = res.getString(1);
-                if (!ret.equalsIgnoreCase("distributed")) {
-                    throw ValidatorUtils.invalidArgument("Citus table is not a distributed table");
-                }
-            }
-        }
     }
 
     private void validateTableSchema() throws SQLException {
@@ -437,7 +398,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 LOG.info(
                         "creating cdc source job: publication '{}' doesn't exist, creating...",
                         pubName);
-                DbzSourceUtils.createPostgresPublicationInValidate(userProps);
+                PostgresCdcSource.createPublication(config);
                 LOG.info("creating cdc source job: publication '{}' created successfully", pubName);
             }
             return;
@@ -706,9 +667,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         break;
                     }
                     String[] users = (String[]) usersArray.getArray();
-                    if (null != users
-                            && Arrays.asList(users)
-                                    .contains(userProps.get(DbzConnectorConfig.USER))) {
+                    if (null != users && Arrays.asList(users).contains(user)) {
                         isTableOwner = true;
                         break;
                     }
@@ -723,7 +682,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    protected void alterPublicationIfNeeded() throws SQLException {
+    private void alterPublicationIfNeeded() throws SQLException {
         if (isCdcSourceJob) {
             throw ValidatorUtils.invalidArgument(
                     "The connector properties is created by a shared source unexpectedly");

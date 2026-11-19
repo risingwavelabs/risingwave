@@ -21,22 +21,32 @@ use fs_err::File;
 use super::{ExecuteContext, Task};
 use crate::wait::wait;
 
+const DEFAULT_LOG_READY_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Check if all log patterns are found in the log output indicating the service is ready.
 pub struct LogReadyCheckTask {
     patterns: Vec<String>,
+    timeout: Duration,
 }
 
 impl LogReadyCheckTask {
     pub fn new(pattern: impl Into<String>) -> Result<Self> {
         Ok(Self {
             patterns: vec![pattern.into()],
+            timeout: DEFAULT_LOG_READY_TIMEOUT,
         })
     }
 
     pub fn new_all(patterns: impl IntoIterator<Item = impl Into<String>>) -> Result<Self> {
         Ok(Self {
             patterns: patterns.into_iter().map(Into::into).collect(),
+            timeout: DEFAULT_LOG_READY_TIMEOUT,
         })
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 }
 
@@ -47,7 +57,7 @@ impl Task for LogReadyCheckTask {
         };
 
         ctx.pb.set_message("waiting for ready...");
-        ctx.wait_log_contains(&self.patterns)
+        ctx.wait_log_contains(&self.patterns, self.timeout)
             .with_context(|| format!("failed to wait for service `{id}` to be ready"))?;
 
         ctx.complete_spin();
@@ -60,7 +70,7 @@ impl<W> ExecuteContext<W>
 where
     W: std::io::Write,
 {
-    fn wait_log_contains(&mut self, patterns: &[String]) -> anyhow::Result<()> {
+    fn wait_log_contains(&mut self, patterns: &[String], timeout: Duration) -> anyhow::Result<()> {
         let log_path = self.log_path().to_path_buf();
 
         let mut content = String::new();
@@ -84,7 +94,7 @@ where
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
-            Some(Duration::from_secs(60)),
+            Some(timeout),
             true,
         )?;
 

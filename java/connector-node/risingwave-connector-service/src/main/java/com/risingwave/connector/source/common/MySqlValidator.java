@@ -17,6 +17,7 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
@@ -25,13 +26,13 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
 
-public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
+public class MySqlValidator extends CdcSourceValidator implements AutoCloseable {
     private static final String REPLICATION_CLIENT = "REPLICATION CLIENT";
     private static final String BINLOG_MONITOR = "BINLOG MONITOR";
-    private static final int CDC_TABLE_TYPE =
-            Catalog.Table.CdcTableType.CDC_TABLE_TYPE_MYSQL.getNumber();
-
-    private final Map<String, String> userProps;
+    private final MysqlDbzConnectorConfig config;
+    private final String databaseTypeName;
+    private final boolean isMariaDb;
+    private final int cdcTableType;
 
     private final TableSchema tableSchema;
 
@@ -43,26 +44,37 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private final boolean isBackfillTable;
 
     public MySqlValidator(
-            Map<String, String> userProps,
-            TableSchema tableSchema,
-            boolean isCdcSourceJob,
-            boolean isBackfillTable)
+            MysqlDbzConnectorConfig config, TableSchema tableSchema, boolean isBackfillTable)
             throws SQLException {
-        this.userProps = userProps;
+        this.config = config;
         this.tableSchema = tableSchema;
+        this.isMariaDb = config.getSourceType() == SourceTypeE.MARIADB;
+        this.databaseTypeName = isMariaDb ? "MariaDB" : "MySQL";
+        this.cdcTableType =
+                (isMariaDb
+                                ? Catalog.Table.CdcTableType.CDC_TABLE_TYPE_MARIADB
+                                : Catalog.Table.CdcTableType.CDC_TABLE_TYPE_MYSQL)
+                        .getNumber();
 
-        var dbHost = userProps.get(DbzConnectorConfig.HOST);
-        var dbPort = userProps.get(DbzConnectorConfig.PORT);
-        var jdbcUrl = String.format("jdbc:mysql://%s:%s", dbHost, dbPort);
+        var jdbcUrl =
+                String.format(
+                        isMariaDb ? "jdbc:mariadb://%s:%s" : "jdbc:mysql://%s:%s",
+                        config.getHost(),
+                        config.getPort());
         var properties = new Properties();
-        properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
-        properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
-        properties.setProperty(
-                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED"));
-        properties.setProperty("allowPublicKeyRetrieval", "true");
+        properties.setProperty("user", config.getUser());
+        properties.setProperty("password", config.getPassword());
+        properties.setProperty("sslMode", config.getSslMode());
+        var rootCert = config.getSslRootCert();
+        if (rootCert != null) {
+            properties.setProperty("serverSslCert", rootCert);
+        }
+        if (!isMariaDb) {
+            properties.setProperty("allowPublicKeyRetrieval", "true");
+        }
 
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
-        this.isCdcSourceJob = isCdcSourceJob;
+        this.isCdcSourceJob = config.isCdcSourceJob();
         this.isBackfillTable = isBackfillTable;
     }
 
@@ -80,7 +92,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             // }
 
             // "database.name" is a comma-separated list of database names
-            var dbNames = userProps.get(DbzConnectorConfig.DB_NAME);
+            var dbNames = config.getDbName();
             for (var dbName : dbNames.split(",")) {
                 // check the existence of the database
                 try (var stmt =
@@ -93,7 +105,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                         if (ret == 0) {
                             throw ValidatorUtils.invalidArgument(
                                     String.format(
-                                            "MySQL database '%s' doesn't exist", dbName.trim()));
+                                            "%s database '%s' doesn't exist",
+                                            databaseTypeName, dbName.trim()));
                         }
                     }
                 }
@@ -106,13 +119,29 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private void validateBinlogConfig() throws SQLException {
+        if (isMariaDb) {
+            // MariaDB 11.4 introduced this variable; older versions return no rows.
+            // Debezium needs legacy event positions to resume reliably after a restart.
+            try (var stmt = jdbcConnection.createStatement();
+                    var res =
+                            stmt.executeQuery(
+                                    "SHOW GLOBAL VARIABLES LIKE 'binlog_legacy_event_pos'")) {
+                if (res.next() && !res.getString(2).equalsIgnoreCase("ON")) {
+                    throw ValidatorUtils.invalidArgument(
+                            "MariaDB binlog_legacy_event_pos must be ON for reliable CDC recovery. "
+                                    + "Set GLOBAL binlog_legacy_event_pos = ON and persist it in the server configuration.");
+                }
+            }
+        }
+
         // check whether source db has enabled binlog
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.bin_log"));
             while (res.next()) {
                 if (!res.getString(2).equalsIgnoreCase("ON")) {
                     throw ValidatorUtils.internalError(
-                            "MySQL doesn't enable binlog.\nPlease set the value of log_bin to 'ON' and restart your MySQL server.");
+                            databaseTypeName
+                                    + " doesn't enable binlog.\nPlease set log_bin to 'ON' and restart the server.");
                 }
             }
         }
@@ -123,7 +152,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             while (res.next()) {
                 if (!res.getString(2).equalsIgnoreCase("ROW")) {
                     throw ValidatorUtils.internalError(
-                            "MySQL binlog_format should be 'ROW'.\nPlease modify the config and restart your MySQL server.");
+                            databaseTypeName
+                                    + " binlog_format should be 'ROW'.\nPlease modify the config and restart the server.");
                 }
             }
         }
@@ -134,7 +164,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             while (res.next()) {
                 if (!res.getString(2).equalsIgnoreCase("FULL")) {
                     throw ValidatorUtils.internalError(
-                            "MySQL binlog_row_image should be 'FULL'.\\nPlease modify the config and restart your MySQL server.");
+                            databaseTypeName
+                                    + " binlog_row_image should be 'FULL'.\nPlease modify the config and restart the server.");
                 }
             }
         }
@@ -163,7 +194,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
                 if (!hashSet.isEmpty()) {
                     throw ValidatorUtils.invalidArgument(
-                            "MySQL user doesn't have enough privileges: " + hashSet);
+                            databaseTypeName + " user doesn't have enough privileges: " + hashSet);
                 }
             }
         } catch (SQLException e) {
@@ -211,8 +242,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private void validateTableSchema() throws SQLException {
         // check whether table exist
-        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
+        var dbName = config.getDbName();
+        var tableName = config.getTableName();
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table"))) {
             stmt.setString(1, dbName);
             stmt.setString(2, tableName);
@@ -221,12 +252,13 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 var ret = res.getInt(1);
                 if (ret == 0) {
                     throw ValidatorUtils.invalidArgument(
-                            String.format("MySQL table '%s' doesn't exist", tableName));
+                            String.format(
+                                    "%s table '%s' doesn't exist", databaseTypeName, tableName));
                 }
             }
         }
 
-        // check whether PK constraint match source table definition
+        // Check column names and types against the source table definition.
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table_schema"))) {
             stmt.setString(1, dbName);
@@ -251,12 +283,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
             // field name (lowercase) -> ColumnInfo
             var upstreamSchema = new HashMap<String, ColumnInfo>();
-            var pkFields = new HashSet<String>();
             var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
-                var key = res.getString(3);
                 long charMaxLength = res.getLong(4);
                 var columnType = res.getString(5); // Get full column type (e.g., "bigint unsigned")
                 // In MySQL, some types (such as text/blob) will return 4294967295 for
@@ -266,9 +296,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
                 upstreamSchema.put(
                         field.toLowerCase(), new ColumnInfo(dataType, charMaxLength, columnType));
-                if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field.toLowerCase());
-                }
             }
 
             // All columns defined must exist in upstream database
@@ -296,8 +323,20 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                                     + e.getValue());
                 }
             }
+        }
 
-            primaryKeyCheck(tableSchema, pkFields);
+        try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.pk"))) {
+            stmt.setString(1, dbName);
+            stmt.setString(2, tableName);
+            var pkFields = new ArrayList<String>();
+
+            try (var res = stmt.executeQuery()) {
+                while (res.next()) {
+                    pkFields.add(res.getString(1));
+                }
+            }
+
+            primaryKeyCheck(tableSchema.getPrimaryKeys(), pkFields);
         }
     }
 
@@ -308,22 +347,31 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
-    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+    static void primaryKeyCheck(List<String> expectedPkFields, List<String> pkFields)
             throws RuntimeException {
-        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+        if (pkFields.isEmpty()) {
+            throw ValidatorUtils.invalidArgument(
+                    "Upstream MySQL primary key metadata is empty; expected columns "
+                            + expectedPkFields);
+        }
+
+        if (expectedPkFields.size() != pkFields.size()) {
             throw ValidatorUtils.invalidArgument(
                     "Primary key mismatch: the SQL schema defines "
-                            + sourceSchema.getPrimaryKeys().size()
+                            + expectedPkFields.size()
                             + " primary key columns, but the source table in MySQL has "
                             + pkFields.size()
                             + " columns.");
         }
-        for (var colName : sourceSchema.getPrimaryKeys()) {
-            if (!pkFields.contains(colName.toLowerCase())) {
+
+        for (int i = 0; i < expectedPkFields.size(); i++) {
+            if (!pkFields.get(i).equalsIgnoreCase(expectedPkFields.get(i))) {
                 throw ValidatorUtils.invalidArgument(
-                        "Primary key mismatch: The primary key list of the source table in MySQL does not contain '"
-                                + colName
-                                + "'.");
+                        "Primary key mismatch: upstream MySQL primary key columns "
+                                + pkFields
+                                + " do not match expected columns "
+                                + expectedPkFields
+                                + " in order.");
             }
         }
     }
@@ -334,11 +382,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             long charMaxLength,
             boolean isUnsigned) {
         return Binding.validateCdcSourceColumnType(
-                CDC_TABLE_TYPE,
-                mysqlDataType,
-                typeName.getNumber(),
-                charMaxLength,
-                isUnsigned,
-                null);
+                cdcTableType, mysqlDataType, typeName.getNumber(), charMaxLength, isUnsigned, null);
     }
 }

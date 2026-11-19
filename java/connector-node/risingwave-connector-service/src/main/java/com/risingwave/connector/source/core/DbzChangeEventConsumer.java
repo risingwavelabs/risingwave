@@ -16,13 +16,14 @@
 
 package com.risingwave.connector.source.core;
 
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
+import com.risingwave.connector.source.common.CdcEventType;
+import com.risingwave.connector.source.common.CdcSource;
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
-import com.risingwave.proto.ConnectorServiceProto.SourceType;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
 import io.debezium.embedded.EmbeddedEngineChangeEventProxy;
 import io.debezium.engine.ChangeEvent;
@@ -43,20 +44,14 @@ import org.apache.kafka.connect.storage.ConverterType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-enum EventType {
-    HEARTBEAT,
-    TRANSACTION,
-    DATA,
-    SCHEMA_CHANGE,
-}
-
 public class DbzChangeEventConsumer
         implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
     static final Logger LOG = LoggerFactory.getLogger(DbzChangeEventConsumer.class);
 
     private final BlockingQueue<GetEventStreamResponse> outputChannel;
 
-    private final SourceTypeE connector;
+    private final CdcSource source;
+    private final boolean needsOffsetCommitOnCheckpoint;
     private final long sourceId;
     private final JsonConverter payloadConverter;
     private final JsonConverter keyConverter;
@@ -68,14 +63,15 @@ public class DbzChangeEventConsumer
             currentRecordCommitter;
 
     DbzChangeEventConsumer(
-            SourceTypeE connector,
-            long sourceId,
+            CdcSource source,
+            DbzConnectorConfig config,
             String heartbeatTopicPrefix,
             String transactionTopic,
             String schemaChangeTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
-        this.connector = connector;
-        this.sourceId = sourceId;
+        this.source = source;
+        this.needsOffsetCommitOnCheckpoint = config.needsOffsetCommitOnCheckpoint();
+        this.sourceId = config.getSourceId();
         this.outputChannel = queue;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
         this.transactionTopic = transactionTopic;
@@ -86,11 +82,13 @@ public class DbzChangeEventConsumer
         // to source parser, we use a customized JSON converter to avoid outputting the `schema`
         // field.
         var payloadConverter = new DbzJsonConverter();
-        final HashMap<String, Object> configs = new HashMap<>(2);
+        final HashMap<String, Object> configs = new HashMap<>(3);
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
         // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
         configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
+        configs.put(
+                JsonConverterConfig.REPLACE_NULL_WITH_DEFAULT_CONFIG, !config.isBackfillSource());
         payloadConverter.configure(configs);
         this.payloadConverter = payloadConverter;
 
@@ -100,45 +98,15 @@ public class DbzChangeEventConsumer
         this.keyConverter = keyConverter;
     }
 
-    /**
-     * Postgres and Oracle connectors need to commit the offset to the upstream database, so that we
-     * need to wait for the epoch commit before committing the record offset.
-     */
-    private boolean noNeedCommitOffset() {
-        return connector != SourceTypeE.POSTGRES;
-    }
-
-    private EventType getEventType(SourceRecord record) {
+    private CdcEventType getEventType(SourceRecord record) {
         if (isHeartbeatEvent(record)) {
-            return EventType.HEARTBEAT;
+            return CdcEventType.HEARTBEAT;
         } else if (isTransactionMetaEvent(record)) {
-            return EventType.TRANSACTION;
+            return CdcEventType.TRANSACTION;
         } else if (isSchemaChangeEvent(record)) {
-            return EventType.SCHEMA_CHANGE;
+            return CdcEventType.SCHEMA_CHANGE;
         } else {
-            return EventType.DATA;
-        }
-    }
-
-    private static SourceType toProtoSourceType(SourceTypeE connector) {
-        if (connector == null) {
-            return SourceType.UNSPECIFIED;
-        }
-        switch (connector) {
-            case MYSQL:
-                return SourceType.MYSQL;
-            case POSTGRES:
-                return SourceType.POSTGRES;
-            case CITUS:
-                return SourceType.CITUS;
-            case MONGODB:
-                return SourceType.MONGODB;
-            case SQL_SERVER:
-                return SourceType.SQL_SERVER;
-            case ORACLE:
-                return SourceType.ORACLE;
-            default:
-                return SourceType.UNSPECIFIED;
+            return CdcEventType.DATA;
         }
     }
 
@@ -168,12 +136,12 @@ public class DbzChangeEventConsumer
         currentRecordCommitter = committer;
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
-            EventType eventType = getEventType(record);
+            CdcEventType eventType = getEventType(record);
             DebeziumOffset offset =
                     new DebeziumOffset(
                             record.sourcePartition(),
-                            record.sourceOffset(),
-                            (eventType == EventType.HEARTBEAT));
+                            source.getEventSourceOffset(record, eventType),
+                            (eventType == CdcEventType.HEARTBEAT));
             // serialize the offset to a JSON, so that kernel doesn't need to
             // aware its layout
             String offsetStr = "";
@@ -186,8 +154,7 @@ public class DbzChangeEventConsumer
             var msgBuilder =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
-                            .setPartition(String.valueOf(sourceId))
-                            .setSourceType(toProtoSourceType(connector));
+                            .setPartition(String.valueOf(sourceId));
 
             switch (eventType) {
                 case HEARTBEAT:
@@ -306,7 +273,7 @@ public class DbzChangeEventConsumer
                 default:
                     break;
             }
-            if (noNeedCommitOffset()) {
+            if (!needsOffsetCommitOnCheckpoint) {
                 committer.markProcessed(event);
             }
         }
@@ -318,7 +285,7 @@ public class DbzChangeEventConsumer
             var response = respBuilder.build();
             outputChannel.put(response);
         }
-        if (noNeedCommitOffset()) {
+        if (!needsOffsetCommitOnCheckpoint) {
             committer.markBatchFinished();
         }
     }

@@ -347,4 +347,54 @@ mod tests {
         // Consume the watermark
         recovered_sort_executor.expect_watermark().await;
     }
+
+    /// A change to the only row left in the cache empties it, while the rows output earlier in the
+    /// epoch stay in the table until the commit cleans them.
+    #[tokio::test]
+    async fn test_sort_executor_change_empties_cache() {
+        let sort_column_index = 1;
+        for barrier_between in [false, true] {
+            for (change, expected) in [
+                (" I I\n - 3 3", None),
+                (" I I\n U- 3 3\n U+ 3 3", Some(" I I\n + 3 3")),
+            ] {
+                let (mut tx, mut sort_executor) =
+                    create_executor(sort_column_index, MemoryStateStore::new()).await;
+                tx.push_barrier(test_epoch(1), false);
+                sort_executor.expect_barrier().await;
+
+                tx.push_chunk(StreamChunk::from_pretty(
+                    " I I
+                    + 1 1
+                    + 2 2
+                    + 3 3",
+                ));
+                tx.push_int64_watermark(sort_column_index, 3_i64);
+                assert_eq!(
+                    sort_executor.expect_chunk().await,
+                    StreamChunk::from_pretty(
+                        " I I
+                        + 1 1
+                        + 2 2"
+                    )
+                );
+                sort_executor.expect_watermark().await;
+
+                if barrier_between {
+                    tx.push_barrier(test_epoch(2), false);
+                    sort_executor.expect_barrier().await;
+                }
+                tx.push_chunk(StreamChunk::from_pretty(change));
+                tx.push_int64_watermark(sort_column_index, 10_i64);
+                if let Some(expected) = expected {
+                    assert_eq!(
+                        sort_executor.expect_chunk().await,
+                        StreamChunk::from_pretty(expected),
+                        "change: {change:?}, barrier_between: {barrier_between}"
+                    );
+                }
+                sort_executor.expect_watermark().await;
+            }
+        }
+    }
 }

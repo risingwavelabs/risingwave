@@ -1,0 +1,58 @@
+statement error struct field "a" specified more than once
+create table t (s struct<a int, a varchar>);
+
+# Unquoted names are folded to lowercase; quoted names preserve case.
+statement error struct field "value" specified more than once
+create table t (s struct<Value int, VALUE varchar>);
+
+statement error struct field "Value" specified more than once
+create table t (s struct<"Value" int, "Value" varchar>);
+
+# Nested types.
+statement error struct field "a" specified more than once
+create table t (s struct<nested struct<a int, a varchar>>);
+
+statement error struct field "a" specified more than once
+create table t (s struct<a int, a varchar>[]);
+
+statement error struct field "a" specified more than once
+create table t (s map(varchar, struct<a int, a varchar>));
+
+# Cast and ALTER TABLE.
+statement error struct field "a" specified more than once
+select row(1, 'hello')::struct<a int, a varchar>;
+
+statement ok
+create table t (s struct<a int, b varchar>);
+
+statement error struct field "a" specified more than once
+alter table t alter column s type struct<a int, a varchar>;
+
+statement ok
+drop table t;
+
+# Case-distinct quoted names are valid.
+statement ok
+create table t (
+    id int,
+    s struct<value int, "Value" varchar, "VALUE" boolean>
+);
+
+statement ok
+insert into t values (1, row(7, 'hello', true));
+
+statement ok
+flush;
+
+query IITT
+select id, (s).value, (s)."Value", (s)."VALUE" from t;
+----
+1 7 hello t
+
+query T
+select to_jsonb(s)::varchar from t;
+----
+{"VALUE": true, "Value": "hello", "value": 7}
+
+statement ok
+drop table t;

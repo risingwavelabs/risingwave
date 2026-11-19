@@ -15,12 +15,12 @@
 use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
+use crate::binder::bind_struct_type;
 use crate::{Binder, bind_data_type};
 
 /// Non-SQL UDFs exchange data via Arrow, which does not support VARIANT yet.
@@ -37,6 +37,27 @@ pub(crate) fn reject_variant_in_udf_signature(
         .into());
     }
     Ok(())
+}
+
+/// `IMMUTABLE` is currently supported only for scalar UDFs, so every other kind of function
+/// rejects it. `STABLE` and `VOLATILE` are always treated as no-ops and pass through unchanged.
+///
+/// TODO: revisit `STABLE` and `VOLATILE` once they get a meaning in RisingWave.
+pub(crate) fn should_reject_function_behavior(behavior: &FunctionBehavior, kind: UdfKind) -> bool {
+    match (behavior, kind) {
+        (FunctionBehavior::Immutable, UdfKind::Table | UdfKind::Aggregate) => true,
+        (FunctionBehavior::Immutable, UdfKind::Scalar) => false,
+        (FunctionBehavior::Stable | FunctionBehavior::Volatile, _) => false,
+    }
+}
+
+/// `unsafe_skip_materializing_exprs` is read only when a scalar UDF call is planned, so every
+/// other kind of function rejects it instead of ignoring it.
+pub(crate) fn should_reject_unsafe_skip_materializing_exprs(kind: UdfKind) -> bool {
+    match kind {
+        UdfKind::Scalar => false,
+        UdfKind::Table | UdfKind::Aggregate => true,
+    }
 }
 
 pub async fn handle_create_function(
@@ -115,7 +136,7 @@ pub async fn handle_create_function(
                     .into_iter()
                     .map(|c| bind_data_type(&c.data_type).map(|ty| (c.name.real_value(), ty)));
                 let fields = it.try_collect::<_, Vec<_>, _>()?;
-                return_type = StructType::new(fields).into();
+                return_type = bind_struct_type(fields)?.into();
             }
             Kind::Table(TableFunction {})
         }
@@ -126,6 +147,41 @@ pub async fn handle_create_function(
             .into());
         }
     };
+
+    let udf_kind = match kind {
+        Kind::Scalar(_) => UdfKind::Scalar,
+        Kind::Table(_) => UdfKind::Table,
+        // Aggregate UDFs are created through `CREATE AGGREGATE` and
+        // `handle_create_aggregate`, not this `CREATE FUNCTION` handler.
+        Kind::Aggregate(_) => unreachable!(),
+    };
+    if let Some(behavior) = &params.behavior
+        && should_reject_function_behavior(behavior, udf_kind)
+    {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "`{behavior}` is not supported for table functions"
+        ))
+        .into());
+    }
+    if with_options.unsafe_skip_materializing_exprs.is_some()
+        && should_reject_unsafe_skip_materializing_exprs(udf_kind)
+    {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`unsafe_skip_materializing_exprs` is not supported for table functions".to_owned(),
+        )
+        .into());
+    }
+    let is_immutable = matches!(params.behavior, Some(FunctionBehavior::Immutable));
+    let unsafe_skip_materializing_exprs = with_options
+        .unsafe_skip_materializing_exprs
+        .unwrap_or_default();
+    if unsafe_skip_materializing_exprs && !is_immutable {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true"
+                .to_owned(),
+        )
+        .into());
+    }
 
     let mut arg_names = vec![];
     let mut arg_types = vec![];
@@ -167,14 +223,28 @@ pub async fn handle_create_function(
         _ => None,
     };
 
-    let create_fn =
-        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
-    let output = create_fn(CreateOptions {
-        kind: match kind {
-            Kind::Scalar(_) => UdfKind::Scalar,
-            Kind::Table(_) => UdfKind::Table,
-            Kind::Aggregate(_) => unreachable!(),
-        },
+    let udf_impl = risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?;
+    let always_retry_on_network_error = with_options
+        .always_retry_on_network_error
+        .unwrap_or_default();
+    let supports_always_retry_on_network_error =
+        (udf_impl.supports_always_retry_on_network_error)(udf_kind);
+    if always_retry_on_network_error && !supports_always_retry_on_network_error {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` is not supported by this UDF implementation"
+                .to_owned(),
+        )
+        .into());
+    }
+    if is_immutable && supports_always_retry_on_network_error && !always_retry_on_network_error {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` must be true for an `IMMUTABLE` UDF whose implementation supports it"
+                .to_owned(),
+        )
+        .into());
+    }
+    let output = (udf_impl.create_fn)(CreateOptions {
+        kind: udf_kind,
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
@@ -200,9 +270,9 @@ pub async fn handle_create_function(
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
-        always_retry_on_network_error: with_options
-            .always_retry_on_network_error
-            .unwrap_or_default(),
+        always_retry_on_network_error,
+        unsafe_skip_materializing_exprs,
+        is_immutable,
         is_async: with_options.r#async,
         is_batched: with_options.batch,
         created_at_epoch: None,

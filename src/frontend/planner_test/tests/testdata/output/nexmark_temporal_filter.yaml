@@ -168,7 +168,7 @@
     GROUP BY Q.category;
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, Case((count(max($expr8)) = 0:Int32), null:Decimal, (sum(max($expr8)) / count(max($expr8))::Decimal)) as $expr10] }
+    └─StreamProject { exprs: [$expr5, Case((count(max($expr8)) = 0:Int32), null:Decimal, (Case((count(max($expr8)) = 0:Int64), null:Decimal, sum(max($expr8))) / count(max($expr8))::Decimal)) as $expr10] }
       └─StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
         └─StreamExchange { dist: HashShard($expr5) }
           └─StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
@@ -201,7 +201,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [$expr5, Case((count(max($expr8)) = 0:Int32), null:Decimal, (sum(max($expr8)) / count(max($expr8))::Decimal)) as $expr10] }
+    └── StreamProject { exprs: [$expr5, Case((count(max($expr8)) = 0:Int32), null:Decimal, (Case((count(max($expr8)) = 0:Int64), null:Decimal, sum(max($expr8))) / count(max($expr8))::Decimal)) as $expr10] }
         └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([1]) from 1
 
@@ -210,8 +210,7 @@
     └── StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr8), count] } { tables: [ HashAggState: 2, HashAggCall0: 1 ] }
         └── StreamProject { exprs: [$expr2, $expr5, $expr8, _row_id, _row_id] }
             └── StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
-                └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
-                    ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
+                └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all } { tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ] }
                     ├── StreamExchange Hash([0]) from 2
                     └── StreamExchange Hash([0]) from 4
 
@@ -239,12 +238,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [[$expr6]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
-    Table 0
-    ├── columns: [ $expr5, sum(max($expr8)), count(max($expr8)), count, _rw_timestamp ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 0 { columns: [ $expr5, sum(max($expr8)), count(max($expr8)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
     ├── columns: [ $expr2, $expr5, $expr8, _row_id, _row_id_0, _rw_timestamp ]
@@ -253,39 +247,19 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
 
-    Table 2
-    ├── columns: [ $expr2, $expr5, max($expr8), count, _rw_timestamp ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 2, 3 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 2
+    Table 2 { columns: [ $expr2, $expr5, max($expr8), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 3
-    ├── columns: [ $expr2, $expr3, $expr4, $expr5, _row_id, _rw_timestamp ]
-    ├── primary key: [ $0 ASC, $4 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 3 { columns: [ $expr2, $expr3, $expr4, $expr5, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ $expr2, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5
-    ├── columns: [ $expr7, $expr8, $expr9, _row_id, _rw_timestamp ]
-    ├── primary key: [ $0 ASC, $3 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 5 { columns: [ $expr7, $expr8, $expr9, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6 { columns: [ $expr7, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 8
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ]
-    ├── primary key: [ $3 ASC, $4 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 0
+    Table 8 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 0 }
 
     Table 9 { columns: [ $expr6, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

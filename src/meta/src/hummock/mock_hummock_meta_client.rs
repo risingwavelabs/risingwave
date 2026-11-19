@@ -96,6 +96,7 @@ impl MockHummockMetaClient {
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
             .get_compact_task(
+                self.compact_context_id.load(Ordering::Acquire).into(),
                 StaticCompactionGroupId::StateDefault,
                 &mut *default_compaction_selector(),
             )
@@ -218,6 +219,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .cloned()
                     .map(|table_id| (table_id, epoch))
                     .collect(),
+                table_change_log_progress: Vec::new(),
                 truncate_tables: HashSet::new(),
             })
             .await
@@ -316,7 +318,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group, &mut *selector)
+                    .get_compact_task(context_id, group, &mut *selector)
                     .await
                     .unwrap()
                 {

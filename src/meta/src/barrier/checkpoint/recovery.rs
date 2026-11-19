@@ -268,10 +268,10 @@ impl DatabaseStatusAction<'_, EnterReset> {
         self,
         barrier_complete_output: Option<BarrierCompleteOutput>,
         partial_graph_manager: &mut PartialGraphManager,
-    ) {
+    ) -> MetaResult<()> {
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
-            self.control.ack_completed(partial_graph_manager, output);
+            self.control.ack_completed(partial_graph_manager, output)?;
         }
         let database_status = self
             .control
@@ -342,6 +342,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 }
             },
         }
+        Ok(())
     }
 }
 
@@ -421,6 +422,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             stream_actors,
             mut source_splits,
             batch_refresh,
+            iceberg_v3,
         } = rendered_info;
         let mut recoverer = partial_graph_manager.start_recover();
         let result: MetaResult<_> = try {
@@ -439,6 +441,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
                 batch_refresh,
+                iceberg_v3,
             )?
         };
         match result {
@@ -518,7 +521,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
 pub(crate) struct EnterRunning;
 
 impl DatabaseStatusAction<'_, EnterRunning> {
-    pub(crate) fn enter(self) {
+    pub(crate) fn enter(self) -> HashSet<JobId> {
         info!(database_id = ?self.database_id, "database enter running");
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
@@ -561,9 +564,16 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     DatabaseRecoveringStage::Initializing {
                         initial_barrier_collector,
                     } => {
-                        *database_status = DatabaseCheckpointControlStatus::Running(
-                            initial_barrier_collector.finish(),
-                        );
+                        let database = initial_barrier_collector.finish();
+                        let running_job_ids = database
+                            .independent_checkpoint_job_controls
+                            .iter()
+                            .filter_map(|(job_id, control)| {
+                                control.running().is_some().then_some(*job_id)
+                            })
+                            .collect();
+                        *database_status = DatabaseCheckpointControlStatus::Running(database);
+                        running_job_ids
                     }
                 }
             }

@@ -533,23 +533,22 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             (&mut self.side_r, &mut self.side_l)
         };
 
-        // State cleaning
-        if side_update.join_key_indices[0] == watermark.col_idx {
-            side_match.ht.update_watermark(watermark.val.clone());
-        }
-
         // Select watermarks to yield.
         let wm_in_jk = side_update
             .join_key_indices
             .iter()
             .positions(|idx| *idx == watermark.col_idx);
         let mut watermarks_to_emit = vec![];
+        let mut clean_watermark = None;
         for idx in wm_in_jk {
             let buffers = self
                 .watermark_buffers
                 .entry(idx)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
+                if idx == 0 {
+                    clean_watermark = Some(selected_watermark.val.clone());
+                }
                 let empty_indices = vec![];
                 let output_indices = side_update
                     .i2o_mapping_indexed
@@ -566,6 +565,12 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                     watermarks_to_emit.push(selected_watermark.clone().with_idx(*output_idx));
                 }
             };
+        }
+        // State cleaning. Until the watermarks of both sides pass a join key, later rows of the
+        // lagging side may still read and write the rows of the key in both tables.
+        if let Some(watermark) = clean_watermark {
+            self.side_l.ht.update_watermark(watermark.clone());
+            self.side_r.ht.update_watermark(watermark);
         }
         Ok(watermarks_to_emit)
     }
@@ -1008,14 +1013,17 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
 mod tests {
     use std::sync::atomic::AtomicU64;
 
+    use futures::TryStreamExt;
     use prometheus::Registry;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::config::MetricLevel;
     use risingwave_common::metrics::get_label;
+    use risingwave_common::row;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::PrefetchOptions;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -1064,6 +1072,36 @@ mod tests {
         use_cache: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        create_executor_with_store::<T>(asof_desc, use_cache, metrics, MemoryStateStore::new())
+            .await
+    }
+
+    /// The state table of a side, with pk (join key, inequality column, stream key).
+    async fn create_side_state_table(
+        mem_state: MemoryStateStore,
+        inequality_idx: usize,
+        table_id: u32,
+    ) -> StateTable<MemoryStateStore> {
+        create_in_memory_state_table(
+            mem_state,
+            &[DataType::Int64, DataType::Int64, DataType::Int64],
+            &[
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+            &[0, inequality_idx, 1],
+            table_id,
+        )
+        .await
+    }
+
+    async fn create_executor_with_store<const T: AsOfJoinTypePrimitive>(
+        asof_desc: AsOfDesc,
+        use_cache: bool,
+        metrics: Arc<StreamingMetrics>,
+        mem_state: MemoryStateStore,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64), // join key
@@ -1078,33 +1116,8 @@ mod tests {
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
 
-        let mem_state = MemoryStateStore::new();
-
-        let state_l = create_in_memory_state_table(
-            mem_state.clone(),
-            &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[
-                OrderType::ascending(),
-                OrderType::ascending(),
-                OrderType::ascending(),
-            ],
-            &[0, asof_desc.left_idx, 1],
-            0,
-        )
-        .await;
-
-        let state_r = create_in_memory_state_table(
-            mem_state,
-            &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[
-                OrderType::ascending(),
-                OrderType::ascending(),
-                OrderType::ascending(),
-            ],
-            &[0, asof_desc.right_idx, 1],
-            1,
-        )
-        .await;
+        let state_l = create_side_state_table(mem_state.clone(), asof_desc.left_idx, 0).await;
+        let state_r = create_side_state_table(mem_state, asof_desc.right_idx, 1).await;
 
         let schema: Schema = [source_l.schema().fields(), source_r.schema().fields()]
             .concat()
@@ -1481,6 +1494,118 @@ mod tests {
                 + 6 8 9 . . ."
             )
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_asof_join_state_cleaning() -> StreamExecutorResult<()> {
+        for use_cache in [false, true] {
+            let store = MemoryStateStore::new();
+            // Inner join on `k` with `l.c1 >= r.c2`.
+            let create_executor = || {
+                create_executor_with_store::<{ AsOfJoinType::Inner }>(
+                    AsOfDesc {
+                        left_idx: 1,
+                        right_idx: 2,
+                        inequality_type: AsOfInequalityType::Ge,
+                    },
+                    use_cache,
+                    Arc::new(StreamingMetrics::unused()),
+                    store.clone(),
+                )
+            };
+            let (mut tx_l, mut tx_r, mut join) = create_executor().await;
+            tx_l.push_barrier(test_epoch(1), false);
+            tx_r.push_barrier(test_epoch(1), false);
+            join.next_unwrap_ready_barrier()?;
+            tx_r.push_chunk(StreamChunk::from_pretty(" I I I\n + 5 1 50"));
+            join.next_unwrap_pending();
+            tx_l.push_chunk(StreamChunk::from_pretty(" I I I\n + 5 100 0"));
+            assert_eq!(
+                join.next_unwrap_ready_chunk()?,
+                StreamChunk::from_pretty(" I I I I I I\n + 5 100 0 5 1 50")
+            );
+
+            tx_l.push_int64_watermark(0, 10);
+            tx_l.push_barrier(test_epoch(2), false);
+            tx_r.push_barrier(test_epoch(2), false);
+            join.next_unwrap_ready_barrier()?;
+            if use_cache {
+                // Recover, so that the cache does not hide the state. The upstream sends the left
+                // watermark again.
+                (tx_l, tx_r, join) = create_executor().await;
+                tx_l.push_barrier(test_epoch(2), false);
+                tx_r.push_barrier(test_epoch(2), false);
+                join.next_unwrap_ready_barrier()?;
+                tx_l.push_int64_watermark(0, 10);
+            }
+
+            // A right row of a key below the left watermark replaces the match.
+            tx_r.push_chunk(StreamChunk::from_pretty(" I I I\n + 5 2 60"));
+            assert_eq!(
+                join.next_unwrap_ready_chunk()?,
+                StreamChunk::from_pretty(
+                    " I I I I I I
+                    - 5 100 0 5 1 50
+                    + 5 100 0 5 2 60"
+                ),
+                "use_cache: {use_cache}"
+            );
+
+            // A left row of a key below the right watermark is deleted.
+            tx_r.push_chunk(StreamChunk::from_pretty(" I I I\n + 15 3 50"));
+            join.next_unwrap_pending();
+            tx_l.push_chunk(StreamChunk::from_pretty(" I I I\n + 15 101 0"));
+            assert_eq!(
+                join.next_unwrap_ready_chunk()?,
+                StreamChunk::from_pretty(" I I I I I I\n + 15 101 0 15 3 50")
+            );
+            tx_r.push_int64_watermark(0, 20);
+            for _ in 0..2 {
+                assert_eq!(
+                    join.next_unwrap_ready_watermark()?.val,
+                    ScalarImpl::Int64(10)
+                );
+            }
+            tx_l.push_barrier(test_epoch(3), false);
+            tx_r.push_barrier(test_epoch(3), false);
+            join.next_unwrap_ready_barrier()?;
+            tx_l.push_chunk(StreamChunk::from_pretty(" I I I\n - 15 101 0"));
+            assert_eq!(
+                join.next_unwrap_ready_chunk()?,
+                StreamChunk::from_pretty(" I I I I I I\n - 15 101 0 15 3 50")
+            );
+            tx_l.push_barrier(test_epoch(4), false);
+            tx_r.push_barrier(test_epoch(4), false);
+            join.next_unwrap_ready_barrier()?;
+
+            // Once both watermarks pass all keys, both tables are cleaned.
+            tx_l.push_int64_watermark(0, 20);
+            for _ in 0..2 {
+                assert_eq!(
+                    join.next_unwrap_ready_watermark()?.val,
+                    ScalarImpl::Int64(20)
+                );
+            }
+            tx_l.push_barrier(test_epoch(5), false);
+            tx_r.push_barrier(test_epoch(5), false);
+            join.next_unwrap_ready_barrier()?;
+            for (inequality_idx, table_id) in [(1, 0), (2, 1)] {
+                let mut table =
+                    create_side_state_table(store.clone(), inequality_idx, table_id).await;
+                table
+                    .init_epoch(EpochPair::new_test_epoch(test_epoch(5)))
+                    .await?;
+                let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                    &(Bound::Unbounded, Bound::Unbounded);
+                let rows: Vec<OwnedRow> = table
+                    .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
+                    .await?
+                    .try_collect()
+                    .await?;
+                assert!(rows.is_empty(), "use_cache: {use_cache}, table: {table_id}");
+            }
+        }
         Ok(())
     }
 }
