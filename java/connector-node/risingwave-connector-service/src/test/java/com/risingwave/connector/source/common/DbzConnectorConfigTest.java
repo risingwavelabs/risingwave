@@ -52,6 +52,107 @@ public class DbzConnectorConfigTest {
     }
 
     @Test
+    public void preservesLiteralCredentialsAcrossRelationalConnectors() {
+        for (var sourceType :
+                new SourceType[] {
+                    SourceType.MYSQL,
+                    SourceType.MARIADB,
+                    SourceType.POSTGRES,
+                    SourceType.SQL_SERVER,
+                    SourceType.ORACLE
+                }) {
+            for (var value :
+                    new String[] {
+                        "Example+&%2B Pass9!",
+                        "Example${username}9!",
+                        "Example${password}9!",
+                        "Example${source.id}9!",
+                        "Example${missing:-fallback}9!",
+                        "Example$${username}9!",
+                        "Example${missing}9!"
+                    }) {
+                // Secret-backed credentials also arrive as resolved strings in the request.
+                var config =
+                        createConfig(
+                                sourceType,
+                                123,
+                                Map.of(
+                                        "username", value,
+                                        "password", value,
+                                        "heartbeat.table.name", "TEST.RW_HEARTBEAT"));
+
+                assertEquals(sourceType.name(), value, config.getUser());
+                assertEquals(sourceType.name(), value, config.getPassword());
+                assertEquals(
+                        sourceType.name(),
+                        value,
+                        config.getResolvedDebeziumProps().getProperty("database.user"));
+                assertEquals(
+                        sourceType.name(),
+                        value,
+                        config.getResolvedDebeziumProps().getProperty("database.password"));
+            }
+        }
+    }
+
+    @Test
+    public void preservesLiteralMongoDbConnectionString() {
+        for (var password :
+                new String[] {
+                    "Example${source.id}9!",
+                    "Example$${source.id}9!",
+                    "Example${mongodb.url}9!",
+                    "Example%24%7Bsource.id%7D9!"
+                }) {
+            var url = "mongodb://audit_user:" + password + "@localhost:27017/test";
+            var config =
+                    createConfig(
+                            SourceType.MONGODB,
+                            123,
+                            Map.of("mongodb.url", url, "collection.name", "test.users"));
+
+            assertEquals(
+                    url,
+                    config.getResolvedDebeziumProps().getProperty("mongodb.connection.string"));
+        }
+    }
+
+    @Test
+    public void resolvesTemplatePlaceholdersAndDefaultsAcrossConnectors() {
+        for (var sourceType :
+                new SourceType[] {
+                    SourceType.MYSQL,
+                    SourceType.MARIADB,
+                    SourceType.POSTGRES,
+                    SourceType.SQL_SERVER,
+                    SourceType.ORACLE,
+                    SourceType.MONGODB
+                }) {
+            var userProps = new HashMap<String, String>();
+            userProps.put("heartbeat.table.name", "TEST.RW_HEARTBEAT");
+            userProps.put("mongodb.url", "mongodb://localhost:27017/test");
+            userProps.put("collection.name", "test.users");
+            var props = createConfig(sourceType, 123, userProps).getResolvedDebeziumProps();
+
+            assertEquals("RW_CDC_123", props.getProperty("topic.prefix"));
+            assertEquals("1024", props.getProperty("max.batch.size"));
+            assertEquals("initial", props.getProperty("snapshot.mode"));
+            assertEquals("60000", props.getProperty("heartbeat.interval.ms"));
+
+            userProps.put("debezium.max.batch.size", "512");
+            userProps.put("debezium.snapshot.mode", "no_data");
+            userProps.put("debezium.heartbeat.interval.ms", "30000");
+            userProps.put("debezium.topic.heartbeat.prefix", "literal_${source.id}");
+            props = createConfig(sourceType, 123, userProps).getResolvedDebeziumProps();
+
+            assertEquals("512", props.getProperty("max.batch.size"));
+            assertEquals("no_data", props.getProperty("snapshot.mode"));
+            assertEquals("30000", props.getProperty("heartbeat.interval.ms"));
+            assertEquals("literal_${source.id}", props.getProperty("topic.heartbeat.prefix"));
+        }
+    }
+
+    @Test
     public void usesConstructorSourceIdForTopicPrefix() {
         var userProps = new HashMap<String, String>();
         userProps.put("mongodb.url", "mongodb://localhost:27017");
