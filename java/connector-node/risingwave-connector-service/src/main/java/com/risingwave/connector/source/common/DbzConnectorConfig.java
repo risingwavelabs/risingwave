@@ -117,6 +117,8 @@ public abstract class DbzConnectorConfig {
         var substitutionProps = new HashMap<>(userProps);
         substitutionProps.put("source.id", Long.toString(sourceId));
         this.substitutor = new StringSubstitutor(substitutionProps);
+        // User values, including resolved secrets, are literal text, not templates.
+        this.substitutor.setDisableSubstitutionInValues(true);
 
         var dbzProps = loadPropertiesTemplate(DBZ_CONFIG_FILE);
         customizeDebeziumProperties(dbzProps);
