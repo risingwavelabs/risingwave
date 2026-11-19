@@ -28,6 +28,9 @@ use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
 use crate::types::{Format, Row};
 
+// Maximum startup packet size excluding the length word, matching PostgreSQL.
+const MAX_STARTUP_PACKET_LENGTH: i32 = 10000;
+
 /// Messages that can be sent from pg client to server. Implement `read`.
 #[derive(Debug)]
 pub enum FeMessage {
@@ -151,8 +154,9 @@ pub struct FeCancelMessage {
 
 impl FeCancelMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
-        let target_process_id = buf.get_i32();
-        let target_secret_key = buf.get_i32();
+        let target_process_id = buf.try_get_i32()?;
+        let target_secret_key = buf.try_get_i32()?;
+        ensure_empty(&buf)?;
         Ok(FeMessage::CancelQuery(Self {
             target_process_id,
             target_secret_key,
@@ -162,8 +166,9 @@ impl FeCancelMessage {
 
 impl FeDescribeMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
-        let kind = buf.get_u8();
+        let kind = buf.try_get_u8()?;
         let name = read_null_terminated(&mut buf)?;
+        ensure_empty(&buf)?;
 
         Ok(FeMessage::Describe(FeDescribeMessage { kind, name }))
     }
@@ -191,24 +196,38 @@ impl FeBindMessage {
         let portal_name = read_null_terminated(&mut buf)?;
         let statement_name = read_null_terminated(&mut buf)?;
 
-        let len = buf.get_i16();
-        let param_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+        let len = read_count(&mut buf, 2)?;
+        let param_format_codes = (0..len)
+            .map(|_| buf.try_get_i16())
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
         // Read Params
-        let len = buf.get_i16();
+        let len = read_count(&mut buf, 4)?;
         let params = (0..len)
             .map(|_| {
-                let val_len = buf.get_i32();
+                let val_len = buf.try_get_i32()?;
                 if val_len == -1 {
-                    None
+                    Ok(None)
                 } else {
-                    Some(buf.copy_to_bytes(val_len as usize))
+                    let val_len = usize::try_from(val_len).map_err(|_| {
+                        Error::new(ErrorKind::InvalidInput, "invalid parameter length")
+                    })?;
+                    if val_len > buf.remaining() {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            "parameter length exceeds remaining payload",
+                        ));
+                    }
+                    Ok(Some(buf.copy_to_bytes(val_len)))
                 }
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
-        let len = buf.get_i16();
-        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+        let len = read_count(&mut buf, 2)?;
+        let result_format_codes = (0..len)
+            .map(|_| buf.try_get_i16())
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        ensure_empty(&buf)?;
 
         Ok(FeMessage::Bind(FeBindMessage {
             param_format_codes,
@@ -223,7 +242,8 @@ impl FeBindMessage {
 impl FeExecuteMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let portal_name = read_null_terminated(&mut buf)?;
-        let max_rows = buf.get_i32();
+        let max_rows = buf.try_get_i32()?;
+        ensure_empty(&buf)?;
 
         Ok(FeMessage::Execute(FeExecuteMessage {
             portal_name,
@@ -236,9 +256,12 @@ impl FeParseMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let statement_name = read_null_terminated(&mut buf)?;
         let sql_bytes = read_null_terminated(&mut buf)?;
-        let nparams = buf.get_i16();
+        let nparams = read_count(&mut buf, 4)?;
 
-        let type_ids: Vec<i32> = (0..nparams).map(|_| buf.get_i32()).collect();
+        let type_ids = (0..nparams)
+            .map(|_| buf.try_get_i32())
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        ensure_empty(&buf)?;
 
         Ok(FeMessage::Parse(FeParseMessage {
             statement_name,
@@ -251,6 +274,7 @@ impl FeParseMessage {
 impl FePasswordMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let password = read_null_terminated(&mut buf)?;
+        ensure_empty(&buf)?;
 
         Ok(FeMessage::Password(FePasswordMessage { password }))
     }
@@ -285,8 +309,9 @@ fn get_sql_from_bytes(sql_bytes: &[u8]) -> Result<&str> {
 
 impl FeCloseMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
-        let kind = buf.get_u8();
+        let kind = buf.try_get_u8()?;
         let name = read_null_terminated(&mut buf)?;
+        ensure_empty(&buf)?;
         Ok(FeMessage::Close(FeCloseMessage { kind, name }))
     }
 }
@@ -294,7 +319,7 @@ impl FeCloseMessage {
 #[derive(Clone)]
 pub struct FeMessageHeader {
     pub tag: u8,
-    pub payload_len: i32,
+    pub payload_len: usize,
 }
 
 impl FeMessage {
@@ -303,7 +328,13 @@ impl FeMessage {
         let tag = stream.read_u8().await?;
         let len = stream.read_i32().await?;
 
-        let payload_len = len - 4;
+        if len < 4 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid message length: {len}"),
+            ));
+        }
+        let payload_len = (len - 4) as usize;
         Ok(FeMessageHeader { tag, payload_len })
     }
 
@@ -313,7 +344,7 @@ impl FeMessage {
         header: FeMessageHeader,
     ) -> Result<FeMessage> {
         let FeMessageHeader { tag, payload_len } = header;
-        let mut payload: Vec<u8> = vec![0; payload_len as usize];
+        let mut payload: Vec<u8> = vec![0; payload_len];
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
@@ -324,11 +355,20 @@ impl FeMessage {
             b'D' => FeDescribeMessage::parse(sql_bytes),
             b'B' => FeBindMessage::parse(sql_bytes),
             b'E' => FeExecuteMessage::parse(sql_bytes),
-            b'S' => Ok(FeMessage::Sync),
-            b'X' => Ok(FeMessage::Terminate),
+            b'S' => {
+                ensure_empty(&sql_bytes)?;
+                Ok(FeMessage::Sync)
+            }
+            b'X' => {
+                ensure_empty(&sql_bytes)?;
+                Ok(FeMessage::Terminate)
+            }
+            b'H' => {
+                ensure_empty(&sql_bytes)?;
+                Ok(FeMessage::Flush)
+            }
             b'C' => FeCloseMessage::parse(sql_bytes),
             b'p' => FePasswordMessage::parse(sql_bytes),
-            b'H' => Ok(FeMessage::Flush),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", tag),
@@ -349,10 +389,10 @@ impl FeMessage {
             // Use smaller batches to process the payload instead of handling it all at once to minimize memory usage.
             const BUF_SIZE: usize = 1024;
             let mut buf: Vec<u8> = vec![0; BUF_SIZE];
-            for _ in 0..(payload_len as usize) / BUF_SIZE {
+            for _ in 0..payload_len / BUF_SIZE {
                 stream.read_exact(&mut buf).await?;
             }
-            let remain = (payload_len as usize) % BUF_SIZE;
+            let remain = payload_len % BUF_SIZE;
             if remain > 0 {
                 buf.truncate(remain);
                 stream.read_exact(&mut buf).await?;
@@ -377,27 +417,38 @@ impl FeStartupMessage {
         }
 
         let len = stream.read_i32().await?;
-        let protocol_num = stream.read_i32().await?;
-        let payload_len = (len - 8) as usize;
-        if payload_len >= isize::MAX as usize {
-            return Err(std::io::Error::new(
+        #[expect(
+            clippy::manual_range_contains,
+            reason = "Keep startup framing bounds as explicit comparisons"
+        )]
+        if len < 8 || len > MAX_STARTUP_PACKET_LENGTH + 4 {
+            return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Payload length has exceed usize::MAX {:?}", payload_len),
+                format!("invalid startup packet length: {len}"),
             ));
         }
+        let protocol_num = stream.read_i32().await?;
+        let payload_len = (len - 8) as usize;
         let mut payload = vec![0; payload_len];
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
+        let payload = Bytes::from(payload);
         match protocol_num {
             // code from: https://www.postgresql.org/docs/current/protocol-message-formats.html
             196608 => Ok(FeMessage::Startup(FeStartupMessage::build_with_payload(
                 &payload,
             )?)),
-            80877104 => Ok(FeMessage::Gss),
-            80877103 => Ok(FeMessage::Ssl),
+            80877104 => {
+                ensure_empty(&payload)?;
+                Ok(FeMessage::Gss)
+            }
+            80877103 => {
+                ensure_empty(&payload)?;
+                Ok(FeMessage::Ssl)
+            }
             // Cancel request code.
-            80877102 => FeCancelMessage::parse(Bytes::from(payload)),
+            80877102 => FeCancelMessage::parse(payload),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!(
@@ -411,21 +462,36 @@ impl FeStartupMessage {
 
 /// Continue read until reached a \0. Used in reading string from Bytes.
 fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
-    let mut result = BytesMut::new();
+    let len = buf
+        .iter()
+        .position(|&byte| byte == 0)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no null-terminator in string"))?;
+    let result = buf.split_to(len);
+    buf.advance(1);
+    Ok(result)
+}
 
-    loop {
-        if !buf.has_remaining() {
-            panic!("no null-terminator in string");
-        }
-
-        let byte = buf.get_u8();
-
-        if byte == 0 {
-            break;
-        }
-        result.put_u8(byte);
+/// Read a protocol count, checking it against the minimum encoded size of each item.
+fn read_count(buf: &mut Bytes, item_size: usize) -> Result<usize> {
+    // Counts use all 16 bits; clients can send more than i16::MAX parameters.
+    let count = usize::from(buf.try_get_u16()?);
+    if count > buf.remaining() / item_size {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "message count exceeds remaining payload",
+        ));
     }
-    Ok(result.freeze())
+    Ok(count)
+}
+
+fn ensure_empty(buf: &Bytes) -> Result<()> {
+    if !buf.is_empty() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "unexpected trailing bytes in message",
+        ));
+    }
+    Ok(())
 }
 
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
@@ -897,9 +963,277 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Re
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
+    use std::io::ErrorKind;
 
-    use crate::pg_message::{FeParseMessage, FeQueryMessage, FeStartupMessage};
+    use bytes::{BufMut, Bytes, BytesMut};
+    use tokio::io::AsyncWriteExt;
+
+    use crate::pg_message::{
+        FeBindMessage, FeCancelMessage, FeCloseMessage, FeDescribeMessage, FeExecuteMessage,
+        FeMessage, FeParseMessage, FePasswordMessage, FeQueryMessage, FeStartupMessage,
+        MAX_STARTUP_PACKET_LENGTH,
+    };
+
+    #[test]
+    fn test_truncated_message_fields() {
+        type Parser = fn(Bytes) -> std::io::Result<FeMessage>;
+        let messages: &[(Parser, &[u8])] = &[
+            (FeParseMessage::parse, b"stmt\0select $1\0\0\x01\0\0\0\x17"),
+            (
+                FeBindMessage::parse,
+                b"portal\0stmt\0\0\x01\0\x01\0\x02\0\0\0\x03abc\xff\xff\xff\xff\0\x01\0\x01",
+            ),
+            (FeExecuteMessage::parse, b"portal\0\0\0\0\x01"),
+            (FeDescribeMessage::parse, b"Sstmt\0"),
+            (FeCloseMessage::parse, b"Pportal\0"),
+            (FePasswordMessage::parse, b"password\0"),
+        ];
+        for &(parse, payload) in messages {
+            assert!(parse(Bytes::copy_from_slice(payload)).is_ok());
+            for len in 0..payload.len() {
+                assert!(
+                    parse(Bytes::copy_from_slice(&payload[..len])).is_err(),
+                    "accepted truncated payload {payload:?} at length {len}"
+                );
+            }
+            let mut trailing = payload.to_vec();
+            trailing.push(0);
+            assert!(parse(Bytes::from(trailing)).is_err());
+        }
+    }
+
+    #[test]
+    fn test_bind_parameter_lengths() {
+        for len in [i32::MIN, -2, 1, i32::MAX] {
+            let mut payload = BytesMut::from(&b"\0\0\0\0\0\x01"[..]);
+            payload.put_i32(len);
+            payload.put_i16(0);
+            assert!(
+                FeBindMessage::parse(payload.freeze()).is_err(),
+                "length {len}"
+            );
+        }
+
+        let FeMessage::Bind(msg) = FeBindMessage::parse(Bytes::from_static(
+            b"\0\0\0\0\0\x03\xff\xff\xff\xff\0\0\0\0\0\0\0\x03abc\0\0",
+        ))
+        .unwrap() else {
+            panic!("expected Bind");
+        };
+        assert_eq!(
+            msg.params,
+            vec![None, Some(Bytes::new()), Some(Bytes::from_static(b"abc"))]
+        );
+    }
+
+    #[test]
+    fn test_message_counts() {
+        // Each count must fit the remaining payload before reserving a vector.
+        for count in [1, i16::MAX as u16, u16::MAX] {
+            for prefix in [&b"\0\0"[..], &b"\0\0\0\0"[..], &b"\0\0\0\0\0\0"[..]] {
+                let mut payload = BytesMut::from(prefix);
+                payload.put_u16(count);
+                assert!(FeBindMessage::parse(payload.freeze()).is_err());
+            }
+            let mut payload = BytesMut::from(&b"\0\0"[..]);
+            payload.put_u16(count);
+            assert!(FeParseMessage::parse(payload.freeze()).is_err());
+        }
+
+        // Protocol counts are unsigned, including the high bit.
+        let mut payload = BytesMut::from(&b"\0\0"[..]);
+        payload.put_u16(u16::MAX);
+        for _ in 0..u16::MAX {
+            payload.put_i32(23);
+        }
+        let FeMessage::Parse(msg) = FeParseMessage::parse(payload.freeze()).unwrap() else {
+            panic!("expected Parse");
+        };
+        assert_eq!(msg.type_ids, vec![23; usize::from(u16::MAX)]);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_regular_message_lengths() {
+        for len in [i32::MIN, i32::MIN + 1, -1, 0, 1, 2, 3] {
+            let mut packet = BytesMut::new();
+            packet.put_u8(b'Q');
+            packet.put_i32(len);
+            assert_eq!(
+                FeMessage::read_header(&mut packet.as_ref())
+                    .await
+                    .err()
+                    .unwrap()
+                    .kind(),
+                ErrorKind::InvalidInput,
+                "length {len}"
+            );
+        }
+        for len in [4, 5, i32::MAX] {
+            let mut packet = BytesMut::new();
+            packet.put_u8(b'Q');
+            packet.put_i32(len);
+            let header = FeMessage::read_header(&mut packet.as_ref()).await.unwrap();
+            assert_eq!(header.payload_len, (len - 4) as usize);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_startup_message_lengths() {
+        for len in [
+            i32::MIN,
+            i32::MIN + 7,
+            -1,
+            0,
+            1,
+            7,
+            MAX_STARTUP_PACKET_LENGTH + 5,
+            i32::MAX,
+        ] {
+            // Reject the length before waiting for a protocol number or allocating a body.
+            assert_eq!(
+                FeStartupMessage::read(&mut len.to_be_bytes().as_slice())
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidInput,
+                "length {len}"
+            );
+        }
+
+        for code in [80877103, 80877104] {
+            let mut packet = BytesMut::new();
+            packet.put_i32(8);
+            packet.put_i32(code);
+            let msg = FeStartupMessage::read(&mut packet.as_ref()).await.unwrap();
+            assert!(matches!(msg, FeMessage::Ssl | FeMessage::Gss));
+            for len in [9, MAX_STARTUP_PACKET_LENGTH + 4] {
+                packet[..4].copy_from_slice(&len.to_be_bytes());
+                assert_eq!(
+                    FeStartupMessage::read(&mut &packet[..8])
+                        .await
+                        .unwrap_err()
+                        .kind(),
+                    ErrorKind::UnexpectedEof
+                );
+                packet.resize(len as usize, 0);
+                assert_eq!(
+                    FeStartupMessage::read(&mut packet.as_ref())
+                        .await
+                        .unwrap_err()
+                        .kind(),
+                    ErrorKind::InvalidInput
+                );
+            }
+        }
+
+        let mut packet = BytesMut::new();
+        packet.put_i32(MAX_STARTUP_PACKET_LENGTH + 4);
+        packet.put_i32(196608);
+        let mut payload = b"user\0".to_vec();
+        payload.resize((MAX_STARTUP_PACKET_LENGTH - 6) as usize, b'x');
+        payload.extend_from_slice(b"\0\0");
+        packet.extend_from_slice(&payload);
+        assert!(matches!(
+            FeStartupMessage::read(&mut packet.as_ref()).await.unwrap(),
+            FeMessage::Startup(_)
+        ));
+        assert!(matches!(
+            FeStartupMessage::read(&mut &b""[..]).await.unwrap(),
+            FeMessage::HealthCheck
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_empty_message_bodies() {
+        for tag in *b"SXH" {
+            let mut packet = BytesMut::new();
+            packet.put_u8(tag);
+            packet.put_i32(4);
+            let mut input = packet.as_ref();
+            let header = FeMessage::read_header(&mut input).await.unwrap();
+            assert!(FeMessage::read_body(&mut input, header).await.is_ok());
+
+            packet[1..5].copy_from_slice(&5i32.to_be_bytes());
+            packet.put_u8(0);
+            let mut input = packet.as_ref();
+            let header = FeMessage::read_header(&mut input).await.unwrap();
+            assert!(FeMessage::read_body(&mut input, header).await.is_err());
+        }
+    }
+
+    fn cancel_request() -> Bytes {
+        let mut packet = BytesMut::new();
+        packet.put_i32(16);
+        packet.put_i32(80877102);
+        packet.put_i32(123);
+        packet.put_i32(-456);
+        packet.freeze()
+    }
+
+    fn assert_cancel_request(msg: FeMessage) {
+        let FeMessage::CancelQuery(msg) = msg else {
+            panic!("expected CancelRequest, got {msg:?}");
+        };
+        assert_eq!(msg.target_process_id, 123);
+        assert_eq!(msg.target_secret_key, -456);
+    }
+
+    #[test]
+    fn test_cancel_request_payload_length() {
+        let packet = cancel_request();
+        assert_cancel_request(FeCancelMessage::parse(packet.slice(8..)).unwrap());
+
+        for len in (0..8).chain([9, 12, 16]) {
+            assert!(
+                FeCancelMessage::parse(Bytes::from(vec![0; len])).is_err(),
+                "payload length {len}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_cancel_request() {
+        let packet = cancel_request();
+        assert_cancel_request(FeStartupMessage::read(&mut packet.as_ref()).await.unwrap());
+
+        // These are complete frames, even though the cancellation fields are incomplete.
+        for len in (8..16).chain([17, 20]) {
+            let mut packet = BytesMut::new();
+            packet.put_i32(len);
+            packet.put_i32(80877102);
+            packet.resize(len as usize, 0);
+            assert!(
+                FeStartupMessage::read(&mut packet.as_ref()).await.is_err(),
+                "frame length {len}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_fragmented_cancel_request() {
+        // A one-byte capacity forces the reader to handle fragmentation at every field.
+        let (mut writer, mut reader) = tokio::io::duplex(1);
+        let write = async {
+            writer.write_all(&cancel_request()).await.unwrap();
+        };
+        let ((), msg) = tokio::join!(write, FeStartupMessage::read(&mut reader));
+        assert_cancel_request(msg.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_read_truncated_cancel_request() {
+        let packet = cancel_request();
+        for len in 1..packet.len() {
+            let err = FeStartupMessage::read(&mut &packet[..len])
+                .await
+                .unwrap_err();
+            assert_eq!(
+                err.kind(),
+                ErrorKind::UnexpectedEof,
+                "received length {len}"
+            );
+        }
+    }
 
     #[test]
     fn test_get_sql() {
