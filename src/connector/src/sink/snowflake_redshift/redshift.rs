@@ -166,30 +166,9 @@ impl RedShiftConfig {
         if let Some(password) = &self.password {
             connection_properties.push(("password".to_owned(), password.clone()));
         }
-        // Redshift gives URL parameters precedence over driver properties. Remove only
-        // credentials supplied separately, preserving URL-only credentials and encoded values.
-        let mut jdbc_url = self.jdbc_url.clone();
-        if let Some(index) = jdbc_url.find('?').or_else(|| jdbc_url.find(';')) {
-            let mut removed_credential = false;
-            let parameters: Vec<_> = jdbc_url[index + 1..]
-                .split(['&', ';'])
-                .filter(|parameter| {
-                    let key = parameter.split_once('=').map_or(*parameter, |(key, _)| key);
-                    let overridden = key.eq_ignore_ascii_case("user") && self.username.is_some()
-                        || key.eq_ignore_ascii_case("password") && self.password.is_some();
-                    removed_credential |= overridden;
-                    !overridden
-                })
-                .collect();
-            if removed_credential {
-                let parameters = parameters.join("&");
-                jdbc_url.truncate(index);
-                if !parameters.is_empty() {
-                    write!(jdbc_url, "?{parameters}").unwrap();
-                }
-            }
-        }
-        (jdbc_url, connection_properties)
+        // Let the driver parse the URL unchanged, including IAM URLs and encoded values.
+        // Credentials in the URL take precedence over these separate properties.
+        (self.jdbc_url.clone(), connection_properties)
     }
 }
 
@@ -1065,6 +1044,14 @@ mod tests {
         for jdbc_url in [
             "jdbc:redshift://example.invalid:5439/dev",
             "jdbc:redshift://example.invalid:5439/dev?ssl=true&ApplicationName=risingwave",
+            "jdbc:redshift://example.invalid:5439/dev?user=url%2Buser&password=Url%2BPass9%21",
+            "jdbc:redshift://example.invalid:5439/dev;USER=url_user;PASSWORD=old;ssl=true",
+            "jdbc:redshift://example.invalid:5439/dev?USER=url_user;user=other&PASSWORD=old;ssl=true",
+            "jdbc:redshift://example.invalid:5439/dev?user=url_user&password",
+            "jdbc:redshift://example.invalid:5439/dev?password=old&&ApplicationName=a%26b%3Bc%3Fd%23e;",
+            "jdbc:redshift://example.invalid:5439/dev;ApplicationName=app?password=old",
+            "jdbc:redshift:iam://cluster:us-east-1/dev;password=old?ssl=true",
+            "jdbc:redshift:iam://cluster:us-east-1/dev;password=old?password=other",
         ] {
             for username in [None, Some(""), Some("user+&%2B=?# 用户")] {
                 for password in [
@@ -1097,91 +1084,6 @@ mod tests {
                     );
                 }
             }
-        }
-    }
-
-    #[test]
-    fn test_explicit_credentials_override_url_credentials() {
-        let base_url = "jdbc:redshift://example.invalid:5439/dev";
-        for (parameters, username, password, expected_parameters) in [
-            (
-                "?user=url_user&password=old",
-                None,
-                None,
-                "?user=url_user&password=old",
-            ),
-            (
-                ";USER=url_user;PASSWORD=old;ssl=true",
-                None,
-                None,
-                ";USER=url_user;PASSWORD=old;ssl=true",
-            ),
-            (
-                "?user=url_user&password=old",
-                None,
-                Some("new+&%2B"),
-                "?user=url_user",
-            ),
-            (
-                "?user=url_user&password=old",
-                Some("new_user"),
-                None,
-                "?password=old",
-            ),
-            (
-                "?user=url_user&password=old",
-                Some("new_user"),
-                Some("new+&%2B"),
-                "",
-            ),
-            ("?user=url_user&password=old", Some(""), Some(""), ""),
-            (
-                "?ssl=true&password=old&ApplicationName=app%2Bname%26value&password=older",
-                None,
-                Some("new"),
-                "?ssl=true&ApplicationName=app%2Bname%26value",
-            ),
-            (
-                ";USER=url_user;PASSWORD=old;ssl=true",
-                None,
-                Some("new"),
-                "?USER=url_user&ssl=true",
-            ),
-            (
-                "?USER=url_user;user=other&PASSWORD=old;ssl=true",
-                Some("new_user"),
-                None,
-                "?PASSWORD=old&ssl=true",
-            ),
-            (
-                "?user=url_user&password",
-                None,
-                Some("new"),
-                "?user=url_user",
-            ),
-            (
-                "?user=url%2Buser&password=Url%2BPass9%21",
-                None,
-                Some("new"),
-                "?user=url%2Buser",
-            ),
-        ] {
-            let mut properties = BTreeMap::from([
-                ("jdbc.url".to_owned(), format!("{base_url}{parameters}")),
-                ("table.name".to_owned(), "test_table".to_owned()),
-            ]);
-            if let Some(username) = username {
-                properties.insert("user".to_owned(), username.to_owned());
-            }
-            if let Some(password) = password {
-                properties.insert("password".to_owned(), password.to_owned());
-            }
-            let config = RedShiftConfig::from_btreemap(properties).unwrap();
-            let (url, connection_properties) = config.build_jdbc_connection_properties();
-            assert_eq!(url, format!("{base_url}{expected_parameters}"));
-            let props: BTreeMap<_, _> = connection_properties.into_iter().collect();
-            assert_eq!(props.get("user").map(String::as_str), username);
-            assert_eq!(props.get("password").map(String::as_str), password);
         }
     }
 
@@ -1230,7 +1132,7 @@ mod tests {
         }
         let config = RedShiftConfig::from_btreemap(properties.unwrap()).unwrap();
         let (url, connection_properties) = config.build_jdbc_connection_properties();
-        assert_eq!(url, "jdbc:redshift://example.invalid:5439/dev?ssl=true");
+        assert_eq!(url, jdbc_url);
         let props: BTreeMap<_, _> = connection_properties.into_iter().collect();
         assert_eq!(props.get("user").unwrap(), username);
         assert_eq!(props.get("password").unwrap(), password);

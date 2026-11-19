@@ -53,26 +53,47 @@ public class JDBCSqlRunnerTest {
     }
 
     @Test
-    public void redshiftPasswordOverrideRequiresRemovingUrlPassword() throws Exception {
-        String password = "New+&%2B=?# 密码9!";
+    public void redshiftUrlCredentialsTakePrecedence() throws Exception {
         String baseUrl = "jdbc:redshift://example.invalid:5439/dev";
+        for (String parameters :
+                new String[] {
+                    "?user=url%2Buser&PASSWORD=Url%2BPass9%21",
+                    ";USER=url%2Buser;password=Url%2BPass9%21",
+                    "?user=older;USER=url%2Buser&password=older;PASSWORD=Url%2BPass9%21"
+                }) {
+            RedshiftProperties props = new RedshiftProperties();
+            props.setProperty("user", "separate_user");
+            props.setProperty("password", "Separate+&%2BPass9!");
+            RedshiftProperties parsed = Driver.parseURL(baseUrl + parameters, props);
+            assertNotNull(parsed);
+            assertEquals("url+user", parsed.getProperty("user"));
+            assertEquals("Url+Pass9!", parsed.getProperty("password"));
+        }
+    }
+
+    @Test
+    public void redshiftMixedDelimitersPreserveDriverSemantics() throws Exception {
         RedshiftProperties props = new RedshiftProperties();
-        props.setProperty("password", password);
-
-        // URL parameters override driver properties, including with mixed-case names.
-        RedshiftProperties conflicting =
-                Driver.parseURL(baseUrl + "?user=url%2Buser&PASSWORD=old", props);
-        assertNotNull(conflicting);
-        assertEquals("old", conflicting.getProperty("password"));
-
-        // The Rust configuration builder removes the overridden password from the URL.
-        props = new RedshiftProperties();
-        props.setProperty("password", password);
-        RedshiftProperties parsed = Driver.parseURL(baseUrl + "?user=url%2Buser&ssl=true", props);
+        props.setProperty("password", "Separate+&%2BPass9!");
+        RedshiftProperties parsed =
+                Driver.parseURL(
+                        "jdbc:redshift://example.invalid:5439/dev;ApplicationName=app?password=old",
+                        props);
         assertNotNull(parsed);
-        assertEquals("url+user", parsed.getProperty("user"));
-        assertEquals(password, parsed.getProperty("password"));
-        assertEquals("true", parsed.getProperty("ssl"));
+        // Removing the query would turn part of the database name into a URL parameter.
+        assertEquals("dev;ApplicationName=app", parsed.getProperty("dbname"));
+        assertEquals("old", parsed.getProperty("password"));
+
+        props = new RedshiftProperties();
+        props.setProperty("password", "Separate+&%2BPass9!");
+        parsed =
+                Driver.parseURL(
+                        "jdbc:redshift:iam://cluster:us-east-1/dev;password=old?ssl=true", props);
+        assertNotNull(parsed);
+        // IAM parsing can recognize credentials before the question mark.
+        assertEquals("dev", parsed.getProperty("dbname"));
+        assertEquals("true", parsed.getProperty("iamauth"));
+        assertEquals("old", parsed.getProperty("password"));
     }
 
     private String loadTestPem() throws IOException {
