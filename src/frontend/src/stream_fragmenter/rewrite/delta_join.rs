@@ -178,6 +178,7 @@ fn build_delta_join_inner(
             },
             column_mapping: lookup_0_column_reordering,
             arrangement_table_info: delta_join_node.left_info.clone(),
+            null_safe: delta_join_node.null_safe.clone(),
         },
     );
     let lookup_1_column_reordering = {
@@ -207,6 +208,7 @@ fn build_delta_join_inner(
             },
             column_mapping: lookup_1_column_reordering,
             arrangement_table_info: delta_join_node.right_info.clone(),
+            null_safe: delta_join_node.null_safe.clone(),
         },
     );
 
@@ -278,13 +280,20 @@ fn build_delta_join_inner(
 
     // LookupUnion's inputs might have different distribution and we need to unify them by using
     // hash shuffle.
+    //
+    // `lookup_0` joins the changes of the right input with the left arrangement of the previous
+    // epoch, which turns the old join result into `left_old join right_new`. `lookup_1` then
+    // joins the changes of the left input with the right arrangement of the current epoch, which
+    // turns it into `left_new join right_new`. The outputs must be emitted in this order, otherwise
+    // the output is not a consistent change stream when both inputs change the same join result in
+    // an epoch, e.g. an update in a self join.
     let union = StreamNode {
         operator_id: state.gen_operator_id(),
         identity: "Union".into(),
         fields: node.fields.clone(),
         stream_key: node.stream_key.clone(),
         node_body: Some(NodeBody::LookupUnion(Box::new(LookupUnionNode {
-            order: vec![1, 0],
+            order: vec![0, 1],
         }))),
         input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
         stream_kind: node.stream_kind,

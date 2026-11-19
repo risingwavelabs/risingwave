@@ -225,6 +225,7 @@ impl TryToStreamPb for StreamDeltaJoin {
                     .collect(),
             }),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
+            null_safe: eq_join_predicate.null_safes(),
         })))
     }
 }
