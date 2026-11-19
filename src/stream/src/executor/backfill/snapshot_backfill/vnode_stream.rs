@@ -232,6 +232,10 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
                         ChangeLogRow::Update {
                             new_value,
                             old_value,
+                        } if new_value == old_value => continue,
+                        ChangeLogRow::Update {
+                            new_value,
+                            old_value,
                         } => {
                             if this.data_chunk_builder.can_append_update() {
                                 this.ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
@@ -286,6 +290,7 @@ mod tests {
 
     use anyhow::anyhow;
     use futures::{Future, FutureExt, pin_mut};
+    use risingwave_common::array::Op;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -389,6 +394,28 @@ mod tests {
         assert_eq!(2, stream.next().await.unwrap().unwrap().cardinality());
         drop(tx);
         assert_eq!(2, stream.next().await.unwrap().unwrap().cardinality());
+        assert!(stream.next().await.is_none());
+        stream.assert_progress([(VirtualNode::ZERO, 4, None)]).await;
+    }
+
+    #[tokio::test]
+    async fn test_skip_noop_update() {
+        let (tx, rx) = unbounded_channel();
+        let mut stream = VnodeStream::new(
+            [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+            vec![0],
+            DataChunkBuilder::new(DATA_TYPES.clone(), 3),
+        );
+        tx.send(Ok(ChangeLogRow::Insert(test_row(0)))).unwrap();
+        tx.send(Ok(ChangeLogRow::Update {
+            new_value: test_row(1),
+            old_value: test_row(1),
+        }))
+        .unwrap();
+        tx.send(Ok(ChangeLogRow::Insert(test_row(2)))).unwrap();
+        drop(tx);
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk.ops(), &[Op::Insert, Op::Insert]);
         assert!(stream.next().await.is_none());
         stream.assert_progress([(VirtualNode::ZERO, 4, None)]).await;
     }
