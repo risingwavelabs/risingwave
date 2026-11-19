@@ -37,7 +37,9 @@ use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, OptionalAssociatedSourceId};
-use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
+use risingwave_pb::catalog::{
+    CdcTableProjection, Comment, Connection, PbCreateType, Secret, Table,
+};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
@@ -1388,6 +1390,10 @@ impl DdlService for DdlServiceImpl {
                 .await?;
 
             for table in tables {
+                let table_change = project_cdc_auto_schema_change_columns(
+                    table_change.clone(),
+                    table.cdc_table_projection.as_ref(),
+                );
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
                 let original_columns_by_name: HashMap<String, ColumnCatalog> = table
@@ -2044,6 +2050,23 @@ fn add_auto_schema_change_fail_event_log(
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }
 
+fn project_cdc_auto_schema_change_columns(
+    mut change: TableSchemaChange,
+    schema: Option<&CdcTableProjection>,
+) -> TableSchemaChange {
+    if let Some(schema) = schema {
+        change.columns.retain(|column| {
+            !schema.excluded_column_names.iter().any(|name| {
+                column
+                    .column_desc
+                    .as_ref()
+                    .is_some_and(|desc| &desc.name == name)
+            })
+        });
+    }
+    change
+}
+
 fn cdc_auto_schema_change_comparable_column(column: &ColumnCatalog) -> Option<(String, DataType)> {
     if column.is_generated() || column.is_hidden() {
         None
@@ -2166,6 +2189,55 @@ mod tests {
             cdc_table_id: "1.db.t".to_owned(),
             columns,
             upstream_ddl: "ALTER TABLE t ADD COLUMN note VARCHAR(255)".to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_cdc_auto_schema_change_preserves_projection() {
+        let schema = CdcTableProjection {
+            excluded_column_names: vec!["email".into()],
+        };
+        for (incoming, expected) in [
+            // Startup/recovery relation metadata does not add an omitted column.
+            (vec!["id", "name", "email"], vec!["id", "name"]),
+            // A real addition, including offline DDL, still reaches replacement planning.
+            (
+                vec!["id", "name", "email", "phone"],
+                vec!["id", "name", "phone"],
+            ),
+            // Dropping a selected column still reaches validation; dropping an omitted one is a no-op.
+            (vec!["id", "email"], vec!["id"]),
+            (vec!["id", "name"], vec!["id", "name"]),
+            // PostgreSQL quoted identifiers are case-sensitive.
+            (
+                vec!["id", "name", "email", "Email"],
+                vec!["id", "name", "Email"],
+            ),
+        ] {
+            let change = pb_table_change(
+                incoming
+                    .iter()
+                    .map(|name| pb_column(name, DataType::Varchar))
+                    .collect(),
+            );
+            let projected = project_cdc_auto_schema_change_columns(change.clone(), Some(&schema));
+            assert_eq!(
+                projected
+                    .columns
+                    .iter()
+                    .map(|c| c.column_desc.as_ref().unwrap().name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            // Independent tables sharing the same CDC source keep their own projection.
+            assert_eq!(
+                project_cdc_auto_schema_change_columns(change.clone(), Some(&Default::default())),
+                change
+            );
+            assert_eq!(
+                project_cdc_auto_schema_change_columns(change.clone(), None),
+                change
+            );
         }
     }
 

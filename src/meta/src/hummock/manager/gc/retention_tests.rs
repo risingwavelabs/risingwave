@@ -444,6 +444,7 @@ impl RetentionFixture {
             refreshable: Set(false),
             vector_index_info: Set(None),
             cdc_table_type: Set(None),
+            cdc_table_projection: Set(None),
         }
         .insert(&txn)
         .await
