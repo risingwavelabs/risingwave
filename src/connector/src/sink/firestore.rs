@@ -692,6 +692,7 @@ fn firestore_value_size(value: &Value) -> usize {
         ValueType::GeoPointValue(_) => 16,
         ValueType::ReferenceValue(value) => value.len() + 16,
         ValueType::FieldReferenceValue(_)
+        | ValueType::VariableReferenceValue(_)
         | ValueType::FunctionValue(_)
         | ValueType::PipelineValue(_) => {
             unreachable!("query-only Firestore values are never emitted by the row encoder")
