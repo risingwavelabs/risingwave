@@ -78,6 +78,7 @@ async fn mock_sstable_store_with_disk_cache(
         path: "test".to_owned(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
+        read_batch: Default::default(),
         recent_filter: recent_filter.unwrap_or_else(|| memory_store.recent_filter().clone()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
