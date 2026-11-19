@@ -20,12 +20,12 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
 use risingwave_pb::id::TableId;
 
-use super::PinCache;
+use super::{PinCache, PinCacheObject};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 
 impl PinCache {
     /// Registers objects for explicit refill without downloading them.
-    /// Registering an existing object preserves its state and refill tokens; it does not repair
+    /// Registering an existing object preserves its publication; it does not repair
     /// an invalidated file. A registered object is readable only after publication.
     pub(crate) fn register_objects(
         &self,
@@ -33,12 +33,17 @@ impl PinCache {
     ) {
         // Release the shard between objects so a large update does not hold up lookups.
         for id in objects {
-            self.shard(id).state.write().register_object(id);
+            self.shard(id)
+                .objects
+                .write()
+                .entry(id)
+                .or_insert(PinCacheObject { published: None });
         }
     }
 
-    /// Unregisters objects, withdrawing their publications and revoking all refill tokens.
-    /// Existing read handles retain their files. The refiller decides when to apply delta
+    /// Unregisters objects and withdraws their publications. The caller cancels their refills
+    /// before processing a membership update that could register the objects again.
+    /// Existing read handles retain their files. The CN membership owner decides when to apply delta
     /// deletions relative to version publication; this method does not wait for a version.
     pub(crate) fn unregister_objects(
         &self,
@@ -46,7 +51,7 @@ impl PinCache {
     ) {
         for id in objects {
             // Release the shard before handing the removed publication to GC.
-            let object = self.shard(id).state.write().objects.remove(&id);
+            let object = self.shard(id).objects.write().remove(&id);
             if let Some(mut object) = object
                 && let Some(file) = object.unpublish()
             {
@@ -58,9 +63,8 @@ impl PinCache {
     /// Whether an object is registered, regardless of whether it has a readable local file.
     pub(crate) fn is_registered(&self, object_id: HummockSstableObjectId) -> bool {
         self.shard(object_id)
-            .state
-            .read()
             .objects
+            .read()
             .contains_key(&object_id)
     }
 }

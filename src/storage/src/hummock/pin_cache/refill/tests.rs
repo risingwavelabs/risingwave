@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{FutureExt, StreamExt, TryStreamExt, stream};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
@@ -25,6 +25,81 @@ use crate::hummock::pin_cache::test_utils::{
     download_and_publish_for_test, in_memory_object_store, local_object_store,
 };
 use crate::monitor::ObjectStoreMetrics;
+
+#[tokio::test]
+async fn test_revoked_download_cannot_publish() {
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+    use risingwave_pb::id::TableId;
+    use tokio::sync::Semaphore;
+
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::pin_cache_refill::PinCacheRefillObject;
+    use crate::hummock::pin_cache_refill::executor::PinCacheRefillExecutor;
+
+    for unregister in [false, true] {
+        let store = mock_sstable_store().await;
+        let cache = PinCache::new(in_memory_object_store(), 1, [])
+            .await
+            .unwrap();
+        let store = Arc::new(
+            Arc::into_inner(store)
+                .unwrap()
+                .with_pin_cache(cache.clone()),
+        );
+        let object = 1001.into();
+        let table = TableId::from(233);
+        store
+            .store()
+            .upload(
+                &store.get_sst_data_path(object),
+                Bytes::from_static(b"complete"),
+            )
+            .await
+            .unwrap();
+        cache.register_objects([object]);
+        let mut finish = cache.watch_upload_finish_for_test();
+        let executor = PinCacheRefillExecutor::new(store, Arc::new(Semaphore::new(1)));
+        let candidate = PinCacheRefillObject {
+            source_sst: SstableInfoInner {
+                object_id: object,
+                file_size: 8,
+                ..Default::default()
+            }
+            .into(),
+            admitted_tables: [table].into(),
+        };
+
+        let waiter = executor.submit(&candidate);
+        let (_, resume) = tokio::time::timeout(Duration::from_secs(5), finish.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if unregister {
+            cache.unregister_objects([object]);
+            executor.cancel_objects([object]);
+            cache.register_objects([object]);
+        } else {
+            executor.cancel_tables(&candidate.admitted_tables);
+        }
+        assert!(!waiter.await);
+        resume.send(()).unwrap();
+        drop(finish);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while executor.has_pending_for_test(object) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(cache.is_registered(object));
+        assert!(cache.get(object).is_none());
+        assert!(cache.store.metadata("1001.sst").await.is_ok());
+        assert!(!executor.submit(&candidate).await);
+        cache.select_minor().delete().await.unwrap();
+        assert!(executor.submit(&candidate).await);
+        assert!(cache.get(object).is_some());
+    }
+}
 
 #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
@@ -248,6 +323,235 @@ async fn test_close_error_preserves_original_error_with_successful_or_failed_abo
         assert_eq!(
             cache.get(1001.into()).unwrap().read(..).await.unwrap(),
             Bytes::from_static(b"complete")
+        );
+    }
+}
+
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
+#[tokio::test]
+async fn test_shutdown_keeps_physical_permit_and_byte_reservation_until_io_exits() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+    use risingwave_pb::id::TableId;
+    use tokio::sync::Semaphore;
+
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::pin_cache::test_utils::local_object_store;
+    use crate::hummock::pin_cache_refill::PinCacheRefillObject;
+    use crate::hummock::pin_cache_refill::executor::PinCacheRefillExecutor;
+    let store = mock_sstable_store().await;
+    let (_dir, local) = local_object_store().await;
+    let cache = PinCache::new(local, 1, []).await.unwrap();
+    let store = Arc::new(
+        Arc::into_inner(store)
+            .unwrap()
+            .with_pin_cache(cache.clone()),
+    );
+    let object = 887.into();
+    store
+        .store()
+        .upload(
+            &store.get_sst_data_path(object),
+            bytes::Bytes::from_static(b"complete"),
+        )
+        .await
+        .unwrap();
+    cache.register_objects([object, 888.into()]);
+    let free = Arc::new(AtomicU64::new(8));
+    cache.set_available_space_for_test({
+        let free = free.clone();
+        move || Ok(Some(free.load(Ordering::SeqCst)))
+    });
+    let mut finish = cache.watch_upload_finish_for_test();
+    let concurrency = Arc::new(Semaphore::new(1));
+    let executor = PinCacheRefillExecutor::new(store, concurrency.clone());
+    let candidate = PinCacheRefillObject {
+        source_sst: SstableInfoInner {
+            object_id: object,
+            file_size: 8,
+            ..Default::default()
+        }
+        .into(),
+        admitted_tables: [TableId::from(233)].into(),
+    };
+    let waiter = executor.submit(&candidate);
+    let (_, resume) = tokio::time::timeout(Duration::from_secs(5), finish.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    drop(executor);
+    assert!(
+        !tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        concurrency.available_permits(),
+        0,
+        "waiter shutdown cannot release a physical copy's data permit"
+    );
+    assert_eq!(cache.storage.lock().uploads.values().sum::<u64>(), 8);
+    assert!(matches!(
+        cache.prepare_download(888.into(), 1).await,
+        Err(super::PinCacheDownloadError::CapacityRejected)
+    ));
+    free.store(0, Ordering::SeqCst);
+    resume.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while concurrency.available_permits() != 1 || !cache.storage.lock().uploads.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        cache.get(object).is_none(),
+        "shutdown must prevent a late publication"
+    );
+    assert_eq!(
+        cache
+            .storage
+            .lock()
+            .files
+            .values()
+            .map(|f| f.size)
+            .sum::<u64>(),
+        8
+    );
+    cache.select_minor().delete().await.unwrap();
+    free.store(8, Ordering::SeqCst);
+    drop(cache.prepare_download(888.into(), 8).await.unwrap());
+}
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
+#[tokio::test]
+async fn test_panicked_copy_and_cancelled_waiter_retain_cleanup_until_physical_exit() {
+    use std::sync::atomic::Ordering;
+
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+    use risingwave_pb::id::TableId;
+    use tokio::sync::Semaphore;
+
+    use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+    use crate::hummock::pin_cache_refill::PinCacheRefillObject;
+    use crate::hummock::pin_cache_refill::executor::PinCacheRefillExecutor;
+
+    const SIZE: u64 = 8 * 1024 * 1024;
+    for cancel_waiter in [false, true] {
+        let (_remote_dir, remote) = local_object_store().await;
+        let store = mock_sstable_store_with_object_store(remote).await;
+        let (dir, local) = local_object_store().await;
+        let cache = PinCache::new(local.clone(), 1, []).await.unwrap();
+        let store = Arc::new(
+            Arc::into_inner(store)
+                .unwrap()
+                .with_pin_cache(cache.clone()),
+        );
+        let object = 887.into();
+        store
+            .store()
+            .upload(
+                &store.get_sst_data_path(object),
+                Bytes::from(vec![7; SIZE as usize]),
+            )
+            .await
+            .unwrap();
+        cache.register_objects([object, 888.into()]);
+        cache.set_available_space_for_test(|| Ok(Some(SIZE)));
+        let mut finish = cache.watch_upload_finish_for_test();
+        cache
+            .test_hooks
+            .panic_before_upload_finish
+            .store(true, Ordering::Relaxed);
+        let concurrency = Arc::new(Semaphore::new(1));
+        let executor = PinCacheRefillExecutor::new(store, concurrency.clone());
+        let candidate = PinCacheRefillObject {
+            source_sst: SstableInfoInner {
+                object_id: object,
+                file_size: SIZE,
+                ..Default::default()
+            }
+            .into(),
+            admitted_tables: [TableId::from(233)].into(),
+        };
+        let waiter = executor.submit(&candidate);
+        tokio::pin!(waiter);
+        let (target, resume) = tokio::time::timeout(Duration::from_secs(5), finish.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let inventory: Vec<_> = local
+            .list("atomic_write_dir/", None, None)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let prefix = format!("atomic_write_dir/{target}.");
+        let actual = inventory
+            .iter()
+            .find(|entry| entry.key.starts_with(&prefix) && !entry.key.ends_with('/'))
+            .unwrap()
+            .key
+            .clone();
+        assert!(
+            dir.path().join(&actual).metadata().unwrap().len() > 0,
+            "fixture must have completed actual position writes before the panic"
+        );
+        if cancel_waiter {
+            executor.cancel_objects([object]);
+            assert_eq!(waiter.as_mut().now_or_never(), Some(false));
+            assert!(
+                !executor.submit(&candidate).await,
+                "cancellation must not start an overlapping physical copy"
+            );
+        }
+        assert_eq!(concurrency.available_permits(), 0);
+        assert_eq!(cache.storage.lock().uploads.values().sum::<u64>(), SIZE);
+        assert!(cache.storage.lock().failed_uploads.is_empty());
+        assert!(matches!(
+            cache.prepare_download(888.into(), 1).await,
+            Err(super::PinCacheDownloadError::CapacityRejected)
+        ));
+        resume.send(()).unwrap();
+        drop(finish);
+        if !cancel_waiter {
+            assert!(
+                !tokio::time::timeout(Duration::from_secs(5), waiter)
+                    .await
+                    .unwrap()
+            );
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while executor.has_pending_for_test(object) || concurrency.available_permits() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            !cache
+                .test_hooks
+                .panic_before_upload_finish
+                .load(Ordering::Relaxed),
+            "the injected panic must have been reached"
+        );
+        assert!(cache.get(object).is_none());
+        assert_eq!(cache.storage.lock().uploads.values().sum::<u64>(), SIZE);
+        assert!(cache.storage.lock().failed_uploads.contains(&target));
+        cache.select_minor().delete().await.unwrap();
+        assert!(cache.storage.lock().uploads.is_empty());
+        assert!(cache.storage.lock().failed_uploads.is_empty());
+        assert!(!dir.path().join(&actual).exists());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), executor.submit(&candidate))
+                .await
+                .unwrap()
+        );
+        assert!(cache.get(object).is_some());
+        assert!(
+            !dir.path().join(&actual).exists(),
+            "no late write may recreate the old temp"
         );
     }
 }

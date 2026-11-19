@@ -23,7 +23,7 @@ use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
 };
 
-use super::{PinCache, PinCacheFile, PinCacheRefillToken};
+use super::{PinCache, PinCacheFile};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 /// Reasons a local copy could not start or finish.
@@ -184,29 +184,6 @@ async fn write_file(
 }
 
 impl PinCache {
-    /// Captures admission for a needed object before the caller queues a refill.
-    /// Execution must use this token with the same cache; it must not recapture admission after
-    /// waiting in a queue or when retrying the same work. Revocation invalidates all previously
-    /// issued tokens for the object.
-    pub(crate) fn prepare_refill(
-        &self,
-        object_id: HummockSstableObjectId,
-    ) -> Option<PinCacheRefillToken> {
-        let state = self.shard(object_id).state.read();
-        let object = state.objects.get(&object_id)?;
-        Some(PinCacheRefillToken {
-            object_id,
-            generation: object.generation,
-        })
-    }
-
-    /// Revokes queued and active refills without withdrawing a published route.
-    /// Running I/O is not aborted, but its result can no longer be published. A subsequent
-    /// `prepare_refill` issues fresh admission for the object if it is still needed.
-    pub(crate) fn revoke_refill(&self, object_id: HummockSstableObjectId) {
-        self.shard(object_id).state.write().revoke_refill(object_id);
-    }
-
     /// Reserves the object's local path and full physical SST bytes before starting the copy.
     /// Uses physical `file_size` rather than the logical SST projection size.
     /// The caller filters membership, ownership and cache hits and serializes each object.
@@ -259,19 +236,17 @@ impl PinCache {
             .await
     }
 
-    /// Installs a downloaded file only if its original admission is still current.
-    /// Returns false if the task was revoked while downloading. The caller must use the token
-    /// for this file and serialize downloads per object; an existing publication is a bug.
+    /// Installs a downloaded file only while its object is registered.
+    /// The executor must hold its active work entry through publication.
     /// A rejected download is handed to GC after releasing the lock.
     pub(crate) fn publish(
         &self,
-        token: PinCacheRefillToken,
+        object_id: HummockSstableObjectId,
         mut download: PinCacheDownload,
     ) -> bool {
-        let mut state = self.shard(token.object_id).state.write();
-        let Some(object) = state.object_matching_token(token) else {
-            // This download lost permission to publish when its object was unregistered or revoked.
-            drop(state);
+        let mut objects = self.shard(object_id).objects.write();
+        let Some(object) = objects.get_mut(&object_id) else {
+            drop(objects);
             return false;
         };
         object.publish(download.file.take().unwrap());
