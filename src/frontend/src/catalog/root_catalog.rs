@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
@@ -126,6 +126,9 @@ pub struct Catalog {
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     table_stats: HummockVersionStats,
     object_dependencies: HashMap<ObjectId, Vec<ObjectDependency>>,
+    /// The version of the last catalog change applied. Whatever is derived from the catalog and
+    /// kept across queries is valid as long as this version stays the same.
+    version: CatalogVersion,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -137,6 +140,7 @@ impl Default for Catalog {
             table_by_id: HashMap::new(),
             table_stats: HummockVersionStats::default(),
             object_dependencies: HashMap::new(),
+            version: 0,
         }
     }
 }
@@ -1209,6 +1213,14 @@ impl Catalog {
         }
     }
 
+    pub fn version(&self) -> CatalogVersion {
+        self.version
+    }
+
+    pub fn set_version(&mut self, version: CatalogVersion) {
+        self.version = version;
+    }
+
     pub fn table_stats(&self) -> &HummockVersionStats {
         &self.table_stats
     }
@@ -1234,6 +1246,13 @@ impl Catalog {
         for (object_id, deps) in grouped {
             self.object_dependencies.insert(object_id, deps);
         }
+    }
+
+    /// The objects that `object_id` depends on.
+    pub fn object_dependencies_of(&self, object_id: ObjectId) -> &[ObjectDependency] {
+        self.object_dependencies
+            .get(&object_id)
+            .map_or(&[], |deps| deps.as_slice())
     }
 
     pub fn iter_object_dependencies(&self) -> impl Iterator<Item = &ObjectDependency> {

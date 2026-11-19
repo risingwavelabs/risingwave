@@ -276,7 +276,7 @@ impl CatalogWriter for MockCatalogWriter {
         checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
         let database_id = DatabaseId::new(self.gen_id());
-        self.catalog.write().create_database(&PbDatabase {
+        self.catalog_mut().create_database(&PbDatabase {
             name: db_name.to_owned(),
             id: database_id,
             owner,
@@ -300,7 +300,7 @@ impl CatalogWriter for MockCatalogWriter {
         owner: UserId,
     ) -> Result<()> {
         let id = self.gen_id();
-        self.catalog.write().create_schema(&PbSchema {
+        self.catalog_mut().create_schema(&PbSchema {
             id,
             name: schema_name.to_owned(),
             database_id: db_id,
@@ -322,7 +322,7 @@ impl CatalogWriter for MockCatalogWriter {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
         table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
-        self.catalog.write().create_table(&table);
+        self.catalog_mut().create_table(&table);
         self.add_table_or_source_id(table.id.as_raw_id(), table.schema_id, table.database_id);
         self.insert_object_dependencies(table.id.as_object_id(), dependencies);
         self.hummock_snapshot_manager.add_table_for_test(table.id);
@@ -336,13 +336,13 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);
-        self.catalog.write().update_table(&table);
+        self.catalog_mut().update_table(&table);
         Ok(())
     }
 
     async fn create_view(&self, mut view: PbView, dependencies: HashSet<ObjectId>) -> Result<()> {
         view.id = self.gen_id();
-        self.catalog.write().create_view(&view);
+        self.catalog_mut().create_view(&view);
         self.add_table_or_source_id(view.id.as_raw_id(), view.schema_id, view.database_id);
         self.insert_object_dependencies(view.id.as_object_id(), dependencies);
         Ok(())
@@ -382,12 +382,12 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);
-        self.catalog.write().update_table(&table);
+        self.catalog_mut().update_table(&table);
         Ok(())
     }
 
     async fn replace_source(&self, source: PbSource, _graph: StreamFragmentGraph) -> Result<()> {
-        self.catalog.write().update_source(&source);
+        self.catalog_mut().update_source(&source);
         Ok(())
     }
 
@@ -445,7 +445,7 @@ impl CatalogWriter for MockCatalogWriter {
         index_table.id = self.gen_id();
         index_table.stream_job_status = PbStreamJobStatus::Created as _;
         index_table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
-        self.catalog.write().create_table(&index_table);
+        self.catalog_mut().create_table(&index_table);
         self.add_table_or_index_id(
             index_table.id.as_raw_id(),
             index_table.schema_id,
@@ -454,13 +454,13 @@ impl CatalogWriter for MockCatalogWriter {
 
         index.id = index_table.id.as_raw_id().into();
         index.index_table_id = index_table.id;
-        self.catalog.write().create_index(&index);
+        self.catalog_mut().create_index(&index);
         Ok(())
     }
 
     async fn create_function(&self, mut function: PbFunction) -> Result<()> {
         function.id = self.gen_id();
-        self.catalog.write().create_function(&function);
+        self.catalog_mut().create_function(&function);
         Ok(())
     }
 
@@ -652,13 +652,13 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_database(&self, database_id: DatabaseId) -> Result<()> {
-        self.catalog.write().drop_database(database_id);
+        self.catalog_mut().drop_database(database_id);
         Ok(())
     }
 
     async fn drop_schema(&self, schema_id: SchemaId, _cascade: bool) -> Result<()> {
         let database_id = self.drop_schema_id(schema_id);
-        self.catalog.write().drop_schema(database_id, schema_id);
+        self.catalog_mut().drop_schema(database_id, schema_id);
         Ok(())
     }
 
@@ -675,7 +675,7 @@ impl CatalogWriter for MockCatalogWriter {
                     .get_database_by_id(database_id)?
                     .to_prost();
                 database.name = object_name.to_owned();
-                self.catalog.write().update_database(&database);
+                self.catalog_mut().update_database(&database);
                 Ok(())
             }
             alter_name_request::Object::TableId(table_id) => {
@@ -691,7 +691,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn alter_source(&self, source: PbSource) -> Result<()> {
-        self.catalog.write().update_source(&source);
+        self.catalog_mut().update_source(&source);
         Ok(())
     }
 
@@ -704,7 +704,7 @@ impl CatalogWriter for MockCatalogWriter {
                         {
                             let mut pb_table = table.to_prost();
                             pb_table.owner = owner_id;
-                            self.catalog.write().update_table(&pb_table);
+                            self.catalog_mut().update_table(&pb_table);
                             return Ok(());
                         }
                     }
@@ -728,7 +728,7 @@ impl CatalogWriter for MockCatalogWriter {
                     let mut pb_subscription = subscription.to_proto();
                     pb_subscription.retention_seconds = retention_seconds;
                     pb_subscription.definition = definition;
-                    self.catalog.write().update_subscription(&pb_subscription);
+                    self.catalog_mut().update_subscription(&pb_subscription);
                     return Ok(());
                 }
             }
@@ -753,7 +753,7 @@ impl CatalogWriter for MockCatalogWriter {
                     table.to_prost()
                 };
                 pb_table.schema_id = new_schema_id;
-                self.catalog.write().update_table(&pb_table);
+                self.catalog_mut().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()
                     .insert(table_id.as_raw_id(), new_schema_id);
@@ -830,7 +830,7 @@ impl CatalogWriter for MockCatalogWriter {
         };
         pb_database.resource_group =
             resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned());
-        self.catalog.write().update_database(&pb_database);
+        self.catalog_mut().update_database(&pb_database);
         Ok(())
     }
 
@@ -852,7 +852,7 @@ impl CatalogWriter for MockCatalogWriter {
                 pb_database.checkpoint_frequency = frequency;
             }
         }
-        self.catalog.write().update_database(&pb_database);
+        self.catalog_mut().update_database(&pb_database);
         Ok(())
     }
 
@@ -913,6 +913,15 @@ impl MockCatalogWriter {
             schema_id_to_database_id: RwLock::new(map),
             hummock_snapshot_manager,
         }
+    }
+
+    /// Locks the catalog for a change, and advances its version as the observer does when it
+    /// applies a notification from meta.
+    fn catalog_mut(&self) -> impl std::ops::DerefMut<Target = Catalog> + '_ {
+        let mut catalog = self.catalog.write();
+        let version = catalog.version() + 1;
+        catalog.set_version(version);
+        catalog
     }
 
     fn gen_id<T: From<u32>>(&self) -> T {
@@ -1000,7 +1009,7 @@ impl MockCatalogWriter {
 
     fn create_source_inner(&self, mut source: PbSource) -> Result<SourceId> {
         source.id = self.gen_id();
-        self.catalog.write().create_source(&source);
+        self.catalog_mut().create_source(&source);
         self.add_table_or_source_id(source.id.as_raw_id(), source.schema_id, source.database_id);
         Ok(source.id)
     }
@@ -1008,14 +1017,14 @@ impl MockCatalogWriter {
     fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<SinkId> {
         sink.id = self.gen_id();
         sink.stream_job_status = PbStreamJobStatus::Created as _;
-        self.catalog.write().create_sink(&sink);
+        self.catalog_mut().create_sink(&sink);
         self.add_table_or_sink_id(sink.id.as_raw_id(), sink.schema_id, sink.database_id);
         Ok(sink.id)
     }
 
     fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
         subscription.id = self.gen_id();
-        self.catalog.write().create_subscription(&subscription);
+        self.catalog_mut().create_subscription(&subscription);
         self.add_table_or_subscription_id(
             subscription.id.as_raw_id(),
             subscription.schema_id,
