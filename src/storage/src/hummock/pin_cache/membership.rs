@@ -38,10 +38,12 @@ impl PinCache {
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
         for id in objects {
-            // Release the shard before dropping the removed publication.
+            // Release the shard before handing the removed publication to GC.
             let object = self.shard(id).write().objects.remove(&id);
-            if let Some(mut object) = object {
-                object.unpublish();
+            if let Some(mut object) = object
+                && let Some(file) = object.unpublish()
+            {
+                self.enqueue_delete(file);
             }
         }
     }
