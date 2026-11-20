@@ -84,6 +84,15 @@ select count(*) from (
 ----
 0
 
+query I
+select count(*) from (
+  select count(*), sum(l.v), sum(r.v) from l join r on l.k = r.k
+  except
+  select c, sl, sr from v
+);
+----
+0
+
 statement ok
 drop materialized view v;
 
