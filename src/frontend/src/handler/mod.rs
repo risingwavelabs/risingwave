@@ -980,6 +980,15 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::CacheRefillPolicy(operation) => {
+                alter_streaming_config::handle_alter_cache_refill_policy(
+                    handler_args,
+                    name,
+                    operation,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
+            }
             AlterTableOperation::SetConfig { entries } => {
                 alter_streaming_config::handle_alter_streaming_set_config(
                     handler_args,
@@ -1061,6 +1070,15 @@ pub async fn handle(
                     resource_group,
                     StatementType::ALTER_INDEX,
                     deferred,
+                )
+                .await
+            }
+            AlterIndexOperation::CacheRefillPolicy(operation) => {
+                alter_streaming_config::handle_alter_cache_refill_policy(
+                    handler_args,
+                    name,
+                    operation,
+                    StatementType::ALTER_INDEX,
                 )
                 .await
             }
@@ -1220,6 +1238,18 @@ pub async fn handle(
                     }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
+                AlterViewOperation::CacheRefillPolicy(operation) => {
+                    if !materialized {
+                        bail!("CACHE_REFILL_POLICY is only supported for materialized views");
+                    }
+                    alter_streaming_config::handle_alter_cache_refill_policy(
+                        handler_args,
+                        name,
+                        operation,
+                        StatementType::ALTER_MATERIALIZED_VIEW,
+                    )
+                    .await
+                }
                 AlterViewOperation::SetConfig { entries } => {
                     if !materialized {
                         bail!("SET CONFIG is only supported for materialized views");
@@ -1310,6 +1340,15 @@ pub async fn handle(
                     resource_group,
                     StatementType::ALTER_SINK,
                     deferred,
+                )
+                .await
+            }
+            AlterSinkOperation::CacheRefillPolicy(operation) => {
+                alter_streaming_config::handle_alter_cache_refill_policy(
+                    handler_args,
+                    name,
+                    operation,
+                    StatementType::ALTER_SINK,
                 )
                 .await
             }
@@ -1498,6 +1537,15 @@ pub async fn handle(
                     parallelism,
                     StatementType::ALTER_SOURCE,
                     deferred,
+                )
+                .await
+            }
+            AlterSourceOperation::CacheRefillPolicy(operation) => {
+                alter_streaming_config::handle_alter_cache_refill_policy(
+                    handler_args,
+                    name,
+                    operation,
+                    StatementType::ALTER_SOURCE,
                 )
                 .await
             }
