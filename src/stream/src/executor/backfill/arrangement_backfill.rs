@@ -217,6 +217,9 @@ where
         if to_backfill {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
+            // Rate limit quota acquired but not yet consumed by the snapshot stream. Kept
+            // across the snapshot stream restarts on barriers so it is not lost.
+            let mut snapshot_quota: u64 = 0;
 
             let metrics = self
                 .metrics
@@ -246,6 +249,7 @@ where
                             paused,
                             &self.rate_limiter,
                             self.chunk_size,
+                            &mut snapshot_quota,
                         )
                         .map(Either::Right)
                     );
@@ -591,6 +595,7 @@ where
                                 let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
+                                    snapshot_quota = 0;
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
@@ -703,6 +708,7 @@ where
         paused: bool,
         rate_limiter: &'a MonitoredRateLimiter,
         chunk_size: usize,
+        remaining_quota: &'a mut u64,
     ) {
         if paused {
             #[for_await]
@@ -715,16 +721,15 @@ where
             // wait goes through a tokio timer with ~1ms granularity, so per-row waits cap the
             // throughput at ~1k rows/s per actor regardless of the configured limit.
             let batch_size = snapshot_batch_size(rate_limiter.rate_limit(), chunk_size) as u64;
-            let mut remaining_quota = 0;
             #[for_await]
             for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
                 let r = r?;
                 if r.is_some() {
-                    if remaining_quota == 0 {
+                    if *remaining_quota == 0 {
                         rate_limiter.wait(batch_size).await;
-                        remaining_quota = batch_size;
+                        *remaining_quota = batch_size;
                     }
-                    remaining_quota -= 1;
+                    *remaining_quota -= 1;
                 }
                 yield r;
             }
