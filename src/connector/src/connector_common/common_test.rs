@@ -16,6 +16,8 @@
 mod tests {
     use std::io::Write;
 
+    #[cfg(not(madsim))]
+    use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
     use tempfile::NamedTempFile;
     use tokio;
     use url::Url;
@@ -118,6 +120,92 @@ mod tests {
         let (url, temp_file_opt) = result.unwrap();
         assert_eq!(url, format!("file://{}", temp_path));
         assert!(temp_file_opt.is_none());
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_resolve_pulsar_credentials_url_with_special_characters() {
+        let pulsar_common = create_test_pulsar_common();
+        let aws_auth_props = create_test_aws_auth_props();
+        let directory = tempfile::tempdir().unwrap();
+        for name in [
+            "oauth fixture.json",
+            "oauth#fixture.json",
+            "oauth?fixture.json",
+            "oauth凭据.json",
+            "oauth%20fixture.json",
+            "directory with #?凭据%/oauth.json",
+        ] {
+            let credentials = serde_json::to_vec(&serde_json::json!({
+                "client_id": name,
+                "client_secret": "test-secret",
+            }))
+            .unwrap();
+            let path = directory.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &credentials).unwrap();
+
+            for credentials_url in [
+                path.to_str().unwrap().to_owned(),
+                Url::from_file_path(&path).unwrap().to_string(),
+            ] {
+                let oauth = PulsarOauthCommon {
+                    // Credential loading precedes issuer discovery. An invalid issuer makes
+                    // initialization fail at discovery without making any network requests.
+                    issuer_url: "invalid URL".to_owned(),
+                    credentials_url,
+                    audience: "test-audience".to_owned(),
+                    scope: None,
+                };
+                let (resolved_url, temp_file) = pulsar_common
+                    .resolve_pulsar_credentials_url(&oauth, &aws_auth_props)
+                    .await
+                    .unwrap();
+                let url = Url::parse(&resolved_url).unwrap();
+
+                let mut auth = OAuth2Authentication::client_credentials(OAuth2Params {
+                    issuer_url: oauth.issuer_url,
+                    credentials_url: resolved_url,
+                    audience: Some(oauth.audience),
+                    scope: oauth.scope,
+                });
+                let error = auth.initialize().await.unwrap_err().to_string();
+                assert!(
+                    error.contains("failed to discover OAuth2 token endpoint"),
+                    "credential loading failed: {error}"
+                );
+
+                let temp_file = temp_file.expect("encoded paths need a temporary file");
+                let temp_path = temp_file.path().to_owned();
+                assert_eq!(std::path::Path::new(url.path()), temp_path);
+                assert_eq!(std::fs::read(url.path()).unwrap(), credentials);
+                drop(temp_file);
+                assert!(!temp_path.exists());
+                assert_eq!(std::fs::read(&path).unwrap(), credentials);
+            }
+        }
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_resolve_pulsar_credentials_url_with_missing_encoded_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing #?凭据.json");
+        let oauth = PulsarOauthCommon {
+            issuer_url: "invalid URL".to_owned(),
+            credentials_url: Url::from_file_path(path).unwrap().to_string(),
+            audience: "test-audience".to_owned(),
+            scope: None,
+        };
+        let error = create_test_pulsar_common()
+            .resolve_pulsar_credentials_url(&oauth, &create_test_aws_auth_props())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to read pulsar credentials file")
+        );
     }
 
     #[cfg(not(madsim))]
