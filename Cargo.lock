@@ -1702,14 +1702,13 @@ dependencies = [
 
 [[package]]
 name = "axum-server"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
+checksum = "f2c55b0e6ae7c8951bc27682e97934423357c1a8208886305290a3adb1ce3c14"
 dependencies = [
  "arc-swap",
  "bytes",
  "either",
- "fs-err",
  "http",
  "http-body",
  "hyper",
@@ -1717,6 +1716,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "pin-project-lite",
+ "socket2 0.6.5",
  "tokio",
  "tokio-openssl",
  "tower-service",
@@ -6414,7 +6414,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73fde052dbfc920003cfd2c8e2c6e6d4cc7c1091538c3a24226cec0665ab08c0"
 dependencies = [
  "autocfg",
- "tokio",
 ]
 
 [[package]]
