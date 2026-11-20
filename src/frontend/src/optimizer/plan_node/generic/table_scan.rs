@@ -233,6 +233,20 @@ impl TableScan {
         ids
     }
 
+    /// Whether the index of `primary_to_secondary_mapping` has every table column that the scan
+    /// reads, so that [`Self::to_index_scan`] can map the scan to the index.
+    pub fn is_covered_by(&self, primary_to_secondary_mapping: &BTreeMap<usize, usize>) -> bool {
+        self.output_col_idx
+            .iter()
+            .copied()
+            .chain(
+                self.predicate
+                    .collect_input_refs(self.table_catalog.columns().len())
+                    .ones(),
+            )
+            .all(|i| primary_to_secondary_mapping.contains_key(&i))
+    }
+
     /// Prerequisite: the caller should guarantee that `primary_to_secondary_mapping` must cover the
     /// scan.
     pub fn to_index_scan(

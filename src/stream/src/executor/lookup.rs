@@ -66,6 +66,10 @@ pub struct LookupExecutor<S: StateStore, SD: ValueRowSerde> {
     /// This vector records such mapping.
     key_indices_mapping: Vec<usize>,
 
+    /// The join key columns on the stream side that never match a null. A stream row with a null
+    /// in any of them joins with nothing.
+    null_unsafe_stream_key_indices: Vec<usize>,
+
     /// The cache for arrangement side.
     lookup_cache: LookupCache,
     /// The maximum size of the chunk produced by executor at a time.

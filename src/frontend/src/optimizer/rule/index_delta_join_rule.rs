@@ -61,16 +61,22 @@ impl Rule<Stream> for IndexDeltaJoinRule {
             table_scan: &StreamTableScan,
             backfill_type: BackfillType,
         ) -> Option<PlanRef> {
-            if table_scan.core().cross_database()
-                && matches!(backfill_type, BackfillType::Replicated)
-            {
-                // We currently do not support cross database index scan in upstream only mode.
+            if table_scan.core().cross_database() {
+                // A cross-database scan is always a cross-database snapshot backfill, which
+                // follows the epochs of another database, while the lookups read the arrangements
+                // in the epochs of this database.
                 return None;
             }
 
             for index in &table_scan.core().table_indexes {
-                // Only full covering index can be used in delta join
-                if !index.full_covering() {
+                // Only full covering index can be used in delta join. `full_covering` only
+                // compares the number of columns, which an expression index may match without
+                // having all columns, so also check the columns that the scan reads.
+                if !index.full_covering()
+                    || !table_scan
+                        .core()
+                        .is_covered_by(index.primary_to_secondary_mapping())
+                {
                     continue;
                 }
 

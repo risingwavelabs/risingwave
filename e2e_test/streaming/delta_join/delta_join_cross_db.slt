@@ -1,0 +1,113 @@
+# Delta join does not read tables of another database. The changes of a cross-database table come
+# from the log store of another database, which lags behind the committed rows that the lookups
+# read. The join falls back to a hash join and stays correct.
+
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+create database delta_join_db1;
+
+statement ok
+create database delta_join_db2;
+
+statement ok
+set database to delta_join_db1;
+
+# `l` is distributed by the join key, so the join needs no index of it.
+statement ok
+create table l (k int primary key, v int);
+
+# A cross-database materialized view reads the table through the log store of a subscription.
+statement ok
+create subscription sub from l with (retention = '1D');
+
+statement ok
+insert into l select g, g from generate_series(1, 5000) g;
+
+statement ok
+set database to delta_join_db2;
+
+statement ok
+create table r (k int, v int);
+
+statement ok
+create index i_r on r(k);
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+# Slow down reading the log store of `l`, so that its changes arrive well after they are committed.
+statement ok
+set backfill_rate_limit = 100;
+
+statement ok
+create materialized view v as
+select count(*) as c, sum(l.v) as sl, sum(r.v) as sr from delta_join_db1.public.l join r on l.k = r.k;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+statement ok
+set backfill_rate_limit = default;
+
+# The changes of `l` arrive through the log store of another database, after the lookups can
+# already read them from the committed rows of `l`.
+statement ok
+set database to delta_join_db1;
+
+statement ok
+update l set v = v + 100000;
+
+statement ok
+set database to delta_join_db2;
+
+statement ok
+insert into r select g, -g from generate_series(1, 5000) g;
+
+# Let the materialized view catch up with the log store of `l`.
+statement ok
+alter materialized view v set backfill_rate_limit = default;
+
+statement ok
+flush;
+
+query I retry 30 backoff 1s
+select count(*) from (
+  select c, sl, sr from v
+  except
+  select count(*), sum(l.v), sum(r.v) from delta_join_db1.public.l join r on l.k = r.k
+);
+----
+0
+
+query I
+select count(*) from (
+  select count(*), sum(l.v), sum(r.v) from delta_join_db1.public.l join r on l.k = r.k
+  except
+  select c, sl, sr from v
+);
+----
+0
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table r;
+
+statement ok
+set database to delta_join_db1;
+
+statement ok
+drop table l cascade;
+
+statement ok
+drop database delta_join_db2;
+
+connection other
+statement ok
+drop database delta_join_db1;
