@@ -503,62 +503,56 @@ impl CacheRefillTask {
 
             if admits as f64 / contexts.len() as f64 >= context.config.threshold {
                 let sstable_store = context.sstable_store.clone();
-                let context = context.clone();
-                let future = async move {
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
-
-                    let permit = context.concurrency.acquire().await.unwrap();
-
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
-
-                    let now = Instant::now();
-
+                let concurrency = context.concurrency.clone();
+                let object_id = task.sst.id;
+                let refill = async move {
                     let data = scope_data_refill_read(
                         sstable_store
                             .store()
-                            .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone()),
+                            .read(&sstable_store.get_sst_data_path(object_id), range.clone()),
                     )
                     .await?;
-                    let mut apply_disk_cache_futures = vec![];
                     for (w, r, uc) in contexts {
                         let offset = r.start - range.start;
                         let len = r.end - r.start;
                         let bytes = data.slice(offset..offset + len);
-                        let future = async move {
-                            let value = Box::new(Block::decode(bytes, uc)?);
-                            // The entry should always be `Some(..)`, use if here for compatible.
-                            if let Some(_entry) = w.force().insert(value) {
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_success_bytes
-                                    .inc_by(len as u64);
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_block_success_total
-                                    .inc();
-                            }
-                            Ok::<_, HummockError>(())
-                        };
-                        apply_disk_cache_futures.push(future);
+                        let value =
+                            Box::new(Block::decode(bytes, uc).map_err(HummockError::file_cache)?);
+                        if let Some(_entry) = w.force().insert(value) {
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_bytes
+                                .inc_by(len as u64);
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_block_success_total
+                                .inc();
+                        }
                     }
-                    try_join_all(apply_disk_cache_futures)
-                        .await
-                        .map_err(HummockError::file_cache)?;
-
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_success_duration
-                        .observe(now.elapsed().as_secs_f64());
-                    drop(permit);
-
                     Ok::<_, HummockError>(())
                 };
-                futures.push(future);
+
+                futures.push(async move {
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+                    let permit = concurrency.acquire_owned().await.unwrap();
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+                    let now = Instant::now();
+
+                    // Keep synchronous cache writes from blocking the polling of sibling reads.
+                    let task = tokio::spawn(async move {
+                        let _permit = permit;
+                        refill.await?;
+                        GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_success_duration
+                            .observe(now.elapsed().as_secs_f64());
+                        Ok::<_, HummockError>(())
+                    });
+                    // A refill timeout drops this future and aborts its range task.
+                    let mut task = scopeguard::guard(task, |task| task.abort());
+                    if let Err(e) = (&mut *task).await.expect("data refill range task failed") {
+                        tracing::error!(error = %e.as_report(), "data cache refill task error");
+                    }
+                });
             }
         }
-
-        let futures = futures.into_iter().map(|future| async move {
-            if let Err(e) = future.await {
-                tracing::error!(error = %e.as_report(), "data cache refill task error");
-            }
-        });
 
         join_all(futures).await;
     }
