@@ -221,6 +221,23 @@ pub fn get_compression_algorithm(
     }
 }
 
+/// Compression algorithms accepted in [`CompactionConfig::compression_algorithm`], with their
+/// canonical spelling and the value used for `CompactTask::compression_algorithm`.
+const COMPRESSION_ALGORITHMS: [(&str, u32); 3] = [("None", 0), ("Lz4", 1), ("Zstd", 2)];
+
+/// Parses a per-level compression algorithm name, ignoring ASCII case.
+///
+/// Returns the canonical spelling (`None`, `Lz4` or `Zstd`) and the value used for
+/// `CompactTask::compression_algorithm`.
+pub fn parse_compression_algorithm(name: &str) -> Result<(&'static str, u32), String> {
+    COMPRESSION_ALGORITHMS
+        .into_iter()
+        .find(|(canonical, _)| canonical.eq_ignore_ascii_case(name))
+        .ok_or_else(|| {
+            format!("unsupported compression algorithm: {name}, expected one of: None, Lz4, Zstd")
+        })
+}
+
 pub struct CompactionDeveloperConfig {
     /// l0 picker whether to select trivial move task
     pub enable_trivial_move: bool,
@@ -243,6 +260,31 @@ impl Default for CompactionDeveloperConfig {
         Self {
             enable_trivial_move: true,
             enable_check_task_level_overlap: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_compression_algorithm;
+
+    #[test]
+    fn test_parse_compression_algorithm() {
+        for (name, expected) in [
+            ("None", ("None", 0)),
+            ("none", ("None", 0)),
+            ("NONE", ("None", 0)),
+            ("Lz4", ("Lz4", 1)),
+            ("lz4", ("Lz4", 1)),
+            ("LZ4", ("Lz4", 1)),
+            ("Zstd", ("Zstd", 2)),
+            ("zstd", ("Zstd", 2)),
+            ("ZSTD", ("Zstd", 2)),
+        ] {
+            assert_eq!(parse_compression_algorithm(name).unwrap(), expected);
+        }
+        for name in ["", "lz4 ", "snappy", "gzip"] {
+            assert!(parse_compression_algorithm(name).is_err());
         }
     }
 }
