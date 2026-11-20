@@ -32,9 +32,11 @@ public class SqlServerDbzConnectorConfig extends DbzConnectorConfig {
 
     public String getJdbcUrl() {
         var encrypt = Boolean.parseBoolean(userProps.getOrDefault(ENCRYPT, "false"));
+        // Brace quoting preserves semicolons and whitespace; literal closing braces are doubled.
+        var databaseName = "{" + getDbName().replace("}", "}}") + "}";
         return String.format(
                 "jdbc:sqlserver://%s:%s;databaseName=%s;encrypt=%s;trustServerCertificate=true",
-                getHost(), getPort(), getDbName(), encrypt);
+                getHost(), getPort(), databaseName, encrypt);
     }
 
     @Override

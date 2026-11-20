@@ -132,6 +132,11 @@
             "description": "Delivering data to Iceberg with a primary key index.",
             "type": "string",
             "const": "IcebergSinkWithPkIndex"
+        },
+        {
+            "description": "CDC source connector for Oracle.",
+            "type": "string",
+            "const": "OracleCdcSource"
         }
     ]
 }

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
-use yaml_rust::Yaml;
+use yaml_rust2::Yaml;
 
 /// Expands `provide-xxx: ["a", "b", "c"]` to their corresponding IDs.
 pub struct ProvideExpander {
@@ -102,7 +102,7 @@ impl ProvideExpander {
 
 #[cfg(test)]
 mod tests {
-    use yaml_rust::YamlLoader;
+    use yaml_rust2::YamlLoader;
 
     use super::*;
 

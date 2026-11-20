@@ -39,7 +39,10 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
-use risingwave_connector::source::cdc::{CdcSourceExternalTableIdentifier, build_cdc_table_id};
+use risingwave_connector::source::cdc::{
+    CDC_COLUMN_EXCLUDE_LIST, CdcSourceExternalTableIdentifier, build_cdc_table_id,
+    parse_cdc_column_exclude_list,
+};
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type,
 };
@@ -1114,8 +1117,31 @@ pub(super) async fn handle_create_table_plan(
                 cdc_table.external_table_name.clone(),
             )?;
 
+            let excluded_columns = match handler_args.with_options.get(CDC_COLUMN_EXCLUDE_LIST) {
+                Some(list) => {
+                    let columns = parse_cdc_column_exclude_list(list);
+                    if columns.is_empty() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_COLUMN_EXCLUDE_LIST}` must list at least one column"
+                        ))
+                        .into());
+                    }
+                    if wildcard_idx.is_none() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_COLUMN_EXCLUDE_LIST}` requires the `(*)` wildcard in the column list"
+                        ))
+                        .into());
+                    }
+                    columns
+                }
+                None => HashSet::new(),
+            };
+
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
-                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                Some(_) => {
+                    bind_cdc_table_schema_externally(cdc_with_options.clone(), &excluded_columns)
+                        .await?
+                }
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {

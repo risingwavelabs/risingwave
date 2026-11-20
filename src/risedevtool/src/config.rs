@@ -17,7 +17,7 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow, bail};
 use itertools::Itertools;
-use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
+use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
 
 use crate::ServiceConfig;
 
