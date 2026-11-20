@@ -318,6 +318,7 @@ impl RedShiftSinkWriter {
                 schema,
                 is_append_only,
                 config.table,
+                writer_param.actor_id,
             )?;
             Ok(Self::S3(s3_writer))
         } else {
@@ -894,7 +895,11 @@ fn build_create_merge_into_task_sql(
 ) -> Vec<String> {
     let cdc_table_name = build_full_table_name(cdc_schema_name, cdc_table_name);
     let target_table_name = build_full_table_name(target_schema_name, target_table_name);
-    let pk_names_str = pk_column_names.join(", ");
+    let pk_names_str = pk_column_names
+        .iter()
+        .map(|name| format!("{cdc_table_name}.{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let pk_names_eq_str = pk_column_names
         .iter()
         .map(|name| format!("{target_table_name}.{name} = source.{name}", name = name))
@@ -912,14 +917,37 @@ fn build_create_merge_into_task_sql(
         .collect::<Vec<String>>()
         .join(", ");
 
+    // Compare epoch_counter_actor components numerically, treating the missing
+    // actor in legacy epoch_counter IDs as zero. DECIMAL(20, 0) covers the full
+    // u64 range of epochs and counters, which does not fit in a signed BIGINT.
+    // Legacy IDs that already collide cannot recover their missing actor IDs.
+    let row_id = format!("{cdc_table_name}.{__ROW_ID}");
+    let row_epoch = format!("CAST(SPLIT_PART({row_id}, '_', 1) AS DECIMAL(20, 0))");
+    let row_count = format!("CAST(SPLIT_PART({row_id}, '_', 2) AS DECIMAL(20, 0))");
+    let row_actor =
+        format!("CAST(COALESCE(NULLIF(SPLIT_PART({row_id}, '_', 3), ''), '0') AS BIGINT)");
+    let row_id_ordering = format!("{row_epoch} DESC, {row_count} DESC, {row_actor} DESC");
+    // Select one complete tuple for the watermark, then use the same numeric
+    // comparison in both target mutations and CDC cleanup.
+    let within_watermark = format!(
+        "({row_epoch} < max_id_table.max_epoch \
+         OR ({row_epoch} = max_id_table.max_epoch AND {row_count} < max_id_table.max_row_count) \
+         OR ({row_epoch} = max_id_table.max_epoch AND {row_count} = max_id_table.max_row_count \
+         AND {row_actor} <= max_id_table.max_actor_id))"
+    );
+
     vec![
         format!(
             r#"
             CREATE TEMP TABLE max_id_table AS
-            SELECT COALESCE(MAX({redshift_sink_row_id}), '0') AS max_row_id
-            FROM {cdc_table_name};
+            SELECT {row_epoch} AS max_epoch,
+                   {row_count} AS max_row_count,
+                   {row_actor} AS max_actor_id
+            FROM {cdc_table_name}
+            WHERE {row_id} IS NOT NULL
+            ORDER BY max_epoch DESC, max_row_count DESC, max_actor_id DESC
+            LIMIT 1;
             "#,
-            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
         ),
         format!(
@@ -928,12 +956,12 @@ fn build_create_merge_into_task_sql(
             USING (
                 SELECT *
                 FROM (
-                    SELECT *, ROW_NUMBER() OVER (
+                    SELECT {cdc_table_name}.*, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
-                        ORDER BY {redshift_sink_row_id} DESC
+                        ORDER BY {row_id_ordering}
                     ) AS dedupe_id
                     FROM {cdc_table_name}, max_id_table
-                    WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id
+                    WHERE {within_watermark}
                 ) AS subquery
                 WHERE dedupe_id = 1 AND {redshift_sink_op} IN (2, 4)
             ) AS source
@@ -941,7 +969,6 @@ fn build_create_merge_into_task_sql(
             "#,
             target_table_name = target_table_name,
             pk_names_str = pk_names_str,
-            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
             redshift_sink_op = __OP,
             pk_names_eq_str = pk_names_eq_str,
@@ -952,12 +979,12 @@ fn build_create_merge_into_task_sql(
             USING (
                 SELECT *
                 FROM (
-                    SELECT *, ROW_NUMBER() OVER (
+                    SELECT {cdc_table_name}.*, ROW_NUMBER() OVER (
                         PARTITION BY {pk_names_str}
-                        ORDER BY {redshift_sink_row_id} DESC
+                        ORDER BY {row_id_ordering}
                     ) AS dedupe_id
                     FROM {cdc_table_name}, max_id_table
-                    WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id
+                    WHERE {within_watermark}
                 ) AS subquery
                 WHERE dedupe_id = 1 AND {redshift_sink_op} IN (1, 3)
             ) AS source
@@ -969,7 +996,6 @@ fn build_create_merge_into_task_sql(
             "#,
             target_table_name = target_table_name,
             pk_names_str = pk_names_str,
-            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
             redshift_sink_op = __OP,
             pk_names_eq_str = pk_names_eq_str,
@@ -981,10 +1007,9 @@ fn build_create_merge_into_task_sql(
             r#"
             DELETE FROM {cdc_table_name}
             USING max_id_table
-            WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id;
+            WHERE {within_watermark};
             "#,
             cdc_table_name = cdc_table_name,
-            redshift_sink_row_id = __ROW_ID,
         ),
         "DROP TABLE IF EXISTS max_id_table;".to_owned(),
     ]
@@ -1030,6 +1055,74 @@ fn build_copy_into_sql(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_merge_sql_normalizes_legacy_row_ids() {
+        let sql = build_create_merge_into_task_sql(
+            Some("staging"),
+            Some("public"),
+            "cdc",
+            "target",
+            &vec!["id".to_owned()],
+            &vec!["id".to_owned(), "value".to_owned()],
+        );
+        let epoch = "CAST(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 1) AS DECIMAL(20, 0))";
+        let count = "CAST(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 2) AS DECIMAL(20, 0))";
+        let actor = "CAST(COALESCE(NULLIF(SPLIT_PART(\"staging\".\"cdc\".__row_id, '_', 3), ''), '0') AS BIGINT)";
+        assert_eq!(sql.len(), 5);
+        assert!(sql[0].contains(&format!("SELECT {epoch} AS max_epoch,")));
+        assert!(sql[0].contains(&format!("{count} AS max_row_count,")));
+        assert!(sql[0].contains(&format!("{actor} AS max_actor_id")));
+        assert!(sql[0].contains("ORDER BY max_epoch DESC, max_row_count DESC, max_actor_id DESC"));
+        assert!(sql[0].contains("LIMIT 1;"));
+        for statement in &sql[1..=2] {
+            assert!(statement.contains(&format!(
+                "ORDER BY {epoch} DESC, {count} DESC, {actor} DESC"
+            )));
+        }
+        // The delete, merge, and CDC cleanup must all compare the entire tuple.
+        let predicate = format!(
+            "WHERE ({epoch} < max_id_table.max_epoch \
+             OR ({epoch} = max_id_table.max_epoch AND {count} < max_id_table.max_row_count) \
+             OR ({epoch} = max_id_table.max_epoch AND {count} = max_id_table.max_row_count \
+             AND {actor} <= max_id_table.max_actor_id))"
+        );
+        for statement in &sql[1..=3] {
+            assert!(statement.contains(&predicate));
+        }
+    }
+
+    #[test]
+    fn test_merge_sql_keeps_watermark_columns_out_of_source() {
+        let column_names = vec![
+            "max_epoch".to_owned(),
+            "max_row_count".to_owned(),
+            "max_actor_id".to_owned(),
+        ];
+        for schema in [None, Some("staging")] {
+            let sql = build_create_merge_into_task_sql(
+                schema,
+                Some("public"),
+                "cdc",
+                "target",
+                &column_names,
+                &column_names,
+            );
+            let cdc_table = match schema {
+                Some(_) => "\"staging\".\"cdc\"",
+                None => "\"cdc\"",
+            };
+            // Both DELETE and MERGE must expose only CDC columns, and every
+            // partition key must be unambiguous even for a composite key.
+            for statement in &sql[1..=2] {
+                assert!(statement.contains(&format!("SELECT {cdc_table}.*, ROW_NUMBER() OVER (")));
+                assert!(statement.contains(&format!(
+                    "PARTITION BY {cdc_table}.max_epoch, {cdc_table}.max_row_count, {cdc_table}.max_actor_id"
+                )));
+                assert!(!statement.contains("SELECT *, ROW_NUMBER()"));
+            }
+        }
+    }
 
     #[test]
     fn test_convert_redshift_decimal_data_type() {

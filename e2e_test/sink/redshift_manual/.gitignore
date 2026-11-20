@@ -1,0 +1,6 @@
+# Keep private test configuration and local artifacts out of commits.
+.env
+.env.*
+*.env
+*.log
+__pycache__/
