@@ -735,6 +735,9 @@ pub struct ReadBatchConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadSchedulerConfig {
+    /// Q17 diagnostic: run an admitted data refill range as a task and read it directly.
+    #[serde(default)]
+    pub diagnostic_spawn_refill_range: bool,
     /// Run scheduled object reads on a small runtime shared by all schedulers in the process.
     #[serde(default)]
     pub use_dedicated_io_runtime: bool,

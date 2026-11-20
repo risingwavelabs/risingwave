@@ -56,6 +56,32 @@ static TIMES: LazyLock<HistogramVec> = LazyLock::new(|| {
     histogram_opts!("object_store_refill_get_phase_seconds", "Q17 phases of the same successful single-HTTP refill GET; wake waits overlap their enclosing phase", exponential_buckets(0.00001, 2.0, 20).unwrap()), &["phase"], &GLOBAL_METRICS_REGISTRY).unwrap()
 });
 
+static RANGE_TIMES: LazyLock<HistogramVec> = LazyLock::new(|| {
+    register_histogram_vec_with_registry!(
+        histogram_opts!(
+            "object_store_refill_range_phase_seconds",
+            "Q17 successful data refill range: permit acquisition through cache insertion",
+            exponential_buckets(0.00001, 2.0, 20).unwrap()
+        ),
+        &["mode", "phase"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+pub fn observe_range(spawn: bool, before_read: Duration, read: Duration, apply: Duration) {
+    let mode = if spawn { "range_spawn" } else { "scheduler" };
+    for (phase, duration) in [
+        ("before_read", before_read),
+        ("store_read", read),
+        ("apply", apply),
+    ] {
+        RANGE_TIMES
+            .with_label_values(&[mode, phase])
+            .observe(duration.as_secs_f64());
+    }
+}
+
 pub async fn refill_get<F: Future>(read: F) -> F::Output {
     READS.with_label_values(&["logical"]).inc();
     REFILL.scope(true, read).await

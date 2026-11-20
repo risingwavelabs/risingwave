@@ -324,6 +324,10 @@ impl StreamingUploaderImpl {
 }
 
 impl ObjectStoreImpl {
+    pub fn diagnostic_spawn_refill_range(&self) -> bool {
+        object_store_impl_method_body!(self, diagnostic_spawn_refill_range())
+    }
+
     /// Enable coalescing for a store whose objects are immutable after publication.
     pub fn with_read_coalescing(mut self) -> Self {
         match &mut self {
@@ -717,12 +721,19 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ))
     }
 
+    fn diagnostic_spawn_refill_range(&self) -> bool {
+        self.config.read_scheduler.diagnostic_spawn_refill_range
+    }
+
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         use std::ops::Bound::{Excluded, Included};
 
         let media_type = self.media_type();
         let mut read_guard = self.object_store_metrics.begin_read(media_type, "logical");
         let (route, scheduled) = match &self.read_scheduler {
+            Some(_) if self.diagnostic_spawn_refill_range() && refill_timing::is_refill() => {
+                ("refill_direct", None)
+            }
             None => ("direct", None),
             Some(scheduler) => {
                 let (route, read_range) = scheduler.plan(&range);
