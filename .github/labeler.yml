@@ -201,7 +201,7 @@ labels:
   files:
   - "ci\\/scripts\\/e2e-clickhouse-sink-test\\.sh"
   - "e2e_test\\/commands\\/clickhouse"
-  - "e2e_test\\/sink\\/clickhouse_sink\\.slt"
+  - "e2e_test\\/sink\\/clickhouse\\/.*"
   - "src\\/connector\\/src\\/sink\\/clickhouse\\.rs"
 
 - label: "ci/run-e2e-sqlserver-sink-tests"

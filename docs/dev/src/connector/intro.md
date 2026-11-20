@@ -163,7 +163,7 @@ Run the ClickHouse sink test in the same way:
 
 ```sh
 ./risedev d local-clickhouse-sink-test
-./risedev slt './e2e_test/sink/clickhouse_sink.slt'
+./risedev slt './e2e_test/sink/clickhouse/basic.slt'
 ./risedev k
 ```
 
@@ -179,7 +179,7 @@ Run the ClickHouse sink test in the same way:
 
 ```sh
 ./risedev d local-clickhouse-sink-test
-./risedev slt './e2e_test/sink/clickhouse_sink.slt'
+./risedev slt './e2e_test/sink/clickhouse/basic.slt'
 ./risedev k
 ```
 

@@ -1,0 +1,16 @@
+<clickhouse>
+    <!-- The router does not host the target tables in this cluster. -->
+    <remote_servers>
+        <rw_sink_remote_test>
+            <shard>
+                <replica>
+                    <host>clickhouse-shard</host>
+                    <port>9000</port>
+                    <user from_env="CLICKHOUSE_USER" />
+                    <password from_env="CLICKHOUSE_PASSWORD" />
+                    <default_database>rw_distributed_remote_target</default_database>
+                </replica>
+            </shard>
+        </rw_sink_remote_test>
+    </remote_servers>
+</clickhouse>

@@ -600,12 +600,23 @@ services:
 
   clickhouse-server:
     image: clickhouse/clickhouse-server:26.9
+    depends_on:
+      - clickhouse-shard
+    volumes:
+      - ./clickhouse-conf/distributed.xml:/etc/clickhouse-server/config.d/rw-distributed.xml:ro
+      - ./clickhouse-conf/remote-distributed.xml:/etc/clickhouse-server/config.d/rw-remote-distributed.xml:ro
     ports:
       - "8123:8123"
       - "9000:9000"
       - "9004:9004"
     expose:
       - 9009
+    environment:
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "default"
+
+  clickhouse-shard:
+    image: clickhouse/clickhouse-server:26.9
     environment:
       CLICKHOUSE_USER: "default"
       CLICKHOUSE_PASSWORD: "default"
