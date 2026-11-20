@@ -293,6 +293,24 @@ object_store_failure_count	counter	type	The number of failures of object store o
 object_store_operation_bytes	histogram	type	Size of operation result on object store		src/object_store/src/object/object_metrics.rs
 object_store_operation_latency	histogram	media_type,type	Total latency of operation on object store		src/object_store/src/object/object_metrics.rs
 object_store_read_bytes	counter		Total bytes of requests read from object store		src/object_store/src/object/object_metrics.rs
+object_store_read_in_flight	gauge	media_type,stage	Currently executing reads by layer		src/object_store/src/object/object_metrics.rs
+object_store_read_outcomes	counter	media_type,stage,outcome	Read completions by layer; attempts are backend invocations, not SDK-internal HTTP retries		src/object_store/src/object/object_metrics.rs
+object_store_read_request_bytes	histogram	media_type,route	Requested bytes of bounded logical reads, before coalescing		src/object_store/src/object/object_metrics.rs
+object_store_read_request_duration_seconds	histogram	media_type,route	Time to complete a logical object store read, including scheduling and retries		src/object_store/src/object/object_metrics.rs
+object_store_read_requests	counter	media_type,route	Logical object store read calls by dispatch route		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_admission_duration_seconds	histogram	media_type	Time waiting for admission, including cancelled waits		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_events	counter	media_type,event	Scheduler planning, completion and fallback events		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_group_size	histogram	media_type	Number of logical range reads in each scheduled physical read		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_groups	gauge	media_type,stage	Read groups by stage: admitted through completion, queued until selection, or ready to claim a physical permit (queued minus dispatch reservations)		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_in_flight	gauge	media_type	Scheduled physical reads from first backend future poll through completion or cancellation, including retry loops and range-error fallbacks		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_overread_bytes	counter	media_type	Gap bytes in successful scheduled reads, including holes left by cancelled members		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_partial_overlap_bytes	counter	media_type	Union of byte intersections with older active same-object reads that do not fully cover the new dispatch; observed at flight registration, counts attempted group reads, not successful or unique duplicate bytes		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_pending	gauge	media_type	Admitted logical reads, queued or in flight		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_physical_duration_seconds	histogram	media_type,stage	Scheduled backend read duration (including retries), permit wait for range-error fallback, or reservation-to-backend-start time for dispatched groups		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_queue_duration_seconds	histogram	media_type	Time from admitting a range read to dispatching it		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_queued	gauge	media_type	Admitted logical reads not yet dispatched		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_reserved	gauge	media_type	Scheduled group reads holding a physical permit before starting the backend future		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_waiting	gauge	media_type	Logical reads waiting for scheduler admission, including collected window reads		src/object_store/src/object/object_metrics.rs
 object_store_request_retry_count	counter	type	The number of retry times of object store request		src/object_store/src/object/object_metrics.rs
 object_store_write_bytes	counter		Total bytes of requests read from object store		src/object_store/src/object/object_metrics.rs
 recent_filter_items	gauge		Item numbers of the recent filter.		src/storage/src/hummock/recent_filter/mod.rs
@@ -334,10 +352,19 @@ state_store_get_new_sst_ids_latency	histogram		Total latency of get new table id
 state_store_report_compaction_task_counts	counter		Total number of report_compaction_task requests that have been issued to state store		src/storage/src/monitor/hummock_metrics.rs
 state_store_report_compaction_task_latency	histogram		Total latency of report compaction task that have been issued to state store		src/storage/src/monitor/hummock_metrics.rs
 block_efficiency_histogram	histogram		Access ratio of in-memory block.		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_block_cache_read_events	counter	event	Fill request registration and actual outer producer starts; pending includes disk cache and shared in-flight reads		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_block_cache_size	gauge		the size of cache for data block cache		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_block_cache_usage_ratio	gauge		the ratio of block cache to it's pre-allocated memory		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_bloom_filter_check_counts	counter	table_id,type	Total number of read request to check SST filters		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_bloom_filter_true_negative_counts	counter	table_id,type	Total number of sstables that have been considered true negative by SST filters		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_budget_denied	counter		ColdRanges windows denied because no multi-block prefix fits the shared prefetch budget; no speculative IO is submitted		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_budget_shrunk	counter		ColdRanges windows admitted with fewer blocks to fit the prefetch budget; not demand fallbacks		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_gap_blocks	histogram		Blocks per internal cache gap counted by cold_range_prefetch_gap_bytes; consecutive hits form one gap		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_gap_bytes	histogram		Compressed bytes of each contiguous cache-hit or disk-index-hint gap between two cold runs in one window; excludes leading/trailing hits and window boundaries		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_hint_misses	counter		Positive disk index hints whose cache-only lookup returned no entry and required a demand fallback		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_read_bytes	histogram		Bytes per submitted direct cold-range read, excluding shared singleton registrations; includes cancelled reads, not physical GET bytes		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_single_blocks	counter		Singleton cold segments registered through Foyer sharing; not physical GETs		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_cold_range_prefetch_window_runs	histogram		Cold segments registered per window, including shared singleton fetches and zero for fully cached windows; not physical GETs	vec![0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0]	src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_event_handler_latency	histogram	event_type	Latency to handle event		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_event_handler_pending_event	gauge	event_type	The number of sent but unhandled events		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_get_shared_buffer_hit_counts	counter	table_id	Total number of get requests that have been fulfilled by shared buffer		src/storage/src/monitor/hummock_state_store_metrics.rs
@@ -388,6 +415,11 @@ state_store_write_batch_duration	histogram	table_id	Total time of batched write 
 state_store_write_batch_size	histogram	table_id	Total size of batched write that have been issued to state store		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_write_batch_tuple_counts	counter	table_id	Total number of batched write kv pairs requests that have been issued to state store		src/storage/src/monitor/hummock_state_store_metrics.rs
 uploading_memory_size	gauge		the size of uploading SSTs memory usage		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_get_batch_concurrency	histogram	table_id	Configured per-batch concurrency clipped to the input key count		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_duration	histogram	table_id	Latency of one explicit point-read batch		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_in_flight	gauge	table_id	Active explicit point batches		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_keys	histogram	table_id	Input keys per explicit point batch, including duplicates and missing keys		src/storage/src/monitor/monitored_storage_metrics.rs
+state_store_get_batch_outcomes	counter	table_id,outcome	Explicit point batches completed, failed or cancelled		src/storage/src/monitor/monitored_storage_metrics.rs
 state_store_get_duration	histogram	table_id	Total latency of get that have been issued to state store		src/storage/src/monitor/monitored_storage_metrics.rs
 state_store_get_key_size	histogram	table_id	Total key bytes of get that have been issued to state store		src/storage/src/monitor/monitored_storage_metrics.rs
 state_store_get_value_size	histogram	table_id	Total value bytes that have been requested from remote storage		src/storage/src/monitor/monitored_storage_metrics.rs

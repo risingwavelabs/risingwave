@@ -23,7 +23,6 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use educe::Educe;
-use either::Either;
 use foyer::Hint;
 use futures::future::{ready, try_join_all};
 use futures::stream::BoxStream;
@@ -42,6 +41,7 @@ use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -57,7 +57,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::StateStore;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
-use risingwave_storage::hummock::CachePolicy;
+use risingwave_storage::hummock::{CachePolicy, SstMetaBatch};
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -1199,6 +1199,18 @@ where
         &self.data_types
     }
 
+    /// Whether this storage instance enables native batches in adapted streaming operators.
+    pub fn native_point_batch_enabled(&self) -> bool {
+        self.row_store.state_store.read_batch_config().enabled
+    }
+
+    pub(crate) fn new_iterator_meta_batch(&self) -> Option<Arc<SstMetaBatch>> {
+        let config = self.row_store.state_store.read_batch_config();
+        config
+            .meta_reuse
+            .then(|| Arc::new(SstMetaBatch::new(config)))
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
@@ -1315,6 +1327,27 @@ where
         }
     }
 
+    /// Read independent primary keys with aligned results, sharing native storage preparation.
+    pub async fn get_rows(&self, keys: &[impl Row]) -> StreamExecutorResult<Vec<Option<OwnedRow>>> {
+        let requests = keys
+            .iter()
+            .map(|key| self.serialize_pk_and_get_prefix_hint(key))
+            .collect();
+        let rows = self.row_store.get_many(requests).await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                row.map(|row| {
+                    if IS_REPLICATED {
+                        row.project(&self.output_indices).into_owned_row()
+                    } else {
+                        row
+                    }
+                })
+            })
+            .collect())
+    }
+
     /// Get a raw encoded row from state table.
     pub async fn exists(&self, pk: impl Row) -> StreamExecutorResult<bool> {
         let (serialized_pk, prefix_hint) = self.serialize_pk_and_get_prefix_hint(&pk);
@@ -1344,6 +1377,71 @@ where
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    async fn get_many(
+        &self,
+        requests: Vec<(TableKey<Bytes>, Option<Bytes>)>,
+    ) -> StreamExecutorResult<Vec<Option<OwnedRow>>> {
+        let mut output = vec![None; requests.len()];
+        let mut pending = Vec::new();
+        let mut positions = Vec::new();
+        for (index, (key, prefix_hint)) in requests.into_iter().enumerate() {
+            if let Some(metrics) = &self.metrics {
+                metrics.get_count.inc();
+            }
+            if let Some(rows) = &self.all_rows {
+                let (vnode, key) = key.split_vnode_bytes();
+                output[index] = rows.get(&vnode).expect("covered vnode").get(&key).cloned();
+                continue;
+            }
+            if self.below_pending_watermark(&key) {
+                continue;
+            }
+            let should_prune = if let Some(stats) = &self.vnode_stats
+                && let (vnode, key) = key.split_vnode_bytes()
+                && let Some(stats) = stats.get(&vnode)
+                && stats.can_prune(&key)
+            {
+                if let Some(metrics) = &self.metrics {
+                    metrics.get_vnode_pruned_count.inc();
+                }
+                true
+            } else {
+                false
+            };
+            if should_prune && self.enable_state_table_vnode_stats_pruning {
+                continue;
+            }
+            positions.push((index, should_prune));
+            pending.push((
+                key,
+                ReadOptions {
+                    prefix_hint,
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
+                    ..Default::default()
+                },
+            ));
+        }
+        if pending.is_empty() {
+            return Ok(output);
+        }
+        let rows = self
+            .state_store
+            .on_key_values(pending, |_, value| {
+                self.row_serde
+                    .deserialize(value)
+                    .map(OwnedRow::new)
+                    .map_err(Into::into)
+            })
+            .await?;
+        for ((index, should_prune), row) in positions.into_iter().zip_eq_fast(rows) {
+            if should_prune && row.is_some() {
+                tracing::warn!(table_id = %self.table_id, "vnode stats pruning dry run fails for batch get. This will not affect correctness.");
+            }
+            output[index] = row;
+        }
+        Ok(output)
+    }
+
     async fn get(
         &self,
         key_bytes: TableKey<Bytes>,
@@ -2228,7 +2326,6 @@ where
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<BoxedRowStream<'_>> {
-        let vnode = self.compute_prefix_vnode(&pk_prefix);
         let Some(clean_watermark_index) = self.clean_watermark_index else {
             return self
                 .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
@@ -2248,6 +2345,7 @@ where
                 .map(|s| s.boxed());
         }
 
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
             return self
@@ -2425,9 +2523,7 @@ where
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(Bytes::copy_from_slice(
-                    &encoded_prefix[..encoded_prefix_len],
-                ))
+                Some(encoded_prefix.slice(..encoded_prefix_len))
             } else {
                 None
             }
@@ -2441,8 +2537,12 @@ where
             "storage_iter_with_prefix"
         );
 
-        let memcomparable_range =
-            prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
+        let memcomparable_range = prefix_and_sub_range_to_memcomparable(
+            &self.pk_serde,
+            sub_range,
+            pk_prefix,
+            encoded_prefix,
+        );
 
         Ok(if REVERSE {
             futures::future::Either::Left(
@@ -2498,7 +2598,7 @@ pub fn prefix_range_to_memcomparable(
 ) -> (Bound<Bytes>, Bound<Bytes>) {
     (
         start_range_to_memcomparable(pk_serde, &range.0),
-        end_range_to_memcomparable(pk_serde, &range.1, None),
+        end_range_to_memcomparable(pk_serde, &range.1),
     )
 }
 
@@ -2506,24 +2606,19 @@ fn prefix_and_sub_range_to_memcomparable(
     pk_serde: &OrderedRowSerde,
     sub_range: &(Bound<impl Row>, Bound<impl Row>),
     pk_prefix: impl Row,
+    encoded_prefix: Bytes,
 ) -> (Bound<Bytes>, Bound<Bytes>) {
-    let (range_start, range_end) = sub_range;
-    let prefix_serializer = pk_serde.prefix(pk_prefix.len());
-    let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-    let start_range = match range_start {
-        Included(start_range) => Bound::Included(Either::Left((&pk_prefix).chain(start_range))),
-        Excluded(start_range) => Bound::Excluded(Either::Left((&pk_prefix).chain(start_range))),
-        Unbounded => Bound::Included(Either::Right(&pk_prefix)),
+    let start = match &sub_range.0 {
+        Included(row) => start_range_to_memcomparable(pk_serde, &Included((&pk_prefix).chain(row))),
+        Excluded(row) => start_range_to_memcomparable(pk_serde, &Excluded((&pk_prefix).chain(row))),
+        Unbounded => Included(encoded_prefix.clone()),
     };
-    let end_range = match range_end {
-        Included(end_range) => Bound::Included((&pk_prefix).chain(end_range)),
-        Excluded(end_range) => Bound::Excluded((&pk_prefix).chain(end_range)),
-        Unbounded => Unbounded,
+    let end = match &sub_range.1 {
+        Included(row) => end_range_to_memcomparable(pk_serde, &Included((&pk_prefix).chain(row))),
+        Excluded(row) => end_range_to_memcomparable(pk_serde, &Excluded((&pk_prefix).chain(row))),
+        Unbounded => end_bound_of_prefix(&encoded_prefix),
     };
-    (
-        start_range_to_memcomparable(pk_serde, &start_range),
-        end_range_to_memcomparable(pk_serde, &end_range, Some(serialized_pk_prefix)),
-    )
+    (start, end)
 }
 
 fn start_range_to_memcomparable<R: Row>(
@@ -2552,17 +2647,13 @@ fn start_range_to_memcomparable<R: Row>(
 fn end_range_to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
-    serialized_pk_prefix: Option<Bytes>,
 ) -> Bound<Bytes> {
     let serialize_pk_prefix = |pk_prefix: &R| {
         let prefix_serializer = pk_serde.prefix(pk_prefix.len());
         serialize_pk(pk_prefix, &prefix_serializer)
     };
     match bound {
-        Unbounded => match serialized_pk_prefix {
-            Some(serialized_pk_prefix) => end_bound_of_prefix(&serialized_pk_prefix),
-            None => Unbounded,
-        },
+        Unbounded => Unbounded,
         Included(r) => {
             let serialized = serialize_pk_prefix(r);
             // TODO: may use Included(serialized)?

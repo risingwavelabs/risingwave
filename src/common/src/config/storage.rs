@@ -79,7 +79,17 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_cached_recent_versions_number")]
     pub max_cached_recent_versions_number: usize,
 
-    /// max prefetch block number
+    /// Per-path prefetch strategies and bounded lookahead budgets. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub scan_prefetch: ScanPrefetchConfig,
+
+    /// Concurrent point reads and batch-local SST metadata reuse. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub read_batch: ReadBatchConfig,
+
+    /// Default maximum blocks per scan prefetch window; scan_prefetch.max_blocks overrides it.
     #[serde(
         default = "default::storage::max_prefetch_block_number",
         deserialize_with = "deserialize_max_prefetch_block_number"
@@ -218,6 +228,7 @@ pub struct StorageConfig {
     /// 2. Some special configuration of Backend
     /// 3. Retry and timeout configuration
     #[serde(default)]
+    #[config_doc(nested)]
     pub object_store: ObjectStoreConfig,
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
@@ -557,7 +568,7 @@ pub struct FileCacheConfig {
 
 /// The subsections `[storage.object_store]`.
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct ObjectStoreConfig {
     // alias is for backward compatibility
     #[serde(
@@ -575,6 +586,14 @@ pub struct ObjectStoreConfig {
     /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    /// Coalesce concurrent small range reads in the Hummock state store on S3 and MinIO.
+    #[serde(default)]
+    pub enable_hummock_read_coalescing: bool,
+    /// Scheduling bounds used when Hummock read coalescing is enabled. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub read_scheduler: ReadSchedulerConfig,
 
     /// Maximum number of concurrent object store requests (read, `streaming_read`, metadata, etc.).
     /// 0 means unlimited. When set to a positive value, a semaphore will be used to limit
@@ -612,6 +631,160 @@ pub struct ObjectStoreConfig {
     pub upload_part_size: usize,
 }
 
+/// Iterator prefetch strategy. Point gets never inherit this setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadPrefetchMode {
+    #[default]
+    Disabled,
+    /// Bounded reads of contiguous cache misses, decoded on consumption.
+    ColdRanges,
+}
+
+/// Per-path prefetch selection. Explicit path modes override the unified mode.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ScanPrefetchConfig {
+    /// Unified mode: disabled or cold_ranges. Empty preserves each caller's default.
+    #[serde(default)]
+    pub mode: Option<ReadPrefetchMode>,
+    /// Prefix scans default to disabled. Empty inherits mode.
+    #[serde(default)]
+    pub prefix_mode: Option<ReadPrefetchMode>,
+    /// Change-log scans default to disabled. Empty inherits mode.
+    #[serde(default)]
+    pub changelog_mode: Option<ReadPrefetchMode>,
+    /// Ordinary range scans default to cold_ranges. Empty inherits mode.
+    #[serde(default)]
+    pub range_scan_mode: Option<ReadPrefetchMode>,
+    /// Snapshot Backfill defaults to cold_ranges. Empty inherits mode.
+    #[serde(default)]
+    pub snapshot_backfill_mode: Option<ReadPrefetchMode>,
+    /// Locality Backfill defaults to cold_ranges. Empty inherits mode.
+    #[serde(default)]
+    pub locality_backfill_mode: Option<ReadPrefetchMode>,
+    /// Maximum blocks per window, including demand. Empty uses storage.max_prefetch_block_number.
+    /// A value of 1 disables lookahead.
+    #[serde(default)]
+    pub max_blocks: Option<NonZeroUsize>,
+    /// Sum of max(compressed, decoded) block sizes per window. Oversized demand blocks are read alone.
+    /// Retained buffers and decoding are additionally bounded by storage.prefetch_buffer_capacity_mb.
+    #[serde(default = "default_scan_prefetch_bytes")]
+    pub max_bytes: NonZeroUsize,
+}
+
+impl ScanPrefetchConfig {
+    pub fn prefix_mode(&self) -> ReadPrefetchMode {
+        self.prefix_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::Disabled)
+    }
+
+    pub fn changelog_mode(&self) -> ReadPrefetchMode {
+        self.changelog_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::Disabled)
+    }
+
+    pub fn range_scan_mode(&self) -> ReadPrefetchMode {
+        self.range_scan_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
+    }
+
+    pub fn snapshot_backfill_mode(&self) -> ReadPrefetchMode {
+        self.snapshot_backfill_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
+    }
+
+    pub fn locality_backfill_mode(&self) -> ReadPrefetchMode {
+        self.locality_backfill_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
+    }
+}
+
+fn default_scan_prefetch_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(1024 * 1024).unwrap()
+}
+
+/// Settings for `MultiGet` and bounded SST metadata retention.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ReadBatchConfig {
+    /// `HashAgg` and Materialize use `MultiGet` when enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum keys executing concurrently in each `MultiGet`, not a node-wide limit.
+    #[serde(default = "default_read_batch_concurrency")]
+    pub concurrency: NonZeroUsize,
+    /// Share SST metadata within `MultiGet` and within `HashJoin` chunk iterator initialization.
+    #[serde(default)]
+    pub meta_reuse: bool,
+    /// Maximum retained regular metadata entries per `MultiGet` or `HashJoin` chunk.
+    #[serde(default = "default_read_meta_entries")]
+    pub meta_max_entries: NonZeroUsize,
+    /// Retained regular metadata bytes; one oversized SST may additionally be retained.
+    #[serde(default = "default_read_meta_bytes")]
+    pub meta_max_bytes: NonZeroUsize,
+}
+
+/// Object-store range coalescing and dispatch.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ReadSchedulerConfig {
+    /// Run scheduled object reads on a small runtime shared by all schedulers in the process.
+    #[serde(default)]
+    pub use_dedicated_io_runtime: bool,
+    /// Worker threads for the shared process runtime. All schedulers using it
+    /// must specify the same count. Applies when dedicated I/O is enabled.
+    #[serde(default = "default_dedicated_io_runtime_workers")]
+    pub dedicated_io_runtime_workers: NonZeroUsize,
+    /// Maximum logical reads in one coalesced group.
+    #[serde(default = "default_read_scheduler_batch_requests")]
+    pub max_batch_requests: NonZeroUsize,
+    /// Maximum groups from queue admission through completion. A read can join
+    /// a compatible pending group without taking another slot.
+    #[serde(
+        default = "default_read_admitted_groups",
+        deserialize_with = "deserialize_read_permits"
+    )]
+    pub max_admitted_groups: NonZeroUsize,
+    /// Maximum concurrent scheduled physical reads, including individual range-error fallbacks.
+    /// Each ordinary object read or merged GET consumes one slot.
+    #[serde(
+        default = "default_read_inflight_reads",
+        deserialize_with = "deserialize_read_permits"
+    )]
+    pub max_inflight_reads: NonZeroUsize,
+    /// Share a scheduled GET with fully covered reads, including waiters blocked on group admission.
+    #[serde(default)]
+    pub reuse_inflight_reads: bool,
+    /// Maximum byte span for coalescing. Larger reads are scheduled individually with their original bounds.
+    #[serde(default = "default_read_window_bytes")]
+    pub max_read_bytes: NonZeroUsize,
+    /// Maximum unread gap between neighboring ranges in the same object. The merged
+    /// range including all gaps must fit `max_read_bytes`. Zero only merges contiguous
+    /// and overlapping ranges.
+    #[serde(default)]
+    pub max_gap_bytes: usize,
+}
+
+fn deserialize_read_permits<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<NonZeroUsize, D::Error> {
+    validate_read_permits(NonZeroUsize::deserialize(deserializer)?)
+}
+
+fn validate_read_permits<E: serde::de::Error>(value: NonZeroUsize) -> Result<NonZeroUsize, E> {
+    if value.get() > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err(E::custom("read scheduler limit exceeds semaphore capacity"));
+    }
+    Ok(value)
+}
+
 fn deserialize_sstable_meta_fetch_concurrency<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -623,6 +796,31 @@ where
         ));
     }
     Ok(value)
+}
+
+fn default_read_window_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(256 * 1024).unwrap()
+}
+fn default_read_batch_concurrency() -> NonZeroUsize {
+    NonZeroUsize::new(10).unwrap()
+}
+fn default_read_scheduler_batch_requests() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
+fn default_read_meta_entries() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
+fn default_read_meta_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(1024 * 1024).unwrap()
+}
+fn default_dedicated_io_runtime_workers() -> NonZeroUsize {
+    NonZeroUsize::new(2).unwrap()
+}
+fn default_read_inflight_reads() -> NonZeroUsize {
+    NonZeroUsize::new(32).unwrap()
+}
+fn default_read_admitted_groups() -> NonZeroUsize {
+    NonZeroUsize::new(64).unwrap()
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
@@ -972,7 +1170,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     let prefetch_buffer_capacity_mb =
         s.storage
-            .shared_buffer_capacity_mb
+            .prefetch_buffer_capacity_mb
             .unwrap_or(match &block_cache_eviction_config {
                 EvictionConfig::Lru(lru) => {
                     ((1.0 - lru.high_priority_pool_ratio) * block_cache_capacity_mb as f64) as usize

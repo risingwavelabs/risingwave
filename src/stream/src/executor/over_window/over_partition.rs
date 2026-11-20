@@ -800,7 +800,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         let mut new_cache = PartitionCache::new_without_sentinels(); // shouldn't use `new` here because we are extending to boundary
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
-            .iter_with_prefix(self.deduped_part_key, sub_range, PrefetchOptions::default())
+            .iter_with_prefix(
+                self.deduped_part_key,
+                sub_range,
+                PrefetchOptions::prefetch_for_prefix_scan(),
+            )
             .await?;
 
         #[for_await]
@@ -1011,7 +1015,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             .iter_with_prefix(
                 self.deduped_part_key,
                 &table_sub_range,
-                PrefetchOptions::default(),
+                PrefetchOptions::prefetch_for_prefix_scan(),
             )
             .await?;
 

@@ -34,6 +34,7 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::storage::ReadPrefetchMode;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -563,8 +564,8 @@ pub struct SstableIteratorReadOptions {
     pub read_table_id: Option<TableId>,
     /// The only hard upper bound of this scan. It limits the iterator's block window.
     pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
-    /// Whether to prefetch blocks within the already-bounded scan window.
-    pub prefetch: bool,
+    /// How to prefetch blocks within the already-bounded scan window.
+    pub prefetch: ReadPrefetchMode,
 }
 
 impl SstableIteratorReadOptions {
@@ -575,7 +576,7 @@ impl SstableIteratorReadOptions {
             cache_policy: read_options.cache_policy,
             read_table_id: None,
             scan_end_user_key: None,
-            prefetch: false,
+            prefetch: ReadPrefetchMode::Disabled,
         }
     }
 }
@@ -592,14 +593,19 @@ mod tests {
 
     #[test]
     fn test_iterator_read_options_do_not_enable_prefetch_for_point_get() {
-        let read_options = ReadOptions {
-            prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-            ..Default::default()
-        };
+        for prefetch_options in [
+            PrefetchOptions::prefetch_for_large_range_scan(),
+            PrefetchOptions::prefetch_for_prefix_scan(),
+        ] {
+            let read_options = ReadOptions {
+                prefetch_options,
+                ..Default::default()
+            };
 
-        let iterator_options = SstableIteratorReadOptions::from_read_options(&read_options);
-        assert!(!iterator_options.prefetch);
-        assert!(iterator_options.scan_end_user_key.is_none());
+            let iterator_options = SstableIteratorReadOptions::from_read_options(&read_options);
+            assert_eq!(iterator_options.prefetch, ReadPrefetchMode::Disabled);
+            assert!(iterator_options.scan_end_user_key.is_none());
+        }
     }
 
     #[test]
