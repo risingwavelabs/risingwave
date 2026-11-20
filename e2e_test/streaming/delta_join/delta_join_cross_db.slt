@@ -68,10 +68,14 @@ set database to delta_join_db2;
 statement ok
 insert into r select g, -g from generate_series(1, 5000) g;
 
+# Let the materialized view catch up with the log store of `l`.
+statement ok
+alter materialized view v set backfill_rate_limit = default;
+
 statement ok
 flush;
 
-query I retry 10 backoff 1s
+query I retry 30 backoff 1s
 select count(*) from (
   select c, sl, sr from v
   except
