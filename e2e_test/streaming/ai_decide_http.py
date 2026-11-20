@@ -147,6 +147,20 @@ def exercise(server):
     for field in ["signal", "team", "size"]:
         assert structured_response[field] == response[field]
 
+    # All question types allow omitted instructions when their criteria suffice.
+    for definition in structured_questions.values():
+        del definition["instructions"]
+    questions_json = json.dumps(structured_questions).replace("'", "''")
+    structured_sql = f"'{questions_json}'::jsonb"
+    before = server.count()
+    criteria_response = json.loads(sql(
+        f"SELECT to_jsonb(result) FROM (SELECT {analyze(batch_state, structured_sql)} AS result) e"
+    )[0])
+    assert server.count() == before + 1
+    assert server.calls[-1] == {"model": "test-model", "state": p1, "questions": structured_questions}
+    for field in ["signal", "team", "size"]:
+        assert criteria_response[field] == response[field]
+
     # Referencing several fields of one subquery result must not duplicate inference.
     before = server.count()
     assert sql(f"SELECT (result).signal, (result).team.choice, (result).team.confidence, (result).size.score FROM (SELECT {analyze(batch_state)} AS result) e") == ["0.1|billing|0.6|1"]

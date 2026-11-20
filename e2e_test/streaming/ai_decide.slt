@@ -13,6 +13,10 @@ SELECT CASE WHEN false THEN (ai_decide('{}'::jsonb, 'invalid', 'test-model', ai_
 statement error score levels must be nonempty strings
 SELECT ai_score_question('q', 'Rate?', ARRAY[' ', 'High']);
 
+# A null instruction needs at least one non-null noul outcome description.
+statement error probability questions require instructions or at least one non-null outcome description
+SELECT ai_decide('{}'::jsonb, 'invalid', 'test-model', '{"q":{"type":"noul","instructions":null,"criteria":{}}}'::jsonb, 'test-key');
+
 # JSON null is a real input. Request-construction errors follow ordinary strictness.
 statement ok
 SET batch_expr_strict_mode = true;

@@ -78,8 +78,11 @@ also accepted by the same `ai_decide` entry point and undergoes the same schema
 validation. In JSONB definitions, instructions and choice/score descriptions may
 be strings, objects, arrays or JSON null. Nested JSON is preserved in the HTTP
 request. Probability (`noul`) questions may also supply a `criteria` object with
-`true` and/or `false` descriptions using those same types; omitted or null criteria
-leave the boundary to the instructions. Score levels must still be distinct.
+`true` and/or `false` descriptions using those same types. Instructions are optional
+for all three question types. A probability question must provide non-null
+instructions or at least one non-null outcome description; omitted, null, empty,
+or all-null criteria cannot supply that description. Empty strings, objects and
+arrays are non-null descriptions. Score levels must still be distinct.
 These description shapes do not change the SQL result types. Per-row question
 definitions are not supported.
 
@@ -287,7 +290,8 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
 
 ## Regression coverage
 
-- Schema tests: named mixed result types and invalid question definitions.
+- Schema tests: named mixed result types, optional instructions, required noul
+  descriptions and invalid question definitions.
 - Mock HTTP tests: request shape, response decoding and contract failures,
   retries/timeouts and truncated bodies, known/chunked response size limits,
   credential redaction, scalar arguments, NULL and invisible rows, empty chunks,
@@ -301,6 +305,11 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
   service checks mixed answers, descriptions, single evaluation for multiple
   field reads, saved-result retractions, GROUP BY/OVER and emission modes.
   The external-service fixture is skipped under madsim.
+- `./risedev slt './e2e_test/streaming/ai_decide_recovery.slt.serial'`: checkpoint
+  saved answers, recover the streaming jobs, then delete the input. The mock HTTP
+  server survives recovery; assertions check unchanged answers, downstream
+  aggregate retraction and no additional HTTP calls. This runs in the serial
+  recovery suite and is skipped under madsim.
 
 ## Local synthetic performance checks
 

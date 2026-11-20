@@ -60,7 +60,7 @@ impl QuestionSchema {
             }
             if definition
                 .get("instructions")
-                .is_none_or(|v| !is_description(v))
+                .is_some_and(|v| !is_description(v))
             {
                 return Err(error(
                     "instructions must be a string, object, array or null",
@@ -68,6 +68,8 @@ impl QuestionSchema {
             }
             let kind = match definition.get("type").and_then(|v| v.as_str()) {
                 Some("noul") => {
+                    let mut has_description =
+                        definition.get("instructions").is_some_and(|v| !v.is_null());
                     if let Some(criteria) = definition.get("criteria").filter(|v| !v.is_null()) {
                         let criteria = criteria.as_object().ok_or_else(|| {
                             error("probability criteria must be an object or null")
@@ -83,7 +85,13 @@ impl QuestionSchema {
                                     "probability descriptions must be strings, objects, arrays or null",
                                 ));
                             }
+                            has_description |= !description.is_null();
                         }
+                    }
+                    if !has_description {
+                        return Err(error(
+                            "probability questions require instructions or at least one non-null outcome description",
+                        ));
                     }
                     QuestionKind::Noul
                 }
@@ -226,7 +234,7 @@ mod tests {
         ] {
             let questions = json!({
                 "probability": {"type": "noul", "instructions": description,
-                    "criteria": {"true": description, "false": description}},
+                    "criteria": {"true": description, "false": "Negative outcome"}},
                 "choice": {"type": "choice", "instructions": description,
                     "criteria": {"yes": description, "no": description}},
                 "score": {"type": "score", "instructions": description,
@@ -243,14 +251,44 @@ mod tests {
             .unwrap();
             assert_eq!(schema.return_type(), plain.return_type());
         }
-        for criteria in [
-            json!(null),
-            json!({}),
-            json!({"true": "Yes"}),
-            json!({"false": "No"}),
-        ] {
+    }
+
+    #[test]
+    fn optional_instructions_require_a_noul_description() {
+        for instructions in [None, Some(Value::Null)] {
+            for definition in [
+                json!({"type": "noul", "criteria": {"true": "Yes"}}),
+                json!({"type": "noul", "criteria": {"false": ["No"], "true": null}}),
+                json!({"type": "noul", "criteria": {"true": {}}}),
+                json!({"type": "choice", "criteria": {"yes": null, "no": null}}),
+                json!({"type": "score", "criteria": ["Low", "High"]}),
+            ] {
+                let mut definition = definition;
+                if let Some(instructions) = &instructions {
+                    definition["instructions"] = instructions.clone();
+                }
+                assert!(QuestionSchema::parse(&JsonbVal::from(json!({"q": definition}))).is_ok());
+            }
+            for definition in [
+                json!({"type": "noul"}),
+                json!({"type": "noul", "criteria": null}),
+                json!({"type": "noul", "criteria": {}}),
+                json!({"type": "noul", "criteria": {"true": null, "false": null}}),
+            ] {
+                let mut definition = definition;
+                if let Some(instructions) = &instructions {
+                    definition["instructions"] = instructions.clone();
+                }
+                let error =
+                    QuestionSchema::parse(&JsonbVal::from(json!({"q": definition}))).unwrap_err();
+                assert!(matches!(error, ExprError::InvalidParam { reason, .. }
+                    if reason.contains("at least one non-null outcome description")));
+            }
+        }
+        // Empty containers and strings are descriptions; only null means absent.
+        for instructions in [json!(""), json!({}), json!([])] {
             QuestionSchema::parse(&JsonbVal::from(json!({
-                "q": {"type": "noul", "instructions": null, "criteria": criteria}
+                "q": {"type": "noul", "instructions": instructions, "criteria": {}}
             })))
             .unwrap();
         }
