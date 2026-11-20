@@ -29,9 +29,6 @@ RUN rustup self update \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1
 
-RUN cargo install flamegraph
-RUN cargo install addr2line --features bin --bin addr2line
-
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
 # We may consider sccache instead.
 
@@ -54,6 +51,11 @@ RUN cargo install addr2line --features bin --bin addr2line
 
 # # Build dependencies - this can be cached if the dependencies don't change
 # RUN cargo chef cook --profile production --recipe-path recipe.json
+
+FROM rust-base AS debug-tools
+
+RUN cargo install flamegraph
+RUN cargo install addr2line --features bin --bin addr2line
 
 FROM rust-base AS rust-builder
 
@@ -112,8 +114,8 @@ COPY java /risingwave/java/
 # Move java/**/pom.xml to poms/**/pom.xml
 RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/{}' \;
 
-# We use rust-maven-plugin to build java-binding. So it's FROM rust-base
-FROM rust-base AS java-builder
+# The Docker package uses the JNI bindings linked into the Rust binary.
+FROM base AS java-builder
 
 RUN apt-get update && apt-get -y install maven
 
@@ -126,11 +128,9 @@ COPY --from=java-planner /risingwave/poms /risingwave/java/
 # 2. start downloading dependencies
 RUN mvn dependency:go-offline --fail-never
 
-# 3. add all source code and start compiling
-# TODO: only add java related code so that changing rust code won't recompile java code
-# Currently java-binding depends on the workspace Cargo.toml, which depends on the whole rust codebase
-# Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
-COPY ./ /risingwave
+# 3. add the Java sources and the schemas used by the protobuf Maven plugin
+COPY java /risingwave/java/
+COPY proto /risingwave/proto/
 
 RUN ./build-debezium.sh && \
   mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
@@ -157,8 +157,8 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
-COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
-COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
+COPY --from=debug-tools /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
+COPY --from=debug-tools /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
 COPY --from=rust-builder /risingwave/lib/adbc /risingwave/lib/adbc
 
