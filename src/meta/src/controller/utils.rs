@@ -48,7 +48,7 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::common::{PbObjectType, WorkerNode};
-use risingwave_pb::expr::{PbExprNode, expr_node};
+use risingwave_pb::expr::{PbExprNode, PbFunctionCall, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
@@ -2647,7 +2647,9 @@ pub fn build_select_node_list(
                     ..
                 })) = &to_col.generated_or_default_column
                 {
-                    expr.clone().unwrap()
+                    let mut expr = expr.clone().unwrap();
+                    rewrite_now_to_proctime(&mut expr);
+                    expr
                 } else {
                     let null = Datum::None.to_protobuf();
                     PbExprNode {
@@ -2661,6 +2663,25 @@ pub fn build_select_node_list(
     }
 
     Ok(exprs)
+}
+
+/// Rewrites `now()` to `proctime()` in a column default expression, so that the compute node can
+/// evaluate it. This mirrors what the frontend does when it plans a sink into a table whose
+/// default columns already exist. See <https://github.com/risingwavelabs/risingwave/issues/28095>.
+fn rewrite_now_to_proctime(expr: &mut PbExprNode) {
+    match expr.rex_node.as_mut() {
+        Some(expr_node::RexNode::Now(_)) => {
+            expr.function_type = expr_node::Type::Proctime.into();
+            expr.rex_node = Some(expr_node::RexNode::FuncCall(PbFunctionCall::default()));
+        }
+        Some(expr_node::RexNode::FuncCall(call)) => {
+            call.children.iter_mut().for_each(rewrite_now_to_proctime);
+        }
+        Some(expr_node::RexNode::Udf(udf)) => {
+            udf.children.iter_mut().for_each(rewrite_now_to_proctime);
+        }
+        _ => {}
+    }
 }
 
 #[derive(Clone, Debug, Default)]
