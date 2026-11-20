@@ -80,3 +80,39 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: single empty grouping set on filtered input
+  sql: |
+    create table t(v int);
+    SELECT count(*) AS c, sum(v) FROM t WHERE v < 0 GROUP BY GROUPING SETS (());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: duplicate empty grouping sets on filtered input
+  sql: |
+    create table t(v int);
+    SELECT count(*) AS c FROM t WHERE v < 0 GROUP BY GROUPING SETS ((), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: mixed grouping sets with duplicate empty sets
+  sql: |
+    create table t(v int);
+    SELECT v, grouping(v, v), count(distinct v), sum(v) FILTER (WHERE v < 0)
+    FROM t GROUP BY GROUPING SETS ((), (v), ()) HAVING count(*) = 0;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: empty grouping sets without aggregate calls
+  sql: |
+    create table t(v int);
+    SELECT 7 AS c FROM t GROUP BY GROUPING SETS ((), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: grouping without aggregate calls
+  sql: |
+    create table t(v int);
+    SELECT v, grouping(v) FROM t GROUP BY GROUPING SETS ((v), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
