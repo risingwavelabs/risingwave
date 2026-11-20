@@ -189,6 +189,7 @@ impl DataRefillGeneratorTestFixture {
         SstDeltaInfo {
             insert_sst_infos: vec![self.sst_info.clone()],
             delete_sst_object_ids: vec![deleted_sst_object_id],
+            delete_sst_infos: vec![],
             insert_sst_level,
         }
     }
@@ -440,11 +441,13 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
     let normal_delta = |insert_sst_infos| SstDeltaInfo {
         insert_sst_infos,
         delete_sst_object_ids: vec![1.into()],
+        delete_sst_infos: vec![],
         insert_sst_level: 1,
     };
     let insert_only_delta = |insert_sst_infos| SstDeltaInfo {
         insert_sst_infos,
         delete_sst_object_ids: vec![],
+        delete_sst_infos: vec![],
         insert_sst_level: 0,
     };
 
@@ -961,6 +964,7 @@ async fn test_refill_units_do_not_cross_table_projection_boundaries() {
     let deltas = [table_a_projection, table_b_projection].map(|projection| SstDeltaInfo {
         insert_sst_infos: vec![projection],
         delete_sst_object_ids: vec![],
+        delete_sst_infos: vec![],
         insert_sst_level: 0,
     });
     let normal_deltas = deltas.clone().map(|mut delta| {
@@ -1077,6 +1081,7 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
     let delta = SstDeltaInfo {
         insert_sst_infos: vec![sst_info],
         delete_sst_object_ids: vec![2330.into()],
+        delete_sst_infos: vec![],
         insert_sst_level: 0,
     };
     let generate = |streaming_vnodes| {
