@@ -1,0 +1,126 @@
+control substitution on
+
+statement ok
+drop table if exists excl_t;
+
+statement ok
+drop table if exists excl_t2;
+
+statement ok
+drop source if exists excl_src;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'excl_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'excl_slot';
+    DROP PUBLICATION IF EXISTS excl_pub;
+    DROP TABLE IF EXISTS public.excl_e2e CASCADE;
+    DROP TABLE IF EXISTS public.excl_e2e_pk2 CASCADE;
+    CREATE TABLE public.excl_e2e (id int PRIMARY KEY, name text, payload text, raw_data text);
+    INSERT INTO public.excl_e2e VALUES (1, 'a', 'big', 'raw');
+    CREATE TABLE public.excl_e2e_pk2 (id1 int, id2 int, payload text, PRIMARY KEY (id1, id2));
+    INSERT INTO public.excl_e2e_pk2 VALUES (1, 1, 'big');
+    "
+
+statement ok
+create source excl_src with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    publication.name = 'excl_pub',
+    slot.name = 'excl_slot',
+    auto.schema.change = 'true'
+);
+
+statement error primary key columns cannot be excluded by `column.exclude.list`: id
+create table excl_t (*) with (column.exclude.list = 'id, payload')
+from excl_src table 'public.excl_e2e';
+
+# Excluding only one column of a composite primary key is refused too.
+statement error primary key columns cannot be excluded by `column.exclude.list`: id2
+create table excl_t2 (*) with (column.exclude.list = 'id2')
+from excl_src table 'public.excl_e2e_pk2';
+
+statement error `column.exclude.list` must list at least one column
+create table excl_t (*) with (column.exclude.list = ' , , ')
+from excl_src table 'public.excl_e2e';
+
+statement error columns in `column.exclude.list` do not exist in the upstream table: nope
+create table excl_t (*) with (column.exclude.list = 'payload, nope')
+from excl_src table 'public.excl_e2e';
+
+statement error `column.exclude.list` requires the `\(\*\)` wildcard
+create table excl_t (id int primary key, name text) with (column.exclude.list = 'payload')
+from excl_src table 'public.excl_e2e';
+
+statement ok
+create table excl_t (*) with (column.exclude.list = 'payload, raw_data')
+from excl_src table 'public.excl_e2e';
+
+query IT retry 30 backoff 1s
+select * from excl_t order by id;
+----
+1 a
+
+# An excluded column cannot be added back by hand: the next upstream schema change would drop it again.
+statement error column "payload" of table "excl_t" is listed in `column.exclude.list`
+alter table excl_t add column payload text;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    INSERT INTO public.excl_e2e VALUES (2, 'b', 'big2', 'raw2');
+    ALTER TABLE public.excl_e2e ADD COLUMN extra int;
+    INSERT INTO public.excl_e2e VALUES (3, 'c', 'big3', 'raw3', 7);
+    "
+
+# The new upstream column is picked up, the excluded ones stay out.
+query ITI retry 30 backoff 1s
+select * from excl_t order by id;
+----
+1 a NULL
+2 b NULL
+3 c 7
+
+statement ok
+drop table excl_t;
+
+# The option value may be a C-style escaped string, like any other WITH option.
+statement ok
+create table excl_t (*) with (column.exclude.list = E'payload,raw_data')
+from excl_src table 'public.excl_e2e';
+
+query ITI retry 30 backoff 1s
+select * from excl_t order by id;
+----
+1 a NULL
+2 b NULL
+3 c 7
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    ALTER TABLE public.excl_e2e ADD COLUMN extra2 int;
+    INSERT INTO public.excl_e2e VALUES (4, 'd', 'big4', 'raw4', 8, 9);
+    "
+
+query ITII retry 30 backoff 1s
+select * from excl_t order by id;
+----
+1 a NULL NULL
+2 b NULL NULL
+3 c 7 NULL
+4 d 8 9
+
+statement ok
+drop table excl_t;
+
+statement ok
+drop source excl_src;

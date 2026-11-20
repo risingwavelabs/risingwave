@@ -1478,7 +1478,9 @@ async fn handle_create_cdc_table_source(
         cdc_table_info.external_table_name.clone(),
     )?;
     let (mut columns, pk_names, pk_comparisons) = match stmt.wildcard_idx {
-        Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+        Some(_) => {
+            bind_cdc_table_schema_externally(cdc_with_options.clone(), &HashSet::new()).await?
+        }
         None => {
             let (columns, pk_names) =
                 bind_cdc_table_schema(&stmt.columns, &stmt.constraints, false)?;
