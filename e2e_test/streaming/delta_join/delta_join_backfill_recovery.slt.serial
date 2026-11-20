@@ -63,6 +63,12 @@ statement ok
 update r set v = v - 1 where k % 5 = 0;
 
 # Recover in the middle of the backfill. The lookups must restore which rows they can see.
+# The backfill is still in progress when recovering.
+query I
+select count(*) from rw_ddl_progress;
+----
+1
+
 statement ok
 recover;
 
