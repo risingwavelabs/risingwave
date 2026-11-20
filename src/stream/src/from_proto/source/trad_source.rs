@@ -16,6 +16,8 @@ use risingwave_common::catalog::{
     KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
+use risingwave_connector::source::iceberg::IcebergLoadTarget;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
@@ -34,9 +36,10 @@ use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
     BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchOpendalFsListExecutor,
     BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
-    IcebergUpdateListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    IcebergUpdateListExecutor, LoadRetryPolicy, SourceExecutor, SourceStateTableHandler,
+    StreamSourceCore,
 };
-use crate::from_proto::source::{iceberg_update_mode, is_full_reload_refresh};
+use crate::from_proto::source::iceberg_update_mode;
 
 pub struct SourceExecutorBuilder;
 
@@ -133,10 +136,14 @@ pub fn create_source_desc_builder(
 
 impl_stream_node_body!(Source(SourceNode) => SourceExecutorBuilder);
 
-fn iceberg_update_list_mode(source: &StreamSource, params: &ExecutorParams) -> StreamResult<bool> {
+fn iceberg_update_list_mode(
+    source: &StreamSource,
+    ingest_mode: &IngestMode,
+    params: &ExecutorParams,
+) -> StreamResult<bool> {
     let enabled = iceberg_update_mode(
         &source.with_properties,
-        &source.ingest_mode,
+        ingest_mode,
         source.rate_limit,
         source.row_id_index,
         params.info.stream_kind,
@@ -161,7 +168,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let is_full_reload_refresh = is_full_reload_refresh(&source.ingest_mode);
+            let ingest_mode = IngestMode::from_proto(source.ingest_mode.as_ref())?;
+            let is_full_reload_refresh = ingest_mode.is_full_reload();
+            let is_bounded = ingest_mode.is_bounded();
+
             let exec = {
                 let source_id = source.source_id;
                 let source_name = source.source_name.clone();
@@ -199,7 +209,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .map(|column| column.column_id)
                     .collect();
 
-                let is_iceberg_update = iceberg_update_list_mode(source, &params)?;
+                let is_iceberg_update = iceberg_update_list_mode(source, &ingest_mode, &params)?;
                 if is_iceberg_update {
                     crate::executor::source::validate_update_state_table(
                         source.get_state_table()?,
@@ -301,7 +311,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             params.config.clone(),
                         )
                         .boxed()
-                    } else if is_full_reload_refresh {
+                    } else if is_full_reload_refresh || is_bounded {
                         BatchIcebergListExecutor::new(
                             params.actor_context.clone(),
                             stream_source_core,
@@ -313,6 +323,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             barrier_receiver,
                             params.local_barrier_manager.clone(),
                             associated_table_id,
+                            IcebergLoadTarget::from_ingest_mode(&ingest_mode),
+                            LoadRetryPolicy::from_ingest_mode(&ingest_mode),
                         )
                         .boxed()
                     } else {

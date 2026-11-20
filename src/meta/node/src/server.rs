@@ -533,6 +533,7 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push((refresh_handle, refresh_shutdown));
 
     let (initial_workers_tx, initial_workers_rx) = tokio::sync::oneshot::channel();
+
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
@@ -545,6 +546,7 @@ pub async fn start_service_as_election_leader(
         scale_controller.clone(),
         refresh_manager.clone(),
         initial_workers_tx,
+        barrier_scheduler.clone(),
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
