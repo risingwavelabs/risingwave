@@ -228,7 +228,8 @@ impl SourceStreamChunkBuilder {
 /// providing a closure that produces one or two [`Datum`]s by corresponding [`SourceColumnDesc`].
 /// Specifically,
 /// - only columns with [`SourceColumnType::Normal`] need to be handled;
-/// - errors for non-primary key columns will be ignored and filled with default value instead;
+/// - missing non-primary key columns are filled with their default value, or `NULL` if none is set;
+/// - other access errors for non-primary key columns are ignored and filled with `NULL`;
 /// - other errors will be propagated.
 pub struct SourceStreamChunkRowWriter<'a> {
     builder: &'a mut SourceStreamChunkBuilder,
@@ -283,9 +284,13 @@ impl SourceStreamChunkRowWriter<'_> {
 
                 // Throw error for failed access to primary key columns.
                 Err(e) if desc.is_pk => Err(e),
+                // Buffered CDC events may predate ADD COLUMN. Fill missing fields with the
+                // same default used when reading older rows from storage.
+                Err(AccessError::Undefined { .. }) if desc.default_value.is_some() => {
+                    Ok(A::output_for(desc.default_value.clone()))
+                }
                 // Ignore error for other columns and fill in `NULL` instead.
                 Err(error) => {
-                    // TODO: figure out a way to fill in not-null default value if user specifies one
                     // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
                     // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                     //       see #13105

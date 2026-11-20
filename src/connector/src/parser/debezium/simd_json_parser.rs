@@ -140,7 +140,7 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 mod tests {
     use chrono::{NaiveDate, NaiveTime};
     use risingwave_common::array::{Op, StructValue};
-    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, Date, Interval, Scalar, ScalarImpl, Time, Timestamp};
     use serde_json::Value;
@@ -206,6 +206,78 @@ mod tests {
             .rows()
             .map(|(op, row_ref)| (op, row_ref.into_owned_row()))
             .collect::<Vec<_>>()
+    }
+
+    #[tokio::test]
+    async fn test_debezium_missing_column_default() {
+        let columns = vec![
+            SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
+            SourceColumnDesc::from(&ColumnDesc::named_with_default_value(
+                "c1",
+                1.into(),
+                DataType::Int32,
+                Some(11.into()),
+            )),
+            SourceColumnDesc::simple("no_default", DataType::Int32, 2.into()),
+        ];
+
+        for op in ["r", "c", "u", "d"] {
+            for (row, expected_default) in [
+                // An event buffered before ADD COLUMN must use the new column's default.
+                (serde_json::json!({"id": 2}), Some(11.into())),
+                (serde_json::json!({"id": 3, "c1": 22}), Some(22.into())),
+                // An explicit NULL or a malformed value must not use the default.
+                (serde_json::json!({"id": 4, "c1": null}), None),
+                (serde_json::json!({"id": 5, "c1": "invalid"}), None),
+            ] {
+                let payload = serde_json::json!({
+                    "op": op,
+                    "before": if op == "d" || op == "u" { Some(&row) } else { None },
+                    "after": if op == "d" { None } else { Some(&row) },
+                });
+                let parser = build_parser(columns.clone()).await;
+                let result = parse_one(
+                    parser,
+                    columns.clone(),
+                    serde_json::to_vec(&payload).unwrap(),
+                )
+                .await;
+                let expected_op = if op == "d" { Op::Delete } else { Op::Insert };
+                let id = row["id"].as_i64().unwrap() as i32;
+                assert_eq!(
+                    result,
+                    vec![(
+                        expected_op,
+                        OwnedRow::new(vec![Some(id.into()), expected_default, None]),
+                    )],
+                    "payload: {payload}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_debezium_missing_primary_key_with_default() {
+        let mut id = SourceColumnDesc::from(&ColumnDesc::named_with_default_value(
+            "id",
+            0.into(),
+            DataType::Int32,
+            Some(1.into()),
+        ));
+        id.is_pk = true;
+        let columns = vec![id];
+        let mut parser = build_parser(columns.clone()).await;
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
+        let result = parser
+            .parse_inner(
+                None,
+                Some(br#"{"op":"c","after":{}}"#.to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        assert!(result.is_err());
+        builder.finish_current_chunk();
+        assert_eq!(builder.consume_ready_chunks().len(), 0);
     }
 
     mod test1_basic {
@@ -535,9 +607,7 @@ mod tests {
             assert_json_eq(&row[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
         }
 
-        #[cfg(not(madsim))] // Traced test does not work with madsim
         #[tokio::test]
-        #[tracing_test::traced_test]
         async fn test2_debezium_json_parser_overflow() {
             let columns = vec![
                 SourceColumnDesc::simple("O_KEY", DataType::Int64, ColumnId::from(0)),
@@ -575,9 +645,14 @@ mod tests {
                     .await;
                 if i < 5 {
                     // For other overflow, the parsing succeeds but the type conversion fails
-                    // The errors are ignored and logged.
+                    // and the column is padded with NULL. Check the value instead of the
+                    // globally rate-limited log, which other parser tests may suppress.
                     res.unwrap();
-                    assert!(logs_contain("expected type"), "{i}");
+                    dummy_builder.finish_current_chunk();
+                    let chunk = dummy_builder.consume_ready_chunks().next().unwrap();
+                    assert_eq!(chunk.cardinality(), 1);
+                    let (_, row) = chunk.rows().next().unwrap();
+                    assert!(row.datum_at(i).is_none(), "{i}");
                 } else {
                     // For f64 overflow, the parsing fails
                     let e = res.unwrap_err();
@@ -652,6 +727,7 @@ mod tests {
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
                     is_hidden_addition_col: false,
+                    default_value: None,
                     additional_column: AdditionalColumn { column_type: None },
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),
