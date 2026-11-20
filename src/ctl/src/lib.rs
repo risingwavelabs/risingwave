@@ -80,6 +80,9 @@ enum Commands {
     /// Commands for profiling nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
+    /// Inspect, update, or reset runtime stdout/stderr log filters
+    #[clap(subcommand)]
+    Log(cmd_impl::log::LogCommands),
     #[clap(subcommand)]
     Throttle(ThrottleCommands),
     /// Commands for Self-testing
@@ -689,6 +692,7 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
 
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
+        Commands::Log(command) => cmd_impl::log::run(context, command).await?,
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?
         }

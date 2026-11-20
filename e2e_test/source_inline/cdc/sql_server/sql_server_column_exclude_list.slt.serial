@@ -1,0 +1,62 @@
+control substitution on
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('excl_db') IS NOT NULL BEGIN ALTER DATABASE excl_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE excl_db; END; CREATE DATABASE excl_db;" -b
+
+system ok
+sqlcmd -C -d excl_db -i e2e_test/source_inline/cdc/sql_server/sql_server_column_exclude_list_prepare.sql -b
+
+statement ok
+create source mssql_excl_source with (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'excl_db',
+);
+
+statement error primary key columns cannot be excluded by `column.exclude.list`: id
+create table rw_excl_tbl (*) with (column.exclude.list = 'id, payload')
+from mssql_excl_source table 'excl_db.dbo.excl_tbl';
+
+# Excluding only one column of a composite primary key is refused too.
+statement error primary key columns cannot be excluded by `column.exclude.list`: id2
+create table rw_excl_tbl_pk2 (*) with (column.exclude.list = 'id2')
+from mssql_excl_source table 'excl_db.dbo.excl_tbl_pk2';
+
+statement error `column.exclude.list` must list at least one column
+create table rw_excl_tbl (*) with (column.exclude.list = ' , , ')
+from mssql_excl_source table 'excl_db.dbo.excl_tbl';
+
+statement error columns in `column.exclude.list` do not exist in the upstream table: nope
+create table rw_excl_tbl (*) with (column.exclude.list = 'payload, nope')
+from mssql_excl_source table 'excl_db.dbo.excl_tbl';
+
+statement error `column.exclude.list` requires the `\(\*\)` wildcard
+create table rw_excl_tbl (id int primary key, name varchar) with (column.exclude.list = 'payload')
+from mssql_excl_source table 'excl_db.dbo.excl_tbl';
+
+statement ok
+create table rw_excl_tbl (*) with (column.exclude.list = 'payload, raw_data')
+from mssql_excl_source table 'excl_db.dbo.excl_tbl';
+
+query IT retry 10 backoff 1s
+select * from rw_excl_tbl order by id;
+----
+1 a
+
+statement error column "payload" of table "rw_excl_tbl" is listed in `column.exclude.list`
+alter table rw_excl_tbl add column payload varchar;
+
+system ok
+sqlcmd -C -d excl_db -Q "INSERT INTO excl_tbl VALUES (2, 'b', 'big2', 'raw2');" -b
+
+query IT retry 10 backoff 1s
+select * from rw_excl_tbl order by id;
+----
+1 a
+2 b
+
+statement ok
+drop source mssql_excl_source cascade;

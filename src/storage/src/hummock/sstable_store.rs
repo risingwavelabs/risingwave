@@ -247,7 +247,7 @@ pub struct SstableStoreConfig {
 }
 
 pub struct SstableStore {
-    path: String,
+    path: Arc<str>,
     store: ObjectStoreRef,
 
     meta_cache: HybridCache<HummockSstableObjectId, SstableMetaCacheValue>,
@@ -284,7 +284,7 @@ impl SstableStore {
         // error until first write attempt.
 
         Self {
-            path: config.path,
+            path: config.path.into(),
             store: config.store,
 
             meta_cache: config.meta_cache,
@@ -337,7 +337,7 @@ impl SstableStore {
             .map_err(HummockError::foyer_error)?;
 
         Ok(Self {
-            path,
+            path: path.into(),
             store,
 
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
@@ -526,7 +526,7 @@ impl SstableStore {
         let store = self.store.clone();
 
         let file_size = sst.meta.estimated_size;
-        let data_path = Arc::new(self.get_sst_data_path(object_id));
+        let data_path = self.get_sst_data_path(object_id);
 
         let disable_cache: fn() -> bool = || {
             fail_point!("disable_block_cache", |_| true);
@@ -717,11 +717,25 @@ impl SstableStore {
     }
 
     pub fn get_object_data_path(&self, object_id: HummockObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(
-            object_id.as_raw().as_raw_id(),
+        Self::build_object_data_path(
+            &self.store,
+            &self.path,
             self.use_new_object_prefix_strategy,
+            object_id,
+        )
+    }
+
+    fn build_object_data_path(
+        store: &ObjectStoreRef,
+        directory: &str,
+        use_new_object_prefix_strategy: bool,
+        object_id: HummockObjectId,
+    ) -> String {
+        let prefix = store.get_object_prefix(
+            object_id.as_raw().as_raw_id(),
+            use_new_object_prefix_strategy,
         );
-        risingwave_hummock_sdk::get_object_data_path(&obj_prefix, &self.path, object_id)
+        risingwave_hummock_sdk::get_object_data_path(&prefix, directory, object_id)
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
@@ -766,12 +780,19 @@ impl SstableStore {
     ) -> HummockResult<TableHolder> {
         let object_id = sstable_info_ref.object_id;
         let store = self.store.clone();
-        let meta_path = self.get_sst_data_path(object_id);
+        let directory = self.path.clone();
+        let use_new_prefix = self.use_new_object_prefix_strategy;
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
         let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
 
         let fetch = self.meta_cache.get_or_fetch(&object_id, || async move {
+            let meta_path = Self::build_object_data_path(
+                &store,
+                &directory,
+                use_new_prefix,
+                HummockObjectId::Sstable(object_id),
+            );
             let now = Instant::now();
             let buf = store
                 .read(&meta_path, range)
@@ -799,11 +820,9 @@ impl SstableStore {
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
-        start_after: Option<String>,
-        limit: Option<usize>,
     ) -> HummockResult<ObjectMetadataIter> {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
-        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
+        let raw_iter = self.store.list(&list_path).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", SST_OBJECT_SUFFIX))),
             Err(_) => future::ready(true),

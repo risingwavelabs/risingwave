@@ -2,9 +2,13 @@ FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
 
+# Require Ubuntu's CVE-2026-114938 fix while allowing newer security updates.
+# https://ubuntu.com/security/notices/USN-9156-1
 RUN apt-get update \
   && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-21-jdk software-properties-common \
-    python3.12 python3.12-dev openssl pkg-config curl git libblas-dev liblapack-dev libomp-dev
+    python3.12 python3.12-dev openssl pkg-config curl git libblas-dev liblapack-dev libomp-dev \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' openjdk-21-jre-headless)" ge '21.0.13.1+2-1~24.04.1' \
+  && java -version
 
 FROM base AS rust-base
 
@@ -123,7 +127,7 @@ RUN ./build-debezium.sh && \
   mkdir -p /risingwave/bin/connector-node && \
   tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
-FROM base AS risingwave
+FROM base AS risingwave-nodwp
 
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
@@ -141,7 +145,6 @@ RUN rustup show && sed -i '1s/^/default_toolchain = "stable"\n/' ~/.rustup/setti
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
@@ -161,3 +164,7 @@ ENV LD_LIBRARY_PATH /risingwave/lib/adbc:${LD_LIBRARY_PATH}
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "single_node" ]
+
+FROM risingwave-nodwp AS risingwave
+
+COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp

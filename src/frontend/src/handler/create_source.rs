@@ -53,9 +53,10 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CdcSourceDdlValidator, CdcSourceRuntimeFlags,
+    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY,
+    CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CdcSourceDdlValidator, CdcSourceRuntimeFlags,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -73,12 +74,12 @@ use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, dispatch_c
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
-use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
+use risingwave_pb::plan_common::source_ingest_mode::{IngestMode, SourceIngestModeStreaming};
+use risingwave_pb::plan_common::{EncodeType, FormatType, SourceIngestMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
     ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
@@ -112,7 +113,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options, resolve_source_refresh_mode_in_with_option,
+    resolve_secret_ref_in_with_options, resolve_source_ingest_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -143,8 +144,8 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
 fn try_consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Option<AstString> {
-    format_encode_options.remove(key).map(AstString)
+) -> Option<String> {
+    format_encode_options.remove(key)
 }
 
 fn try_consume_schema_registry_config_from_options(
@@ -185,7 +186,7 @@ fn try_consume_pulsar_schema_config_from_options(
 fn consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Result<AstString> {
+) -> Result<String> {
     try_consume_string_from_options(format_encode_options, key).ok_or(RwError::from(ProtocolError(
         format!("missing field {} in options", key),
     )))
@@ -774,7 +775,7 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<(WithOptions, SourceRefreshMode)> {
+) -> Result<(WithOptions, SourceIngestMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     // The planner and executors decide the ingestion mode from plaintext options only, while
     // connector property extraction would also read a secret value.
@@ -788,17 +789,20 @@ pub fn bind_connector_props(
                 .to_owned(),
         )));
     }
-    validate_compatibility(format_encode, &mut with_properties)?;
-    let refresh_mode = {
-        let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
-        if is_create_source && refresh_mode.is_some() {
+    let (_, secret_refs) =
+        resolve_secret_ref_in_with_options(with_properties.clone(), &handler_args.session)?
+            .into_parts();
+    validate_compatibility(format_encode, &mut with_properties, &secret_refs)?;
+    let ingest_mode = {
+        let ingest_mode = resolve_source_ingest_mode_in_with_option(&mut with_properties)?;
+        if is_create_source && ingest_mode.is_some() {
             return Err(RwError::from(ProtocolError(
                 "`refresh_mode` only supported for CREATE TABLE".to_owned(),
             )));
         }
 
-        refresh_mode.unwrap_or(SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+        ingest_mode.unwrap_or(SourceIngestMode {
+            ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
         })
     };
 
@@ -812,7 +816,36 @@ pub fn bind_connector_props(
             with_properties.get_connector().unwrap(),
         ))));
     }
-    if is_create_source && create_cdc_source_job {
+    if with_properties.is_cdc_connector() {
+        if with_properties.contains_key(CDC_TRANSACTIONAL_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_TRANSACTIONAL_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave enables transaction metadata itself for the connectors that support it",
+                CDC_TRANSACTIONAL_KEY
+            ))));
+        }
+        if with_properties.contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave sets it itself for the connectors that commit offsets to the upstream database",
+                CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY
+            ))));
+        }
+        if with_properties
+            .secret_ref()
+            .contains_key(AUTO_SCHEMA_CHANGE_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "'{}' cannot be provided as a SECRET; use a plaintext 'true' or 'false'",
+                AUTO_SCHEMA_CHANGE_KEY
+            ))));
+        }
         if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
             && value.parse::<bool>().map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
@@ -821,9 +854,28 @@ pub fn bind_connector_props(
                 ))
             })?
         {
+            if !dispatch_cdc_source_type!(
+                with_properties.cdc_source_type(),
+                T,
+                T::CAN_AUTO_SCHEMA_CHANGE,
+                false
+            ) {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "auto schema change for connector {}",
+                        with_properties.get_connector().unwrap()
+                    ),
+                    format!(
+                        "Remove the '{}' option or set it to false",
+                        AUTO_SCHEMA_CHANGE_KEY
+                    ),
+                )
+                .into());
+            }
             Feature::CdcAutoSchemaChange.check_available()?;
         }
-
+    }
+    if is_create_source && create_cdc_source_job {
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
@@ -844,7 +896,7 @@ pub fn bind_connector_props(
             );
         }
     }
-    Ok((with_properties, refresh_mode))
+    Ok((with_properties, ingest_mode))
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -923,7 +975,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-    refresh_mode: SourceRefreshMode,
+    ingest_mode: SourceIngestMode,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -1186,7 +1238,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        refresh_mode: Some(refresh_mode),
+        ingest_mode: Some(ingest_mode),
     };
     source.validate_iceberg_update_source()?;
     Ok(source)
@@ -1244,8 +1296,7 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, ingest_mode) = bind_connector_props(&handler_args, &format_encode, true)?;
     if let Some(connector) = with_properties.get_connector() {
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
@@ -1292,7 +1343,7 @@ pub async fn handle_create_source(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
@@ -1427,7 +1478,9 @@ async fn handle_create_cdc_table_source(
         cdc_table_info.external_table_name.clone(),
     )?;
     let (mut columns, pk_names, pk_comparisons) = match stmt.wildcard_idx {
-        Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+        Some(_) => {
+            bind_cdc_table_schema_externally(cdc_with_options.clone(), &HashSet::new()).await?
+        }
         None => {
             let (columns, pk_names) =
                 bind_cdc_table_schema(&stmt.columns, &stmt.constraints, false)?;
@@ -1542,7 +1595,7 @@ async fn handle_create_cdc_table_source(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: None,
-        refresh_mode: upstream_source.refresh_mode,
+        ingest_mode: upstream_source.ingest_mode,
     };
 
     session

@@ -142,13 +142,19 @@ impl ApplyEliminateRule {
 
     /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to
     /// `LogicalApply`'s left and right.
+    ///
+    /// v1 and v2 must have the same type, because the right column replaces the left one in the
+    /// output. `=` alone doesn't ensure that: it also compares integers of different widths, e.g.
+    /// `int4 = int8`.
     fn check(func_call: &FunctionCall, apply_left_len: usize) -> Option<(usize, usize, DataType)> {
         let inputs = func_call.inputs();
         if func_call.func_type() == ExprType::Equal && inputs.len() == 2 {
             let left = &inputs[0];
             let right = &inputs[1];
             match (left, right) {
-                (ExprImpl::InputRef(left), ExprImpl::InputRef(right)) => {
+                (ExprImpl::InputRef(left), ExprImpl::InputRef(right))
+                    if left.return_type() == right.return_type() =>
+                {
                     let left_type = left.return_type();
                     let left = left.index();
                     let right_type = right.return_type();

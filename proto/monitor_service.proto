@@ -5,6 +5,24 @@ package monitor_service;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+// Controls the process-wide stdout/stderr filter. Query-log files and tracing
+// exporters keep their own filters. Overrides are lost when the process restarts.
+message SetLogFilterRequest {
+  // Same target/level syntax as RUST_LOG. Omit to restore the startup filter.
+  // Each update replaces startup RUST_LOG and previous runtime directives,
+  // applying the new directives on top of built-in defaults and logger settings.
+  optional string filter = 1;
+}
+
+message GetLogFilterRequest {}
+
+message LogFilterState {
+  // Effective startup filter, restored by reset.
+  string startup_filter = 1;
+  // Effective filter currently applied to stdout/stderr.
+  string current_filter = 2;
+}
+
 message StackTraceRequest {
   enum ActorTracesFormat {
     UNSPECIFIED = 0;
@@ -146,6 +164,8 @@ message GetTableCacheRefillStatsResponse {
 }
 
 service MonitorService {
+  rpc SetLogFilter(SetLogFilterRequest) returns (LogFilterState);
+  rpc GetLogFilter(GetLogFilterRequest) returns (LogFilterState);
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
