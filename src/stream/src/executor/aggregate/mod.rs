@@ -18,7 +18,11 @@ use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::aggregate::{
+    AggCall, AggType, BoxedAggregateFunction, PbAggKind, agg_types, build_list_state,
+    build_retractable,
+};
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
@@ -107,6 +111,31 @@ async fn agg_call_filter_res(
     }
 
     Ok(vis)
+}
+
+/// Whether a value-state `call` runs through `ListStateAgg`, which takes the unprojected chunk.
+/// The planner only picks a value state for these kinds under
+/// `streaming_enable_value_state_array_agg`.
+fn is_list_value_state(call: &AggCall) -> bool {
+    matches!(call.agg_type, agg_types::list_value_state!())
+}
+
+fn build_agg_funcs<S: StateStore>(
+    agg_calls: &[AggCall],
+    storages: &[AggStateStorage<S>],
+) -> StreamExecutorResult<Vec<BoxedAggregateFunction>> {
+    agg_calls
+        .iter()
+        .zip_eq_fast(storages)
+        .map(|(call, storage)| {
+            if matches!(storage, AggStateStorage::Value) && is_list_value_state(call) {
+                build_list_state(call)
+            } else {
+                build_retractable(call)
+            }
+        })
+        .collect::<Result<_, _>>()
+        .map_err(Into::into)
 }
 
 fn iter_table_storage<S>(

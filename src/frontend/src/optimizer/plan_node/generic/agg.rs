@@ -22,7 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types, list_state_type};
 use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncBuilder};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{AggCallState as PbAggCallState, agg_call_state};
@@ -111,6 +111,16 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 
     pub fn two_phase_agg_enabled(&self) -> bool {
         self.enable_two_phase
+    }
+
+    /// Whether `agg_call` uses a value state (see `streaming_enable_value_state_array_agg`).
+    fn use_list_value_state(&self, agg_call: &PlanAggCall) -> bool {
+        matches!(agg_call.agg_type, agg_types::list_value_state!())
+            && self
+                .ctx()
+                .session_ctx()
+                .config()
+                .streaming_enable_value_state_array_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
@@ -462,6 +472,9 @@ impl Agg<StreamPlanRef> {
                     AggCallState::Value
                 }
                 agg_types::single_value_state!() => AggCallState::Value,
+                agg_types::list_value_state!() if self.use_list_value_state(agg_call) => {
+                    AggCallState::Value
+                }
                 agg_types::materialized_input_state!() => {
                     // columns with order requirement in state table
                     let sort_keys = {
@@ -578,6 +591,16 @@ impl Agg<StreamPlanRef> {
             .iter()
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
+            if self.use_list_value_state(agg_call) {
+                field.data_type = list_state_type(
+                    &agg_call
+                        .inputs
+                        .iter()
+                        .map(|input| input.data_type.clone())
+                        .collect_vec(),
+                );
+                continue;
+            }
             let agg_kind = match agg_call.agg_type {
                 AggType::UserDefined(_) => {
                     // for user defined aggregate, the state type is always BYTEA

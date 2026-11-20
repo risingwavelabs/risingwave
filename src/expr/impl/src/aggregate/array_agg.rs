@@ -53,7 +53,7 @@ mod tests {
     use risingwave_common::array::{ListValue, StreamChunk};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_expr::Result;
-    use risingwave_expr::aggregate::{AggCall, build_append_only};
+    use risingwave_expr::aggregate::{AggCall, build_append_only, build_list_state};
 
     #[tokio::test]
     async fn test_array_agg_basic() -> Result<()> {
@@ -86,6 +86,103 @@ mod tests {
         assert_eq!(
             array_agg.get_result(&state).await?,
             Some(ListValue::from_iter([None::<i32>]).into())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_array_agg_list_state_unordered() -> Result<()> {
+        let agg = build_list_state(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        let mut state = agg.create_state()?;
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " i
+                + 1
+                + .
+                + 2
+                + 1",
+            ),
+        )
+        .await?;
+        assert_eq!(
+            agg.get_result(&state).await?,
+            Some(ListValue::from_iter([Some(1), None, Some(2), Some(1)]).into())
+        );
+        // retract removes the first match; a never-inserted row is ignored
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " i
+                - 1
+                - .
+                - 9",
+            ),
+        )
+        .await?;
+        assert_eq!(
+            agg.get_result(&state).await?,
+            Some(ListValue::from_iter([2, 1]).into())
+        );
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " i
+                - 2
+                - 1",
+            ),
+        )
+        .await?;
+        assert_eq!(agg.get_result(&state).await?, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_array_agg_list_state_ordered() -> Result<()> {
+        // array_agg(value order by k1 asc, k2 desc) where value=$0, k1=$1, k2=$2
+        let agg = build_list_state(&AggCall::from_pretty(
+            "(array_agg:int4[] $0:int4 orderby $1:asc $2:desc)",
+        ))?;
+        let mut state = agg.create_state()?;
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " i i i
+                + 1 2 1
+                + 2 1 1
+                + 3 2 5
+                + 4 . 1
+                + 5 1 1",
+            ),
+        )
+        .await?;
+        // k1 asc with nulls last by default, ties keep arrival order
+        assert_eq!(
+            agg.get_result(&state).await?,
+            Some(ListValue::from_iter([2, 5, 3, 1, 4]).into())
+        );
+
+        // encode/decode roundtrip keeps the sorted state
+        let encoded = agg.encode_state(&state)?;
+        let mut state = agg.decode_state(encoded)?;
+        assert_eq!(
+            agg.get_result(&state).await?,
+            Some(ListValue::from_iter([2, 5, 3, 1, 4]).into())
+        );
+
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " i i i
+                - 3 2 5
+                U- 2 1 1
+                U+ 2 3 1",
+            ),
+        )
+        .await?;
+        assert_eq!(
+            agg.get_result(&state).await?,
+            Some(ListValue::from_iter([5, 1, 2, 4]).into())
         );
         Ok(())
     }

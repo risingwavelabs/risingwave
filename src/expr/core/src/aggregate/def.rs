@@ -483,6 +483,16 @@ pub mod agg_types {
     }
     pub use materialized_input_state;
 
+    /// [`AggType`](super::AggType)s in [`materialized_input_state`] that can alternatively run on
+    /// a value state through `ListStateAgg`, when `streaming_enable_value_state_array_agg` is set.
+    #[macro_export]
+    macro_rules! list_value_state {
+        () => {
+            AggType::Builtin(PbAggKind::ArrayAgg | PbAggKind::StringAgg)
+        };
+    }
+    pub use list_value_state;
+
     /// Ordered-set aggregate functions.
     #[macro_export]
     macro_rules! ordered_set {
