@@ -93,6 +93,12 @@ pub trait ObjectStore: Send + Sync {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader>;
 
+    /// Local uploads whose caller retains physical execution through completion. FS avoids
+    /// cancellable I/O wrappers and background position writes so failure cleanup is ordered.
+    async fn streaming_upload_owned(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        self.streaming_upload(path).await
+    }
+
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
@@ -109,6 +115,12 @@ pub trait ObjectStore: Send + Sync {
 
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
+
+    /// Available bytes on the underlying filesystem, or None for non-local stores.
+    /// This is an advisory space check, not a reservation or a per-store quota.
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        Ok(None)
+    }
 
     /// Deletes blob permanently.
     async fn delete(&self, path: &str) -> ObjectResult<()>;
@@ -302,12 +314,25 @@ impl ObjectStoreImpl {
         }))
     }
 
+    pub async fn streaming_upload_owned(
+        &self,
+        path: &str,
+    ) -> ObjectResult<ObjectStreamingUploader> {
+        Ok(enum_map!(self, |store| {
+            store.streaming_upload_owned(path).await?
+        }))
+    }
+
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         object_store_impl_method_body!(self, read(path, range).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         object_store_impl_method_body!(self, metadata(path).await)
+    }
+
+    pub async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        object_store_impl_method_body!(self, available_space().await)
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -331,7 +356,19 @@ impl ObjectStoreImpl {
     /// If a hybrid storage is used, the method will first attempt to delete objects in local
     /// storage. Only if that is successful, it will remove objects from remote storage.
     pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, delete_objects(paths).await)
+        object_store_impl_method_body!(
+            self,
+            delete_objects(paths, OperationType::DeleteObjects).await
+        )
+    }
+
+    /// Deletes without an attempt timeout so submitted FS unlinks settle before returning.
+    /// The caller must drive this future to completion.
+    pub async fn delete_objects_owned(&self, paths: &[String]) -> ObjectResult<()> {
+        object_store_impl_method_body!(
+            self,
+            delete_objects(paths, OperationType::DeleteObjectsOwned).await
+        )
     }
 
     pub async fn list(
@@ -560,6 +597,10 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - start `operation_latency` timer
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
+    pub async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        self.inner.available_space().await
+    }
+
     pub fn new(
         store: OS,
         object_store_metrics: Arc<ObjectStoreMetrics>,
@@ -626,6 +667,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         &self,
         path: &str,
     ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
+        self.streaming_upload_mode(path, false).await
+    }
+
+    pub async fn streaming_upload_owned(
+        &self,
+        path: &str,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
+        self.streaming_upload_mode(path, true).await
+    }
+
+    async fn streaming_upload_mode(
+        &self,
+        path: &str,
+        owned: bool,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
         let operation_type = OperationType::StreamingUploadInit;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
@@ -635,11 +691,15 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
-        let res = self
-            .inner
-            .streaming_upload(path)
-            .instrument_await(operation_type_str.verbose())
-            .await;
+        let res = async {
+            if owned {
+                self.inner.streaming_upload_owned(path).await
+            } else {
+                self.inner.streaming_upload(path).await
+            }
+        }
+        .instrument_await(operation_type_str.verbose())
+        .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
@@ -803,8 +863,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        let operation_type = OperationType::DeleteObjects;
+    async fn delete_objects(
+        &self,
+        paths: &[String],
+        operation_type: OperationType,
+    ) -> ObjectResult<()> {
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
 
@@ -1171,6 +1234,66 @@ mod tests {
         assert_eq!(&rest, b"defg");
     }
 
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_owned_delete_waits_for_submitted_unlink_past_attempt_timeout() {
+        use std::cell::Cell;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use risingwave_common::config::ObjectStoreConfig;
+        use tokio::sync::oneshot;
+
+        use super::{ObjectStoreMetrics, OperationType, retry_request};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1001.sst");
+        std::fs::write(&path, b"old cache file").unwrap();
+        let (started_tx, started) = oneshot::channel();
+        let (resume, resume_rx) = oneshot::channel();
+        let unlink = Cell::new(Some((started_tx, resume_rx)));
+        let mut config = ObjectStoreConfig::default();
+        config.retry.delete_objects_attempt_timeout_ms = 10;
+        config.retry.delete_objects_retry_attempts = 0;
+
+        let delete = retry_request(
+            || {
+                let (started, resume) = unlink.take().unwrap();
+                let path = path.clone();
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        started.send(()).unwrap();
+                        // Wait inside the submitted blocking task, before the pathname is used.
+                        if resume.blocking_recv().is_ok() {
+                            std::fs::remove_file(path).unwrap();
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    Ok(())
+                }
+            },
+            &config,
+            OperationType::DeleteObjectsOwned,
+            Arc::new(ObjectStoreMetrics::unused()),
+            "fs",
+        );
+        tokio::pin!(delete);
+        tokio::select! {
+            biased;
+            _ = &mut delete => panic!("delete returned before its submitted unlink completed"),
+            () = async {
+                started.await.unwrap();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            } => {}
+        }
+
+        assert!(path.exists());
+        resume.send(()).unwrap();
+        delete.await.unwrap();
+        assert!(!path.exists());
+    }
+
     #[tokio::test]
     async fn test_object_data_stream_reader_returns_stream_error() {
         let stream = stream::iter([
@@ -1197,6 +1320,7 @@ enum OperationType {
     Metadata,
     Delete,
     DeleteObjects,
+    DeleteObjectsOwned,
     List,
 }
 
@@ -1212,7 +1336,7 @@ impl OperationType {
             Self::StreamingRead => "streaming_read",
             Self::Metadata => "metadata",
             Self::Delete => "delete",
-            Self::DeleteObjects => "delete_objects",
+            Self::DeleteObjects | Self::DeleteObjectsOwned => "delete_objects",
             Self::List => "list",
         }
     }
@@ -1230,7 +1354,9 @@ fn get_retry_attempts_by_type(config: &ObjectStoreConfig, operation_type: Operat
         }
         OperationType::Metadata => config.retry.metadata_retry_attempts,
         OperationType::Delete => config.retry.delete_retry_attempts,
-        OperationType::DeleteObjects => config.retry.delete_objects_retry_attempts,
+        OperationType::DeleteObjects | OperationType::DeleteObjectsOwned => {
+            config.retry.delete_objects_retry_attempts
+        }
         OperationType::List => config.retry.list_retry_attempts,
     }
 }
@@ -1248,6 +1374,7 @@ fn get_attempt_timeout_by_type(config: &ObjectStoreConfig, operation_type: Opera
         OperationType::Metadata => config.retry.metadata_attempt_timeout_ms,
         OperationType::Delete => config.retry.delete_attempt_timeout_ms,
         OperationType::DeleteObjects => config.retry.delete_objects_attempt_timeout_ms,
+        OperationType::DeleteObjectsOwned => 0,
         OperationType::List => config.retry.list_attempt_timeout_ms,
     }
 }

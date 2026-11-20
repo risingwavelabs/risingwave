@@ -15565,6 +15565,7 @@ dependencies = [
  "bytes",
  "crc32fast",
  "fail",
+ "fs4",
  "futures",
  "futures-async-stream",
  "itertools 0.14.0",
