@@ -42,6 +42,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
+use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::progress::{BackfillState, TableChangeLogProgress};
 use crate::task::{
@@ -86,9 +87,8 @@ use risingwave_common::must_match;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::{InjectBarrierRequest, PbIcebergPkIndexSinkRole};
 
-use crate::executor::exchange::permit;
+use crate::task::barrier_worker::ScoredStreamError;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
-use crate::task::barrier_worker::{ScoredStreamError, TakeReceiverRequest};
 use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
@@ -460,7 +460,7 @@ pub(crate) struct ResetPartialGraphOutput {
 }
 
 pub(in crate::task) enum PartialGraphStatus {
-    ReceivedExchangeRequest(Vec<(String, UpDownActorIds, TakeReceiverRequest)>),
+    ReceivedExchangeRequest(Vec<(String, UpDownActorIds, NewOutputRequest)>),
     Running(PartialGraphState),
     Suspended(SuspendedPartialGraphState),
     Resetting,
@@ -473,9 +473,7 @@ impl PartialGraphStatus {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, _, request) in pending_requests.drain(..) {
-                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
-                        let _ = result_sender.send(Err(anyhow!("partial graph aborted").into()));
-                    }
+                    request.reject(anyhow!("partial graph aborted").into());
                 }
             }
             PartialGraphStatus::Running(state) => {
@@ -544,9 +542,7 @@ impl PartialGraphStatus {
         match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, _, request) in pending_requests {
-                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
-                        let _ = result_sender.send(Err(anyhow!("partial graph reset").into()));
-                    }
+                    request.reject(anyhow!("partial graph reset").into());
                 }
                 async move { ResetPartialGraphOutput { root_err: None } }.boxed()
             }
@@ -608,7 +604,7 @@ pub(super) enum ManagedBarrierStateEvent {
         upstream_actor_id: ActorId,
         upstream_partial_graph_id: PartialGraphId,
         term_id: String,
-        tx: permit::Sender,
+        result_sender: tokio::sync::oneshot::Sender<StreamResult<Receiver>>,
     },
 }
 
@@ -864,32 +860,8 @@ impl PartialGraphState {
         &mut self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
-        request: TakeReceiverRequest,
+        request: NewOutputRequest,
     ) {
-        let request = match request {
-            TakeReceiverRequest::Remote {
-                result_sender,
-                upstream_fragment_id,
-            } => {
-                let upstream_fragment_id_str = upstream_fragment_id.to_string();
-                let fragment_channel_buffered_bytes = self
-                    .actor_manager
-                    .streaming_metrics
-                    .fragment_channel_buffered_bytes
-                    .with_guarded_label_values(&[&upstream_fragment_id_str]);
-                let (tx, rx) = permit::channel_from_config_with_metrics(
-                    self.local_barrier_manager.env.global_config(),
-                    permit::ChannelMetrics {
-                        sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes
-                            .clone(),
-                        receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
-                    },
-                );
-                let _ = result_sender.send(Ok(rx));
-                NewOutputRequest::Remote(tx)
-            }
-            TakeReceiverRequest::Local(tx) => NewOutputRequest::Local(tx),
-        };
         if let Some(actor) = self.actor_states.get_mut(&upstream_actor_id) {
             let _ = actor.new_output_request_tx.send((actor_id, request));
         } else {
@@ -993,14 +965,14 @@ impl PartialGraphState {
                     upstream_actor_id,
                     upstream_partial_graph_id,
                     term_id,
-                    tx,
+                    result_sender,
                 } => {
                     return Poll::Ready(ManagedBarrierStateEvent::RegisterLocalUpstreamOutput {
                         actor_id,
                         upstream_actor_id,
                         upstream_partial_graph_id,
                         term_id,
-                        tx,
+                        result_sender,
                     });
                 }
                 LocalBarrierEvent::ReportCdcTableBackfillProgress {

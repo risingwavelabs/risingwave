@@ -15,20 +15,17 @@
 pub mod cdc_progress;
 pub mod progress;
 
-use std::sync::Arc;
-
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::{mpsc, oneshot};
 
-use crate::error::{IntoUnexpectedExit, StreamError};
+use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::executor::exchange::permit;
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
 use crate::task::cdc_progress::CdcTableBackfillState;
@@ -78,7 +75,7 @@ pub(super) enum LocalBarrierEvent {
         upstream_actor_id: ActorId,
         upstream_partial_graph_id: PartialGraphId,
         term_id: String,
-        tx: permit::Sender,
+        result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
     },
     ReportCdcTableBackfillProgress {
         actor_id: ActorId,
@@ -173,29 +170,17 @@ impl LocalBarrierManager {
         &self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
-        upstream_fragment_id: FragmentId,
         upstream_partial_graph_id: PartialGraphId,
-        metrics: Arc<StreamingMetrics>,
-    ) -> permit::Receiver {
-        let upstream_fragment_id_str = upstream_fragment_id.to_string();
-        let fragment_channel_buffered_bytes = metrics
-            .fragment_channel_buffered_bytes
-            .with_guarded_label_values(&[&upstream_fragment_id_str]);
-        let (tx, rx) = permit::channel_from_config_with_metrics(
-            self.env.global_config(),
-            permit::ChannelMetrics {
-                sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes.clone(),
-                receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
-            },
-        );
+    ) -> oneshot::Receiver<StreamResult<permit::Receiver>> {
+        let (result_sender, result_receiver) = oneshot::channel();
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,
             upstream_partial_graph_id,
             term_id: self.term_id.clone(),
-            tx,
+            result_sender,
         });
-        rx
+        result_receiver
     }
 
     pub fn report_source_list_finished(
