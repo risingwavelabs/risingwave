@@ -129,6 +129,8 @@ struct ReadWake {
     start: Instant,
     first: AtomicU64,
     target: AtomicWaker,
+    #[cfg(not(madsim))]
+    owner: tokio::runtime::Id,
 }
 
 impl Wake for ReadWake {
@@ -137,10 +139,20 @@ impl Wake for ReadWake {
     }
 
     fn wake_by_ref(self: &Arc<Self>) {
+        #[cfg(not(madsim))]
+        let source = match tokio::runtime::Handle::try_current() {
+            Ok(h) if h.id() == self.owner => 0,
+            Ok(_) => 1,
+            Err(_) => 2,
+        };
+        #[cfg(madsim)]
+        let source = 2;
         let ns = self.start.elapsed().as_nanos() as u64 + 1;
+        // Record time and origin of the same first notification in one atomic update.
+        let stamp = (ns << 2) | source;
         let _ = self
             .first
-            .compare_exchange(0, ns, Ordering::Relaxed, Ordering::Relaxed);
+            .compare_exchange(0, stamp, Ordering::Relaxed, Ordering::Relaxed);
         self.target.wake();
     }
 }
@@ -153,22 +165,25 @@ pub(super) async fn measure<T, E>(read: impl Future<Output = Result<T, E>>) -> R
             start,
             first: AtomicU64::new(0),
             target: AtomicWaker::new(),
+            #[cfg(not(madsim))]
+            owner: tokio::runtime::Handle::current().id(),
         });
         let waker = Waker::from(signal.clone());
         let mut previous = start;
         let mut wake_head = Duration::ZERO;
-        let mut wake_body = Duration::ZERO;
+        let mut body_waits = [Duration::ZERO; 3];
         tokio::pin!(read);
         let result = poll_fn(|cx| {
             signal.target.register(cx.waker());
-            let ns = signal.first.swap(0, Ordering::Relaxed);
+            let stamp = signal.first.swap(0, Ordering::Relaxed);
             let now = Instant::now();
-            if ns != 0 {
+            if stamp != 0 {
+                let ns = stamp >> 2;
                 let from = (start + Duration::from_nanos(ns - 1)).max(previous);
                 let t = HTTP.with(Cell::get);
                 if t.collected.is_none() {
                     if t.headers.is_some() {
-                        wake_body += now.saturating_duration_since(from);
+                        body_waits[(stamp & 3) as usize] += now.saturating_duration_since(from);
                     } else if t.sent.is_some() {
                         wake_head += now.saturating_duration_since(from);
                     }
@@ -191,7 +206,10 @@ pub(super) async fn measure<T, E>(read: impl Future<Output = Result<T, E>>) -> R
                     ("body", collected - headers),
                     ("other", (sent - start) + (end - collected)),
                     ("wake_headers", wake_head),
-                    ("wake_body", wake_body),
+                    ("wake_body", body_waits.iter().sum()),
+                    ("wake_body_same_runtime", body_waits[0]),
+                    ("wake_body_other_runtime", body_waits[1]),
+                    ("wake_body_outside_runtime", body_waits[2]),
                 ] {
                     TIMES
                         .with_label_values(&[phase])

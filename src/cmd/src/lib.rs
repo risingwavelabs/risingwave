@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![recursion_limit = "256"]
+
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
