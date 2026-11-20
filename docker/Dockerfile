@@ -12,7 +12,7 @@ RUN apt-get update \
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync util-linux
 
 SHELL ["/bin/bash", "-c"]
 
@@ -92,8 +92,7 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
-RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
+RUN bash docker/build-with-dashboard.sh -p risingwave_cmd_all --profile "${CARGO_PROFILE}" --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
