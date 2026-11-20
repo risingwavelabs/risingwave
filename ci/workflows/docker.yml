@@ -32,6 +32,15 @@ steps:
             DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
+  - label: "thinlto-profile: amd64"
+    if: build.env("AD_HOC") == "true" && build.env("PROFILE_THINLTO") == "true"
+    command: "bash ci/scripts/profile-thinlto.sh"
+    timeout_in_minutes: 100
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            DOCKER_TOKEN: docker-token
+
   - label: "docker-build-push: amd64"
     if: |
       build.env("AD_HOC") != "true" &&

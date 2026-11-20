@@ -92,7 +92,8 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
-RUN bash docker/build-with-dashboard.sh -p risingwave_cmd_all --profile "${CARGO_PROFILE}" --features "rw-static-link" --features udf --features datafusion && \
+RUN RUSTC_WRAPPER=/risingwave/ci/scripts/profile-thinlto-rustc.py \
+  bash docker/build-with-dashboard.sh -p risingwave_cmd_all --profile "${CARGO_PROFILE}" --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
@@ -173,6 +174,10 @@ ENV LD_LIBRARY_PATH=/risingwave/lib/adbc
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "single_node" ]
+
+FROM scratch AS thinlto-profile
+
+COPY --from=rust-builder /risingwave/bin/thinlto-profile/ /
 
 FROM risingwave-nodwp AS risingwave
 
