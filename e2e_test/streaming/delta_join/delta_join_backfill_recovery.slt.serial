@@ -47,6 +47,16 @@ set background_ddl = false;
 statement ok
 set rw_streaming_enable_delta_join = false;
 
+statement ok
+set backfill_rate_limit = default;
+
+# Let the backfill emit part of `l`, then pause it until after the recovery, so that the changes
+# below and the recovery happen in the middle of the backfill.
+sleep 2s
+
+statement ok
+alter materialized view v set backfill_rate_limit = 0;
+
 # These changes are made while the backfill of `l` is in progress, and match rows of `l` both
 # before and after the backfill position.
 
@@ -63,7 +73,6 @@ statement ok
 update r set v = v - 1 where k % 5 = 0;
 
 # Recover in the middle of the backfill. The lookups must restore which rows they can see.
-# The backfill is still in progress when recovering.
 query I
 select count(*) from rw_ddl_progress;
 ----
@@ -77,6 +86,9 @@ insert into r select g, -g from generate_series(4001, 4500) g;
 
 statement ok
 insert into l select g, g from generate_series(4001, 4500) g;
+
+statement ok
+alter materialized view v set backfill_rate_limit = default;
 
 statement ok
 wait;
