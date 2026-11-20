@@ -27,13 +27,10 @@ cd e2e_test/udf/remote_java
 "${MVN_CMD[@]}" -B package
 cd ../../..
 
-echo "--- Build rust binary for java binding integration test"
-cargo build -p risingwave_java_binding --bin data-chunk-payload-generator --bin data-chunk-payload-convert-generator
-
 echo "--- Create package for java binding integration test"
 mkdir bin
-mv target/debug/data-chunk-payload-convert-generator bin/data-chunk-payload-convert-generator
-mv target/debug/data-chunk-payload-generator bin/data-chunk-payload-generator
+# The Maven JNI build already compiles and copies both generators.
+install -m 755 java/java-binding/target/classes/risingwave/jni/*/data-chunk-payload{,-convert}-generator bin/
 tar --zstd -cf java-binding-integration-test.tar.zst bin java/java-binding-integration-test/target/dependency java/java-binding-integration-test/target/classes
 
 echo "--- Upload built artifacts"
