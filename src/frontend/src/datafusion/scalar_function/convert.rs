@@ -223,10 +223,7 @@ fn convert_cast_func(func_call: &FunctionCall, input_columns: &impl ColumnTrait)
         .ok()?
         .data_type()
         .clone();
-    Some(DFExpr::Cast(Cast {
-        expr: Box::new(arg),
-        data_type: target_type,
-    }))
+    Some(DFExpr::Cast(Cast::new(Box::new(arg), target_type)))
 }
 
 // TODO: verify more cast safety cases
