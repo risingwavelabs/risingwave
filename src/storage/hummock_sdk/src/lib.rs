@@ -212,7 +212,14 @@ pub struct SyncResult {
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
     /// Sstable that holds the uncommitted old value
     pub old_value_ssts: Vec<LocalSstableInfo>,
-    pub vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
+    /// Changes of the indexes whose data lives in their own objects instead of SSTs.
+    pub object_index_adds: HashMap<TableId, Vec<ObjectIndexAdd>>,
+}
+
+/// Changes that the writer of an object-backed index commits in one epoch.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ObjectIndexAdd {
+    Vector(VectorIndexAdd),
 }
 
 #[derive(Debug, Clone)]
