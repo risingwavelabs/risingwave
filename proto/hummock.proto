@@ -616,6 +616,8 @@ message CompactTask {
   // The xor filter layout to use for output SSTs in this task.
   // Ignored when `sstable_filter_type` is NONE.
   SstableFilterLayout sstable_filter_layout = 31;
+  // Soft limit on the encoded footer bytes of one compaction output SST.
+  optional uint64 sst_footer_size_limit_bytes = 32;
 }
 
 message LevelHandler {
@@ -943,6 +945,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       bool reset_compression_algorithm = 34;
       SstableFilterType sstable_filter_type = 35;
       SstableFilterLayout sstable_filter_layout = 36;
+      // Soft limit on encoded compaction output footer bytes. Zero resets the limit.
+      uint64 sst_footer_size_limit_bytes = 37;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1210,6 +1214,9 @@ message CompactionConfig {
   // Note: `sstable_filter_layout[0]` is reserved for L0 and currently ignored by shared-buffer
   // flush, which always uses "auto".
   repeated string sstable_filter_layout = 35;
+  // Soft limit on the encoded footer bytes of one compaction output SST.
+  // Unset by default.
+  optional uint64 sst_footer_size_limit_bytes = 36;
 }
 
 message TableStats {
