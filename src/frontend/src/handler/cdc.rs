@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use itertools::Itertools;
@@ -23,8 +25,9 @@ use risingwave_connector::source::cdc::external::{
     TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    CdcSourceExternalTableIdentifier, MARIADB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR,
-    ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, Postgres, SQL_SERVER_CDC_CONNECTOR, SqlServer,
+    CDC_COLUMN_EXCLUDE_LIST, CdcSourceExternalTableIdentifier, MARIADB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, Postgres,
+    SQL_SERVER_CDC_CONNECTOR, SqlServer,
 };
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
@@ -408,9 +411,11 @@ pub(crate) fn sanity_check_for_table_on_cdc_source(
     Ok(())
 }
 
-/// Derive the schema of a CDC table from its upstream external table.
+/// Derive the schema of a CDC table created with `(*)` from the upstream table, leaving out the
+/// columns listed in `column.exclude.list`.
 pub(crate) async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
+    excluded_columns: &HashSet<String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>, Vec<CdcKeyComparison>)> {
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -422,19 +427,40 @@ pub(crate) async fn bind_cdc_table_schema_externally(
 
     let pk_names = table.pk_names().clone();
     let pk_comparisons = table.pk_column_comparisons(&pk_names)?;
-    Ok((
-        table
-            .column_descs()
-            .iter()
-            .cloned()
-            .map(|column_desc| ColumnCatalog {
-                column_desc,
-                is_hidden: false,
-            })
-            .collect(),
-        pk_names,
-        pk_comparisons,
-    ))
+    let column_descs = table.column_descs();
+
+    let unknown = excluded_columns
+        .iter()
+        .filter(|name| !column_descs.iter().any(|c| c.name == **name))
+        .sorted()
+        .join(", ");
+    if !unknown.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "columns in `{CDC_COLUMN_EXCLUDE_LIST}` do not exist in the upstream table: {unknown}"
+        ))
+        .into());
+    }
+    let excluded_pks = pk_names
+        .iter()
+        .filter(|name| excluded_columns.contains(*name))
+        .join(", ");
+    if !excluded_pks.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "primary key columns cannot be excluded by `{CDC_COLUMN_EXCLUDE_LIST}`: {excluded_pks}"
+        ))
+        .into());
+    }
+
+    let columns = column_descs
+        .iter()
+        .filter(|c| !excluded_columns.contains(&c.name))
+        .cloned()
+        .map(|column_desc| ColumnCatalog {
+            column_desc,
+            is_hidden: false,
+        })
+        .collect();
+    Ok((columns, pk_names, pk_comparisons))
 }
 
 pub(crate) async fn bind_cdc_pk_comparisons_externally(
