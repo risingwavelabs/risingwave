@@ -6494,12 +6494,35 @@ impl Parser<'_> {
         }
     }
 
+    /// True when the next tokens are a parenthesized query, which Postgres accepts as an
+    /// INSERT source (`INSERT INTO t (SELECT ...)`) and which must not be parsed as a column list.
+    fn parenthesized_insert_query_source(&self) -> bool {
+        if self.peek_token().token != Token::LParen {
+            return false;
+        }
+        match self.peek_nth_token(1).token {
+            Token::Word(w) => matches!(
+                w.keyword,
+                Keyword::SELECT | Keyword::VALUES | Keyword::WITH | Keyword::TABLE
+            ),
+            Token::LParen => true,
+            _ => false,
+        }
+    }
+
     /// Parse an INSERT statement
     pub fn parse_insert(&mut self) -> ModalResult<Statement> {
         self.expect_keyword(Keyword::INTO)?;
 
         let table_name = self.parse_object_name()?;
-        let columns = self.parse_parenthesized_column_list(Optional)?;
+        // `(SELECT ...)` / `(VALUES ...)` / `(WITH ...)` is a parenthesized query source,
+        // not a column list. A column list is otherwise tried first so `INSERT INTO t (c) SELECT 1`
+        // keeps working. See #19875.
+        let columns = if self.parenthesized_insert_query_source() {
+            vec![]
+        } else {
+            self.parse_parenthesized_column_list(Optional)?
+        };
 
         let source = Box::new(self.parse_query()?);
         let returning = self.parse_returning(Optional)?;
