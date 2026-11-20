@@ -898,13 +898,17 @@ pub fn create_builder(
     chunk_size: usize,
     data_types: Vec<DataType>,
 ) -> DataChunkBuilder {
+    DataChunkBuilder::new(data_types, snapshot_batch_size(rate_limit, chunk_size))
+}
+
+/// Number of rows per snapshot read chunk: `chunk_size`, capped by the rate limit if any.
+pub fn snapshot_batch_size(rate_limit: RateLimit, chunk_size: usize) -> usize {
     let batch_size = match rate_limit {
         RateLimit::Disabled | RateLimit::Pause => chunk_size,
         RateLimit::Fixed(limit) => min(limit.get() as usize, chunk_size),
     };
     // Ensure that the batch size is at least 2, to have enough space for two rows in a single update.
-    let batch_size = max(2, batch_size);
-    DataChunkBuilder::new(data_types, batch_size)
+    max(2, batch_size)
 }
 
 #[cfg(test)]
