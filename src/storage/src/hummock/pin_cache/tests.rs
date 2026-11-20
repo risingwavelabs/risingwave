@@ -25,6 +25,7 @@ use risingwave_object_store::object::ObjectError;
 use super::PinCache;
 use super::test_utils::{
     download_and_publish_for_test, in_memory_object_store, local_object_store, object_in_shard,
+    publish_pin_cache,
 };
 use crate::opts::StorageOpts;
 
@@ -209,6 +210,131 @@ async fn test_disk_space_rejection_precedes_local_io() {
     assert!(cache.storage.lock().uploads.is_empty());
 }
 
+#[tokio::test]
+async fn test_cancelled_reads_keep_file_until_producer_completes() {
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{default_builder_opt_for_test, gen_default_test_sstable};
+    use crate::hummock::{CachePolicy, SstableBlockIndex};
+    use crate::monitor::StoreLocalStatistic;
+
+    for prefetch in [false, true] {
+        let store = mock_sstable_store().await;
+        let (sst, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, store.clone()).await;
+        store.clear_block_cache().await.unwrap();
+        let id = info.object_id;
+        let (store, cache) = publish_pin_cache(store, id, in_memory_object_store()).await;
+        let handle = cache.get(id).unwrap();
+        let file = Arc::downgrade(&handle.file);
+        let path = handle.file.path.clone();
+        drop(handle);
+        {
+            let mut stats = StoreLocalStatistic::default();
+            let mut read = Box::pin(async {
+                if prefetch {
+                    store
+                        .prefetch_blocks(
+                            &sst,
+                            0,
+                            sst.block_count(),
+                            CachePolicy::default(),
+                            &mut stats,
+                        )
+                        .await
+                        .map(|_| ())
+                } else {
+                    store
+                        .get(&sst, 0, CachePolicy::default(), &mut stats)
+                        .await
+                        .map(|_| ())
+                }
+            });
+            assert!(futures::poll!(&mut read).is_pending());
+            if !prefetch {
+                // A cancelled follower must join without constructing another fetch.
+                let handle = cache.get(id).unwrap();
+                let follower = handle.get_or_fetch::<std::future::Pending<_>>(0, || {
+                    panic!("a follower must not construct a fetch")
+                });
+                drop(follower);
+            }
+        }
+        cache.unregister_objects([id]);
+        // The caller is gone, but the unpolled producer must still protect its file from GC.
+        cache.select_minor().delete().await.unwrap();
+        assert!(cache.store.metadata(&path).await.is_ok());
+        assert!(file.strong_count() > 1);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while file.strong_count() > 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cancelled readers must not strand a Pin producer");
+        assert!(cache.shards[0].read_requests.lock().is_empty());
+        if !prefetch {
+            // A cancelled Fill waiter must not prevent the producer from filling memory.
+            assert!(store.block_cache().memory().contains(&SstableBlockIndex {
+                sst_id: id,
+                block_idx: 0,
+            }));
+        }
+        cache.select_minor().delete().await.unwrap();
+        assert!(file.upgrade().is_none());
+        assert!(cache.store.metadata(&path).await.is_err());
+        assert_eq!(store.get_prefetch_memory_usage(), 0);
+    }
+}
+
+#[cfg(not(madsim))]
+#[test]
+fn test_read_cleanup_on_runtime_shutdown() {
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let id = object_in_shard(2, 3);
+        let cache = runtime.block_on(async {
+            let store = in_memory_object_store();
+            store
+                .upload(
+                    &format!("{}-1.sst", id.as_raw_id()),
+                    Bytes::from_static(b"complete"),
+                )
+                .await
+                .unwrap();
+            PinCache::new(store, 3, [(id, 8)]).await.unwrap()
+        });
+        let read_handle = cache.get(id).unwrap();
+        let runtime_handle = runtime.handle().clone();
+        drop(runtime);
+        let _entered = runtime_handle.enter();
+        // Neither registration nor cleanup may lock another object's request shard.
+        let _other_shard = cache.shards[0].read_requests.lock();
+        {
+            // A captured read handle also needs no membership lock in its own shard.
+            let _state = cache.shards[2].state.write();
+            assert!(
+                futures::executor::block_on(read_handle.get_or_fetch(0, || {
+                    assert!(cache.shard(id).read_requests.try_lock().is_some());
+                    std::future::pending()
+                }))
+                .is_err()
+            );
+            assert!(cache.shards[2].read_requests.lock().is_empty());
+        }
+        // Runtime cancellation did not read the file and must not withdraw its publication.
+        assert!(cache.get(id).is_some());
+        done_tx.send(()).unwrap();
+    });
+    done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("read cleanup must not deadlock during runtime shutdown");
+    worker.join().unwrap();
+}
+
 #[cfg(not(madsim))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_other_shard_does_not_block_object_operations() {
@@ -235,7 +361,7 @@ async fn test_other_shard_does_not_block_object_operations() {
     // Hold an unrelated shard until the other thread completes. On timeout, release it
     // before joining so an accidental cross-shard dependency fails instead of hanging.
     let result = std::thread::scope(|scope| {
-        let shard = cache.shard(blocked).write();
+        let shard = cache.shard(blocked).state.write();
         let (tx, rx) = std::sync::mpsc::channel();
         let cache = &cache;
         scope.spawn(move || {

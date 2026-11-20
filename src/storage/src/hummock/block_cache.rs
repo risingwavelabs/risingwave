@@ -22,7 +22,7 @@ use risingwave_common::config::EvictionConfig;
 use super::{Block, HummockResult, SstableBlockIndex};
 use crate::hummock::HummockError;
 
-type HybridCachedBlockEntry = HybridCacheEntry<SstableBlockIndex, Box<Block>>;
+pub(super) type HybridCachedBlockEntry = HybridCacheEntry<SstableBlockIndex, Box<Block>>;
 
 pub enum BlockEntry {
     HybridCache(HybridCachedBlockEntry),
