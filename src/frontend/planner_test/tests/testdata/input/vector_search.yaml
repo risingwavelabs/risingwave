@@ -64,6 +64,13 @@
   expected_outputs: []
 - before:
     - create_table_and_index
+  name: a vector index cannot be consumed by an ordinary streaming scan
+  sql: |
+    SELECT * FROM vector_index;
+  expected_outputs:
+    - stream_error
+- before:
+    - create_table_and_index
   sql: |
     SELECT id, name FROM items order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
   expected_outputs:
