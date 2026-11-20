@@ -291,6 +291,7 @@ impl HummockManager {
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
                 Arc::new(object_store_config),
+                state_store_dir,
             )
             .await,
         );
