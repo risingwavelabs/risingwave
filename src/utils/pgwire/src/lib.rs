@@ -22,6 +22,7 @@
 
 pub mod error;
 pub mod error_or_notice;
+mod jwks_cache;
 pub mod ldap_auth;
 pub mod memory_manager;
 pub mod net;
