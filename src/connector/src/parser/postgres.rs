@@ -18,6 +18,7 @@ use anyhow::{Context, anyhow, bail};
 use bytes::Buf;
 use risingwave_common::array::Finite32;
 use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::cdc_type_compatibility::is_unsupported_postgres_array_element_type;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, VectorVal};
@@ -199,7 +200,7 @@ pub fn postgres_cell_to_scalar_impl_strict(
         }
         DataType::List(list) => match list.elem() {
             // TODO(Kexiang): allow DataType::List(_)
-            elem @ (DataType::Struct(_) | DataType::List(_) | DataType::Serial) => {
+            elem if is_unsupported_postgres_array_element_type(elem) => {
                 bail!("unsupported PostgreSQL snapshot list element type {elem}")
             }
             _ => {
