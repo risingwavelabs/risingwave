@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem::{replace, take};
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::task::{Context, Poll, ready};
 
 use futures::stream::{FuturesUnordered, Peekable, StreamFuture};
@@ -26,6 +26,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_storage::table::ChangeLogRow;
+use tokio::task::consume_budget;
 
 use crate::executor::StreamExecutorResult;
 use crate::executor::backfill::utils::create_builder;
@@ -232,6 +233,13 @@ impl<St: ChangeLogRowStream> Stream for VnodeStream<St> {
                         ChangeLogRow::Update {
                             new_value,
                             old_value,
+                        } if new_value == old_value => {
+                            ready!(pin!(consume_budget()).poll(cx));
+                            continue;
+                        }
+                        ChangeLogRow::Update {
+                            new_value,
+                            old_value,
                         } => {
                             if this.data_chunk_builder.can_append_update() {
                                 this.ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
@@ -286,6 +294,7 @@ mod tests {
 
     use anyhow::anyhow;
     use futures::{Future, FutureExt, pin_mut};
+    use risingwave_common::array::Op;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -391,6 +400,51 @@ mod tests {
         assert_eq!(2, stream.next().await.unwrap().unwrap().cardinality());
         assert!(stream.next().await.is_none());
         stream.assert_progress([(VirtualNode::ZERO, 4, None)]).await;
+    }
+
+    #[tokio::test]
+    async fn test_skip_noop_update() {
+        let (tx, rx) = unbounded_channel();
+        let mut stream = VnodeStream::new(
+            [(VirtualNode::ZERO, UnboundedReceiverStream::new(rx), 0)].into_iter(),
+            vec![0],
+            DataChunkBuilder::new(DATA_TYPES.clone(), 3),
+        );
+        tx.send(Ok(ChangeLogRow::Insert(test_row(0)))).unwrap();
+        tx.send(Ok(ChangeLogRow::Update {
+            new_value: test_row(1),
+            old_value: test_row(1),
+        }))
+        .unwrap();
+        tx.send(Ok(ChangeLogRow::Insert(test_row(2)))).unwrap();
+        drop(tx);
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk.ops(), &[Op::Insert, Op::Insert]);
+        assert!(stream.next().await.is_none());
+        stream.assert_progress([(VirtualNode::ZERO, 4, None)]).await;
+    }
+
+    #[tokio::test]
+    async fn test_yield_after_skipping_noop_updates() {
+        let rows = (0..1024)
+            .map(|i| ChangeLogRow::Update {
+                new_value: test_row(i),
+                old_value: test_row(i),
+            })
+            .chain([ChangeLogRow::Insert(test_row(1024))])
+            .map(Ok);
+        let mut stream = VnodeStream::new(
+            [(VirtualNode::ZERO, futures::stream::iter(rows), 0)].into_iter(),
+            vec![0],
+            DataChunkBuilder::new(DATA_TYPES.clone(), 4),
+        );
+        assert!(stream.next().now_or_never().is_none());
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk.ops(), &[Op::Insert]);
+        assert!(stream.next().await.is_none());
+        stream
+            .assert_progress([(VirtualNode::ZERO, 2049, None)])
+            .await;
     }
 
     #[tokio::test]
