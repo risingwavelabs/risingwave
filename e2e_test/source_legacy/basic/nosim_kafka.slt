@@ -56,6 +56,7 @@ price double precision false NULL
 tags character varying[] false NULL
 _row_id serial true NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key _row_id NULL NULL
 distribution key _row_id NULL NULL
 table description kafka_json_schema_plain NULL NULL

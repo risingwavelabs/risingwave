@@ -270,7 +270,7 @@ impl Binder {
             }
         }
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items, table_catalog)?;
         let returning = !returning_list.is_empty();
 
         Ok(BoundUpdate {

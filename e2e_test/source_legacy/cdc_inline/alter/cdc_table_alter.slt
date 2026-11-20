@@ -195,6 +195,7 @@ id integer false NULL
 name character varying false NULL
 description character varying false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description my_products NULL NULL

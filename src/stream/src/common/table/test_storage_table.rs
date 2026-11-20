@@ -19,7 +19,7 @@ use futures::{StreamExt, TryStreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, OwnedRow, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::{EpochPair, test_epoch};
@@ -177,6 +177,62 @@ async fn test_storage_table_value_indices() {
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
+
+    // Cover system-only output and a mix of key, value, and system columns.
+    // They must not be included in the persisted value schema.
+    let mut query_columns = column_descs;
+    query_columns
+        .push(risingwave_common::catalog::ColumnCatalog::rw_timestamp_column().column_desc);
+    query_columns.push(risingwave_common::catalog::ColumnCatalog::rw_vnode_column().column_desc);
+    for projection in [vec![6, 5], vec![4, 6, 0, 5]] {
+        let reader = BatchTable::for_test_with_partial_columns(
+            test_env.storage.clone(),
+            TEST_TABLE_ID,
+            query_columns.clone(),
+            projection
+                .iter()
+                .map(|&i| query_columns[i].column_id)
+                .collect(),
+            order_types.clone(),
+            vec![0, 2],
+            vec![1, 3, 4],
+        );
+        let expected = |id: i32| {
+            OwnedRow::new(vec![
+                Some(id.into()),
+                None,
+                Some((id * 11).into()),
+                Some((id * 111).into()),
+                Some((id * 1111).to_string().into()),
+                Some(risingwave_common::util::epoch::Epoch::from(epoch.prev).as_scalar()),
+                Some(0_i16.into()),
+            ])
+            .project(&projection)
+            .into_owned_row()
+        };
+        assert_eq!(
+            reader
+                .get_row(
+                    &OwnedRow::new(vec![Some(1_i32.into()), Some(11_i32.into())]),
+                    HummockReadEpoch::Committed(epoch.prev),
+                )
+                .await
+                .unwrap(),
+            Some(expected(1)),
+        );
+        let iter = reader
+            .batch_iter(
+                HummockReadEpoch::Committed(epoch.prev),
+                true,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        pin_mut!(iter);
+        assert_eq!(iter.next_row().await.unwrap(), Some(expected(1)));
+        assert_eq!(iter.next_row().await.unwrap(), Some(expected(3)));
+        assert_eq!(iter.next_row().await.unwrap(), None);
+    }
 }
 
 #[tokio::test]

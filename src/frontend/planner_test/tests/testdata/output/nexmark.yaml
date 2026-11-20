@@ -62,9 +62,15 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ auction, bidder, price, date_time, bid._row_id, _rw_timestamp ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ auction, bidder, price, date_time, bid._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q1
   before:
@@ -97,9 +103,15 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ auction, bidder, price, date_time, bid._row_id, _rw_timestamp ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ auction, bidder, price, date_time, bid._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q2
   before:
@@ -127,14 +139,14 @@
             └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ auction, price, bid._row_id, _rw_timestamp ], primary key: [ $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ auction, price, bid._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q3
   before:
@@ -190,16 +202,21 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ auction_id, auction_seller, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ auction_id, auction_seller, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ auction_seller, auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ auction_seller, auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ person_id, person_name, person_city, person_state, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2
+    ├── columns: [ person_id, person_name, person_city, person_state, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 3 { columns: [ person_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ person_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -207,7 +224,7 @@
     └── vnode column idx: 0
 
     Table 5
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -215,7 +232,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ name, city, state, id, auction.seller, person.id, _rw_timestamp ]
+    ├── columns: [ name, city, state, id, auction.seller, person.id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 3, 4 ]
@@ -288,25 +305,52 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ auction_category, sum(max(bid_price)), count(max(bid_price)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0
+    ├── columns: [ auction_category, sum(max(bid_price)), count(max(bid_price)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ auction_id, auction_category, bid_price, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC ], value indices: [ 0, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 1
+    ├── columns: [ auction_id, auction_category, bid_price, bid__row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC ]
+    ├── value indices: [ 0, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 2
 
-    Table 2 { columns: [ auction_id, auction_category, max(bid_price), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ auction_id, auction_category, max(bid_price), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 3 { columns: [ auction_id, auction_date_time, auction_expires, auction_category, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3
+    ├── columns: [ auction_id, auction_date_time, auction_expires, auction_category, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 4 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 7
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 8 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 8
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ category, avg, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ category, avg, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q5
   before:
@@ -348,7 +392,7 @@
       │   └─LogicalProject { exprs: [window_start, bid.auction] }
       │     └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
       │       └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
-      │         └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+      │         └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
@@ -357,7 +401,7 @@
                 └─LogicalProject { exprs: [bid.auction, window_start] }
                   └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
                     └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
-                      └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+                      └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [bid.auction, count] }
@@ -427,30 +471,30 @@
     StreamNoOp
     └── StreamExchange NoShuffle from 2
 
-    Table 0 { columns: [ bid_auction, window_start, count, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ bid_auction, window_start, count, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ window_start, bid_auction, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ window_start, bid_auction, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ window_start, max(count), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ window_start, max(count), _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ window_start, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ window_start, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ bid_auction, window_start, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 4 { columns: [ bid_auction, window_start, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 5
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 6 { columns: [ window_start, count, bid_auction, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ window_start, count, bid_auction, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ window_start, max(count), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ window_start, max(count), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4294967294
-    ├── columns: [ auction, num, window_start, window_start#1, _rw_timestamp ]
+    ├── columns: [ auction, num, window_start, window_start#1, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 2 ]
@@ -512,23 +556,23 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ auction_seller, bid_price, bid_date_time, auction_id, sum, count, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ auction_seller, bid_price, bid_date_time, auction_id, sum, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ auction_id, auction_seller, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 1 { columns: [ auction_id, auction_seller, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 2 { columns: [ auction_id, auction_date_time, auction_expires, auction_seller, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ auction_id, auction_date_time, auction_expires, auction_seller, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ seller, avg, auction.id, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ seller, avg, auction.id, _rw_timestamp, _rw_vnode ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - id: nexmark_q6
   before:
@@ -601,23 +645,23 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ auction_seller, bid_price, bid_date_time, auction_id, sum, count, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ auction_seller, bid_price, bid_date_time, auction_id, sum, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ auction_id, auction_seller, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 1 { columns: [ auction_id, auction_seller, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 2 { columns: [ auction_id, auction_date_time, auction_expires, auction_seller, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ auction_id, auction_date_time, auction_expires, auction_seller, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ seller, avg, auction.id, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ seller, avg, auction.id, _rw_timestamp, _rw_vnode ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - id: nexmark_q7
   before:
@@ -694,26 +738,38 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id, _rw_timestamp ]
+    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ bid_price, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ bid_price, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ $expr1, max(bid_price), $expr2, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr1, max(bid_price), $expr2, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ max(bid_price), $expr1, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ max(bid_price), $expr1, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 5 { columns: [ $expr1, max(bid_price), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr1, max(bid_price), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ auction, price, bidder, date_time, bid._row_id, $expr1, _rw_timestamp ]
+    ├── columns: [ auction, price, bidder, date_time, bid._row_id, $expr1, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $4 ASC, $5 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 1 ]
@@ -816,33 +872,45 @@
             └── BatchPlanNode
 
     Table 0
-    ├── columns: [ person_id, $expr1, $expr2, internal_last_seen_value(person_name), _rw_timestamp ]
+    ├── columns: [ person_id, $expr1, $expr2, internal_last_seen_value(person_name), _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
-    Table 1 { columns: [ person_id, $expr1, $expr2, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 1 { columns: [ person_id, $expr1, $expr2, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 2 { columns: [ auction_seller, $expr3, $expr4, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ auction_seller, $expr3, $expr4, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 3 { columns: [ auction_seller, $expr3, $expr4, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 3 { columns: [ auction_seller, $expr3, $expr4, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 4
-    ├── columns: [ person_id, $expr1, $expr2, internal_last_seen_value(person_name), count, _rw_timestamp ]
+    ├── columns: [ person_id, $expr1, $expr2, internal_last_seen_value(person_name), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 3
 
-    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 6 { columns: [ auction_seller, $expr3, $expr4, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 6 { columns: [ auction_seller, $expr3, $expr4, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 7
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ id, name, starttime, $expr2, auction.seller, $expr3, $expr4, _rw_timestamp ]
+    ├── columns: [ id, name, starttime, $expr2, auction.seller, $expr3, $expr4, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 0, 2, 3 ]
@@ -867,11 +935,11 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._rw_timestamp, bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+          └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._rw_timestamp, auction._rw_vnode, bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
             └─LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
               └─LogicalJoin { type: Inner, on: true, output: all }
-                ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._rw_timestamp] }
-                └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+                ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._rw_timestamp, auction._rw_vnode] }
+                └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
@@ -922,30 +990,35 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id, _rw_timestamp ]
+    ├── columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $11 DESC, $12 ASC, $13 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, _rw_timestamp ]
+    ├── columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 2 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
 - id: nexmark_q10
   before:
@@ -973,9 +1046,20 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ auction, bidder, price, date_time, date, time, bid._row_id, _rw_timestamp ], primary key: [ $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 6 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ auction, bidder, price, date_time, date, time, bid._row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $6 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
+    ├── distribution key: [ 6 ]
+    └── read pk prefix len hint: 1
 
 - id: nexmark_q11
   before:
@@ -1030,11 +1114,11 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ bid_bidder, $expr1, $expr2, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 0 { columns: [ bid_bidder, $expr1, $expr2, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ bidder, bid_count, window_start, window_end, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ bidder, bid_count, window_start, window_end, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3 }
 
 - id: nexmark_q13
   before:
@@ -1084,12 +1168,12 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, key, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, key, backfill_finished, row_count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294
-    ├── columns: [ auction, bidder, price, date_time, value, bid._row_id, $expr1, side_input.key, _rw_timestamp ]
+    ├── columns: [ auction, bidder, price, date_time, value, bid._row_id, $expr1, side_input.key, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $5 ASC, $6 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 5, 6 ]
@@ -1144,9 +1228,9 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, bidtimetype, date_time, extra, bid._row_id, _rw_timestamp ], primary key: [ $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 6 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ auction, bidder, price, bidtimetype, date_time, extra, bid._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 6 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q15
   before:
@@ -1197,19 +1281,19 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ $expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32)), _rw_timestamp ]
+    ├── columns: [ $expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32)), _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ $expr1, bid_bidder, count_for_agg_call_4, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 1 { columns: [ $expr1, bid_bidder, count_for_agg_call_4, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 2 { columns: [ $expr1, bid_auction, count_for_agg_call_8, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ $expr1, bid_auction, count_for_agg_call_8, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
-    Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q15_split_distinct_agg
   before:
@@ -1261,17 +1345,17 @@
             └── BatchPlanNode
 
     Table 0
-    ├── columns: [ $expr1_expanded, sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid_price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid_bidder_expanded) filter((flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_auction_expanded) filter((flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count, _rw_timestamp ]
+    ├── columns: [ $expr1_expanded, sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid_price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid_bidder_expanded) filter((flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_auction_expanded) filter((flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ $expr1_expanded, bid_bidder_expanded, bid_auction_expanded, flag, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4, 5, 6, 7 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
+    Table 1 { columns: [ $expr1_expanded, bid_bidder_expanded, bid_auction_expanded, flag, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4, 5, 6, 7 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
 
-    Table 2 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 2 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
@@ -1326,19 +1410,19 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_channel, $expr1, max($expr2), count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32)), _rw_timestamp ]
+    ├── columns: [ bid_channel, $expr1, max($expr2), count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32)), _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ bid_channel, $expr1, bid_bidder, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7, count_for_agg_call_8, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4, 5, 6 ], distribution key: [ 0, 1 ], read pk prefix len hint: 3 }
+    Table 1 { columns: [ bid_channel, $expr1, bid_bidder, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7, count_for_agg_call_8, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4, 5, 6 ], distribution key: [ 0, 1 ], read pk prefix len hint: 3 }
 
-    Table 2 { columns: [ bid_channel, $expr1, bid_auction, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11, count_for_agg_call_12, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4, 5, 6 ], distribution key: [ 0, 1 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ bid_channel, $expr1, bid_auction, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11, count_for_agg_call_12, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4, 5, 6 ], distribution key: [ 0, 1 ], read pk prefix len hint: 3 }
 
-    Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
 - id: nexmark_q16_split_distinct_agg
   before:
@@ -1391,20 +1475,20 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ bid_channel_expanded, $expr1_expanded, max($expr2_expanded), bid_bidder_expanded, bid_auction_expanded, flag, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 0 { columns: [ bid_channel_expanded, $expr1_expanded, max($expr2_expanded), bid_bidder_expanded, bid_auction_expanded, flag, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 1
-    ├── columns: [ bid_channel_expanded, $expr1_expanded, max(max($expr2_expanded)) filter((flag = 0:Int64)), sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid_price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid_bidder_expanded) filter((flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_auction_expanded) filter((flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count, _rw_timestamp ]
+    ├── columns: [ bid_channel_expanded, $expr1_expanded, max(max($expr2_expanded)) filter((flag = 0:Int64)), sum0(count) filter((flag = 0:Int64)), sum0(count filter((bid_price < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter((bid_price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid_bidder_expanded) filter((flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_bidder_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid_auction_expanded) filter((flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid_auction_expanded) filter((count filter((bid_price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 2 { columns: [ bid_channel_expanded, $expr1_expanded, bid_bidder_expanded, bid_auction_expanded, flag, max($expr2_expanded), count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5, 6, 7, 8, 9 ], distribution key: [ 0, 1, 2, 3, 4 ], read pk prefix len hint: 5 }
+    Table 2 { columns: [ bid_channel_expanded, $expr1_expanded, bid_bidder_expanded, bid_auction_expanded, flag, max($expr2_expanded), count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5, 6, 7, 8, 9 ], distribution key: [ 0, 1, 2, 3, 4 ], read pk prefix len hint: 5 }
 
-    Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
@@ -1453,15 +1537,15 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_auction, $expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), min(bid_price), max(bid_price), sum(bid_price), count(bid_price), _rw_timestamp ]
+    ├── columns: [ bid_auction, $expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), min(bid_price), max(bid_price), sum(bid_price), count(bid_price), _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
 - id: nexmark_q18
   before:
@@ -1476,8 +1560,8 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
-            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
@@ -1506,15 +1590,15 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id, _rw_timestamp ]
+    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC, $0 ASC, $5 DESC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, _rw_timestamp, _rw_vnode ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
 - id: nexmark_q18_rank
   before:
@@ -1529,8 +1613,8 @@
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, rank] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
-            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
@@ -1557,16 +1641,16 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id, _rw_timestamp ]
+    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC, $0 ASC, $5 DESC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294
-    ├── columns: [ auction, bidder, price, channel, url, date_time, extra, bid._row_id, _rw_timestamp ]
+    ├── columns: [ auction, bidder, price, channel, url, date_time, extra, bid._row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC, $0 ASC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 0, 1 ]
@@ -1584,8 +1668,8 @@
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
-            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time] }
@@ -1612,15 +1696,20 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid_p_time, bid__row_id, _rw_timestamp ]
+    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid_p_time, bid__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $2 DESC, $8 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, p_time, bid._row_id, _rw_timestamp ], primary key: [ $0 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294
+    ├── columns: [ auction, bidder, price, channel, url, date_time, extra, p_time, bid._row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $8 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 2
 
 - id: nexmark_q19
   before:
@@ -1634,8 +1723,8 @@
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
-            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, bid._rw_vnode] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (row_number <= 10:Int32) }
@@ -1663,23 +1752,23 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid_p_time, bid__row_id, row_number, _rw_timestamp ]
+    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid_p_time, bid__row_id, row_number, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $2 DESC, $8 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid_p_time, bid__row_id, _rw_timestamp ]
+    ├── columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid_p_time, bid__row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $2 DESC, $8 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 2 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 2 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294
-    ├── columns: [ auction, bidder, price, channel, url, date_time, extra, p_time, bid._row_id, rank_number, _rw_timestamp ]
+    ├── columns: [ auction, bidder, price, channel, url, date_time, extra, p_time, bid._row_id, rank_number, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $8 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0 ]
@@ -1732,20 +1821,25 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2
+    ├── columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 3 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294
-    ├── columns: [ auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id, auction.id, _rw_timestamp ]
+    ├── columns: [ auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id, auction.id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $14 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
     ├── distribution key: [ 0, 14 ]
@@ -1786,9 +1880,9 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, channel, channel_id, bid._row_id, _rw_timestamp ], primary key: [ $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ auction, bidder, price, channel, channel_id, bid._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q22
   before:
@@ -1820,9 +1914,9 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id, _rw_timestamp ], primary key: [ $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 7 ], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id, _rw_timestamp, _rw_vnode ], primary key: [ $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 7 ], read pk prefix len hint: 1 }
 
 - id: nexmark_q101
   before:
@@ -1887,26 +1981,26 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ bid_auction, max(bid_price), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ bid_auction, max(bid_price), _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ bid_auction, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ bid_auction, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 5 { columns: [ bid_auction, max(bid_price), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ bid_auction, max(bid_price), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -1914,7 +2008,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ auction_id, auction_item_name, current_highest_bid, bid.auction, _rw_timestamp ]
+    ├── columns: [ auction_id, auction_item_name, current_highest_bid, bid.auction, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -2015,31 +2109,41 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 0
 
-    Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ $expr1, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), count, _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 3 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ bid_auction, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5
+    ├── columns: [ bid_auction, bid__row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 6 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6
+    ├── columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 7
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -2047,19 +2151,24 @@
     └── vnode column idx: 0
 
     Table 8
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 9 { columns: [ sum0(sum0(count)), sum0(count(bid_auction)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9
+    ├── columns: [ sum0(sum0(count)), sum0(count(bid_auction)), count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
-    Table 10 { columns: [ bid_auction, count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 10 { columns: [ bid_auction, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 11
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -2067,7 +2176,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ auction_id, auction_item_name, bid_count, _rw_timestamp ]
+    ├── columns: [ auction_id, auction_item_name, bid_count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -2136,33 +2245,38 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ bid_auction, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ bid_auction, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ bid_auction, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ bid_auction, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 5 { columns: [ bid_auction, count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ bid_auction, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
 - id: nexmark_q104
   before:
@@ -2227,33 +2341,38 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ bid_auction, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ bid_auction, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ bid_auction, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ bid_auction, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 5 { columns: [ bid_auction, count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ bid_auction, count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
 - id: nexmark_q105
   before:
@@ -2324,14 +2443,14 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _vnode, _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _vnode, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 DESC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _vnode, _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _vnode, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $3 ASC, $2 DESC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -2339,22 +2458,32 @@
     └── vnode column idx: 3
 
     Table 2
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), count, _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 3 { columns: [ auction_id, auction_item_name, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ auction_id, auction_item_name, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ bid_auction, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5
+    ├── columns: [ bid_auction, bid__row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 6 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6
+    ├── columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 7
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -2362,7 +2491,7 @@
     └── vnode column idx: 0
 
     Table 8
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -2370,7 +2499,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ auction_id, auction_item_name, bid_count, _rw_timestamp ]
+    ├── columns: [ auction_id, auction_item_name, bid_count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 DESC, $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
@@ -2457,34 +2586,39 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ min(max(bid_price)), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ min(max(bid_price)), _vnode, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ min(min(max(bid_price))), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ min(min(max(bid_price))), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ _vnode, max(bid_price), auction_id, _rw_timestamp ]
+    ├── columns: [ _vnode, max(bid_price), auction_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 3 { columns: [ _vnode, min(max(bid_price)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ _vnode, min(max(bid_price)), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4 { columns: [ auction_id, bid_price, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ auction_id, bid_price, bid__row_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ auction_id, max(bid_price), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ auction_id, max(bid_price), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ auction_id, auction_date_time, auction_expires, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ auction_id, auction_date_time, auction_expires, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ auction_id, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ auction_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8
+    ├── columns: [ bid_auction, bid_price, bid_date_time, bid__row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
-    Table 9 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 9 { columns: [ bid_auction, bid__row_id, _degree, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 10
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -2492,12 +2626,12 @@
     └── vnode column idx: 0
 
     Table 11
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ min_final, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ min_final, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

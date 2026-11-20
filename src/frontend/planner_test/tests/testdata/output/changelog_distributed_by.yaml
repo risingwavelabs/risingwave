@@ -7,7 +7,7 @@
     LogicalProject { exprs: [t.payload] }
     └─LogicalShare { id: 2 }
       └─LogicalChangeLog { distribution_key: [t.tenant] }
-        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp, t._rw_vnode] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.payload] }
     └─LogicalChangeLog { distribution_key: [t.tenant] }
@@ -32,7 +32,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -40,7 +40,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ payload, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ payload, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
@@ -71,7 +71,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -79,7 +79,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ payload, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ payload, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
@@ -116,7 +116,7 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _rw_timestamp ]
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -124,7 +124,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ c, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── columns: [ c, changelog_op, _changelog_row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 2 ]
