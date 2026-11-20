@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-use foyer::{HybridCacheEntry, RangeBoundsExt};
+use foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -417,7 +417,7 @@ impl CacheRefillTask {
     fn get_units_to_refill_by_inheritance(
         context: &CacheRefillContext,
         ssts: &[TableHolder],
-        parent_ssts: impl IntoIterator<Item = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>,
+        parent_ssts: impl IntoIterator<Item = TableHolder>,
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
