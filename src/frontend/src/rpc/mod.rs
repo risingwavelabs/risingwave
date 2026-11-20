@@ -58,6 +58,7 @@ impl FrontendService for FrontendServiceImpl {
             req.table_id,
             req.database_id,
             req.cdc_table_change,
+            req.catalog_version,
         ))
         .await?;
 
@@ -160,12 +161,18 @@ async fn get_new_table_plan(
     table_id: TableId,
     database_id: DatabaseId,
     cdc_table_change: Option<TableSchemaChange>,
+    catalog_version: u64,
 ) -> Result<ReplaceJobPlan, RwError> {
     tracing::info!("get_new_table_plan for table {}", table_id);
 
     let session_mgr = SESSION_MANAGER
         .get()
         .expect("session manager has been initialized");
+
+    session_mgr
+        .env()
+        .wait_catalog_version(catalog_version)
+        .await?;
 
     // get a session object for the corresponding user and database
     let session = session_mgr.create_dummy_session(database_id)?;

@@ -1,0 +1,76 @@
+# Consecutive changes must both reach the CDC table before subsequent data is consumed.
+control substitution on
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_auto_schema_change_consecutive;
+    CREATE TABLE mysql_auto_schema_change_consecutive (id INT NOT NULL PRIMARY KEY);
+    INSERT INTO mysql_auto_schema_change_consecutive VALUES (1);
+"
+
+statement ok
+create source s_mysql_auto_schema_change_consecutive with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev',
+  auto.schema.change = 'true'
+);
+
+statement ok
+create table rw_mysql_auto_schema_change_consecutive (
+  id INT,
+  primary key (id)
+) from s_mysql_auto_schema_change_consecutive table 'risedev.mysql_auto_schema_change_consecutive';
+
+query I retry 10 backoff 1s
+select id from rw_mysql_auto_schema_change_consecutive;
+----
+1
+
+# Do not wait for frontend catalog propagation between these two schema changes.
+system ok
+mysql -e "
+    USE risedev;
+    ALTER TABLE mysql_auto_schema_change_consecutive ADD COLUMN c1 INT;
+    ALTER TABLE mysql_auto_schema_change_consecutive ADD COLUMN c2 INT;
+    INSERT INTO mysql_auto_schema_change_consecutive VALUES (2, 10, 20);
+"
+
+query III retry 20 backoff 1s
+select id, c1, c2 from rw_mysql_auto_schema_change_consecutive order by id;
+----
+1 NULL NULL
+2 10 20
+
+# Exercise another consecutive pair after the first replacements have completed.
+system ok
+mysql -e "
+    USE risedev;
+    ALTER TABLE mysql_auto_schema_change_consecutive DROP COLUMN c1;
+    ALTER TABLE mysql_auto_schema_change_consecutive ADD COLUMN c3 INT;
+    INSERT INTO mysql_auto_schema_change_consecutive VALUES (3, 30, 40);
+"
+
+query III retry 20 backoff 1s
+select id, c2, c3 from rw_mysql_auto_schema_change_consecutive order by id;
+----
+1 NULL NULL
+2 20 NULL
+3 30 40
+
+query T rowsort retry 10 backoff 1s
+select column_name from information_schema.columns
+where table_name = 'rw_mysql_auto_schema_change_consecutive';
+----
+c2
+c3
+id
+
+statement ok
+drop source s_mysql_auto_schema_change_consecutive cascade;
+
+system ok
+mysql -e "USE risedev; DROP TABLE IF EXISTS mysql_auto_schema_change_consecutive;"
