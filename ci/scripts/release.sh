@@ -26,8 +26,8 @@ ld.lld --version
 
 echo "--- Install dependencies"
 dnf install -y perl-core wget python3.12 python3.12-devel cyrus-sasl-devel rsync openssl-devel blas-devel lapack-devel libgomp
-# python udf compiling requires python3.12
-update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.12 3
+# Use the distribution's shared Python library for embedded UDFs.
+export PYO3_PYTHON=/usr/bin/python3.12
 
 echo "--- Install java and maven"
 dnf install -y java-21-openjdk java-21-openjdk-devel
