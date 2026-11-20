@@ -91,7 +91,7 @@ gcloud-googleapis = { version = "1", features = [
     "bigquery",
 ], optional = true }
 gcloud-pubsub = "1.5"
-gcloud-sdk = { version = "0.32", features = ["google-firestore-admin-v1"] }
+gcloud-sdk = { version = "0.33", features = ["google-firestore-admin-v1"] }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
 iceberg = { workspace = true }
