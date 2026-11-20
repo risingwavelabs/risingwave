@@ -29,8 +29,8 @@ CREATE SINK sink1 AS select * from mv1 WITH (
 statement ok
 INSERT INTO s1 (i1, i2, i3) values(1,'1','1'),(2,'2','2'),(3,'3','3'),(4,'4','4'),(5,'5','5');
 
-# The error is just an ad-hoc fix. We can support this later.
-statement error
+# Declared columns select a subset of the upstream columns.
+statement ok
 CREATE SOURCE iceberg_t1_source_with_cols (i1 int, i2 varchar)
 WITH (
     connector = 'iceberg',
@@ -43,13 +43,24 @@ WITH (
     database.name = 'demo_db',
     table.name = 'test_streaming',
 );
+
+statement error
+SELECT i3 FROM iceberg_t1_source_with_cols;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_with_cols AS SELECT * FROM iceberg_t1_source_with_cols;
+
+query IT retry 6 backoff 5s
+SELECT * FROM mv_with_cols ORDER BY i1;
 ----
-    db error: ERROR: Failed to run the query
+1 1
+2 2
+3 3
+4 4
+5 5
 
-Caused by:
-  Invalid input syntax: Schema is automatically inferred for iceberg source and should not be specified
-
-HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`.
+statement ok
+DROP SOURCE iceberg_t1_source_with_cols CASCADE;
 
 
 statement ok

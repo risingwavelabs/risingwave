@@ -111,6 +111,7 @@ use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{BackfillType, LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
+use crate::utils::data_type::DataTypeToAst;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
     resolve_secret_ref_in_with_options, resolve_source_ingest_mode_in_with_option,
@@ -964,7 +965,7 @@ pub async fn bind_create_source_or_table_with_connector(
     full_name: ObjectName,
     format_encode: FormatEncodeOptions,
     with_properties: WithOptions,
-    sql_columns_defs: &[ColumnDef],
+    mut sql_columns_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     wildcard_idx: Option<usize>,
     source_watermarks: Vec<SourceWatermark>,
@@ -1016,32 +1017,18 @@ pub async fn bind_create_source_or_table_with_connector(
         }
     }
 
-    let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
+    let sql_pk_names = bind_sql_pk_names(&sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    if with_properties.is_iceberg_connector() {
-        if is_create_source
-            && !with_properties.is_iceberg_update_source()
-            && !sql_pk_names.is_empty()
-        {
-            return Err(ErrorCode::NotSupported(
-                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
-                    .to_owned(),
-                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
-                    .to_owned(),
-            )
-            .into());
-        }
-
-        // FIXME: ideally we can support it, but current way of handling iceberg additional columns
-        // are problematic. They are treated as normal user columns, so they will be lost if we
-        // allow user to specify columns. See `extract_iceberg_columns`.
-        if !sql_columns_defs.is_empty() {
-            return Err(RwError::from(InvalidInputSyntax(
-                r#"Schema is automatically inferred for iceberg source and should not be specified
-
-HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
-            )));
-        }
+    if with_properties.is_iceberg_connector()
+        && is_create_source
+        && !with_properties.is_iceberg_update_source()
+        && !sql_pk_names.is_empty()
+    {
+        return Err(ErrorCode::NotSupported(
+            "PRIMARY KEY is not supported for Iceberg append-only sources".to_owned(),
+            "Please remove the PRIMARY KEY clause or set streaming_updates = 'true' for supported RisingWave-written tables.".to_owned(),
+        )
+        .into());
     }
 
     // Same for ADBC Snowflake connector - schema is automatically inferred
@@ -1057,18 +1044,58 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
 HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<columns>) WITH (...)`."#.to_owned(),
         )));
     }
-    let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
+    if with_properties.is_iceberg_connector()
+        && matches!(sql_column_strategy, SqlColumnStrategy::FollowChecked)
+        && let Some(source_columns) = &columns_from_resolve_source
+    {
+        // Infer types only for regular columns; hidden columns are kept separately below.
+        for column in &mut sql_columns_defs {
+            if column.data_type.is_some() || column.is_generated() {
+                continue;
+            }
+            let name = column.name.real_value();
+            let upstream_column = source_columns
+                .iter()
+                .find(|column| !column.is_hidden() && column.name() == name)
+                .ok_or_else(|| {
+                    ProtocolError(format!(
+                        "Column \"{name}\" is defined in SQL but not found in the source"
+                    ))
+                })?;
+            column.data_type = Some(upstream_column.data_type().to_ast());
+        }
+    }
+    let columns_from_sql = bind_sql_columns(&sql_columns_defs, false)?;
 
     reject_variant_columns_for_unsupported_encoding(&format_encode, &columns_from_sql)?;
+
+    // Columns declared in SQL select only visible Iceberg columns. The hidden ones (the upstream
+    // `_row_id` and the position metadata used to apply deletes) must be kept as inferred.
+    let iceberg_hidden_columns = if with_properties.is_iceberg_connector() {
+        columns_from_resolve_source
+            .iter()
+            .flatten()
+            .filter(|column| column.is_hidden())
+            .cloned()
+            .collect_vec()
+    } else {
+        vec![]
+    };
 
     let mut columns = bind_all_columns(
         &format_encode,
         columns_from_resolve_source,
         columns_from_sql,
-        sql_columns_defs,
+        &sql_columns_defs,
         wildcard_idx,
         sql_column_strategy,
     )?;
+
+    for hidden in iceberg_hidden_columns {
+        if !columns.iter().any(|column| column.name() == hidden.name()) {
+            columns.push(hidden);
+        }
+    }
 
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(
@@ -1151,6 +1178,12 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     )
     .await?;
 
+    // An upstream Iceberg table may have its own `_row_id` column. Without a primary key, we
+    // generate our own row ID under that name, so the upstream column cannot be ingested.
+    if with_properties.is_iceberg_connector() && pk_names.is_empty() {
+        columns.retain(|column| column.name() != ROW_ID_COLUMN_NAME);
+    }
+
     // User may specify a generated or additional column with the same name as one from the external schema.
     // Ensure duplicated column names are handled here.
     if let Some(duplicated_name) = columns.iter().map(|c| c.name()).duplicates().next() {
@@ -1204,7 +1237,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         source_name.clone(),
         &mut columns,
         // TODO(st1page): pass the ref
-        sql_columns_defs,
+        &sql_columns_defs,
         &pk_col_ids,
     )?;
     check_format_encode(&with_properties, row_id_index, &columns)?;
@@ -1332,7 +1365,7 @@ pub async fn handle_create_source(
         stmt.source_name,
         format_encode,
         with_properties,
-        &stmt.columns,
+        stmt.columns,
         stmt.constraints,
         stmt.wildcard_idx,
         stmt.source_watermarks,
@@ -1630,6 +1663,10 @@ pub(super) fn generate_stream_graph_for_source(
 #[cfg(all(test, not(madsim)))]
 #[path = "create_source/iceberg_update_test.rs"]
 mod iceberg_update_tests;
+
+#[cfg(all(test, not(madsim)))]
+#[path = "create_source/iceberg_declared_columns_test.rs"]
+mod iceberg_declared_columns_tests;
 
 #[cfg(test)]
 pub mod tests {

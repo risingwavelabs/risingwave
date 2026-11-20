@@ -291,7 +291,7 @@ CREATE SOURCE iceberg_demo_source WITH (
     table.name='e2e_demo_table'
 );
 
-statement error PRIMARY KEY is not supported for Iceberg CREATE SOURCE
+statement error PRIMARY KEY is not supported for Iceberg append-only sources
 CREATE SOURCE iceberg_demo_source_with_pk (
     PRIMARY KEY (v1)
 ) WITH (
