@@ -68,7 +68,7 @@ use std::time::Duration;
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub use batch::BatchSourceSplitImpl;
 pub(crate) use common::*;
-use google_cloud_pubsub::subscription::Subscription;
+use gcloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;

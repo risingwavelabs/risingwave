@@ -25,6 +25,7 @@ use crate::source::cdc::{
 // ------- Runtime flags -------
 
 impl CdcSourceRuntimeFlags for Mariadb {
+    const CAN_AUTO_SCHEMA_CHANGE: bool = true;
     const CAN_BACKFILL: bool = true;
     const CAN_USE_TRANSACTION_METADATA: bool = true;
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;
@@ -35,16 +36,17 @@ impl CdcSourceRuntimeFlags for Mariadb {
 impl CdcSourceDdlValidator for Mariadb {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
         // MariaDB replication needs a unique `server.id` just like MySQL.
-        Mysql::check_and_fill_create_with_options(props)
+        Mysql::check_and_fill_create_with_options(props, secret_refs)
     }
 
     fn check_alter_with_options(
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         check_alter_with_options_inner(
             Self::CDC_CONNECTOR_NAME,
             props,

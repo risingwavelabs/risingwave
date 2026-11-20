@@ -454,6 +454,7 @@ message Table {
     reserved 5;
     reserved "CDC_TABLE_TYPE_CITUS"; // removed connector
     CDC_TABLE_TYPE_MARIADB = 6;
+    CDC_TABLE_TYPE_ORACLE = 7;
   }
 
   uint32 id = 1;

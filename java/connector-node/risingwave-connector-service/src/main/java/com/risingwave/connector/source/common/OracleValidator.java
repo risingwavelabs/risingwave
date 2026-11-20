@@ -17,18 +17,20 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.source.common.OracleExternalTable.ColumnInfo;
+import com.risingwave.proto.Data.DataType.TypeName;
+import io.debezium.jdbc.TemporalPrecisionMode;
+import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
-public class OracleValidator extends DatabaseValidator implements AutoCloseable {
+public class OracleValidator extends CdcSourceValidator implements AutoCloseable {
     private static final Set<String> REQUIRED_PRIVILEGES =
             Set.of(
                     "CREATE SESSION",
@@ -55,39 +57,35 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private final OracleHeartbeatTable heartbeatTable;
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
+    private final String racNodes;
+    private final TemporalPrecisionMode timePrecisionMode;
 
-    public OracleValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
+    public OracleValidator(OracleDbzConnectorConfig config, TableSchema tableSchema)
             throws SQLException {
         this.tableSchema = tableSchema;
         this.pdbName =
                 normalizeIdentifierInConfigOption(
-                        DbzConnectorConfig.ORACLE_PDB_NAME,
-                        userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
-        this.heartbeatTable =
-                OracleHeartbeatTable.parse(
-                        userProps.get(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
-        this.autoInitializeHeartbeatTable =
-                "true"
-                        .equals(
-                                userProps.get(
-                                        DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY));
+                        OracleDbzConnectorConfig.PDB_NAME, config.getPdbName());
+        this.heartbeatTable = OracleHeartbeatTable.parse(config.getHeartbeatTableName());
+        this.autoInitializeHeartbeatTable = config.isAutoInitializeHeartbeatTable();
         var jdbcUrl =
-                ValidatorUtils.getJdbcUrl(
-                        SourceTypeE.ORACLE,
-                        userProps.get(DbzConnectorConfig.HOST),
-                        userProps.get(DbzConnectorConfig.PORT),
+                OracleCdcSource.getJdbcUrl(
+                        config.getHost(),
+                        config.getPort(),
                         normalizeIdentifierInConfigOption(
-                                DbzConnectorConfig.DB_NAME,
-                                userProps.get(DbzConnectorConfig.DB_NAME)));
+                                DbzConnectorConfig.DB_NAME, config.getDbName()));
         this.jdbcConnection =
-                DriverManager.getConnection(
-                        jdbcUrl,
-                        userProps.get(DbzConnectorConfig.USER),
-                        userProps.get(DbzConnectorConfig.PASSWORD));
-        this.schemaName = userProps.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-        this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
-        this.isCdcSourceJob = isCdcSourceJob;
+                DriverManager.getConnection(jdbcUrl, config.getUser(), config.getPassword());
+        this.schemaName = config.getSchemaName();
+        this.tableName = config.getTableName();
+        this.isCdcSourceJob = config.isCdcSourceJob();
+        this.racNodes = config.getRacNodes();
+        this.timePrecisionMode =
+                TemporalPrecisionMode.parse(
+                        config.getResolvedDebeziumProps()
+                                .getProperty(
+                                        RelationalDatabaseConnectorConfig.TIME_PRECISION_MODE
+                                                .name()));
     }
 
     @Override
@@ -100,9 +98,30 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     void validateDbConfig() {
         try {
             validateLoggingConfiguration();
+            if (isCdcSourceJob) {
+                validateRacConfiguration();
+            }
             validatePdb();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private void validateRacConfiguration() throws SQLException {
+        try (var stmt = jdbcConnection.createStatement();
+                var result =
+                        stmt.executeQuery(
+                                "SELECT VALUE FROM V$PARAMETER WHERE NAME = 'cluster_database'")) {
+            if (!result.next()) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Unable to determine whether Oracle RAC is enabled");
+            }
+            if ("TRUE".equalsIgnoreCase(result.getString(1))
+                    && (racNodes == null || racNodes.isBlank())) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Oracle RAC requires 'debezium.rac.nodes' so LogMiner discovers "
+                                + "transactions on every instance");
+            }
         }
     }
 
@@ -212,25 +231,31 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         try {
             switchToPdb();
             validateTableExists();
-            validateTableColumns();
-            validateTablePrimaryKey();
             validateTableSupplementalLogging();
+            validateTableSchema();
+            validateTablePrimaryKey();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
-    private void validateTableColumns() throws SQLException {
-        var upstreamColumns = new HashSet<String>();
+    private void validateTableSchema() throws SQLException {
+        var upstreamColumns = new HashMap<String, ColumnInfo>();
         try (var stmt =
                 jdbcConnection.prepareStatement(
-                        "SELECT COLUMN_NAME FROM ALL_TAB_COLS "
+                        "SELECT COLUMN_NAME, DATA_TYPE, DATA_PRECISION, DATA_SCALE "
+                                + "FROM ALL_TAB_COLS "
                                 + "WHERE OWNER = ? AND TABLE_NAME = ? AND HIDDEN_COLUMN = 'NO'")) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             try (var result = stmt.executeQuery()) {
                 while (result.next()) {
-                    upstreamColumns.add(result.getString("COLUMN_NAME"));
+                    upstreamColumns.put(
+                            result.getString("COLUMN_NAME"),
+                            new ColumnInfo(
+                                    result.getString("DATA_TYPE"),
+                                    OracleExternalTable.nullableInteger(result, "DATA_PRECISION"),
+                                    OracleExternalTable.nullableInteger(result, "DATA_SCALE")));
                 }
             }
         }
@@ -238,51 +263,64 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             if (columnName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                 continue;
             }
-            if (!upstreamColumns.contains(columnName)) {
+            var columnInfo = upstreamColumns.get(columnName);
+            if (columnInfo == null) {
                 throw ValidatorUtils.invalidArgument(
                         "Column '"
                                 + columnName
                                 + "' not found in the upstream database.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
             }
+            var declaredType = tableSchema.getColumnType(columnName);
+            if (OracleExternalTable.oracleTypeToRisingWaveType(columnInfo).getTypeName()
+                    != declaredType) {
+                throw ValidatorUtils.invalidArgument(
+                        "Incompatible data type of column '"
+                                + columnName
+                                + "': Oracle type "
+                                + columnInfo.dataType()
+                                + " cannot be declared as "
+                                + declaredType);
+            }
+            if (timePrecisionMode == TemporalPrecisionMode.CONNECT
+                    && declaredType == TypeName.TIMESTAMP
+                    && columnInfo.scale() != null
+                    && columnInfo.scale() > 3
+                    && tableSchema.getPrimaryKeys().contains(columnName)) {
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key column '"
+                                + columnName
+                                + "' of Oracle type "
+                                + columnInfo.dataType()
+                                + " cannot be captured with 'debezium.time.precision.mode' = 'connect', which truncates timestamps to milliseconds.\nHint: Remove 'debezium.time.precision.mode' to use the default 'microseconds'.");
+            }
         }
     }
 
     private void validateTablePrimaryKey() throws SQLException {
-        var pkFields = new ArrayList<String>();
-        String indexName = null;
-        var indexUsable = true;
+        var pkFields =
+                OracleExternalTable.discoverPrimaryKeys(jdbcConnection, schemaName, tableName);
+        primaryKeyCheck(tableSchema, pkFields);
         try (var stmt =
                 jdbcConnection.prepareStatement(
-                        "SELECT cols.COLUMN_NAME, ix.INDEX_NAME, ix.STATUS, ix.VISIBILITY "
-                                + "FROM ALL_CONSTRAINTS cons "
-                                + "JOIN ALL_CONS_COLUMNS cols ON cons.OWNER = cols.OWNER "
-                                + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
+                        "SELECT ix.INDEX_NAME, ix.STATUS, ix.VISIBILITY FROM ALL_CONSTRAINTS cons "
                                 + "JOIN ALL_INDEXES ix ON ix.OWNER = cons.INDEX_OWNER "
                                 + "AND ix.INDEX_NAME = cons.INDEX_NAME "
-                                + "JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = ix.OWNER "
-                                + "AND ic.INDEX_NAME = ix.INDEX_NAME AND ic.COLUMN_NAME = cols.COLUMN_NAME "
                                 + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
-                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED' "
-                                + "ORDER BY ic.COLUMN_POSITION")) {
+                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED'")) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             try (var result = stmt.executeQuery()) {
                 while (result.next()) {
-                    pkFields.add(result.getString("COLUMN_NAME"));
-                    indexName = result.getString("INDEX_NAME");
                     var status = result.getString("STATUS");
-                    indexUsable &=
-                            ("VALID".equals(status) || "N/A".equals(status))
-                                    && "VISIBLE".equals(result.getString("VISIBILITY"));
+                    if (!("VALID".equals(status) || "N/A".equals(status))
+                            || !"VISIBLE".equals(result.getString("VISIBILITY"))) {
+                        throw ValidatorUtils.invalidArgument(
+                                String.format(
+                                        "The index '%s' enforcing the primary key of Oracle table '%s.%s' must be valid and visible, so CDC backfill can read the table in primary-key order through it.",
+                                        result.getString("INDEX_NAME"), schemaName, tableName));
+                    }
                 }
             }
-        }
-        primaryKeyCheck(tableSchema, pkFields);
-        if (!indexUsable) {
-            throw ValidatorUtils.invalidArgument(
-                    String.format(
-                            "The index '%s' enforcing the primary key of Oracle table '%s.%s' must be valid and visible, so CDC backfill can read the table in primary-key order through it.",
-                            indexName, schemaName, tableName));
         }
     }
 

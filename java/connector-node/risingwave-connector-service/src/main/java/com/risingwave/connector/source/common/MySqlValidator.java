@@ -26,10 +26,10 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
 
-public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
+public class MySqlValidator extends CdcSourceValidator implements AutoCloseable {
     private static final String REPLICATION_CLIENT = "REPLICATION CLIENT";
     private static final String BINLOG_MONITOR = "BINLOG MONITOR";
-    private final Map<String, String> userProps;
+    private final MysqlDbzConnectorConfig config;
     private final String databaseTypeName;
     private final boolean isMariaDb;
     private final int cdcTableType;
@@ -44,15 +44,11 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private final boolean isBackfillTable;
 
     public MySqlValidator(
-            SourceTypeE sourceType,
-            Map<String, String> userProps,
-            TableSchema tableSchema,
-            boolean isCdcSourceJob,
-            boolean isBackfillTable)
+            MysqlDbzConnectorConfig config, TableSchema tableSchema, boolean isBackfillTable)
             throws SQLException {
-        this.userProps = userProps;
+        this.config = config;
         this.tableSchema = tableSchema;
-        this.isMariaDb = sourceType == SourceTypeE.MARIADB;
+        this.isMariaDb = config.getSourceType() == SourceTypeE.MARIADB;
         this.databaseTypeName = isMariaDb ? "MariaDB" : "MySQL";
         this.cdcTableType =
                 (isMariaDb
@@ -60,29 +56,25 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                                 : Catalog.Table.CdcTableType.CDC_TABLE_TYPE_MYSQL)
                         .getNumber();
 
-        var dbHost = userProps.get(DbzConnectorConfig.HOST);
-        var dbPort = userProps.get(DbzConnectorConfig.PORT);
         var jdbcUrl =
                 String.format(
-                        isMariaDb ? "jdbc:mariadb://%s:%s" : "jdbc:mysql://%s:%s", dbHost, dbPort);
+                        isMariaDb ? "jdbc:mariadb://%s:%s" : "jdbc:mysql://%s:%s",
+                        config.getHost(),
+                        config.getPort());
         var properties = new Properties();
-        properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
-        properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
-        String sslMode = userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED");
-        if (isMariaDb) {
-            sslMode = DbzConnectorConfig.mariaDbSslMode(userProps);
-            var rootCert = DbzConnectorConfig.mariaDbSslRootCert(userProps);
-            if (rootCert != null) {
-                properties.setProperty("serverSslCert", rootCert);
-            }
+        properties.setProperty("user", config.getUser());
+        properties.setProperty("password", config.getPassword());
+        properties.setProperty("sslMode", config.getSslMode());
+        var rootCert = config.getSslRootCert();
+        if (rootCert != null) {
+            properties.setProperty("serverSslCert", rootCert);
         }
-        properties.setProperty("sslMode", sslMode);
         if (!isMariaDb) {
             properties.setProperty("allowPublicKeyRetrieval", "true");
         }
 
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
-        this.isCdcSourceJob = isCdcSourceJob;
+        this.isCdcSourceJob = config.isCdcSourceJob();
         this.isBackfillTable = isBackfillTable;
     }
 
@@ -100,7 +92,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             // }
 
             // "database.name" is a comma-separated list of database names
-            var dbNames = userProps.get(DbzConnectorConfig.DB_NAME);
+            var dbNames = config.getDbName();
             for (var dbName : dbNames.split(",")) {
                 // check the existence of the database
                 try (var stmt =
@@ -250,8 +242,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private void validateTableSchema() throws SQLException {
         // check whether table exist
-        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
+        var dbName = config.getDbName();
+        var tableName = config.getTableName();
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table"))) {
             stmt.setString(1, dbName);
             stmt.setString(2, tableName);

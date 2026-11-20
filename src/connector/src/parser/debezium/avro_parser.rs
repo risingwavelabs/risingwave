@@ -204,6 +204,7 @@ mod tests {
 
     use super::*;
     use crate::WithOptionsSecResolved;
+    use crate::parser::unified::json::NumericHandling;
     use crate::parser::{DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig};
     use crate::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 
@@ -398,6 +399,9 @@ mod tests {
             parser_config,
             columns.clone(),
             SourceContext::dummy().into(),
+            NumericHandling::Relax {
+                string_parsing: false,
+            },
         )
         .await?;
         let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA.to_vec())

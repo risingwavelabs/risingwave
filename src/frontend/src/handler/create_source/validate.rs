@@ -14,6 +14,7 @@
 
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
+use risingwave_pb::secret::PbSecretRef;
 
 use super::*;
 
@@ -126,6 +127,7 @@ fn validate_pulsar_schema_options(
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
+    secret_refs: &BTreeMap<String, PbSecretRef>,
 ) -> Result<()> {
     let mut connector = props
         .get_connector()
@@ -143,7 +145,7 @@ pub fn validate_compatibility(
                 row_encode_to_prost(&format_encode.row_encode),
             )
             .map_err(protocol_error)?;
-            T::check_and_fill_create_with_options(props).map_err(protocol_error)?;
+            T::check_and_fill_create_with_options(props, secret_refs).map_err(protocol_error)?;
             return Ok(());
         },
         {}
@@ -251,7 +253,12 @@ mod tests {
                     (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
                 ],
             );
-            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+            validate_compatibility(
+                &format_encode,
+                &mut source_options(PULSAR_CONNECTOR),
+                &BTreeMap::new(),
+            )
+            .unwrap();
         }
     }
 
@@ -269,8 +276,12 @@ mod tests {
                 encode,
                 &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
             );
-            let error =
-                validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
+            let error = validate_compatibility(
+                &format_encode,
+                &mut source_options(connector),
+                &BTreeMap::new(),
+            )
+            .unwrap_err();
             assert!(error.to_string().contains(
                 "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO or JSON"
             ));
@@ -284,7 +295,12 @@ mod tests {
             Encode::Avro,
             &[("schema.registry", "http://localhost:8081")],
         );
-        validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
+        validate_compatibility(
+            &format_encode,
+            &mut source_options(KAFKA_CONNECTOR),
+            &BTreeMap::new(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -294,6 +310,11 @@ mod tests {
             Encode::Avro,
             &[(AWS_GLUE_SCHEMA_ARN_KEY, "placeholder")],
         );
-        validate_compatibility(&format_encode, &mut source_options(KINESIS_CONNECTOR)).unwrap();
+        validate_compatibility(
+            &format_encode,
+            &mut source_options(KINESIS_CONNECTOR),
+            &BTreeMap::new(),
+        )
+        .unwrap();
     }
 }

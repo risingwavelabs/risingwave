@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use itertools::Itertools;
@@ -23,8 +25,9 @@ use risingwave_connector::source::cdc::external::{
     TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    CdcSourceExternalTableIdentifier, MARIADB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR,
-    POSTGRES_CDC_CONNECTOR, Postgres, SQL_SERVER_CDC_CONNECTOR, SqlServer,
+    CDC_COLUMN_EXCLUDE_LIST, CdcSourceExternalTableIdentifier, MARIADB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, Postgres,
+    SQL_SERVER_CDC_CONNECTOR, SqlServer,
 };
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
@@ -40,6 +43,8 @@ use crate::handler::create_table::{bind_sql_columns, bind_sql_pk_names, bind_tab
 /// user's spelling:
 /// - For SQL Server: 'schema.table' (2 parts) gets the database name of the source prepended, so
 ///   that it names the table the same way as Debezium's topic, 'database.schema.table'.
+/// - For Oracle: Returns `schema.table` with both parts exactly as written, without case folding,
+///   to match Oracle catalog names and Debezium's `schema.table` topic suffix.
 /// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 pub(crate) fn derive_connect_properties_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
@@ -85,6 +90,13 @@ pub(crate) fn derive_connect_properties_for_cdc_table(
                 with_options.insert(TABLE_NAME_KEY.into(), table_name);
                 // Return original external_table_name unchanged for Postgres
                 return Ok((with_options, external_table_name));
+            }
+            ORACLE_CDC_CONNECTOR => {
+                let (schema_name, table_name) =
+                    parse_oracle_cdc_external_table_name(&external_table_name)?;
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.clone());
+                with_options.insert(TABLE_NAME_KEY.into(), table_name.clone());
+                return Ok((with_options, format!("{schema_name}.{table_name}")));
             }
             SQL_SERVER_CDC_CONNECTOR => {
                 // SQL Server external table name must be in one of two formats:
@@ -156,6 +168,25 @@ pub(crate) fn derive_connect_properties_for_cdc_table(
         };
     }
     unreachable!("All valid CDC connectors should have returned by now")
+}
+
+/// Both parts are exact Oracle names, like `schema.name` and `table.name`. Oracle stores
+/// unquoted names in upper case, so `app.orders` does not match a table created as `APP.ORDERS`.
+/// Names containing dots are not supported.
+fn parse_oracle_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
+    match external_table_name
+        .split('.')
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [schema, table] if !schema.is_empty() && !table.is_empty() => {
+            Ok(((*schema).to_owned(), (*table).to_owned()))
+        }
+        _ => Err(anyhow!(
+            "Invalid Oracle CDC table name '{external_table_name}': expected schema.table"
+        )
+        .into()),
+    }
 }
 
 /// Parse the schema/table name from the CDC `TABLE` clause.
@@ -380,9 +411,11 @@ pub(crate) fn sanity_check_for_table_on_cdc_source(
     Ok(())
 }
 
-/// Derive the schema of a CDC table from its upstream external table.
+/// Derive the schema of a CDC table created with `(*)` from the upstream table, leaving out the
+/// columns listed in `column.exclude.list`.
 pub(crate) async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
+    excluded_columns: &HashSet<String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>, Vec<CdcKeyComparison>)> {
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -394,19 +427,40 @@ pub(crate) async fn bind_cdc_table_schema_externally(
 
     let pk_names = table.pk_names().clone();
     let pk_comparisons = table.pk_column_comparisons(&pk_names)?;
-    Ok((
-        table
-            .column_descs()
-            .iter()
-            .cloned()
-            .map(|column_desc| ColumnCatalog {
-                column_desc,
-                is_hidden: false,
-            })
-            .collect(),
-        pk_names,
-        pk_comparisons,
-    ))
+    let column_descs = table.column_descs();
+
+    let unknown = excluded_columns
+        .iter()
+        .filter(|name| !column_descs.iter().any(|c| c.name == **name))
+        .sorted()
+        .join(", ");
+    if !unknown.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "columns in `{CDC_COLUMN_EXCLUDE_LIST}` do not exist in the upstream table: {unknown}"
+        ))
+        .into());
+    }
+    let excluded_pks = pk_names
+        .iter()
+        .filter(|name| excluded_columns.contains(*name))
+        .join(", ");
+    if !excluded_pks.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "primary key columns cannot be excluded by `{CDC_COLUMN_EXCLUDE_LIST}`: {excluded_pks}"
+        ))
+        .into());
+    }
+
+    let columns = column_descs
+        .iter()
+        .filter(|c| !excluded_columns.contains(&c.name))
+        .cloned()
+        .map(|column_desc| ColumnCatalog {
+            column_desc,
+            is_hidden: false,
+        })
+        .collect();
+    Ok((columns, pk_names, pk_comparisons))
 }
 
 pub(crate) async fn bind_cdc_pk_comparisons_externally(

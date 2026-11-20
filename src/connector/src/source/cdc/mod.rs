@@ -24,14 +24,16 @@ pub mod source;
 pub mod split;
 pub mod sql_server;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
 
+use anyhow::anyhow;
 pub use enumerator::*;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, SourceId};
 use risingwave_common::license::FeatureNotAvailable;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -44,9 +46,10 @@ pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::parser::NumericHandling;
 use crate::source::cdc::external::SchemaTableName;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
-use crate::{for_all_classified_sources, impl_cdc_source_type};
+use crate::{dispatch_cdc_source_type, for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
@@ -62,7 +65,11 @@ pub const CDC_BACKFILL_AS_EVEN_SPLITS: &str = "backfill.as_even_splits";
 pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_index";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
+/// Comma-separated upstream columns to leave out of a CDC table created with `(*)`.
+pub const CDC_COLUMN_EXCLUDE_LIST: &str = "column.exclude.list";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
+pub const CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY: &str =
+    "cdc.source.needs.offset.commit.on.checkpoint";
 pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
@@ -80,6 +87,14 @@ pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> Str
     format!("{}.{}", source_id, external_table_name)
 }
 
+/// Parse the value of `column.exclude.list`, e.g. `'a, b'`.
+pub fn parse_cdc_column_exclude_list(list: &str) -> HashSet<String> {
+    list.split(',')
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
+        .collect()
+}
+
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
     fn source_type() -> CdcSourceType;
@@ -94,16 +109,30 @@ pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
     /// When true, a shared source sets Debezium's `provide.transaction.metadata`, so that all rows
     /// of one upstream transaction go into a single chunk.
     const CAN_USE_TRANSACTION_METADATA: bool = false;
+    /// When true, the connector accepts `auto.schema.change = true`, which makes Debezium emit
+    /// schema change events that RisingWave applies to the CDC tables of the source. Set it only
+    /// when Debezium consumes the option for the connector and RisingWave can apply the resulting
+    /// DDL events.
+    const CAN_AUTO_SCHEMA_CHANGE: bool = false;
+    /// When true, the connector accepts `heartbeat.table.auto.initialize = true`, which makes
+    /// source validation create the heartbeat table named by `heartbeat.table.name` in the
+    /// upstream database if it does not exist yet.
+    const CAN_AUTO_INITIALIZE_HEARTBEAT_TABLE: bool = false;
     /// When true, the source executor waits for a non-empty split offset before reporting the
     /// initial CDC offset.
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = false;
     /// When true, the consumed offset is committed back to the upstream database on each
-    /// checkpoint via a JNI call.
+    /// checkpoint via a JNI call. The CDC reader passes the flag to the Java engine, which then
+    /// holds back Debezium's acknowledgement of each record until that commit.
     const NEEDS_OFFSET_COMMIT_ON_CHECKPOINT: bool = false;
+    /// When true, the Debezium JSON parser accepts a numeric value that arrives as a JSON string,
+    /// such as `"42"` for an integer column or `"123.45"` for a decimal column, and converts it to
+    /// the column type instead of rejecting it.
+    const NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING: bool = false;
 }
 
 /// Checks the `CREATE` and `ALTER` statements of a CDC source connector.
-pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
+pub trait CdcSourceDdlValidator: CdcSourceRuntimeFlags {
     /// Checks the `FORMAT ... ENCODE ...` clause of a `CREATE` statement.
     fn check_format_encode(format: PbFormatType, encode: PbEncodeType) -> ConnectorResult<()> {
         check_format_encode_inner(
@@ -135,8 +164,9 @@ pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
     /// first.
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)
+        check_common_with_options::<Self>(props, secret_refs)
     }
 
     /// Checks that the license allows the CDC source.
@@ -148,9 +178,9 @@ pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
     /// CDC source can apply. An override calls [`check_common_with_options`] first.
     fn check_alter_with_options(
         props: &BTreeMap<String, String>,
-        _secret_refs: &BTreeMap<String, PbSecretRef>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)
+        check_common_with_options::<Self>(props, secret_refs)
     }
 }
 
@@ -225,32 +255,69 @@ pub fn split_quoted_identifier_inner(name: &str, open: char, close: char) -> Opt
     Some(parts)
 }
 
+const HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY: &str = "heartbeat.table.auto.initialize";
+
 /// Checks the `WITH (...)` options that every CDC source accepts, on both `CREATE` and `ALTER`.
-pub fn check_common_with_options(props: &BTreeMap<String, String>) -> ConnectorResult<()> {
+/// Options that only some connectors support are checked against the runtime flags of `T`. An
+/// option given as a `SECRET` in `secret_refs` is checked by its resolved value, which an error
+/// never shows.
+pub fn check_common_with_options<T: CdcSourceRuntimeFlags>(
+    props: &BTreeMap<String, String>,
+    secret_refs: &BTreeMap<String, PbSecretRef>,
+) -> ConnectorResult<()> {
+    let value_of = |key: &str| -> ConnectorResult<Option<String>> {
+        Ok(match secret_refs.get(key) {
+            Some(secret_ref) => Some(LocalSecretManager::global().fill_secret(*secret_ref)?),
+            None => props.get(key).cloned(),
+        })
+    };
+    let shown = |key: &str, value: String| {
+        if secret_refs.contains_key(key) {
+            "<secret>".to_owned()
+        } else {
+            value
+        }
+    };
     // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
     // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
     // override must retain the common `string` default from `debezium.properties`.
-    if let Some(mode) = props.get("debezium.decimal.handling.mode")
+    if let Some(mode) = value_of("debezium.decimal.handling.mode")?
         && mode != "string"
     {
-        bail!("'debezium.decimal.handling.mode' must be 'string', got: '{mode}'");
+        bail!(
+            "'debezium.decimal.handling.mode' must be 'string', got: '{}'",
+            shown("debezium.decimal.handling.mode", mode)
+        );
     }
     for key in [
         CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
         "debezium.max.queue.size",
     ] {
-        if let Some(value) = props.get(key)
+        if let Some(value) = value_of(key)?
             && value.parse::<u32>().is_err()
         {
-            bail!("Invalid value `{value}` for `{key}`");
+            bail!("Invalid value `{}` for `{key}`", shown(key, value));
         }
     }
-    // Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`:
-    // match Java's ASCII integer syntax and Debezium's signed 32-bit range.
-    if let Some(value) = props.get("debezium.heartbeat.interval.ms")
+    // Debezium reads the interval as a signed 32-bit integer.
+    if let Some(value) = value_of("debezium.heartbeat.interval.ms")?
         && !value.parse::<i32>().is_ok_and(|interval| interval > 0)
     {
-        bail!("'debezium.heartbeat.interval.ms' must be a positive integer, got: '{value}'");
+        bail!(
+            "'debezium.heartbeat.interval.ms' must be a positive integer, got: '{}'",
+            shown("debezium.heartbeat.interval.ms", value)
+        );
+    }
+    if let Some(value) = value_of(HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY)?
+        && value.parse::<bool>().map_err(|_| {
+            anyhow!("'{HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY}' must be 'true' or 'false'")
+        })?
+        && !T::CAN_AUTO_INITIALIZE_HEARTBEAT_TABLE
+    {
+        bail!(
+            "'{HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY}=true' is not supported for connector {}",
+            T::CDC_CONNECTOR_NAME
+        );
     }
     Ok(())
 }
@@ -342,6 +409,19 @@ impl CdcSourceType {
             CdcSourceType::SqlServer => "SQL Server",
             CdcSourceType::Oracle => "Oracle",
             CdcSourceType::Unspecified => "Unspecified",
+        }
+    }
+
+    /// Returns how the Debezium JSON parser handles the numeric values in the change events of
+    /// this connector.
+    pub fn debezium_numeric_handling(&self) -> NumericHandling {
+        NumericHandling::Relax {
+            string_parsing: dispatch_cdc_source_type!(
+                self,
+                T,
+                T::NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING,
+                false
+            ),
         }
     }
 }
