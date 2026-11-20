@@ -31,9 +31,16 @@ select count(*) from t_idx_sb where b = 42;
 ----
 1000
 
+# Read the base table directly, so that the comparison does not go through the index.
+statement ok
+set enable_index_selection = false;
+
 query T
 select a, b from t_idx_sb where b = 7 except select a, b from idx_sb_b where b = 7;
 ----
+
+statement ok
+set enable_index_selection = default;
 
 # Index keeps up with upstream changes after backfill
 statement ok
@@ -69,10 +76,14 @@ set backfill_rate_limit = 10000;
 statement ok
 create index idx_sb_c on t_idx_sb(c);
 
-query T retry 6 backoff 1s
-select backfill_type from rw_catalog.rw_ddl_progress where ddl_statement like '%idx_sb_c%';
+# The fragment flag is set at job creation and survives the end of the backfill, so this
+# does not race with the backfill completing.
+query I
+select count(*) from rw_catalog.rw_fragments f
+join rw_catalog.rw_indexes i on f.table_id = i.id
+where i.name = 'idx_sb_c' and f.flags @> ARRAY['SNAPSHOT_BACKFILL_STREAM_SCAN'];
 ----
-SNAPSHOT_BACKFILL
+1
 
 statement ok
 wait;
@@ -93,9 +104,15 @@ select count(*) from idx_sb_c;
 ----
 100000
 
+statement ok
+set enable_index_selection = false;
+
 query T
 select a from t_idx_sb where c = 'v12345' except select a from idx_sb_c where c = 'v12345';
 ----
+
+statement ok
+set enable_index_selection = default;
 
 # ---- Disabled: fall back to arrangement backfill ----
 
