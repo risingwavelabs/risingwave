@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use yaml_rust::Yaml;
+use yaml_rust2::Yaml;
 
 /// Expands `x-${port}` to `x-2333`.
 pub struct DollarExpander {
@@ -87,7 +87,7 @@ impl DollarExpander {
 
 #[cfg(test)]
 mod tests {
-    use yaml_rust::YamlLoader;
+    use yaml_rust2::YamlLoader;
 
     use super::*;
 

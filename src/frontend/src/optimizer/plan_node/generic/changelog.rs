@@ -28,8 +28,13 @@ pub const _CHANGELOG_ROW_ID: &str = "_changelog_row_id";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
-    /// Declared key column indices in the input schema.
+    /// Declared key column indices in the input schema. Changes sharing this key are
+    /// co-located, with deletes emitted before inserts within each epoch. Distinct stream
+    /// keys remain separate changes; this does not compact to one final change per declared key.
+    /// For upsert input, these columns must be a subset of the input stream key.
     pub key_indices: Option<Vec<usize>>,
+    /// Explicit vnode distribution columns, independent of keyed changelog processing.
+    pub distribution_key_indices: Option<Vec<usize>>,
     // If there is no op in the output result, it is false, example 'create materialized view mv1 as with sub as changelog from t1 select v1 from sub;'
     pub need_op: bool,
     // Before rewrite. If there is no changelog_row_id in the output result, it is false.
@@ -55,6 +60,18 @@ impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
             fields.push(("key", key));
         }
 
+        if let Some(indices) = &self.distribution_key_indices {
+            fields.push((
+                "distribution_key",
+                Pretty::Array(
+                    indices
+                        .iter()
+                        .map(|&index| Pretty::display(&FieldDisplay(&self.input.schema()[index])))
+                        .collect(),
+                ),
+            ));
+        }
+
         childless_record(name, fields)
     }
 }
@@ -62,12 +79,14 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
     pub fn new(
         input: PlanRef,
         key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
         need_op: bool,
         need_changelog_row_id: bool,
     ) -> Self {
         ChangeLog {
             input,
             key_indices,
+            distribution_key_indices,
             need_op,
             need_changelog_row_id,
         }
@@ -77,6 +96,7 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
         ChangeLog {
             input,
             key_indices: self.key_indices.clone(),
+            distribution_key_indices: self.distribution_key_indices.clone(),
             need_op: self.need_op,
             need_changelog_row_id: self.need_changelog_row_id,
         }

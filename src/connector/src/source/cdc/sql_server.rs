@@ -18,9 +18,11 @@ use risingwave_common::license::{Feature, FeatureNotAvailable};
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::{DATABASE_NAME_KEY, SchemaTableName};
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, SqlServer,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, SqlServer, check_alter_with_options_inner, check_common_with_options,
+    split_quoted_identifier_inner,
 };
 
 // ------- Runtime flags -------
@@ -38,8 +40,9 @@ impl CdcSourceRuntimeFlags for SqlServer {
 impl CdcSourceDdlValidator for SqlServer {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         if !props.contains_key("schema.name") {
             // Default schema name is "dbo"
             props.insert("schema.name".into(), "dbo".into());
@@ -55,7 +58,7 @@ impl CdcSourceDdlValidator for SqlServer {
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         check_alter_with_options_inner(
             Self::CDC_CONNECTOR_NAME,
             props,
@@ -69,5 +72,29 @@ impl CdcSourceDdlValidator for SqlServer {
                 "password",
             ],
         )
+    }
+}
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for SqlServer {
+    /// Debezium SQL Server always names topics in multi-partition mode, so the topic suffix
+    /// starts with the database: `database.schema.table`. The database part must be the name
+    /// SQL Server reports, which the Java validator guarantees by checking `database.name`
+    /// against `DB_NAME()` exactly.
+    fn canonical_name(connect_properties: &BTreeMap<String, String>) -> String {
+        let SchemaTableName {
+            schema_name,
+            table_name,
+        } = SchemaTableName::from_properties(connect_properties);
+        let database_name = connect_properties
+            .get(DATABASE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or_default();
+        format!("{database_name}.{schema_name}.{table_name}")
+    }
+
+    fn split_quoted_identifier(name: &str) -> Option<Vec<String>> {
+        split_quoted_identifier_inner(name, '[', ']')
     }
 }

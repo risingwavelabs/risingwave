@@ -28,7 +28,7 @@ use risingwave_expr::aggregate::{
 };
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{
-    BoxedWindowState, FrameBounds, StateEvictHint, StateKey, StatePos, WindowFuncCall,
+    BoxedWindowState, FrameBounds, Readiness, StateEvictHint, StateKey, StatePos, WindowFuncCall,
     WindowFuncKind, WindowState,
 };
 use smallvec::SmallVec;
@@ -179,6 +179,14 @@ where
             key: window.key,
             is_ready: window.following_saturated,
         }
+    }
+
+    fn readiness(&self) -> Readiness {
+        self.buffer.readiness()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
     }
 
     fn slide(&mut self) -> Result<(Datum, StateEvictHint)> {

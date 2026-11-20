@@ -14,6 +14,7 @@
 
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
+use risingwave_pb::secret::PbSecretRef;
 
 use super::*;
 
@@ -126,6 +127,7 @@ fn validate_pulsar_schema_options(
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
+    secret_refs: &BTreeMap<String, PbSecretRef>,
 ) -> Result<()> {
     let mut connector = props
         .get_connector()
@@ -143,7 +145,7 @@ pub fn validate_compatibility(
                 row_encode_to_prost(&format_encode.row_encode),
             )
             .map_err(protocol_error)?;
-            T::check_and_fill_create_with_options(props).map_err(protocol_error)?;
+            T::check_and_fill_create_with_options(props, secret_refs).map_err(protocol_error)?;
             return Ok(());
         },
         {}
@@ -175,9 +177,10 @@ pub fn validate_compatibility(
         })?;
     if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
-            (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
+            (Format::Plain | Format::Upsert, Encode::Protobuf | Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+                let (_, use_schema_registry) =
+                    get_schema_location(options.inner_mut()).unwrap_or_default();
                 use_schema_registry
             }
             (Format::Debezium, Encode::Avro) => true,
@@ -250,7 +253,12 @@ mod tests {
                     (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
                 ],
             );
-            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+            validate_compatibility(
+                &format_encode,
+                &mut source_options(PULSAR_CONNECTOR),
+                &BTreeMap::new(),
+            )
+            .unwrap();
         }
     }
 
@@ -268,8 +276,12 @@ mod tests {
                 encode,
                 &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
             );
-            let error =
-                validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
+            let error = validate_compatibility(
+                &format_encode,
+                &mut source_options(connector),
+                &BTreeMap::new(),
+            )
+            .unwrap_err();
             assert!(error.to_string().contains(
                 "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO or JSON"
             ));
@@ -283,6 +295,26 @@ mod tests {
             Encode::Avro,
             &[("schema.registry", "http://localhost:8081")],
         );
-        validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
+        validate_compatibility(
+            &format_encode,
+            &mut source_options(KAFKA_CONNECTOR),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn glue_schema_registry_non_kafka() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[(AWS_GLUE_SCHEMA_ARN_KEY, "placeholder")],
+        );
+        validate_compatibility(
+            &format_encode,
+            &mut source_options(KINESIS_CONNECTOR),
+            &BTreeMap::new(),
+        )
+        .unwrap();
     }
 }

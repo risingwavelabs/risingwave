@@ -192,10 +192,7 @@ impl MockIcebergV3Catalog {
                 partition_type,
                 format_version,
             )?;
-            let output_path = format!(
-                "memory://test/data/compacted-{}.parquet",
-                uuid::Uuid::new_v4()
-            );
+            let output_path = format!("memory://test/data/{}.parquet", uuid::Uuid::new_v4());
             let bytes = self.file_io.new_input(path)?.read().await?;
             self.file_io.new_output(&output_path)?.write(bytes).await?;
             let mut file = serde_json::to_value(file)?;

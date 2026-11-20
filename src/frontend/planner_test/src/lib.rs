@@ -63,6 +63,7 @@ static PLANNER_TEST_JAVASCRIPT_UDF: UdfImplDescriptor = UdfImplDescriptor {
         })
     },
     build_fn: |_| bail!("UDFs are not executed in planner tests"),
+    supports_always_retry_on_network_error: |_| false,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash, Eq)]
@@ -439,7 +440,7 @@ impl TestCase {
                     let context = OptimizerContext::new(
                         HandlerArgs::new(session.clone(), &stmt, sql.clone())?,
                         explain_options,
-                    );
+                    )?;
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -644,6 +645,7 @@ impl TestCase {
                             args,
                             returns,
                             params,
+                            with_options,
                         )
                         .await?;
                     } else {

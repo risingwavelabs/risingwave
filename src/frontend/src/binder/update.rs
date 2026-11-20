@@ -130,10 +130,9 @@ impl Binder {
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundUpdate> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &name)?;
-        let table = self.bind_table(schema_name.as_deref(), &table_name)?;
+        let table = self.bind_table_for_dml(schema_name.as_deref(), &table_name, false)?;
 
         let table_catalog = &table.table_catalog;
-        Self::check_for_dml(table_catalog, false)?;
         self.check_privilege(
             ObjectCheckItem::new(
                 table_catalog.owner,

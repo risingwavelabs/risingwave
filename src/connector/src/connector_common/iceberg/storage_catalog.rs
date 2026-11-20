@@ -26,8 +26,8 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use iceberg::io::{
     AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, FileIO, FileIOBuilder,
-    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD,
-    S3_ENDPOINT, S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY,
+    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN,
+    S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use iceberg::spec::{TableMetadata, TableMetadataBuilder, TableProperties};
 use iceberg::table::Table;
@@ -52,6 +52,7 @@ pub struct StorageCatalogS3Config {
     warehouse: String,
     access_key: Option<String>,
     secret_key: Option<String>,
+    iam_role_arn: Option<String>,
     endpoint: Option<String>,
     region: Option<String>,
     path_style_access: Option<bool>,
@@ -91,6 +92,9 @@ impl StorageCatalog {
                 if let Some(secret_key) = &config.secret_key {
                     file_io_builder = file_io_builder.with_prop(S3_SECRET_ACCESS_KEY, secret_key)
                 };
+                if let Some(iam_role_arn) = &config.iam_role_arn {
+                    file_io_builder = file_io_builder.with_prop(S3_ASSUME_ROLE_ARN, iam_role_arn);
+                }
                 if let Some(endpoint) = &config.endpoint {
                     file_io_builder = file_io_builder.with_prop(S3_ENDPOINT, endpoint)
                 }
@@ -212,14 +216,6 @@ impl StorageCatalog {
 
         // write version hint
         let final_file_path = format!("{table_path}/metadata/version-hint.text");
-        if self
-            .file_io()
-            .exists(final_file_path.as_str())
-            .await
-            .map_err(|_| Error::new(ErrorKind::Unexpected, "Fail to check exist"))?
-        {
-            self.file_io().delete(final_file_path.as_str()).await?;
-        }
         self.file_io()
             .new_output(final_file_path)?
             .write(format!("{}", current_version + 1).into())

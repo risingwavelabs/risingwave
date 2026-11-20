@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use futures_async_stream::for_await;
-use parking_lot::RwLock;
+use parking_lot::{RecursiveRwLock, RwLock};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{SessionId, SessionManager, UserAuthenticator};
@@ -258,7 +258,7 @@ pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
 }
 
 pub struct MockCatalogWriter {
-    catalog: Arc<RwLock<Catalog>>,
+    catalog: Arc<RecursiveRwLock<Catalog>>,
     id: AtomicU32,
     table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
     schema_id_to_database_id: RwLock<HashMap<SchemaId, DatabaseId>>,
@@ -873,7 +873,7 @@ impl CatalogWriter for MockCatalogWriter {
 
 impl MockCatalogWriter {
     pub fn new(
-        catalog: Arc<RwLock<Catalog>>,
+        catalog: Arc<RecursiveRwLock<Catalog>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         catalog.write().create_database(&PbDatabase {
@@ -1077,7 +1077,7 @@ impl MockCatalogWriter {
 
 pub struct MockUserInfoWriter {
     id: AtomicU32,
-    user_info: Arc<RwLock<UserInfoManager>>,
+    user_info: Arc<RecursiveRwLock<UserInfoManager>>,
 }
 
 #[async_trait::async_trait]
@@ -1177,7 +1177,7 @@ impl UserInfoWriter for MockUserInfoWriter {
 }
 
 impl MockUserInfoWriter {
-    pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
+    pub fn new(user_info: Arc<RecursiveRwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_owned(),

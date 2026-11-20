@@ -22,10 +22,11 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{
-    BigintUnsignedHandlingMode, JsonAccess, JsonParseOptions, TimeHandling, TimestampHandling,
-    TimestamptzHandling,
+    BigintUnsignedHandlingMode, JsonAccess, JsonParseOptions, NumericHandling, TimeHandling,
+    TimestampHandling, TimestamptzHandling,
 };
 use crate::parser::{AccessBuilder, MongoProperties};
+use crate::source::cdc::CdcSourceType;
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
@@ -38,8 +39,9 @@ impl DebeziumJsonAccessBuilder {
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
+        numeric_handling: NumericHandling,
         bigint_unsigned_handling: BigintUnsignedHandlingMode,
-        handle_toast_columns: bool,
+        handle_postgres_toast_columns: bool,
     ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
@@ -47,8 +49,9 @@ impl DebeziumJsonAccessBuilder {
                 timestamptz_handling,
                 timestamp_handling,
                 time_handling,
+                numeric_handling,
                 bigint_unsigned_handling,
-                handle_toast_columns,
+                handle_postgres_toast_columns,
             ),
         })
     }
@@ -100,6 +103,7 @@ impl DebeziumMongoJsonAccessBuilder {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                CdcSourceType::Mongodb.debezium_numeric_handling(),
                 BigintUnsignedHandlingMode::Long,
                 false,
             ),
@@ -142,6 +146,7 @@ mod tests {
     use serde_json::Value;
     use thiserror_ext::AsReport;
 
+    use crate::parser::unified::json::NumericHandling;
     use crate::parser::{
         DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
         SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
@@ -169,13 +174,20 @@ mod tests {
                 timestamp_handling: None,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        DebeziumParser::new(props, rw_columns, SourceContext::dummy().into())
-            .await
-            .unwrap()
+        DebeziumParser::new(
+            props,
+            rw_columns,
+            SourceContext::dummy().into(),
+            NumericHandling::Relax {
+                string_parsing: false,
+            },
+        )
+        .await
+        .unwrap()
     }
 
     async fn parse_one(

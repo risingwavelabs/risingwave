@@ -27,7 +27,7 @@ pub fn cdc_source_column_type_compatible(
 ) -> bool {
     let upstream_type_name = upstream_type_name.to_ascii_lowercase();
     match cdc_table_type {
-        PbCdcTableType::Mysql => mysql_source_column_type_compatible(
+        PbCdcTableType::Mysql | PbCdcTableType::Mariadb => mysql_source_column_type_compatible(
             &upstream_type_name,
             rw_type_name,
             char_max_length,
@@ -42,7 +42,7 @@ pub fn cdc_source_column_type_compatible(
             char_max_length,
             postgres_udt_name,
         ),
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => false,
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb | PbCdcTableType::Oracle => false,
     }
 }
 
@@ -250,12 +250,14 @@ fn auto_schema_change_source_type_candidates(
     mapped_type: &DataType,
 ) -> Vec<SourceTypeCompatibilityInput> {
     match cdc_table_type {
-        PbCdcTableType::Mysql => mysql_auto_schema_change_source_type_candidates(mapped_type),
+        PbCdcTableType::Mysql | PbCdcTableType::Mariadb => {
+            mysql_auto_schema_change_source_type_candidates(mapped_type)
+        }
         PbCdcTableType::SqlServer => {
             sql_server_auto_schema_change_source_type_candidates(mapped_type)
         }
         PbCdcTableType::Postgres => postgres_auto_schema_change_source_type_candidates(mapped_type),
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => vec![],
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb | PbCdcTableType::Oracle => vec![],
     }
 }
 
@@ -358,6 +360,25 @@ mod tests {
             false,
             None,
         ));
+    }
+
+    #[test]
+    fn test_mariadb_uses_mysql_type_compatibility() {
+        for table_type in [PbCdcTableType::Mysql, PbCdcTableType::Mariadb] {
+            assert!(cdc_source_column_type_compatible(
+                table_type,
+                "int",
+                PbTypeName::Int64,
+                None,
+                true,
+                None,
+            ));
+            assert!(cdc_auto_schema_change_existing_type_compatible(
+                table_type,
+                &DataType::Float64,
+                &DataType::Float32,
+            ));
+        }
     }
 
     #[test]

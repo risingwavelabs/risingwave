@@ -501,8 +501,9 @@ pub(crate) mod tests {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
-        let catalog_reader =
-            CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
+        let catalog_reader = CatalogReader::new(Arc::new(parking_lot::RecursiveRwLock::new(
+            Catalog::default(),
+        )));
         let query = create_query().await;
         let query_id = query.query_id().clone();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
@@ -736,7 +737,7 @@ pub(crate) mod tests {
         worker_node_manager.insert_streaming_fragment_mapping(0.into(), mapping.clone());
         worker_node_manager
             .set_serving_fragment_mapping(vec![(0.into(), mapping)].into_iter().collect());
-        let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
+        let catalog = Arc::new(parking_lot::RecursiveRwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0.into());
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.

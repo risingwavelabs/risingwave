@@ -239,7 +239,7 @@ fn test_batch_query(
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
     let context: OptimizerContextRef =
-        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, sql)?).into();
+        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, sql)?)?.into();
 
     match stmt {
         Statement::Query(_) => {

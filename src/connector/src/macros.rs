@@ -19,6 +19,7 @@ macro_rules! for_all_classified_sources {
             // cdc sources
             {
                 { Mysql },
+                { Mariadb },
                 { Postgres },
                 { Mongodb },
                 { SqlServer },
@@ -412,14 +413,16 @@ macro_rules! impl_cdc_source_type {
             }
         }
 
-        impl From<&$crate::source::ConnectorProperties> for CdcSourceType {
-            fn from(props: &$crate::source::ConnectorProperties) -> Self {
+        impl $crate::source::ConnectorProperties {
+            /// Returns the CDC source type of a native CDC connector, or `None` for any other
+            /// connector, including a transport connector such as Kafka that carries Debezium events.
+            pub fn native_cdc_type(&self) -> Option<CdcSourceType> {
                 $crate::paste! {
-                    match props {
+                    match self {
                         $(
-                            $crate::source::ConnectorProperties::[<$cdc_source_type Cdc>](_) => CdcSourceType::$cdc_source_type,
+                            $crate::source::ConnectorProperties::[<$cdc_source_type Cdc>](_) => Some(CdcSourceType::$cdc_source_type),
                         )*
-                        _ => CdcSourceType::Unspecified,
+                        _ => None,
                     }
                 }
             }

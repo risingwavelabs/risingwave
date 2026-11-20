@@ -19,13 +19,14 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Mysql,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, Mysql, check_alter_with_options_inner, check_common_with_options,
 };
 
 // ------- Runtime flags -------
 
 impl CdcSourceRuntimeFlags for Mysql {
+    const CAN_AUTO_SCHEMA_CHANGE: bool = true;
     const CAN_BACKFILL: bool = true;
     const CAN_USE_TRANSACTION_METADATA: bool = true;
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;
@@ -36,8 +37,9 @@ impl CdcSourceRuntimeFlags for Mysql {
 impl CdcSourceDdlValidator for Mysql {
     fn check_and_fill_create_with_options(
         props: &mut BTreeMap<String, String>,
+        secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         // Generate a random server id for mysql cdc source if needed
         // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
         // group (that is, different from any other server id being used by any master or slave)
@@ -51,7 +53,7 @@ impl CdcSourceDdlValidator for Mysql {
         props: &BTreeMap<String, String>,
         secret_refs: &BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<()> {
-        check_common_with_options(props)?;
+        check_common_with_options::<Self>(props, secret_refs)?;
         check_alter_with_options_inner(
             Self::CDC_CONNECTOR_NAME,
             props,
@@ -67,3 +69,7 @@ impl CdcSourceDdlValidator for Mysql {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Mysql {}

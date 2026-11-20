@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
-use yaml_rust::{Yaml, yaml};
+use yaml_rust2::{Yaml, yaml};
 
 /// Expands `use: xxx` from the template.
 pub struct UseExpander {
@@ -99,7 +99,7 @@ impl UseExpander {
 
 #[cfg(test)]
 mod tests {
-    use yaml_rust::YamlLoader;
+    use yaml_rust2::YamlLoader;
 
     use super::*;
     #[test]

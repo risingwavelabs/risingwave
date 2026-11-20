@@ -712,7 +712,7 @@ pub async fn handle_create_index(
             return Ok(resp);
         }
 
-        let context = OptimizerContext::from_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args)?;
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),

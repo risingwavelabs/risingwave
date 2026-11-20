@@ -39,6 +39,7 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
@@ -63,9 +64,6 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
-use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
-};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -234,6 +232,30 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
             specific_resource_group: model.specific_resource_group,
         }
     }
+}
+
+fn update_source_node_rate_limit(
+    node: &mut PbNodeBody,
+    rate_limit: Option<u32>,
+) -> MetaResult<bool> {
+    let (properties, current_limit) = match node {
+        PbNodeBody::Source(node) => match &mut node.source_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        PbNodeBody::StreamFsFetch(node) => match &mut node.node_inner {
+            Some(inner) => (&inner.with_properties, &mut inner.rate_limit),
+            None => return Ok(false),
+        },
+        _ => return Ok(false),
+    };
+    if properties.is_iceberg_update_source() {
+        return Err(MetaError::invalid_parameter(
+            "Iceberg streaming_updates does not support rate limiting",
+        ));
+    }
+    *current_limit = rate_limit;
+    Ok(true)
 }
 
 fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -> MetaResult<bool> {
@@ -768,18 +790,11 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
 
                 if table.refreshable {
-                    let trigger_interval_secs = src
-                        .as_ref()
-                        .and_then(|source_catalog| source_catalog.refresh_mode)
-                        .and_then(
-                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
-                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
-                                    refresh_interval_sec,
-                                })) => refresh_interval_sec,
-                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
-                                None => None,
-                            },
-                        );
+                    let trigger_interval_secs = IngestMode::from_proto(
+                        src.as_ref()
+                            .and_then(|source_catalog| source_catalog.ingest_mode.as_ref()),
+                    )?
+                    .refresh_interval_sec();
 
                     RefreshJob::insert(refresh_job::ActiveModel {
                         table_id: Set(table.id),
@@ -2579,6 +2594,15 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
+        if source
+            .with_properties
+            .inner_ref()
+            .is_iceberg_update_source()
+        {
+            return Err(MetaError::invalid_parameter(
+                "Iceberg streaming_updates does not support rate limiting",
+            ));
+        }
         let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id.as_job_id()]
@@ -3812,20 +3836,15 @@ impl CatalogController {
             let mut found = Ok(false);
             match throttle_type {
                 ThrottleType::Source => {
-                    visit_stream_node_mut(stream_node, |node| match node {
-                        PbNodeBody::Source(node) => {
-                            if let Some(node_inner) = &mut node.source_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                    visit_stream_node_mut(stream_node, |node| {
+                        if found.is_err() {
+                            return;
                         }
-                        PbNodeBody::StreamFsFetch(node) => {
-                            if let Some(node_inner) = &mut node.node_inner {
-                                node_inner.rate_limit = rate_limit;
-                                found = Ok(true);
-                            }
+                        match update_source_node_rate_limit(node, rate_limit) {
+                            Ok(true) => found = Ok(true),
+                            Ok(false) => {}
+                            Err(err) => found = Err(err),
                         }
-                        _ => {}
                     });
                 }
                 ThrottleType::Backfill => {
