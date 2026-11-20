@@ -37,9 +37,23 @@ fn dest_dir() -> PathBuf {
 }
 
 fn build() -> anyhow::Result<()> {
-    // TODO(bugen): we should include all files and subdirectories under `DASHBOARD_DIR`
-    // while excluding the `out` directory. There's no elegant way to do this.
-    rerun_if_changed!(format!("{DASHBOARD_DIR}/components"));
+    // Watch the source inputs without watching Next.js output or vendored Monaco files.
+    for path in [
+        "components",
+        "hook",
+        "lib",
+        "pages",
+        "public/risingwave.svg",
+        "scripts",
+        "styles",
+        "next.config.js",
+        "package.json",
+        "pnpm-lock.yaml",
+        "tsconfig.json",
+    ] {
+        rerun_if_changed!(format!("{DASHBOARD_DIR}/{path}"));
+    }
+    rerun_if_changed!("../../../proto");
 
     for args in [
         ["install", "--frozen-lockfile"].as_slice(),
@@ -61,6 +75,9 @@ fn build() -> anyhow::Result<()> {
 
     let dest = dest_dir();
     let src = Path::new(DASHBOARD_DIR).join("out");
+    if dest.try_exists()? {
+        std::fs::remove_dir_all(&dest)?;
+    }
     dircpy::copy_dir(src, dest)?;
 
     Ok(())
