@@ -28,6 +28,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
+use risingwave_object_store::object::opendal_engine::s3::scope_data_refill_read;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
@@ -512,10 +513,12 @@ impl CacheRefillTask {
 
                     let now = Instant::now();
 
-                    let data = sstable_store
-                        .store()
-                        .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone())
-                        .await?;
+                    let data = scope_data_refill_read(
+                        sstable_store
+                            .store()
+                            .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone()),
+                    )
+                    .await?;
                     let mut apply_disk_cache_futures = vec![];
                     for (w, r, uc) in contexts {
                         let offset = r.start - range.start;

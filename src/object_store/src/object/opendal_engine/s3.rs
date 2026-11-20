@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use http::{Request, Response};
 use opendal::layers::LoggingLayer;
 use opendal::services::S3;
-use opendal::{HttpTransporter, OperationContext, Operator};
+use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator};
 use opendal_http_transport_reqwest::ReqwestTransport;
 use risingwave_common::config::ObjectStoreConfig;
 use thiserror_ext::AsReport as _;
@@ -26,6 +28,31 @@ use super::rotating_transport::RotatingTransport;
 use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{ObjectError, ObjectResult};
+
+tokio::task_local! {
+    static DATA_REFILL_READ: ();
+}
+
+/// Marks a data-refill read for the optional separate S3 connection pool.
+pub async fn scope_data_refill_read<F: Future>(read: F) -> F::Output {
+    DATA_REFILL_READ.scope((), read).await
+}
+
+struct RefillHttpTransport {
+    shared: ReqwestTransport,
+    refill: ReqwestTransport,
+}
+
+impl HttpTransport for RefillHttpTransport {
+    async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
+        let transport = if DATA_REFILL_READ.try_get().is_ok() {
+            &self.refill
+        } else {
+            &self.shared
+        };
+        transport.fetch(request).await
+    }
+}
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
@@ -108,6 +135,19 @@ impl OpendalObjectStore {
     }
 
     fn new_http_transport(config: Arc<ObjectStoreConfig>) -> ObjectResult<HttpTransporter> {
+        if std::env::var("RW_REFILL_PRIVATE_HTTP_POOL").as_deref() == Ok("1") {
+            if config.s3.http_client_rotation_interval_ms.is_some() {
+                return Err(ObjectError::internal(
+                    "RW_REFILL_PRIVATE_HTTP_POOL requires HTTP client rotation to be disabled",
+                ));
+            }
+            tracing::info!("Using a separate HTTP connection pool for Hummock data refill");
+            return Ok(HttpTransporter::new(RefillHttpTransport {
+                shared: ReqwestTransport::new(Self::new_http_client(&config)?),
+                refill: ReqwestTransport::new(Self::new_http_client(&config)?),
+            }));
+        }
+
         match config.s3.http_client_rotation_interval_ms {
             None => Ok(HttpTransporter::new(ReqwestTransport::new(
                 Self::new_http_client(&config)?,
