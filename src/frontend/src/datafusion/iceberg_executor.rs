@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Int64Array, RecordBatch, RecordBatchOptions, StringArray};
@@ -57,8 +56,8 @@ struct IcebergScanInner {
     #[educe(Debug(ignore))]
     table: Table,
     tasks: Vec<Vec<FileScanTask>>,
-    statistics: Vec<Statistics>,
-    total_statistics: Statistics,
+    statistics: Vec<Arc<Statistics>>,
+    total_statistics: Arc<Statistics>,
     arrow_schema: SchemaRef,
     scan_column_names: Vec<String>,
     need_seq_num: bool,
@@ -110,10 +109,6 @@ impl ExecutionPlan for IcebergScan {
         "IcebergScan"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.inner.plan_properties
     }
@@ -146,7 +141,7 @@ impl ExecutionPlan for IcebergScan {
         )))
     }
 
-    fn partition_statistics(&self, partition: Option<usize>) -> DFResult<Statistics> {
+    fn partition_statistics(&self, partition: Option<usize>) -> DFResult<Arc<Statistics>> {
         if let Some(partition) = partition {
             if partition >= self.inner.statistics.len() {
                 return exec_err!("IcebergScan: partition out of bounds");
@@ -211,9 +206,9 @@ impl IcebergScan {
         );
         let statistics = tasks
             .iter()
-            .map(|tasks| calculate_statistics(tasks.iter(), &arrow_schema))
+            .map(|tasks| Arc::new(calculate_statistics(tasks.iter(), &arrow_schema)))
             .collect();
-        let total_statistics = calculate_statistics(scan_tasks.iter(), &arrow_schema);
+        let total_statistics = Arc::new(calculate_statistics(scan_tasks.iter(), &arrow_schema));
         let plan_properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(arrow_schema.clone()),
             Partitioning::UnknownPartitioning(tasks.len()),

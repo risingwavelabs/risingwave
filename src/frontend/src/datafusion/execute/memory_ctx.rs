@@ -94,11 +94,21 @@ impl RwMemoryPool {
 
 impl std::fmt::Debug for RwMemoryPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RwMemoryPool")
+        f.write_str(self.name())
+    }
+}
+
+impl std::fmt::Display for RwMemoryPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
     }
 }
 
 impl MemoryPool for RwMemoryPool {
+    fn name(&self) -> &str {
+        "RwMemoryPool"
+    }
+
     fn grow(&self, reservation: &MemoryReservation, additional: usize) {
         let ctx = match reservation.consumer().can_spill() {
             true => &self.spillable_ctx,
