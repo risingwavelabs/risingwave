@@ -571,14 +571,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
-        self.store
-            .try_wait_epoch(
-                wait_epoch,
-                TryWaitEpochOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await?;
         let serialized_pk = serialize_pk_with_vnode(
             &pk,
             &self.pk_serializer,

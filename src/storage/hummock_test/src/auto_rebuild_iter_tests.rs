@@ -95,7 +95,7 @@ async fn test_auto_rebuild_iter() {
         let kv_iter = pairs.clone().into_iter();
         let snapshot = state_store
             .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
+                HummockReadEpoch::Committed(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
                     table_option: TableOption::default(),

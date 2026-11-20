@@ -710,10 +710,6 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     type Iter = RangeKvStateStoreIter<R>;
     type RevIter = RangeKvStateStoreRevIter<R>;
 
-    fn read_epoch(&self) -> Option<u64> {
-        Some(self.epoch)
-    }
-
     async fn iter(
         &self,
         key_range: TableKeyRange,

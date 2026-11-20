@@ -124,7 +124,6 @@ pub struct TracedReadOptions {
     pub retention_seconds: Option<u32>,
     pub table_id: TracedTableId,
     pub read_version_from_backup: bool,
-    pub read_committed: bool,
 }
 
 impl TracedReadOptions {
@@ -139,7 +138,6 @@ impl TracedReadOptions {
             retention_seconds: None,
             table_id: TracedTableId { table_id },
             read_version_from_backup: false,
-            read_committed: false,
         }
     }
 }
@@ -212,26 +210,23 @@ pub type TracedHummockEpoch = u64;
 pub enum TracedHummockReadEpoch {
     Committed(TracedHummockEpoch),
     BatchQueryReadCommitted(TracedHummockEpoch, u64),
-    NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
     TimeTravel(TracedHummockEpoch),
-    LatestCommitted(u64),
 }
 
-impl From<HummockReadEpoch> for TracedHummockReadEpoch {
-    fn from(value: HummockReadEpoch) -> Self {
-        match value {
+impl TryFrom<HummockReadEpoch> for TracedHummockReadEpoch {
+    type Error = ();
+
+    fn try_from(value: HummockReadEpoch) -> Result<Self, Self::Error> {
+        Ok(match value {
             HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
             HummockReadEpoch::BatchQueryCommitted(epoch, version_id) => {
                 Self::BatchQueryReadCommitted(epoch, version_id.as_raw_id())
             }
-            HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
-            HummockReadEpoch::LatestCommitted(version_id) => {
-                Self::LatestCommitted(version_id.as_raw_id())
-            }
-        }
+            HummockReadEpoch::LatestCommitted(_) => return Err(()),
+        })
     }
 }
 
@@ -242,12 +237,8 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
             TracedHummockReadEpoch::BatchQueryReadCommitted(epoch, version_id) => {
                 Self::BatchQueryCommitted(epoch, HummockVersionId::new(version_id))
             }
-            TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
-            TracedHummockReadEpoch::LatestCommitted(version_id) => {
-                Self::LatestCommitted(HummockVersionId::new(version_id))
-            }
         }
     }
 }
@@ -319,14 +310,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_latest_committed_trace_compatibility() {
+    fn test_hummock_read_epoch_trace_round_trip() {
         let epochs = [
             TracedHummockReadEpoch::Committed(0),
             TracedHummockReadEpoch::BatchQueryReadCommitted(0, 0),
-            TracedHummockReadEpoch::NoWait(0),
             TracedHummockReadEpoch::Backup(0),
             TracedHummockReadEpoch::TimeTravel(0),
-            TracedHummockReadEpoch::LatestCommitted(123),
         ];
         for (discriminant, epoch) in epochs.into_iter().enumerate() {
             let bytes = bincode::encode_to_vec(&epoch, bincode::config::standard()).unwrap();
@@ -336,7 +325,11 @@ mod tests {
             assert_eq!(len, bytes.len());
             assert_eq!(decoded, epoch);
             let hummock_epoch = HummockReadEpoch::from(epoch.clone());
-            assert_eq!(TracedHummockReadEpoch::from(hummock_epoch), epoch);
+            assert_eq!(TracedHummockReadEpoch::try_from(hummock_epoch), Ok(epoch));
         }
+        assert!(
+            TracedHummockReadEpoch::try_from(HummockReadEpoch::LatestCommitted(123.into()))
+                .is_err()
+        );
     }
 }
