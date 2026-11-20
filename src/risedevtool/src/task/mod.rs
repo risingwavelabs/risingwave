@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod cassandra_service;
 mod clickhouse_service;
 mod compactor_service;
 mod compute_node_service;
@@ -44,6 +45,7 @@ mod redis_service;
 mod schema_registry_service;
 mod sql_server_service;
 mod starrocks_service;
+mod task_cassandra_ready_check;
 mod task_clickhouse_ready_check;
 mod task_configure_minio;
 mod task_db_ready_check;
@@ -72,6 +74,7 @@ use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;
 pub use utils::*;
 
+pub use self::cassandra_service::*;
 pub use self::clickhouse_service::*;
 pub use self::compactor_service::*;
 pub use self::compute_node_service::*;
@@ -103,6 +106,7 @@ pub use self::redis_service::*;
 pub use self::schema_registry_service::SchemaRegistryService;
 pub use self::sql_server_service::*;
 pub use self::starrocks_service::*;
+pub use self::task_cassandra_ready_check::*;
 pub use self::task_clickhouse_ready_check::*;
 pub use self::task_configure_minio::*;
 pub use self::task_db_ready_check::*;

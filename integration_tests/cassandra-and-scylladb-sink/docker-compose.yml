@@ -1,7 +1,7 @@
 ---
 services:
   cassandra:
-    image: cassandra:4.0
+    image: cassandra:4.0.21
     ports:
       - 9042:9042
     environment:
