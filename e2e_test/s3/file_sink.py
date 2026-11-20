@@ -1,8 +1,6 @@
-import os
 import sys
 import random
 import psycopg2
-import json
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pandas as pd
@@ -55,7 +53,7 @@ def gen_data(file_num, item_num_per_file):
         for file_id in range(file_num)
     ]
 
-def do_test(config, file_num, item_num_per_file, prefix):
+def do_test(file_num, item_num_per_file, prefix):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -155,7 +153,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     cur.close()
     conn.close()
 
-def do_sink(config, file_num, item_num_per_file, prefix):
+def do_sink(file_num, item_num_per_file, prefix):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -498,7 +496,6 @@ if __name__ == "__main__":
     ITEM_NUM_PER_FILE = 2000
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
 
-    config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
         endpoint="127.0.0.1:9301",
         access_key="hummockadmin",
@@ -536,13 +533,13 @@ if __name__ == "__main__":
         )
 
     # do test
-    do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
+    do_test(FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
     # clean up s3 files
     for idx, _ in enumerate(data):
        client.remove_object(bucket_name="hummock001", object_name=_s3(idx))
 
-    do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
+    do_sink(FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
     # clean up s3 files
     for idx, _ in enumerate(data):

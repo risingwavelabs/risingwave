@@ -731,13 +731,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - S3_SOURCE_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
@@ -751,13 +745,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - S3_SOURCE_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
@@ -771,13 +759,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - S3_SOURCE_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
