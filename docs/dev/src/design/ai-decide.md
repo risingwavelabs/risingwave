@@ -114,9 +114,15 @@ position from 0 to the number of levels minus one, not a probability. Score
 probabilities follow the declared level order; SQL arrays are one-based, so
 `probabilities[1]` corresponds to level 0.
 
-The service must return an `answers` object with each declared question and its
-matching `type`. Required fields cannot be absent or null. Choices must name a
-declared label. Confidence and probabilities must be numeric values in [0, 1];
+The service must return an `answers` object with each declared question. An explicit
+`{"type": "refusal"}` answer produces SQL NULL for that question's entire field,
+including the nested STRUCT for a choice or score. Other successful answers are
+preserved, and the refusal does not trigger a retry. NULL means unanswered, not a
+zero probability or a negative verdict. If every question is refused, the result
+is still a STRUCT with all fields NULL.
+
+Other answers must have the matching question `type`. Required fields cannot be
+absent or null. Choices must name a declared label. Confidence and probabilities must be numeric values in [0, 1];
 probability distributions must contain exactly the declared labels or level
 indices. Probabilities are preserved as returned, including service-side rounding,
 without renormalization or a sum-to-one check. Invalid responses are retried until
@@ -236,7 +242,8 @@ which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row.
 Each HTTP attempt has a fixed 30-second timeout. AI_DECIDE retries all remote
 failures indefinitely: transport errors, timeouts, all non-success HTTP statuses
 (including 401 and redirects), truncated bodies, oversized responses, invalid JSON,
-and invalid typed answers. It reuses the serialized request and waits until a valid
+and invalid typed answers. Explicit per-question refusals are valid results, not
+remote failures. It reuses the serialized request and waits until a valid
 answer arrives or evaluation is cancelled. Redirects are not followed.
 
 Exponential backoff starts at 100 ms and is capped at 10 seconds. A

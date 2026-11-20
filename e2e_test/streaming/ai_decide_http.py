@@ -60,6 +60,9 @@ class EvaluationHandler(BaseHTTPRequestHandler):
                               for call in self.server.calls)
         if isinstance(state, dict) and state.get("malformed") and malformed_calls <= 4:
             response["answers"]["team"]["choice"] = "undeclared"
+        if isinstance(state, dict):
+            for question in state.get("refuse", []):
+                response["answers"][question] = {"type": "refusal"}
         response = json.dumps(response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -124,6 +127,20 @@ def exercise(server):
     assert server.count() == before + 1
     assert server.calls[-1]["questions"]["team"]["criteria"] == {"billing": "Payments and refunds", "technical": "Software issues"}
     assert server.calls[-1]["state"] == p1
+
+    # Explicit refusals are SQL NULL fields, including for nested choice/score results.
+    # A persistent refusal must complete after one request and retain successful answers.
+    for refused in [["signal"], ["team"], ["size"], ["signal", "generation", "team", "size"]]:
+        refusal_state = "'" + json.dumps({**p1, "refuse": refused}) + "'::jsonb"
+        before = server.count()
+        mixed = json.loads(sql(
+            f"SET batch_expr_strict_mode = true; "
+            f"SELECT to_jsonb(result) FROM (SELECT {analyze(refusal_state)} AS result) e"
+        )[0])
+        expected = {**response, "generation": (before + 1) / 1024}
+        expected.update({question: None for question in refused})
+        assert mixed == expected, (mixed, expected)
+        assert server.count() == before + 1, "refusal retried a completed request"
 
     # Constant JSONB definitions preserve structured descriptions through binding and HTTP.
     structured_questions = {
@@ -215,6 +232,15 @@ def exercise(server):
     sql(f"UPDATE jev_input SET payload = '{json.dumps(p3)}' WHERE id = 1")
     wait_rows(states("jev_direct"), [0.3, 0.2])
     # A downstream aggregate checks that updates and deletes retract the saved value.
+    actual = sql("SELECT count(*), sum((result).generation) FROM jev_direct")
+    assert sql("SELECT n, generation_sum FROM jev_totals") == actual
+    # Persist a partly refused result, then retract it without evaluating it again.
+    calls = server.count()
+    sql("UPDATE jev_input SET payload = '{\"message\":\"updated\",\"refuse\":[\"signal\",\"team\",\"size\"]}' WHERE id = 1")
+    wait_rows("SELECT jsonb_build_array(id, (result).signal, (result).team, (result).size) "
+              "FROM jev_direct WHERE id = 1", [[1, None, None, None]])
+    assert server.count() == calls + 1, "streaming refusal retried inference"
+    assert sql("SELECT (result).generation FROM jev_direct WHERE id = 1") == [str((calls + 1) / 1024)]
     actual = sql("SELECT count(*), sum((result).generation) FROM jev_direct")
     assert sql("SELECT n, generation_sum FROM jev_totals") == actual
     calls = server.count()

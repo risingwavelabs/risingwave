@@ -110,6 +110,7 @@ fn request_error(message: impl std::fmt::Display) -> ExprError {
 
 /// Decode strictly before the result can be persisted. Invalid responses are retried
 /// inside the request loop, without reaching non-strict expression wrappers.
+/// An explicit provider refusal is a valid unanswered question, represented by SQL NULL.
 fn decode_response(response: JsonbVal, schema: &QuestionSchema) -> Result<StructValue> {
     let response = response.take();
     let answers = response
@@ -128,6 +129,10 @@ fn decode_response(response: JsonbVal, schema: &QuestionSchema) -> Result<Struct
             .get(&question.id)
             .and_then(serde_json::Value::as_object)
             .ok_or_else(|| error("missing answer object"))?;
+        if answer.get("type").and_then(serde_json::Value::as_str) == Some("refusal") {
+            fields.push(None);
+            continue;
+        }
         let expected = match &question.kind {
             QuestionKind::Noul => "noul",
             QuestionKind::Choice(_) => "choice",
@@ -497,6 +502,30 @@ mod tests {
             ])))
         );
 
+        // Refusals are valid for every question kind and preserve successful siblings.
+        for refused in [
+            vec!["refund"],
+            vec!["team"],
+            vec!["urgency"],
+            vec!["refund", "team", "urgency"],
+        ] {
+            let mut mixed = response.clone();
+            let mut expected = result.fields().to_vec();
+            for id in refused {
+                mixed["answers"][id] = json!({"type": "refusal"});
+                let index = schema
+                    .0
+                    .iter()
+                    .position(|question| question.id == id)
+                    .unwrap();
+                expected[index] = None;
+            }
+            assert_eq!(
+                decode_response(JsonbVal::from(mixed), &schema).unwrap(),
+                StructValue::new(expected)
+            );
+        }
+
         let mut rounded = response.clone();
         rounded["answers"]["urgency"]["probabilities"] =
             json!({"0": 0.3333, "1": 0.3333, "2": 0.3333});
@@ -510,6 +539,9 @@ mod tests {
 
         for (pointer, value) in [
             ("/answers/refund", Value::Null),
+            ("/answers/refund", json!({})),
+            ("/answers/refund/type", Value::Null),
+            ("/answers/refund/type", json!("unknown")),
             ("/answers/refund/noul", json!(1.1)),
             ("/answers/refund/noul", json!("test-only-key")),
             ("/answers/team/type", json!("score")),
