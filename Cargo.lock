@@ -3640,7 +3640,6 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "bytes",
- "bzip2",
  "chrono",
  "datafusion-catalog 53.0.0",
  "datafusion-catalog-listing 53.0.0",
@@ -3650,7 +3649,6 @@ dependencies = [
  "datafusion-datasource-arrow 53.0.0",
  "datafusion-datasource-csv 53.0.0",
  "datafusion-datasource-json 53.0.0",
- "datafusion-datasource-parquet 53.0.0",
  "datafusion-execution 53.0.0",
  "datafusion-expr 53.0.0",
  "datafusion-expr-common 53.0.0",
@@ -3667,14 +3665,11 @@ dependencies = [
  "datafusion-physical-plan 53.0.0",
  "datafusion-session 53.0.0",
  "datafusion-sql 53.0.0",
- "flate2",
  "futures",
  "itertools 0.14.0",
- "liblzma",
  "log",
  "object_store 0.13.2",
  "parking_lot 0.12.5",
- "parquet",
  "rand 0.9.5",
  "regex",
  "sqlparser 0.61.0",
@@ -3682,7 +3677,6 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "zstd",
 ]
 
 [[package]]
@@ -3704,7 +3698,7 @@ dependencies = [
  "datafusion-datasource-arrow 54.1.0",
  "datafusion-datasource-csv 54.1.0",
  "datafusion-datasource-json 54.1.0",
- "datafusion-datasource-parquet 54.1.0",
+ "datafusion-datasource-parquet",
  "datafusion-execution 54.1.0",
  "datafusion-expr 54.1.0",
  "datafusion-expr-common 54.1.0",
@@ -3851,9 +3845,7 @@ dependencies = [
  "libc",
  "log",
  "object_store 0.13.2",
- "parquet",
  "paste",
- "recursive",
  "sqlparser 0.61.0",
  "tokio",
  "web-time",
@@ -3914,10 +3906,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde1e030a9dc87b743c806fbd631f5ecfa2ccaa4ffb61fa19144a07fea406b79"
 dependencies = [
  "arrow",
- "async-compression",
  "async-trait",
  "bytes",
- "bzip2",
  "chrono",
  "datafusion-common 53.1.0",
  "datafusion-common-runtime 53.0.0",
@@ -3928,18 +3918,14 @@ dependencies = [
  "datafusion-physical-expr-common 53.0.0",
  "datafusion-physical-plan 53.0.0",
  "datafusion-session 53.0.0",
- "flate2",
  "futures",
  "glob",
  "itertools 0.14.0",
- "liblzma",
  "log",
  "object_store 0.13.2",
  "rand 0.9.5",
  "tokio",
- "tokio-util",
  "url",
- "zstd",
 ]
 
 [[package]]
@@ -4121,36 +4107,6 @@ dependencies = [
 
 [[package]]
 name = "datafusion-datasource-parquet"
-version = "53.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95be805d0742ab129720f4c51ad9242cd872599cdb076098b03f061fcdc7f946"
-dependencies = [
- "arrow",
- "async-trait",
- "bytes",
- "datafusion-common 53.1.0",
- "datafusion-common-runtime 53.0.0",
- "datafusion-datasource 53.0.0",
- "datafusion-execution 53.0.0",
- "datafusion-expr 53.0.0",
- "datafusion-functions-aggregate-common 53.0.0",
- "datafusion-physical-expr 53.0.0",
- "datafusion-physical-expr-adapter 53.0.0",
- "datafusion-physical-expr-common 53.0.0",
- "datafusion-physical-plan 53.0.0",
- "datafusion-pruning 53.0.0",
- "datafusion-session 53.0.0",
- "futures",
- "itertools 0.14.0",
- "log",
- "object_store 0.13.2",
- "parking_lot 0.12.5",
- "parquet",
- "tokio",
-]
-
-[[package]]
-name = "datafusion-datasource-parquet"
 version = "54.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cc35b92cd560082155e80d9c826929c852d3c51543f4affd3a51c464a0aab3a"
@@ -4255,7 +4211,6 @@ dependencies = [
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "paste",
- "recursive",
  "serde_json",
  "sqlparser 0.61.0",
 ]
@@ -4614,7 +4569,6 @@ dependencies = [
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "log",
- "recursive",
  "regex",
  "regex-syntax",
 ]
@@ -4659,7 +4613,6 @@ dependencies = [
  "parking_lot 0.12.5",
  "paste",
  "petgraph 0.8.3",
- "recursive",
  "tokio",
 ]
 
@@ -4765,7 +4718,6 @@ dependencies = [
  "datafusion-physical-plan 53.0.0",
  "datafusion-pruning 53.0.0",
  "itertools 0.14.0",
- "recursive",
 ]
 
 [[package]]
@@ -4927,7 +4879,6 @@ dependencies = [
  "datafusion-functions-nested 53.0.0",
  "indexmap 2.14.0",
  "log",
- "recursive",
  "regex",
  "sqlparser 0.61.0",
 ]
@@ -14745,8 +14696,8 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "datafusion 53.0.0",
- "datafusion-common 53.1.0",
+ "datafusion 54.1.0",
+ "datafusion-common 54.1.0",
  "downcast-rs 2.0.1",
  "dyn-clone",
  "easy-ext",
