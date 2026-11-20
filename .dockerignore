@@ -52,3 +52,6 @@ riselab-components.user.env
 
 Dockerfile
 .dockerignore
+
+# Diagnostic artifacts change during the build and must stay outside its context.
+.context/
