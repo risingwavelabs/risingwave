@@ -44,6 +44,7 @@ pub use s3::*;
 
 pub mod error;
 pub mod object_metrics;
+mod refill_timing;
 
 pub mod prefix;
 
@@ -659,14 +660,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                 .await
         };
 
-        let res = retry_request(
+        let physical = retry_request(
             builder,
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
             media_type,
-        )
-        .await;
+        );
+        let res = if media_type == "S3" && opendal_engine::s3::is_data_refill_read() {
+            refill_timing::measure(physical).await
+        } else {
+            physical.await
+        };
 
         if let Err(e) = &res
             && e.is_object_not_found_error()

@@ -38,6 +38,10 @@ pub async fn scope_data_refill_read<F: Future>(read: F) -> F::Output {
     DATA_REFILL_READ.scope((), read).await
 }
 
+pub(crate) fn is_data_refill_read() -> bool {
+    DATA_REFILL_READ.try_get().is_ok()
+}
+
 struct RefillHttpTransport {
     shared: ReqwestTransport,
     refill: ReqwestTransport,
@@ -45,7 +49,7 @@ struct RefillHttpTransport {
 
 impl HttpTransport for RefillHttpTransport {
     async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
-        let transport = if DATA_REFILL_READ.try_get().is_ok() {
+        let transport = if is_data_refill_read() {
             &self.refill
         } else {
             &self.shared
@@ -72,7 +76,9 @@ impl OpendalObjectStore {
             builder = builder.enable_virtual_host_style();
         }
 
-        let transport = Self::new_http_transport(config.clone())?;
+        let transport = HttpTransporter::new(crate::object::refill_timing::TimedTransport(
+            Self::new_http_transport(config.clone())?,
+        ));
 
         let op = new_operator(
             &config,
