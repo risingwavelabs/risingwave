@@ -164,6 +164,9 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::TemporalJoin(node) => {
                 optional!(node.memo_table, "TemporalJoinMemo");
             }
+            NodeBody::Lookup(node) => {
+                optional!(node.visibility_table, "LookupVisibility");
+            }
             NodeBody::DynamicFilter(node) => {
                 always!(node.left_table, "DynamicFilterLeft");
                 always!(node.right_table, "DynamicFilterRight");

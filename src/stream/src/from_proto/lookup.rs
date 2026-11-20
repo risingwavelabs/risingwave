@@ -71,6 +71,16 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let versioned = table_desc.versioned;
         let vnodes = Some(Arc::new(params.vnode_bitmap.clone()));
 
+        let visibility_table = match &lookup.visibility_table {
+            Some(table) => Some(
+                StateTableBuilder::new(table, store.clone(), vnodes.clone())
+                    .forbid_preload_all_rows()
+                    .build()
+                    .await,
+            ),
+            None => None,
+        };
+
         macro_rules! build_lookup {
             ($SD:ident) => {{
                 let state_table =
@@ -107,6 +117,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
                     null_safe: lookup.null_safe.clone(),
                     column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
                     state_table,
+                    visibility_table,
                     watermark_epoch: params.watermark_epoch,
                     chunk_size: params.config.developer.chunk_size,
                 });

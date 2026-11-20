@@ -15,16 +15,20 @@
 use std::assert_matches;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::types::DataType;
 use risingwave_common::util::functional::SameOrElseExt;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
-use super::utils::{Distill, childless_record};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanRef, generic};
+use crate::catalog::TableCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -148,10 +152,26 @@ impl PlanTreeNodeBinary<Stream> for StreamDeltaJoin {
 
 impl_plan_tree_node_for_binary! { Stream, StreamDeltaJoin }
 
+/// Builds the catalog of the table that persists which rows of a backfilled arrangement a lookup can
+/// see: for each vnode, the largest primary key on the arrangement input, memcomparable-encoded. See
+/// `LookupNode.visibility_table`.
+pub(crate) fn build_lookup_visibility_catalog(state: &mut BuildFragmentGraphState) -> TableCatalog {
+    let mut builder = TableCatalogBuilder::default();
+    builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+    builder.add_order_column(0, OrderType::ascending());
+    builder.add_column(&Field::with_name(DataType::Bytea, "visible_pk_bound"));
+    builder.set_vnode_col_idx(0);
+    builder.set_dist_key_in_pk(vec![0]);
+    builder.set_value_indices(vec![1]);
+    builder
+        .build(vec![0], 1)
+        .with_id(state.gen_table_id_wrapped())
+}
+
 impl TryToStreamPb for StreamDeltaJoin {
     fn try_to_stream_prost_body(
         &self,
-        _state: &mut BuildFragmentGraphState,
+        state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<NodeBody> {
         let left = self.left();
         let right = self.right();
@@ -226,6 +246,11 @@ impl TryToStreamPb for StreamDeltaJoin {
             }),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             null_safe: eq_join_predicate.null_safes(),
+            // The left input is backfilled, so the lookup of the left arrangement only sees the
+            // rows the backfill has emitted.
+            left_visibility_table: Some(
+                build_lookup_visibility_catalog(state).to_internal_table_prost(),
+            ),
         })))
     }
 }

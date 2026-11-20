@@ -179,6 +179,8 @@ fn build_delta_join_inner(
             column_mapping: lookup_0_column_reordering,
             arrangement_table_info: delta_join_node.left_info.clone(),
             null_safe: delta_join_node.null_safe.clone(),
+            // The left arrangement is backfilled.
+            visibility_table: delta_join_node.left_visibility_table.clone(),
         },
     );
     let lookup_1_column_reordering = {
@@ -209,6 +211,7 @@ fn build_delta_join_inner(
             column_mapping: lookup_1_column_reordering,
             arrangement_table_info: delta_join_node.right_info.clone(),
             null_safe: delta_join_node.null_safe.clone(),
+            visibility_table: None,
         },
     );
 
