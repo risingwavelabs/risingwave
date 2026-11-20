@@ -842,9 +842,6 @@ for_all_wrapped_id_fields! (
             sink_id: SinkId,
             task_id: IcebergCompactionTaskId,
         }
-        ListFinishMutation {
-            associated_source_id: SourceId,
-        }
         LoadFinishMutation {
             associated_source_id: SourceId,
         }
@@ -860,10 +857,6 @@ for_all_wrapped_id_fields! (
         }
         MergeNode {
             upstream_fragment_id: FragmentId,
-        }
-        RefreshStartMutation {
-            table_id: TableId,
-            associated_source_id: SourceId,
         }
         SinkDesc {
             id: SinkId,
@@ -955,8 +948,6 @@ for_all_wrapped_id_fields! (
             table_watermarks: TableId,
             vector_index_adds: TableId,
             worker_id: WorkerId,
-            list_finished_source_ids: SourceId,
-            load_finished_source_ids: SourceId,
             partial_graph_id: PartialGraphId,
         }
         BarrierCompleteResponse.CdcSourceOffsetUpdated {
@@ -974,16 +965,6 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.IcebergPkIndexSinkMetadata {
             reporter_actor_id: ActorId,
             sink_id: SinkId,
-        }
-        BarrierCompleteResponse.ListFinishedSource {
-            reporter_actor_id: ActorId,
-            table_id: TableId,
-            associated_source_id: SourceId,
-        }
-        BarrierCompleteResponse.LoadFinishedSource {
-            reporter_actor_id: ActorId,
-            table_id: TableId,
-            associated_source_id: SourceId,
         }
         BarrierCompleteResponse.LoadProgress {
             reporter_actor_id: ActorId,

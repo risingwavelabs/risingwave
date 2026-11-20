@@ -68,7 +68,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 node.refresh_progress_table.as_ref().unwrap(),
                 Some(Arc::new(params.vnode_bitmap.clone())),
             )
-            .await;
+            .await?;
 
             // Use unified MaterializeExecutor with refresh args
             MaterializeExecutor::<_, ColumnAwareSerde>::new(
