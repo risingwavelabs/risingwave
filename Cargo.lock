@@ -6157,7 +6157,7 @@ dependencies = [
  "async-trait",
  "backoff",
  "futures",
- "gcloud-sdk",
+ "gcloud-sdk 0.32.5",
  "hex",
  "hyper",
  "jiff",
@@ -6784,6 +6784,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcloud-sdk"
+version = "0.33.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfbb81834c9b141d0e2f1f16178e265a90479544175b3a850bad424a449a570a"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "google-cloud-auth",
+ "hyper",
+ "jiff",
+ "jsonwebtoken 11.1.0",
+ "once_cell",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "reqwest 0.13.4",
+ "rustls 0.23.46",
+ "secret-vault-value",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-prost",
+ "tower",
+ "tower-layer",
+ "tracing",
+]
+
+[[package]]
 name = "gcp-bigquery-client"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7009,6 +7038,84 @@ dependencies = [
  "futures-core",
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "google-cloud-auth"
+version = "1.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d563c7b987f40249c274a4e6a671661df6be2d084f08476dda2f0f931576cfcf"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "bytes",
+ "google-cloud-gax",
+ "hex",
+ "hmac 0.13.0",
+ "http",
+ "jiff",
+ "jsonwebtoken 11.1.0",
+ "reqwest 0.13.4",
+ "rustc_version",
+ "rustls 0.23.46",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.17",
+ "time",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "google-cloud-gax"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc64ee071c0d22cb68662b454f1bea5424506cafeaddc51260fbc585bac1d29d"
+dependencies = [
+ "bytes",
+ "futures",
+ "google-cloud-rpc",
+ "google-cloud-wkt",
+ "http",
+ "pin-project",
+ "rand 0.10.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-stream 0.1.17",
+]
+
+[[package]]
+name = "google-cloud-rpc"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2162c08a89118130979ba261080e960e44cdcb2d6e2ab8ca9b1da245285d353"
+dependencies = [
+ "bytes",
+ "google-cloud-wkt",
+ "serde",
+ "serde_json",
+ "serde_with",
+]
+
+[[package]]
+name = "google-cloud-wkt"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75baa147c141fa2b11047827e7ff4eea3a84ab00c3d2cf44fccd132b2ed326cf"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.17",
+ "time",
+ "url",
 ]
 
 [[package]]
@@ -14390,7 +14497,7 @@ dependencies = [
  "gcloud-gax",
  "gcloud-googleapis",
  "gcloud-pubsub",
- "gcloud-sdk",
+ "gcloud-sdk 0.33.3",
  "gcp-bigquery-client",
  "glob",
  "iceberg",
