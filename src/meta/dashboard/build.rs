@@ -46,6 +46,7 @@ fn build() -> anyhow::Result<()> {
         "public/risingwave.svg",
         "scripts",
         "styles",
+        ".pnpmfile.cjs",
         "next.config.js",
         "package.json",
         "pnpm-lock.yaml",
