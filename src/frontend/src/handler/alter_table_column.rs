@@ -139,6 +139,20 @@ pub async fn handle_alter_table_column(
         )));
     }
 
+    // An Iceberg update source persists its column projection when it first runs and fails if
+    // the columns change afterwards.
+    if let Some(source_id) = original_catalog.associated_source_id() {
+        let reader = session.env().catalog_reader().read_guard();
+        let source = reader.get_source_by_id_with_db(&session.database(), source_id)?;
+        if source.is_iceberg_update_source() {
+            return Err(ErrorCode::NotSupported(
+                "altering columns of an Iceberg table with streaming_updates".to_owned(),
+                "Drop and recreate the table with the new columns".to_owned(),
+            )
+            .into());
+        }
+    }
+
     // Retrieve the original table definition and parse it to AST.
     let mut definition = original_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { columns, .. } = &mut definition else {
