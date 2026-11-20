@@ -244,6 +244,7 @@ pub mod memory {
 }
 
 pub mod cpu {
+    use std::num::NonZeroU32;
     use std::thread;
 
     use thiserror_ext::AsReport;
@@ -256,13 +257,16 @@ pub mod cpu {
     const V1_CPU_PERIOD_PATH: &str = "/sys/fs/cgroup/cpu/cpu.cfs_period_us";
     const V2_CPU_LIMIT_PATH: &str = "/sys/fs/cgroup/cpu.max";
 
-    /// Returns the total number of cpu available as a float.
+    /// Returns the number of available CPUs as a float.
     ///
-    /// If running in container, this function will return the cpu limit by the container. If not,
-    /// it will return the ```available_parallelism``` by the system. A panic will be invoked if
-    /// invoking process does not have permission to read appropriate values by
-    /// ```std::thread::available_parallelism``` or if the platform is not supported. The cgroup
-    /// mount point is assumed to be at /sys/fs/cgroup by default.
+    /// In a Linux container, the cgroup CPU quota is capped by the current thread's CPU
+    /// affinity when it is known. If the quota is unlimited or unavailable, this falls back to
+    /// [`std::thread::available_parallelism`], which is also used outside containers.
+    /// The cgroup mount point is assumed to be at `/sys/fs/cgroup`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `available_parallelism` returns an error.
     ///
     ///
     /// # Examples
@@ -285,12 +289,31 @@ pub mod cpu {
         cgroup_version: super::CgroupVersion,
     ) -> Result<f32, std::io::Error> {
         let max_cpu = get_system_cpu();
-        match cgroup_version {
+        let quota = match cgroup_version {
             super::CgroupVersion::V1 => {
                 get_cpu_limit_v1(V1_CPU_QUOTA_PATH, V1_CPU_PERIOD_PATH, max_cpu)
             }
             super::CgroupVersion::V2 => get_cpu_limit_v2(V2_CPU_LIMIT_PATH, max_cpu),
+        }?;
+        Ok(cap_cpu_quota(quota, cpu_affinity_count()))
+    }
+
+    fn cpu_affinity_count() -> Option<NonZeroU32> {
+        #[cfg(target_os = "linux")]
+        {
+            // available_parallelism also accounts for cgroup quotas, but rounds them down.
+            // Read affinity separately so a fractional quota is preserved.
+            let cpus = rustix::thread::sched_getaffinity(None).ok()?;
+            NonZeroU32::new(cpus.count())
         }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
+    fn cap_cpu_quota(quota: f32, affinity_count: Option<NonZeroU32>) -> f32 {
+        affinity_count.map_or(quota, |cpus| quota.min(cpus.get() as f32))
     }
 
     /// Returns the total system cpu.
@@ -350,6 +373,19 @@ pub mod cpu {
                     "Invalid format in Cgroup CPU interface file, path: {limit_path}, content: {cpu_limit_string}"
                 ),
             )),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn cap_cgroup_cpu_quota_by_affinity() {
+            let affinity = NonZeroU32::new(2);
+            assert_eq!(cap_cpu_quota(4.0, affinity), 2.0);
+            assert_eq!(cap_cpu_quota(1.5, affinity), 1.5);
+            assert_eq!(cap_cpu_quota(4.0, None), 4.0);
         }
     }
 }
