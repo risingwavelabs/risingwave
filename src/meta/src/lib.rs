@@ -28,6 +28,8 @@
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]
 #![feature(iterator_try_collect)]
+#![feature(coroutines)]
+#![feature(yield_expr)]
 
 pub mod backup_restore;
 pub mod barrier;

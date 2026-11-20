@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -28,9 +29,10 @@ use risingwave_pb::meta::{
 };
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tonic::Status;
 
+use crate::MetaResult;
 use crate::controller::SqlMetaStore;
 use crate::manager::WorkerKey;
 use crate::manager::notification_version::NotificationVersionGenerator;
@@ -42,6 +44,173 @@ pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
 /// NOTE(kwannoel): This is just ignored, used in background DDL
 pub const IGNORED_NOTIFICATION_VERSION: u64 = 0;
+
+/// A state domain whose notifications are ordered against its initial snapshot.
+/// Each subscriber reads the fields it consumes from that domain and emits one marker for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NotificationPart {
+    Catalog,
+    Cluster,
+    StreamingMappings,
+    ServingMappings,
+    HummockVersion,
+    HummockWriteLimits,
+    SessionParams,
+}
+
+impl NotificationPart {
+    pub fn for_subscriber(subscribe_type: SubscribeType) -> &'static [Self] {
+        use NotificationPart::*;
+        match subscribe_type {
+            SubscribeType::Frontend => &[
+                Catalog,
+                Cluster,
+                StreamingMappings,
+                ServingMappings,
+                HummockVersion,
+                SessionParams,
+            ],
+            SubscribeType::Hummock => &[
+                Catalog,
+                Cluster,
+                ServingMappings,
+                HummockVersion,
+                HummockWriteLimits,
+            ],
+            SubscribeType::Compactor | SubscribeType::Compute => &[Catalog, Cluster],
+            SubscribeType::Unspecified => unreachable!(),
+        }
+    }
+}
+
+/// Internal channel events. Snapshot payloads stay in the snapshot-building methods.
+#[derive(Clone, Debug)]
+pub enum SubscriptionEvent {
+    SnapshotMarker(NotificationPart),
+    Delta {
+        part: NotificationPart,
+        response: SubscribeResponse,
+    },
+    /// Notifications without a corresponding snapshot part must always be retained.
+    Unscoped(SubscribeResponse),
+}
+
+impl SubscriptionEvent {
+    fn delta(response: SubscribeResponse) -> Self {
+        use NotificationPart::*;
+        let part = match response
+            .info
+            .as_ref()
+            .expect("notification must contain info")
+        {
+            Info::Database(_)
+            | Info::Schema(_)
+            | Info::ObjectGroup(_)
+            | Info::User(_)
+            | Info::Connection(_)
+            | Info::Secret(_)
+            | Info::Function(_) => Catalog,
+            Info::Node(_) | Info::ClusterResource(_) => Cluster,
+            Info::StreamingWorkerSlotMapping(_) => StreamingMappings,
+            Info::ServingWorkerSlotMappings(_) => ServingMappings,
+            Info::HummockVersionDeltas(_) => HummockVersion,
+            Info::HummockWriteLimits(_) => HummockWriteLimits,
+            Info::SessionParam(_) => SessionParams,
+            Info::TableRefillRuntimeConfig(config) => {
+                assert!(
+                    config.table_cache_refill_policies.is_none()
+                        || config.serving_table_vnode_mappings.is_none(),
+                    "refill deltas must belong to a single notification part"
+                );
+                if config.serving_table_vnode_mappings.is_some() {
+                    ServingMappings
+                } else {
+                    Catalog
+                }
+            }
+            // Manifest IDs are monotonic refresh hints; the receiver ignores older IDs.
+            // System params are absent from MetaSnapshot and periodically sent in full.
+            Info::MetaBackupManifestId(_)
+            | Info::HummockStats(_)
+            | Info::Recovery(_)
+            | Info::SystemParams(_) => {
+                return Self::Unscoped(response);
+            }
+            Info::Snapshot(_) => unreachable!("initial snapshots bypass delta publishing"),
+        };
+        Self::Delta { part, response }
+    }
+
+    /// Convert a live channel event, rejecting unexpected initialization markers.
+    pub fn into_notification(self) -> Notification {
+        match self {
+            Self::Delta { response, .. } | Self::Unscoped(response) => Ok(response),
+            Self::SnapshotMarker(part) => Err(Status::internal(format!(
+                "unexpected snapshot marker for {part:?}"
+            ))),
+        }
+    }
+}
+
+/// A cloneable sender used only to mark reads on this exact subscription's channel.
+#[derive(Clone)]
+pub struct SnapshotMarkerSender(UnboundedSender<SubscriptionEvent>);
+
+impl SnapshotMarkerSender {
+    /// Call after reading every field of the part, before releasing its state guard.
+    /// Producers must modify and publish under the corresponding exclusive guard.
+    pub fn snapshot_read(&self, part: NotificationPart) {
+        // A closed receiver means the subscription has already been cancelled.
+        let _ = self.0.send(SubscriptionEvent::SnapshotMarker(part));
+    }
+}
+
+/// Emit the assembled snapshot first, then post-marker deltas in their original channel order.
+/// This does no snapshot reads and retains no state locks across stream yields.
+#[try_stream(ok = SubscribeResponse, error = Status)]
+pub async fn notification_stream(
+    subscribe_type: SubscribeType,
+    mut receiver: UnboundedReceiver<SubscriptionEvent>,
+    snapshot: MetaSnapshot,
+) {
+    let mut remaining_parts = NotificationPart::for_subscriber(subscribe_type)
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let mut buffered = Vec::new();
+    while !remaining_parts.is_empty() {
+        match receiver.recv().await.ok_or_else(|| {
+            Status::unavailable("notification channel closed before all snapshot markers")
+        })? {
+            SubscriptionEvent::SnapshotMarker(part) => {
+                if !remaining_parts.remove(&part) {
+                    Err(Status::internal(format!(
+                        "unexpected or duplicate snapshot marker for {part:?}"
+                    )))?;
+                }
+            }
+            SubscriptionEvent::Delta { part, response } => {
+                if !remaining_parts.contains(&part) {
+                    buffered.push(response);
+                }
+            }
+            SubscriptionEvent::Unscoped(response) => buffered.push(response),
+        }
+    }
+    yield SubscribeResponse {
+        status: None,
+        operation: Operation::Snapshot as i32,
+        info: Some(Info::Snapshot(snapshot)),
+        // Receivers initialize from the catalog/Hummock versions inside MetaSnapshot.
+        version: Default::default(),
+    };
+    for response in buffered {
+        yield response;
+    }
+    while let Some(event) = receiver.recv().await {
+        yield event.into_notification()?;
+    }
+}
 
 /// A batch of frontend notifications that belong to the same catalog update.
 ///
@@ -86,81 +255,44 @@ pub enum LocalNotification {
 }
 
 #[derive(Debug)]
-enum Target {
-    Subscribers {
-        subscribe_type: SubscribeType,
-        // `None` indicates sending to all subscribers of `subscribe_type`.
-        worker_key: Option<WorkerKey>,
-    },
-    /// The sender of one subscribe call. By the time the task is delivered, the worker may have
-    /// subscribed again and replaced its entry in the sender map.
-    Sender(UnboundedSender<Notification>),
+struct Target {
+    subscribe_type: SubscribeType,
+    // `None` indicates sending to all subscribers of `subscribe_type`.
+    worker_key: Option<WorkerKey>,
 }
 
 impl From<SubscribeType> for Target {
     fn from(value: SubscribeType) -> Self {
-        Self::Subscribers {
+        Self {
             subscribe_type: value,
             worker_key: None,
         }
     }
 }
 
-#[derive(Debug)]
-struct Task {
-    target: Target,
-    operation: Operation,
-    info: Info,
-    /// `None` means using the latest version published to the notification queue without
-    /// incrementing it.
-    version: Option<NotificationVersion>,
-}
-
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
 pub struct NotificationManager {
-    core: Arc<parking_lot::Mutex<NotificationManagerCore>>,
-    /// Sender used to add a notification into the waiting queue.
-    task_tx: UnboundedSender<Task>,
+    core: parking_lot::Mutex<NotificationManagerCore>,
     /// The current notification version generator.
     version_generator: Mutex<NotificationVersionGenerator>,
 }
 
 impl NotificationManager {
     pub async fn new(meta_store_impl: SqlMetaStore) -> Self {
-        // notification waiting queue.
-        let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
-        let core = Arc::new(parking_lot::Mutex::new(NotificationManagerCore::new()));
-        let core_clone = core.clone();
         let version_generator = NotificationVersionGenerator::new(meta_store_impl)
             .await
             .unwrap();
-        let mut latest_version = version_generator.current_version();
-
-        tokio::spawn(async move {
-            while let Some(task) = task_rx.recv().await {
-                if let Some(version) = task.version {
-                    latest_version = version;
-                }
-                let response = SubscribeResponse {
-                    status: None,
-                    operation: task.operation as i32,
-                    info: Some(task.info),
-                    version: latest_version,
-                };
-                core.lock().notify(task.target, response);
-            }
-        });
+        let core = NotificationManagerCore::new(version_generator.current_version());
 
         Self {
-            core: core_clone,
-            task_tx,
+            core: parking_lot::Mutex::new(core),
             version_generator: Mutex::new(version_generator),
         }
     }
 
     pub fn abort_all(&self) {
         let mut guard = self.core.lock();
-        *guard = NotificationManagerCore::new();
+        *guard = NotificationManagerCore::new(guard.latest_version);
         guard.exiting = true;
     }
 
@@ -172,16 +304,22 @@ impl NotificationManager {
         info: Info,
         version: Option<NotificationVersion>,
     ) {
-        let task = Task {
-            target,
-            operation,
-            info,
-            version,
+        // Publish immediately so callers can order notifications with snapshots by retaining
+        // the corresponding state guard, without leaving work pending in a background queue.
+        let mut core = self.core.lock();
+        if let Some(version) = version {
+            core.latest_version = version;
+        }
+        let response = SubscribeResponse {
+            status: None,
+            operation: operation as i32,
+            info: Some(info),
+            version: core.latest_version,
         };
-        self.task_tx.send(task).unwrap();
+        core.notify(target, response);
     }
 
-    /// Add a notification to the waiting queue and increase notification version.
+    /// Add a notification and increase notification version.
     async fn notify_with_version(
         &self,
         target: Target,
@@ -195,7 +333,7 @@ impl NotificationManager {
         version
     }
 
-    /// Assign consecutive versions to a frontend notification batch and enqueue the complete batch
+    /// Assign consecutive versions to a frontend notification batch and publish the complete batch
     /// while holding the version generator lock.
     async fn notify_frontend_batch(
         &self,
@@ -226,24 +364,27 @@ impl NotificationManager {
         Some(final_version)
     }
 
-    /// Add a notification using the latest version published to the queue without incrementing it.
+    /// Add a notification using the latest published version without incrementing it.
     #[inline(always)]
     fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
         self.notify(target, operation, info, None);
     }
 
-    /// Queue the snapshot behind every notification published before it was read. The observer
-    /// manager filters out such notifications only if they arrive before the snapshot.
-    pub fn notify_snapshot(
+    /// Register before reading any snapshot part. Boundaries and deltas share this channel;
+    /// filtering is local to the returned subscription, never part of the sender map.
+    pub fn start_subscription(
         &self,
-        sender: UnboundedSender<Notification>,
-        meta_snapshot: MetaSnapshot,
-    ) {
-        self.notify_without_version(
-            Target::Sender(sender),
-            Operation::Snapshot,
-            Info::Snapshot(meta_snapshot),
-        );
+        subscribe_type: SubscribeType,
+        worker_key: WorkerKey,
+    ) -> MetaResult<(SnapshotMarkerSender, UnboundedReceiver<SubscriptionEvent>)> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let mut core = self.core.lock();
+        if core.exiting {
+            return Err(anyhow::anyhow!("notification manager exiting").into());
+        }
+        core.senders_of(subscribe_type)
+            .insert(worker_key, sender.clone());
+        Ok((SnapshotMarkerSender(sender), receiver))
     }
 
     pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
@@ -284,7 +425,7 @@ impl NotificationManager {
 
     pub(crate) fn notify_hummock_targeted_update(&self, worker_key: WorkerKey, info: Info) {
         self.notify_without_version(
-            Target::Subscribers {
+            Target {
                 subscribe_type: SubscribeType::Hummock,
                 worker_key: Some(worker_key),
             },
@@ -350,7 +491,7 @@ impl NotificationManager {
         &self,
         subscribe_type: SubscribeType,
         worker_key: WorkerKey,
-        sender: UnboundedSender<Notification>,
+        sender: UnboundedSender<SubscriptionEvent>,
     ) {
         let mut core_guard = self.core.lock();
         if core_guard.exiting {
@@ -382,9 +523,11 @@ impl NotificationManager {
     }
 }
 
-type SenderMap = HashMap<WorkerKey, UnboundedSender<Notification>>;
+type SenderMap = HashMap<WorkerKey, UnboundedSender<SubscriptionEvent>>;
 
 struct NotificationManagerCore {
+    /// Catalog version of the latest synchronously published notification batch entry.
+    latest_version: NotificationVersion,
     /// The notification sender to frontends.
     frontend_senders: SenderMap,
     /// The notification sender to nodes that subscribes the hummock.
@@ -399,8 +542,9 @@ struct NotificationManagerCore {
 }
 
 impl NotificationManagerCore {
-    fn new() -> Self {
+    fn new(latest_version: NotificationVersion) -> Self {
         Self {
+            latest_version,
             frontend_senders: HashMap::new(),
             hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
@@ -422,25 +566,14 @@ impl NotificationManagerCore {
             };
         }
 
-        let (subscribe_type, worker_key) = match target {
-            Target::Subscribers {
-                subscribe_type,
-                worker_key,
-            } => (subscribe_type, worker_key),
-            Target::Sender(sender) => {
-                let _ = sender.send(Ok(response)).inspect_err(|err| {
-                    tracing::warn!("Failed to send snapshot: {}", err.as_report());
-                });
-                return;
-            }
-        };
-        let senders = self.senders_of(subscribe_type);
+        let event = SubscriptionEvent::delta(response);
+        let senders = self.senders_of(target.subscribe_type);
 
-        if let Some(worker_key) = worker_key {
+        if let Some(worker_key) = target.worker_key {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
-                    let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(subscribe_type, &worker_key, err.as_report());
+                    let _ = entry.get().send(event).inspect_err(|err| {
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -451,9 +584,9 @@ impl NotificationManagerCore {
         } else {
             senders.retain(|worker_key, sender| {
                 sender
-                    .send(Ok(response.clone()))
+                    .send(event.clone())
                     .inspect_err(|err| {
-                        warn_send_failure!(subscribe_type, &worker_key, err.as_report());
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });
@@ -473,6 +606,7 @@ impl NotificationManagerCore {
 
 #[cfg(test)]
 mod tests {
+    use futures::{StreamExt, TryStreamExt};
     use risingwave_common::id::JobId;
     use risingwave_pb::common::HostAddress;
 
@@ -490,14 +624,12 @@ mod tests {
             host: "a".to_owned(),
             port: 2,
         });
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
         let (tx3, mut rx3) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1.clone());
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1);
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2);
         mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3);
-        mgr.notify_snapshot(tx1, MetaSnapshot::default());
-        assert!(rx1.recv().await.is_some());
         assert!(rx2.try_recv().is_err());
         assert!(rx3.try_recv().is_err());
 
@@ -505,16 +637,26 @@ mod tests {
             .notify_frontend(Operation::Add, Info::Database(Default::default()))
             .await;
         assert!(rx1.try_recv().is_err());
-        let frontend_notification = rx2.recv().await.unwrap().unwrap();
+        let frontend_notification = rx2.recv().await.unwrap().into_notification().unwrap();
         assert_eq!(frontend_notification.version, version);
         assert_eq!(
-            rx3.recv().await.unwrap().unwrap().version,
+            rx3.recv()
+                .await
+                .unwrap()
+                .into_notification()
+                .unwrap()
+                .version,
             frontend_notification.version
         );
 
         mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
         assert_eq!(
-            rx1.recv().await.unwrap().unwrap().version,
+            rx1.recv()
+                .await
+                .unwrap()
+                .into_notification()
+                .unwrap()
+                .version,
             frontend_notification.version
         );
     }
@@ -541,10 +683,23 @@ mod tests {
         assert_eq!(published_version, initial_version + 2);
         assert_eq!(mgr.current_version().await, published_version);
         assert_eq!(
-            rx.recv().await.unwrap().unwrap().version,
+            rx.recv()
+                .await
+                .unwrap()
+                .into_notification()
+                .unwrap()
+                .version,
             initial_version + 1
         );
-        assert_eq!(rx.recv().await.unwrap().unwrap().version, published_version);
+        assert_eq!(
+            rx.recv()
+                .await
+                .unwrap()
+                .into_notification()
+                .unwrap()
+                .version,
+            published_version
+        );
     }
 
     #[tokio::test]
@@ -568,60 +723,353 @@ mod tests {
         let version = mgr.current_version().await;
         mgr.notify_hummock_targeted_update(worker_key1, Info::Database(Default::default()));
 
-        let notification = hummock_rx1.recv().await.unwrap().unwrap();
+        let notification = hummock_rx1
+            .recv()
+            .await
+            .unwrap()
+            .into_notification()
+            .unwrap();
         assert_eq!(notification.version, version);
         assert_eq!(mgr.current_version().await, version);
         assert!(hummock_rx2.try_recv().is_err());
         assert!(frontend_rx1.try_recv().is_err());
     }
 
-    #[tokio::test]
-    async fn test_snapshot_uses_original_sender_after_resubscribe() {
-        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
-        let worker_key = WorkerKey(HostAddress {
+    fn key() -> WorkerKey {
+        WorkerKey(HostAddress {
             host: "a".to_owned(),
             port: 1,
-        });
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key.clone(), tx1.clone());
-        mgr.notify_snapshot(tx1, MetaSnapshot::default());
+        })
+    }
 
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key, tx2);
+    fn delta(tx: &SnapshotMarkerSender, part: NotificationPart, version: u64) {
+        tx.0.send(SubscriptionEvent::Delta {
+            part,
+            response: SubscribeResponse {
+                version,
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    }
 
-        assert!(rx1.recv().await.is_some());
-        assert!(rx2.try_recv().is_err());
-
-        let version = mgr.current_version().await;
-        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()));
-        assert!(rx1.try_recv().is_err());
-        let notification = rx2.recv().await.unwrap().unwrap();
-        assert_eq!(notification.version, version);
-        assert_eq!(mgr.current_version().await, version);
+    fn complete_markers(tx: &SnapshotMarkerSender, subscribe_type: SubscribeType) {
+        for &part in NotificationPart::for_subscriber(subscribe_type) {
+            tx.snapshot_read(part);
+        }
     }
 
     #[tokio::test]
-    async fn test_snapshot_arrives_after_notification_it_covers() {
-        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
-        let worker_key = WorkerKey(HostAddress {
-            host: "a".to_owned(),
-            port: 1,
-        });
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Frontend, worker_key, tx.clone());
+    async fn test_snapshot_markers_filter_each_part_and_preserve_fifo() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Compute, key())
+            .unwrap();
+        delta(&tx, NotificationPart::Catalog, 1);
+        delta(&tx, NotificationPart::Cluster, 2);
+        tx.snapshot_read(NotificationPart::Catalog);
+        delta(&tx, NotificationPart::Catalog, 3);
+        delta(&tx, NotificationPart::Cluster, 4);
+        tx.0.send(SubscriptionEvent::Unscoped(SubscribeResponse {
+            version: 5,
+            ..Default::default()
+        }))
+        .unwrap();
+        tx.snapshot_read(NotificationPart::Cluster);
+        // This is already in the channel when initialization finishes, but behind its last marker.
+        delta(&tx, NotificationPart::Cluster, 6);
+        drop(tx);
+        let mut stream = Box::pin(notification_stream(
+            SubscribeType::Compute,
+            rx,
+            MetaSnapshot::default(),
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap().info,
+            Some(Info::Snapshot(_))
+        ));
+        for version in [3, 5, 6] {
+            assert_eq!(stream.next().await.unwrap().unwrap().version, version);
+        }
+        // Equal catalog versions must not cause a newer unversioned state update to be dropped.
+        mgr.notify_compute_without_version(
+            Operation::Update,
+            Info::ClusterResource(Default::default()),
+        );
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap().info,
+            Some(Info::ClusterResource(_))
+        ));
+    }
 
-        // The test runtime has one thread and `notify_frontend` does not yield after queueing, so
-        // the notification is still in the queue when the snapshot is sent.
-        let version = mgr
+    #[tokio::test]
+    async fn test_snapshot_filters_published_catalog_notifications() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Frontend, key())
+            .unwrap();
+        let before = mgr
             .notify_frontend(Operation::Add, Info::Database(Default::default()))
             .await;
-        mgr.notify_snapshot(tx, MetaSnapshot::default());
+        tx.snapshot_read(NotificationPart::Catalog);
+        let after = mgr
+            .notify_frontend(Operation::Add, Info::Schema(Default::default()))
+            .await;
+        for &part in NotificationPart::for_subscriber(SubscribeType::Frontend) {
+            if part != NotificationPart::Catalog {
+                tx.snapshot_read(part);
+            }
+        }
+        let mut stream = Box::pin(notification_stream(
+            SubscribeType::Frontend,
+            rx,
+            MetaSnapshot {
+                version: Some(risingwave_pb::meta::meta_snapshot::SnapshotVersion {
+                    catalog_version: before,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap().info,
+            Some(Info::Snapshot(_))
+        ));
+        let notification = stream.next().await.unwrap().unwrap();
+        assert_eq!(notification.version, after);
+        assert!(matches!(notification.info, Some(Info::Schema(_))));
+    }
 
-        let first = rx.recv().await.unwrap().unwrap();
-        assert!(matches!(first.info, Some(Info::Database(_))));
-        assert_eq!(first.version, version);
-        let second = rx.recv().await.unwrap().unwrap();
-        assert!(matches!(second.info, Some(Info::Snapshot(_))));
+    #[tokio::test]
+    async fn test_snapshot_stream_preserves_cross_part_delta_order() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Frontend, key())
+            .unwrap();
+        tx.snapshot_read(NotificationPart::Catalog);
+        tx.snapshot_read(NotificationPart::Cluster);
+        delta(&tx, NotificationPart::Cluster, 10);
+        delta(&tx, NotificationPart::Catalog, 11);
+        delta(&tx, NotificationPart::Cluster, 12);
+        for part in [
+            NotificationPart::StreamingMappings,
+            NotificationPart::ServingMappings,
+            NotificationPart::HummockVersion,
+            NotificationPart::SessionParams,
+        ] {
+            tx.snapshot_read(part);
+        }
+        let mut stream = Box::pin(notification_stream(
+            SubscribeType::Frontend,
+            rx,
+            MetaSnapshot::default(),
+        ));
+        stream.next().await.unwrap().unwrap();
+        for version in [10, 11, 12] {
+            assert_eq!(stream.next().await.unwrap().unwrap().version, version);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_markers_reject_duplicate_or_unexpected_parts() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        for invalid in [NotificationPart::Catalog, NotificationPart::HummockVersion] {
+            let (tx, rx) = mgr
+                .start_subscription(SubscribeType::Compute, key())
+                .unwrap();
+            tx.snapshot_read(NotificationPart::Catalog);
+            tx.snapshot_read(invalid);
+            let mut stream = Box::pin(notification_stream(
+                SubscribeType::Compute,
+                rx,
+                MetaSnapshot::default(),
+            ));
+            assert_eq!(
+                stream.next().await.unwrap().unwrap_err().code(),
+                tonic::Code::Internal
+            );
+        }
+        mgr.notify_compute_without_version(
+            Operation::Update,
+            Info::ClusterResource(Default::default()),
+        );
+        assert!(mgr.core.lock().compute_senders.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_subscription_after_abort_fails() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        mgr.abort_all();
+        assert!(
+            mgr.start_subscription(SubscribeType::Compute, key())
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_operation_for_serving_is_a_delta() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Frontend, key())
+            .unwrap();
+        mgr.notify_frontend_without_version(
+            Operation::Snapshot,
+            Info::ServingWorkerSlotMappings(Default::default()),
+        );
+        tx.snapshot_read(NotificationPart::ServingMappings);
+        mgr.notify_frontend_without_version(
+            Operation::Snapshot,
+            Info::ServingWorkerSlotMappings(Default::default()),
+        );
+        for &part in NotificationPart::for_subscriber(SubscribeType::Frontend) {
+            if part != NotificationPart::ServingMappings {
+                tx.snapshot_read(part);
+            }
+        }
+        let mut stream = Box::pin(notification_stream(
+            SubscribeType::Frontend,
+            rx,
+            MetaSnapshot::default(),
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap().info,
+            Some(Info::Snapshot(_))
+        ));
+        let notification = stream.next().await.unwrap().unwrap();
+        assert_eq!(notification.operation(), Operation::Snapshot);
+        assert!(matches!(
+            notification.info,
+            Some(Info::ServingWorkerSlotMappings(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_stream_requires_all_markers() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Compute, key())
+            .unwrap();
+        tx.snapshot_read(NotificationPart::Catalog);
+        drop(tx);
+        mgr.abort_all();
+        let mut stream = Box::pin(notification_stream(
+            SubscribeType::Compute,
+            rx,
+            MetaSnapshot::default(),
+        ));
+        assert_eq!(
+            stream.next().await.unwrap().unwrap_err().code(),
+            tonic::Code::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_uses_original_sender_after_resubscribe() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (old_tx, old_rx) = mgr
+            .start_subscription(SubscribeType::Compute, key())
+            .unwrap();
+        let (new_tx, new_rx) = mgr
+            .start_subscription(SubscribeType::Compute, key())
+            .unwrap();
+        complete_markers(&old_tx, SubscribeType::Compute);
+        complete_markers(&new_tx, SubscribeType::Compute);
+        drop(old_tx);
+        drop(new_tx);
+        let mut old_stream = Box::pin(notification_stream(
+            SubscribeType::Compute,
+            old_rx,
+            MetaSnapshot::default(),
+        ));
+        assert!(matches!(
+            old_stream.next().await.unwrap().unwrap().info,
+            Some(Info::Snapshot(_))
+        ));
+        assert!(old_stream.next().await.is_none());
+        drop(old_stream);
+        assert_eq!(mgr.core.lock().compute_senders.len(), 1);
+        mgr.notify_compute_without_version(
+            Operation::Update,
+            Info::ClusterResource(Default::default()),
+        );
+        let mut new_stream = Box::pin(notification_stream(
+            SubscribeType::Compute,
+            new_rx,
+            MetaSnapshot::default(),
+        ));
+        assert!(matches!(
+            new_stream.next().await.unwrap().unwrap().info,
+            Some(Info::Snapshot(_))
+        ));
+        assert!(matches!(
+            new_stream.next().await.unwrap().unwrap().info,
+            Some(Info::ClusterResource(_))
+        ));
+        drop(new_stream);
+        mgr.notify_compute_without_version(
+            Operation::Update,
+            Info::ClusterResource(Default::default()),
+        );
+        assert!(mgr.core.lock().compute_senders.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_subscription_is_removed_on_next_notification() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Compute, key())
+            .unwrap();
+        drop(rx);
+        assert_eq!(mgr.core.lock().compute_senders.len(), 1);
+        // Reading a snapshot after cancellation does not need to expose a send error.
+        tx.snapshot_read(NotificationPart::Catalog);
+        mgr.notify_compute_without_version(
+            Operation::Update,
+            Info::ClusterResource(Default::default()),
+        );
+        assert!(mgr.core.lock().compute_senders.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_filters_refill_notifications_by_part() {
+        let mgr = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let (tx, rx) = mgr
+            .start_subscription(SubscribeType::Hummock, key())
+            .unwrap();
+        tx.snapshot_read(NotificationPart::Catalog);
+        mgr.notify_hummock(
+            Operation::Update,
+            Info::TableRefillRuntimeConfig(risingwave_pb::meta::PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(Default::default()),
+                ..Default::default()
+            }),
+        );
+        mgr.notify_hummock(
+            Operation::Update,
+            Info::TableRefillRuntimeConfig(risingwave_pb::meta::PbTableRefillRuntimeConfig {
+                serving_table_vnode_mappings: Some(Default::default()),
+                ..Default::default()
+            }),
+        );
+        for part in [
+            NotificationPart::Cluster,
+            NotificationPart::ServingMappings,
+            NotificationPart::HummockVersion,
+            NotificationPart::HummockWriteLimits,
+        ] {
+            tx.snapshot_read(part);
+        }
+        let stream = notification_stream(SubscribeType::Hummock, rx, MetaSnapshot::default());
+        let responses = Box::pin(stream)
+            .take(2)
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        let Some(Info::TableRefillRuntimeConfig(config)) = &responses[1].info else {
+            panic!()
+        };
+        assert!(config.table_cache_refill_policies.is_some());
+        assert!(config.serving_table_vnode_mappings.is_none());
     }
 
     #[tokio::test]

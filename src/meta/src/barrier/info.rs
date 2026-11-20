@@ -132,6 +132,12 @@ impl SharedActorInfosInner {
     pub fn iter_over_fragments(&self) -> impl Iterator<Item = (&FragmentId, &SharedFragmentInfo)> {
         self.info.values().flatten()
     }
+
+    pub fn worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+        self.iter_over_fragments()
+            .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
+            .collect()
+    }
 }
 
 #[derive(Clone, educe::Educe)]

@@ -639,8 +639,9 @@ message MetaSnapshot {
     uint64 catalog_version = 1;
     reserved 2;
     reserved "parallel_unit_mapping_version";
-    uint64 worker_node_version = 3;
-    uint64 streaming_worker_slot_mapping_version = 4;
+    // Legacy client-side filtering fields. The server now filters each part before the snapshot.
+    uint64 worker_node_version = 3 [deprecated = true];
+    uint64 streaming_worker_slot_mapping_version = 4 [deprecated = true];
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
