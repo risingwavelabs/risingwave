@@ -88,6 +88,10 @@ insert into a select g, g, g from generate_series(3001, 3500) g;
 statement ok
 insert into b select g, g from generate_series(3001, 3500) g;
 
+# Join the new rows of `a` and `b` through `c`, so that the changes after recovery reach every path.
+statement ok
+insert into c select g, g from generate_series(3001, 3500) g;
+
 statement ok
 wait;
 
@@ -97,6 +101,16 @@ select count(*) from (
   except
   select count(*), sum(a.v), sum(b.v), sum(c.v)
   from a join b on a.x = b.x join c on a.y = c.y
+);
+----
+0
+
+query I
+select count(*) from (
+  select count(*), sum(a.v), sum(b.v), sum(c.v)
+  from a join b on a.x = b.x join c on a.y = c.y
+  except
+  select n, sa, sb, sc from v
 );
 ----
 0

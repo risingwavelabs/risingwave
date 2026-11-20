@@ -344,8 +344,9 @@ fn permutation(key: &[usize], target: &[usize]) -> Option<Vec<usize>> {
 
 /// Finds an arrangement of `scan` that can be looked up by `key` (column indices of `scan`). The
 /// arrangement must be distributed by `key`, and its order key must start with the distribution
-/// key. Returns the arrangement and `perm`, where `key[perm[i]]` is the `i`-th column of the
-/// distribution key.
+/// key. The arrangement must have every column of the scan, and its primary key must be in the
+/// scan output, which the lookups need to maintain their copy of the arrangement. Returns the
+/// arrangement and `perm`, where `key[perm[i]]` is the `i`-th column of the distribution key.
 fn find_arrangement(
     scan: &StreamTableScan,
     key: &[usize],
@@ -353,8 +354,18 @@ fn find_arrangement(
     let core = scan.core();
 
     for index in &core.table_indexes {
-        // Only full covering indexes can be used in delta join.
-        if !index.full_covering() {
+        // Only full covering indexes can be used in delta join. `full_covering` only compares the
+        // number of columns, which an expression index may match without having all columns.
+        if !index.full_covering() || !core.is_covered_by(index.primary_to_secondary_mapping()) {
+            continue;
+        }
+        let s2p_mapping = index.secondary_to_primary_mapping();
+        let pk_in_output = index.index_table.pk.iter().all(|order| {
+            s2p_mapping
+                .get(&order.column_index)
+                .is_some_and(|i| core.output_col_idx.contains(i))
+        });
+        if !pk_in_output {
             continue;
         }
         let p2s_mapping = index.primary_to_secondary_mapping();
@@ -393,7 +404,13 @@ fn find_arrangement(
         .map(|order| order.column_index)
         .take(table_dist_key.len())
         .collect_vec();
-    if order_key_prefix != *table_dist_key {
+    if order_key_prefix != *table_dist_key
+        || !core
+            .table_catalog
+            .pk
+            .iter()
+            .all(|order| core.output_col_idx.contains(&order.column_index))
+    {
         return None;
     }
     Some((ArrangementSource::PrimaryTable, perm))
@@ -405,8 +422,10 @@ fn build_arrangement_scan(
     source: &ArrangementSource,
     backfill_type: BackfillType,
 ) -> Option<StreamTableScan> {
-    if scan.core().cross_database() && matches!(backfill_type, BackfillType::Replicated) {
-        // We currently do not support cross database index scan in upstream only mode.
+    if scan.core().cross_database() {
+        // A cross-database scan is always a cross-database snapshot backfill, which follows the
+        // epochs of another database, while the lookups read the arrangements in the epochs of
+        // this database.
         return None;
     }
     let arrangement = match source {

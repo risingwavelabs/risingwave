@@ -223,17 +223,18 @@ impl StreamMultiwayDeltaJoin {
         let core = scan.core();
         let table_catalog = &*core.table_catalog;
         // The order key of the arrangement, as column indices of the scan output, so that the
-        // lookup executor can match it with the arrangement join key. Primary key columns are
-        // always in the scan output.
+        // lookup executor can match it with the arrangement join key. The rule only picks
+        // arrangements whose primary key is in the scan output.
         let arrange_key_orders = table_catalog
             .pk
             .iter()
-            .filter_map(|order| {
+            .map(|order| {
                 let column_index = core
                     .output_col_idx
                     .iter()
-                    .position(|&i| i == order.column_index)?;
-                Some(ColumnOrder::new(column_index, order.order_type).to_protobuf())
+                    .position(|&i| i == order.column_index)
+                    .expect("primary key of the arrangement should be in the scan output");
+                ColumnOrder::new(column_index, order.order_type).to_protobuf()
             })
             .collect();
         Ok(ArrangementInfo {
