@@ -54,3 +54,17 @@
   expected_outputs:
     - optimized_logical_plan_for_batch
     - stream_plan
+- name: two uncorrelated scalar count(*) subqueries are left to general unnesting
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id, (select count(*) from child c where c.id > 0), (select count(*) from child d where d.id < 0) from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: correlated approx_count_distinct subquery yields 0 on an empty group
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id, coalesce((select approx_count_distinct(c.name) from child c where c.event_id = e.id), 42) as cnt from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch

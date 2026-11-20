@@ -142,3 +142,28 @@
           └─StreamHashAgg { group_key: [child.event_id], aggs: [array_agg(child.name order_by(child.pos ASC)), count] }
             └─StreamExchange { dist: HashShard(child.event_id) }
               └─StreamTableScan { table: child, columns: [child.event_id, child.name, child.pos, child.id], stream_scan_type: SnapshotBackfill, stream_key: [child.id], pk: [id], dist: UpstreamHashShard(child.id) }
+- name: two uncorrelated scalar count(*) subqueries are left to general unnesting
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id, (select count(*) from child c where c.id > 0), (select count(*) from child d where d.id < 0) from event e;
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: true, output: all }
+    ├─LogicalScan { table: event, columns: [event.id] }
+    └─LogicalJoin { type: FullOuter, on: true, output: all }
+      ├─LogicalAgg { aggs: [count] }
+      │ └─LogicalScan { table: child, output_columns: [], required_columns: [child.id], predicate: (child.id > 0:Int32) }
+      └─LogicalAgg { aggs: [count] }
+        └─LogicalScan { table: child, output_columns: [], required_columns: [child.id], predicate: (child.id < 0:Int32) }
+- name: correlated approx_count_distinct subquery yields 0 on an empty group
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id, coalesce((select approx_count_distinct(c.name) from child c where c.event_id = e.id), 42) as cnt from event e;
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [event.id, Coalesce(Case(IsNull(child.event_id), 0:Int64, approx_count_distinct(child.name)), 42:Int32::Int64) as $expr1] }
+    └─LogicalJoin { type: LeftOuter, on: (event.id = child.event_id), output: all }
+      ├─LogicalScan { table: event, columns: [event.id] }
+      └─LogicalProject { exprs: [approx_count_distinct(child.name), child.event_id] }
+        └─LogicalAgg { group_key: [child.event_id], aggs: [approx_count_distinct(child.name)] }
+          └─LogicalScan { table: child, columns: [child.event_id, child.name] }
