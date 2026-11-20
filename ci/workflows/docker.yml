@@ -32,6 +32,18 @@ steps:
             DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
+  - label: "docker-build-timing: amd64"
+    if: build.env("AD_HOC") == "true" && build.env("DOCKER_BUILD_TIMING") == "true"
+    command: "ci/scripts/docker.sh"
+    timeout_in_minutes: 100
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
+
   - label: "docker-build-push: amd64"
     if: |
       build.env("AD_HOC") != "true" &&

@@ -81,8 +81,9 @@ ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
+  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion --timings && \
   mkdir -p /risingwave/bin && \
+  cp /risingwave/target/cargo-timings/cargo-timing.html /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
   cp ./target/${CARGO_PROFILE}/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
@@ -168,3 +169,4 @@ CMD [ "single_node" ]
 FROM risingwave-nodwp AS risingwave
 
 COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
+COPY --from=rust-builder /risingwave/bin/cargo-timing.html /risingwave/bin/cargo-timing.html

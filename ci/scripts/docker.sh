@@ -7,6 +7,7 @@ ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
 CARGO_PROFILE=${CARGO_PROFILE:-production}
+DOCKER_BUILD_TIMING=${DOCKER_BUILD_TIMING:-false}
 
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
@@ -14,12 +15,28 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- dockerhub login"
 echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
-if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
+if [[ "$DOCKER_BUILD_TIMING" != "true" && -n "${ORIGINAL_IMAGE_TAG+x}" && -n "${NEW_IMAGE_TAG+x}" ]]; then
   echo "--- retag docker image"
   docker pull ${ghcraddr}:${ORIGINAL_IMAGE_TAG}
   docker tag ${ghcraddr}:${ORIGINAL_IMAGE_TAG} ${ghcraddr}:${NEW_IMAGE_TAG}-${arch}
   docker push ${ghcraddr}:${NEW_IMAGE_TAG}-${arch}
   exit 0
+fi
+
+builder=container
+image="${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
+cache_args=(
+  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}"
+  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}"
+)
+if [[ "$DOCKER_BUILD_TIMING" == "true" ]]; then
+  if [[ "$arch" != "x86_64" ]]; then
+    echo "Expected x86_64 timing runner, got $arch"
+    exit 1
+  fi
+  builder="rw-timing-${BUILDKITE_JOB_ID}"
+  image="rw-build-timing:${BUILDKITE_JOB_ID}"
+  cache_args=(--no-cache)
 fi
 
 echo "--- init Debezium submodule"
@@ -29,8 +46,22 @@ git submodule update --init java/debezium
 echo "--- docker build and tag"
 echo "CARGO_PROFILE is set to ${CARGO_PROFILE}"
 docker buildx create \
-  --name container \
+  --name "$builder" \
   --driver=docker-container
+
+if [[ "$DOCKER_BUILD_TIMING" == "true" ]]; then
+  container_id=""
+  cleanup() {
+    if [[ -n "$container_id" ]]; then
+      docker rm "$container_id" >/dev/null || true
+    fi
+    docker image rm "$image" >/dev/null 2>&1 || true
+    docker buildx rm "$builder" >/dev/null || true
+  }
+  trap cleanup EXIT
+  lscpu | grep -E '^(Architecture|CPU\(s\)|Model name):'
+  grep '^MemTotal:' /proc/meminfo
+fi
 
 PULL_PARAM=""
 if [[ "${ALWAYS_PULL:-false}" = "true" ]]; then
@@ -40,14 +71,20 @@ fi
 docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
   --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
-  -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
+  -t "$image" \
   --progress plain \
-  --builder=container \
+  --builder="$builder" \
   --load \
   ${PULL_PARAM} \
-  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
-  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+  "${cache_args[@]}" \
   .
+
+if [[ "$DOCKER_BUILD_TIMING" == "true" ]]; then
+  container_id=$(docker create "$image")
+  docker cp "${container_id}:/risingwave/bin/cargo-timing.html" ./cargo-timing.html
+  buildkite-agent artifact upload cargo-timing.html
+  exit 0
+fi
 
 echo "--- check the image can start correctly"
 container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
