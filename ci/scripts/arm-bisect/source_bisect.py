@@ -55,6 +55,46 @@ def investigate(run):
     }
 
 
+def investigate_peak(run):
+    """Bisect a measured RSS increase without treating intermittent OOM as a label."""
+    low = run(0, NEW_BASE, "rss-endpoint-low")
+    high = run(5, NEW_BASE, "rss-endpoint-high")
+
+    def rss(record):
+        return record["metrics"][-1]["max_rss_kib"] if record.get("metrics") else None
+
+    if low["outcome"] != "pass" or rss(low) is None or rss(high) is None:
+        return {"verdict": "rss_endpoints_inconclusive", "low": low, "high": high}
+    if rss(high) - rss(low) < 256 * 1024:
+        return {"verdict": "rss_endpoints_not_separated", "low": low, "high": high}
+    threshold = (rss(low) + rss(high)) / 2
+
+    def above(record):
+        if rss(record) is None:
+            raise RuntimeError("No final rustc RSS measurement; cannot classify")
+        return record["outcome"] == "oom" or rss(record) >= threshold
+
+    lo, hi = 0, 5
+    low_record, high_record = low, high
+    while hi - lo > 1:
+        mid = (lo + hi + 1) // 2
+        record = run(mid, NEW_BASE, f"rss-midpoint-{mid}")
+        if above(record):
+            hi, high_record = mid, record
+        else:
+            lo, low_record = mid, record
+    repeated_low = run(lo, NEW_BASE, f"rss-boundary-low-repeat-{lo}")
+    repeated_high = run(hi, NEW_BASE, f"rss-boundary-high-repeat-{hi}")
+    stable = not above(repeated_low) and above(repeated_high)
+    return {
+        "verdict": "repeated_rss_boundary" if stable else "rss_boundary_not_repeatable",
+        "threshold_kib": threshold, "before": COMMITS[lo], "after": COMMITS[hi],
+        "before_measurements": [low_record, repeated_low],
+        "after_measurements": [high_record, repeated_high],
+        "scope": "Boundary in measured peak RSS; not proof of a deterministic OOM regression",
+    }
+
+
 def archive(revision, destination, repository):
     destination.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen(["git", "-C", str(repository), "archive", revision],
@@ -156,7 +196,13 @@ def main():
             raise RuntimeError(f"Non-OOM error in {name}; do not classify as a source regression")
         return outcome
 
-    verdict = investigate(run)
+    if os.environ.get("BISECT_METRIC") == "peak-rss":
+        def run_record(index, base, name):
+            run(index, base, name)
+            return records[-1]
+        verdict = investigate_peak(run_record)
+    else:
+        verdict = investigate(run)
     (results / "verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
     print("BISECT_VERDICT " + json.dumps(verdict), flush=True)
 
@@ -169,6 +215,18 @@ if __name__ == "__main__":
             assert verdict["first_bad"] == COMMITS[boundary]
         for result in ("pass", "oom"):
             assert investigate(lambda i, b, n: result)["verdict"] == "source_endpoints_not_bracketed"
+        for boundary in range(1, 6):
+            def run_record(i, base, name):
+                return {"outcome": "pass", "source": COMMITS[i],
+                        "metrics": [{"max_rss_kib": (59 if i >= boundary else 58) * 1048576}]}
+            verdict = investigate_peak(run_record)
+            assert verdict["verdict"] == "repeated_rss_boundary"
+            assert verdict["after"] == COMMITS[boundary]
+        assert investigate_peak(lambda i, b, n: {"outcome": "pass", "metrics": [{"max_rss_kib": 58 * 1048576}]})["verdict"] == "rss_endpoints_not_separated"
+        def unstable_record(i, base, name):
+            high = i >= 3 or name.startswith("rss-boundary-low-repeat")
+            return {"outcome": "pass", "metrics": [{"max_rss_kib": (59 if high else 58) * 1048576}]}
+        assert investigate_peak(unstable_record)["verdict"] == "rss_boundary_not_repeatable"
         print("Bisect driver startup and decision self-tests passed", flush=True)
     else:
         main()

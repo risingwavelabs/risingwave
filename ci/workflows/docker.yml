@@ -1,7 +1,9 @@
 steps:
-  - label: "ARM ThinLTO OOM: fixed-base source bisect"
+  - label: "ARM ThinLTO: bisect measured RSS increase"
     key: arm-thinlto-bisect
     command: ci/scripts/arm-bisect/run.sh
+    env:
+      BISECT_METRIC: peak-rss
     timeout_in_minutes: 300
     agents:
       queue: linux-arm64
