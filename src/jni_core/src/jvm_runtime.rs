@@ -102,6 +102,13 @@ fn build_jvm_with_native_registration() -> anyhow::Result<JavaVM> {
         .option("-Xms16m")
         .option(format!("-Xmx{}", jvm_heap_size));
 
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Mitigate CVE-2026-114938 in unpatched x86-64 JDKs. ARM64 is unaffected
+        // and retains its Base64 intrinsics. See https://calif.io/java4shell/.
+        args_builder = args_builder.option("-XX:-UseBASE64Intrinsics");
+    }
+
     // Exit the embedded JVM on uncaught `OutOfMemoryError` so that the host
     // compute node process terminates and the cluster recovers via the standard
     // recovery loop, matching native OOM behavior. Set `JVM_EXIT_ON_OOM=false`
