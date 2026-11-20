@@ -30,7 +30,6 @@ use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streami
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
-use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, PbField};
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
     PbCdcTableSnapshotSplitsWithGeneration,
@@ -39,14 +38,12 @@ use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
-use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
-    PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    ListFinishMutation, LoadFinishMutation, PauseMutation, PbStreamNode, PbUpstreamSinkInfo,
+    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -72,7 +69,7 @@ use crate::model::{
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
     RefreshCycleActors, ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState,
-    UpstreamSinkInfo, build_actor_connector_splits,
+    UpstreamSinkInfo, build_actor_connector_splits, build_sink_schema_change,
 };
 use crate::{MetaError, MetaResult};
 
@@ -873,29 +870,6 @@ impl BarrierKind {
     }
 }
 
-fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
-    columns
-        .iter()
-        .filter(|col| !col.is_hidden)
-        .map(|col| {
-            let column_desc = col
-                .column_desc
-                .as_ref()
-                .expect("sink column catalog should have a column descriptor");
-            PbField {
-                data_type: Some(
-                    column_desc
-                        .column_type
-                        .as_ref()
-                        .expect("sink column descriptor should have a column type")
-                        .clone(),
-                ),
-                name: column_desc.name.clone(),
-            }
-        })
-        .collect()
-}
-
 impl Command {
     pub(super) fn collect_commit_epoch_info(
         database_info: &InflightDatabaseInfo,
@@ -1688,27 +1662,13 @@ impl Command {
                 .into_iter()
                 .flat_map(|sinks| {
                     sinks.iter().map(|sink| {
-                        let op = if !sink.removed_column_names.is_empty() {
-                            PbSinkSchemaChangeOp::DropColumns(PbSinkDropColumnsOp {
-                                column_names: sink.removed_column_names.clone(),
-                            })
-                        } else {
-                            PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
-                                fields: sink
-                                    .newly_add_fields
-                                    .iter()
-                                    .map(|field| field.to_prost())
-                                    .collect(),
-                            })
-                        };
                         (
                             sink.original_sink.id.as_raw_id(),
-                            PbSinkSchemaChange {
-                                original_schema: sink_original_schema_fields(
-                                    &sink.original_sink.columns,
-                                ),
-                                op: Some(op),
-                            },
+                            build_sink_schema_change(
+                                &sink.original_sink.columns,
+                                &sink.newly_add_fields,
+                                &sink.removed_column_names,
+                            ),
                         )
                     })
                 })
@@ -1822,7 +1782,7 @@ mod tests {
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, ColumnDesc};
 
-    use super::sink_original_schema_fields;
+    use crate::stream::build_sink_schema_change;
 
     fn column(name: &str, type_name: PbTypeName, is_hidden: bool) -> PbColumnCatalog {
         PbColumnCatalog {
@@ -1846,7 +1806,7 @@ mod tests {
             column("_row_id", PbTypeName::Serial, true),
         ];
 
-        let fields = sink_original_schema_fields(&columns);
+        let fields = build_sink_schema_change(&columns, &[], &[]).original_schema;
         let field_names = fields
             .iter()
             .map(|field| field.name.as_str())

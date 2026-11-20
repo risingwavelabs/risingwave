@@ -63,6 +63,38 @@ cd ../.. && ./risedev k
 
 CI runs `ci/scripts/e2e-iceberg-test.sh`. The main suite uses the `ci-iceberg-test` profile, which needs an external postgres for the meta store and prebuilt connector libs downloaded from CI artifacts. The steps above are the local equivalent.
 
+The same CI lane runs `python3 e2e_test/iceberg/cdc_schema_change_failure.py` from
+the repository root. It uses the PostgreSQL CDC fixture and a per-sink TCP proxy
+to keep Iceberg unavailable across two CDC column additions. An unrelated MV in
+the same database must complete six checkpoints during the outage. After storage
+recovers, the test checks all old and new rows in Iceberg. The proxy does not
+interrupt Hummock storage or change the shared MinIO service.
+
+For a local PostgreSQL CDC fixture, override `CDC_PGHOST`, `CDC_PGPORT`,
+`CDC_PGUSER`, `CDC_PGDATABASE`, and `CDC_PGPASSWORD` as needed. These settings
+configure both the upstream SQL client and the RisingWave CDC source. For example,
+start RisingWave with `ENABLE_BUILD_RW_CONNECTOR=true` so its nodes receive the
+Java connector library path. With the fixture password and PostgreSQL exposed on
+localhost port 15432, run:
+
+```sh
+CDC_PGHOST=127.0.0.1 CDC_PGPORT=15432 python3 e2e_test/iceberg/cdc_schema_change_failure.py
+```
+
+Schema-change recovery currently retains all historical log schemas without
+garbage collection. Log rows carry an explicit `u32` schema-version header,
+independent of the row operation. Legacy rows without the header are version 0.
+While an Iceberg managed table's downstream schema is catching up, reads use
+committed Iceberg data only and temporarily omit pending log rows.
+Pending-log reads resume only after a data snapshot records the current sink ID
+and log-store schema version. Equal column names are not proof of schema progress.
+Snapshots without this progress marker, including legacy snapshots, use committed
+Iceberg data only until a versioned data commit is available. Before the first
+snapshot, pending reads remain available if the catalog proves the sink is at v0
+and therefore has no historical schemas. Legacy sink catalogs
+without a known schema version also conservatively omit pending rows until their
+next schema refresh.
+
 ### Multi-batch compaction rounds
 
 CI runs `compaction_round.slt` and `pk_index_compaction_round.slt` first in the

@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use futures::FutureExt;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::constants::log_store::SCHEMA_VERSION_PROPERTY;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
@@ -40,8 +41,9 @@ use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
     KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
+    LogStoreReadSchemaVersion, LogStoreSchemaHistoryEntry,
 };
-use crate::executor::{SinkExecutor, StreamExecutorError};
+use crate::executor::{SinkExecutor, SinkSchemaVersionParam, StreamExecutorError};
 
 /// Build [`SinkParam`] from a [`PbSinkDesc`], along with the full [`ColumnCatalog`] list for
 /// downstream use. `connector` is the resolved connector name (e.g. `ICEBERG_SINK`), used for
@@ -132,13 +134,59 @@ pub(super) fn build_sink_param(
     Ok((sink_param, columns))
 }
 
+/// The sink desc of an older schema version with `columns`. The downstream pk is mapped to the
+/// older columns by name.
+fn sink_desc_of_columns(
+    sink_desc: &PbSinkDesc,
+    columns: &[PbColumnCatalog],
+) -> Result<PbSinkDesc, StreamExecutorError> {
+    let column_name = |column: &PbColumnCatalog| {
+        column
+            .column_desc
+            .as_ref()
+            .map(|desc| desc.name.clone())
+            .unwrap_or_default()
+    };
+    let downstream_pk = sink_desc
+        .downstream_pk
+        .iter()
+        .map(|idx| {
+            let name = sink_desc
+                .column_catalogs
+                .get(*idx as usize)
+                .map(column_name)
+                .ok_or_else(|| anyhow!("invalid downstream pk index {}", idx))?;
+            columns
+                .iter()
+                .position(|column| column_name(column) == name)
+                .map(|idx| idx as u32)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "downstream pk column {} not found in older sink schema",
+                        name
+                    )
+                })
+        })
+        .try_collect()?;
+    Ok(PbSinkDesc {
+        column_catalogs: columns.to_vec(),
+        downstream_pk,
+        ..sink_desc.clone()
+    })
+}
+
 pub struct SinkExecutorBuilder;
 
 fn resolve_pk_info(
     input_schema: &Schema,
     log_store_table: &Table,
 ) -> StreamResult<&'static KvLogStorePkInfo> {
-    let predefined_column_len = log_store_table.columns.len() - input_schema.fields.len();
+    let payload_end = log_store_table.columns.len()
+        - usize::from(log_store_table.columns.last().is_some_and(|col| {
+            col.column_desc.as_ref().unwrap().name
+                == risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME
+        }));
+    let predefined_column_len = payload_end - input_schema.fields.len();
 
     #[expect(deprecated)]
     let info = match predefined_column_len {
@@ -157,7 +205,7 @@ fn resolve_pk_info(
         )),
     }?;
     validate_payload_schema(
-        &log_store_table.columns[predefined_column_len..],
+        &log_store_table.columns[predefined_column_len..payload_end],
         input_schema,
     )?;
     Ok(info)
@@ -269,7 +317,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             )?
         };
 
-        let (sink_param, columns) = build_sink_param(sink_desc, properties_with_secret, connector)?;
+        if connector.eq_ignore_ascii_case(ICEBERG_SINK) {
+            // Derive this from the plan, never from user-supplied connector options.
+            properties_with_secret.insert(
+                SCHEMA_VERSION_PROPERTY.to_owned(),
+                node.log_store_schema_version.to_string(),
+            );
+        }
+        let (sink_param, columns) =
+            build_sink_param(sink_desc, properties_with_secret.clone(), connector)?;
 
         let sink_write_param = SinkWriterParam {
             executor_id: params.executor_id,
@@ -343,6 +399,49 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
+                let schema_history = node
+                    .log_store_schema_history
+                    .iter()
+                    .map(|entry| {
+                        Ok::<_, StreamExecutorError>(LogStoreSchemaHistoryEntry {
+                            version: entry.version,
+                            table: Table {
+                                columns: entry.log_store_columns.clone(),
+                                value_indices: entry.log_store_value_indices.clone(),
+                                ..Default::default()
+                            },
+                            schema_change: entry.schema_change.clone().ok_or_else(|| {
+                                anyhow!(
+                                    "missing schema change of log store schema version {}",
+                                    entry.version
+                                )
+                            })?,
+                        })
+                    })
+                    .try_collect()?;
+                let older_sink_params = node
+                    .log_store_schema_history
+                    .iter()
+                    .map(|entry| {
+                        let sink_desc = sink_desc_of_columns(sink_desc, &entry.sink_columns)?;
+                        let mut properties = properties_with_secret.clone();
+                        if connector.eq_ignore_ascii_case(ICEBERG_SINK) {
+                            properties.insert(
+                                SCHEMA_VERSION_PROPERTY.to_owned(),
+                                entry.version.to_string(),
+                            );
+                        }
+                        let (sink_param, columns) =
+                            build_sink_param(&sink_desc, properties, connector)?;
+                        Ok::<_, StreamExecutorError>(SinkSchemaVersionParam {
+                            version: entry.version,
+                            sink_param,
+                            columns,
+                        })
+                    })
+                    .try_collect()?;
+                let read_schema_version = LogStoreReadSchemaVersion::default();
+
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -354,7 +453,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     log_store_identity,
                     params.env.kv_log_store_historical_read_semaphore(),
                     pk_info,
-                );
+                )
+                .with_schema_history(
+                    node.log_store_schema_version,
+                    schema_history,
+                    read_schema_version.clone(),
+                )?;
 
                 SinkExecutor::new(
                     params.actor_context,
@@ -369,6 +473,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     input_data_types,
                     node.rate_limit.map(|x| x as _),
                 )?
+                .with_log_store_schema_versions(
+                    read_schema_version,
+                    node.log_store_schema_version,
+                    older_sink_params,
+                )
                 .boxed()
             }
         };
@@ -432,6 +541,44 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_pk_info_with_explicit_version() {
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+        use risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME;
+
+        #[expect(deprecated)]
+        let pk_infos: [&'static KvLogStorePkInfo; 2] = [
+            &crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO,
+            &KV_LOG_STORE_V2_INFO,
+        ];
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Varchar),
+        ]);
+        for info in pk_infos {
+            let mut table =
+                crate::common::log_store_impl::kv_log_store::test_utils::gen_test_log_store_table(
+                    info,
+                );
+            assert!(std::ptr::eq(
+                resolve_pk_info(&schema, &table).unwrap(),
+                info
+            ));
+            table.columns.push(
+                ColumnCatalog::hidden(ColumnDesc::named(
+                    SCHEMA_VERSION_COLUMN_NAME,
+                    ColumnId::new(table.columns.len() as i32),
+                    DataType::Int64,
+                ))
+                .to_protobuf(),
+            );
+            assert!(std::ptr::eq(
+                resolve_pk_info(&schema, &table).unwrap(),
+                info
+            ));
+        }
+    }
 
     #[test]
     fn test_parse_jdbc_url() {

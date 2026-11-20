@@ -33,6 +33,7 @@ use error::ValueEncodingError;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
+pub mod log_store;
 
 pub use crate::row::RowDeserializer as BasicDeserializer;
 use crate::vector::{decode_vector_payload, encode_vector_payload};
@@ -110,16 +111,44 @@ impl ValueRowDeserializer for BasicDeserializer {
 pub struct BasicSerde {
     pub serializer: BasicSerializer,
     pub deserializer: BasicDeserializer,
+    /// Only log-store tables with an explicit schema-version column use this header.
+    pub log_store_header: Option<log_store::LogStoreHeader>,
 }
 
 impl ValueRowSerializer for BasicSerde {
     fn serialize(&self, row: impl Row) -> Vec<u8> {
+        if let Some(header) = &self.log_store_header {
+            let version_index = header
+                .version_index
+                .expect("writer needs the version column");
+            let version = row.datum_at(version_index).unwrap().into_int64();
+            let version = u32::try_from(version).expect("invalid log store schema version");
+            let mut buf = Vec::new();
+            log_store::serialize_header(version, &mut buf);
+            for (index, datum) in row.iter().enumerate() {
+                if index != version_index {
+                    serialize_datum_into(datum, &mut buf);
+                }
+            }
+            return buf;
+        }
         self.serializer.serialize(row)
     }
 }
 
 impl ValueRowDeserializer for BasicSerde {
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+    fn deserialize(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        if let Some(header) = &self.log_store_header {
+            let version = log_store::deserialize_header(&mut encoded_bytes)?;
+            let mut row = Vec::with_capacity(
+                self.deserializer.data_types().len() + usize::from(header.version_index.is_some()),
+            );
+            self.deserializer.deserialize_to(encoded_bytes, &mut row)?;
+            if let Some(index) = header.version_index {
+                row.insert(index, Some(ScalarImpl::Int64(version.into())));
+            }
+            return Ok(row);
+        }
         Ok(self
             .deserializer
             .deserialize(encoded_bytes)?

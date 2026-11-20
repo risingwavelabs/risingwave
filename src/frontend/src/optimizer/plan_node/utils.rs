@@ -26,6 +26,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
     StreamJobStatus,
 };
+use risingwave_common::constants::log_store::SCHEMA_VERSION_COLUMN_NAME;
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
@@ -410,6 +411,12 @@ pub fn infer_kv_log_store_table_catalog_inner(
         let indice = table_catalog_builder.add_column(field);
         value_indices.push(indice);
     }
+    let version_index = table_catalog_builder.add_column(&Field::with_name(
+        DataType::Int64,
+        SCHEMA_VERSION_COLUMN_NAME,
+    ));
+    table_catalog_builder.columns[version_index].is_hidden = true;
+    value_indices.push(version_index);
     table_catalog_builder.set_value_indices(value_indices);
 
     // Modify distribution key indices based on the pre-defined columns.
