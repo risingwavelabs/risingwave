@@ -1,6 +1,6 @@
 FROM ubuntu:24.04 AS base
 
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 # Require Ubuntu's CVE-2026-114938 fix while allowing newer security updates.
 # https://ubuntu.com/security/notices/USN-9156-1
@@ -12,22 +12,12 @@ RUN apt-get update \
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync
-
-# Install Node.js as dependency for building the dashboard.
-# Bump version together with `dashboard/.node-version`.
-ENV NVM_DIR /root/.nvm
-ENV NODE_VERSION 20.11.1
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
-  && . $NVM_DIR/nvm.sh \
-  && nvm install $NODE_VERSION \
-  && npm install --global pnpm@10.14.0
-ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync util-linux
 
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
-ENV PATH /root/.cargo/bin:$PATH
+ENV PATH=/root/.cargo/bin:$PATH
 ENV CARGO_INCREMENTAL=0
 
 COPY rust-toolchain rust-toolchain
@@ -38,9 +28,6 @@ RUN rustup self update \
   && rustup show \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1
-
-RUN cargo install flamegraph
-RUN cargo install addr2line --features bin --bin addr2line
 
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
 # We may consider sccache instead.
@@ -65,7 +52,32 @@ RUN cargo install addr2line --features bin --bin addr2line
 # # Build dependencies - this can be cached if the dependencies don't change
 # RUN cargo chef cook --profile production --recipe-path recipe.json
 
+FROM rust-base AS debug-tools
+
+RUN cargo install flamegraph
+RUN cargo install addr2line --features bin --bin addr2line
+
 FROM rust-base AS rust-builder
+
+# Only the Rust build needs Node.js for the embedded dashboard.
+COPY dashboard/.node-version /tmp/dashboard-node-version
+RUN set -eu; \
+  node_version="$(cat /tmp/dashboard-node-version)"; \
+  node_arch="$(dpkg --print-architecture)"; \
+  if [ "$node_arch" = amd64 ]; then node_arch=x64; fi; \
+  archive="node-v${node_version}-linux-${node_arch}.tar.gz"; \
+  dist="https://nodejs.org/dist/v${node_version}"; \
+  cd /tmp; \
+  curl -fsSLO "$dist/$archive"; \
+  curl -fsSLO "$dist/SHASUMS256.txt"; \
+  grep -F "  $archive" SHASUMS256.txt | sha256sum -c -; \
+  mkdir -p /opt/node; \
+  tar -xzf "$archive" -C /opt/node --strip-components=1; \
+  rm "$archive" SHASUMS256.txt
+ENV PATH=/opt/node/bin:$PATH
+
+COPY dashboard/package.json /tmp/dashboard-package.json
+RUN npm install --global "$(node -p 'require("/tmp/dashboard-package.json").packageManager')"
 
 # Build application
 ARG GIT_SHA
@@ -80,8 +92,7 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
-RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
+RUN bash docker/build-with-dashboard.sh -p risingwave_cmd_all --profile "${CARGO_PROFILE}" --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
@@ -102,8 +113,8 @@ COPY java /risingwave/java/
 # Move java/**/pom.xml to poms/**/pom.xml
 RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/{}' \;
 
-# We use rust-maven-plugin to build java-binding. So it's FROM rust-base
-FROM rust-base AS java-builder
+# The Docker package uses the JNI bindings linked into the Rust binary.
+FROM base AS java-builder
 
 RUN apt-get update && apt-get -y install maven
 
@@ -116,11 +127,9 @@ COPY --from=java-planner /risingwave/poms /risingwave/java/
 # 2. start downloading dependencies
 RUN mvn dependency:go-offline --fail-never
 
-# 3. add all source code and start compiling
-# TODO: only add java related code so that changing rust code won't recompile java code
-# Currently java-binding depends on the workspace Cargo.toml, which depends on the whole rust codebase
-# Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
-COPY ./ /risingwave
+# 3. add the Java sources and the schemas used by the protobuf Maven plugin
+COPY java /risingwave/java/
+COPY proto /risingwave/proto/
 
 RUN ./build-debezium.sh && \
   mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
@@ -129,7 +138,7 @@ RUN ./build-debezium.sh && \
 
 FROM base AS risingwave-nodwp
 
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
+LABEL org.opencontainers.image.source=https://github.com/risingwavelabs/risingwave
 
 RUN apt-get update && apt-get -y install linux-tools-generic \
   && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
@@ -147,20 +156,20 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
-COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
-COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
+COPY --from=debug-tools /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
+COPY --from=debug-tools /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
 COPY --from=rust-builder /risingwave/lib/adbc /risingwave/lib/adbc
 
 # Set default playground mode to docker-playground profile
-ENV PLAYGROUND_PROFILE docker-playground
+ENV PLAYGROUND_PROFILE=docker-playground
 # Set default connector libs path
-ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
+ENV CONNECTOR_LIBS_PATH=/risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 # Runtime dynamic library search path for ADBC (Linux containers use LD_LIBRARY_PATH).
-ENV ADBC_DRIVER_PATH /risingwave/lib/adbc
-ENV LD_LIBRARY_PATH /risingwave/lib/adbc:${LD_LIBRARY_PATH}
+ENV ADBC_DRIVER_PATH=/risingwave/lib/adbc
+ENV LD_LIBRARY_PATH=/risingwave/lib/adbc
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "single_node" ]
