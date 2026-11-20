@@ -20,12 +20,10 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
 use crate::utils::Condition;
 
-/// Specially for the predicate and sub-nodes under `LogicalFilter`
-/// note that we will rewrite everything for the `LogicalFilter`
-/// include `input` and `predicate`
+/// Simplifies the predicate of a `LogicalFilter`.
 pub struct LogicalFilterExpressionSimplifyRule {}
 impl Rule<Logical> for LogicalFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
@@ -37,17 +35,10 @@ impl Rule<Logical> for LogicalFilterExpressionSimplifyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
 
-        // rewrite the entire condition first
-        // i.e., the specific optimization that will apply to the entire condition
-        // e.g., `e and not(e)`
-        let predicate = ConditionRewriter::rewrite(filter.predicate().clone());
-
-        // construct the new filter after predicate rewriting
-        let filter = LogicalFilter::create(filter.input(), predicate);
-
-        // then rewrite single expression via `rewrite_exprs`
-        let mut expr_rewriter = ExpressionSimplifyRewriter {};
-        Some(filter.rewrite_exprs(&mut expr_rewriter))
+        // A true predicate makes `create` return the input, where predicate rewrites can change values.
+        let predicate = ConditionRewriter::rewrite(filter.predicate().clone())
+            .rewrite_expr(&mut ExpressionSimplifyRewriter {});
+        Some(LogicalFilter::create(filter.input(), predicate))
     }
 }
 
