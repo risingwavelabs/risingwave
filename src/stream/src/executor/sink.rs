@@ -127,12 +127,60 @@ fn drop_deletes_of_reinserted_keys(
         .collect()
 }
 
+/// Orders the inserts of an epoch for `ignore_delete`: the rows gone at the barrier first, then the
+/// rows still there.
+///
+/// When the downstream pk does not contain the stream key, the inserts of a downstream pk come from
+/// several stream keys, in no order, so a row deleted in the epoch may arrive after the row that
+/// replaced it. The deletes are not sent, but they tell which rows are gone: a stream key whose
+/// last change is an insert still has that row at the barrier.
+fn live_rows_last(chunks: Vec<StreamChunk>, stream_key: &[usize]) -> Vec<StreamChunk> {
+    let live = StreamChunkCompactor::new(stream_key.to_vec(), chunks.clone(), StreamKind::Upsert)
+        .into_compacted_chunks_inline::<{ output_kind::UPSERT }>(InconsistencyBehavior::Panic)
+        .into_iter()
+        .map(force_append_only)
+        .collect_vec();
+    let gone = chunks.into_iter().zip_eq(&live).map(|(chunk, live)| {
+        let inserts = force_append_only(chunk);
+        let vis = inserts.visibility() & &!live.visibility();
+        inserts.clone_with_vis(vis)
+    });
+    let mut ordered = gone.collect_vec();
+    ordered.extend(live);
+    ordered.retain(|chunk| chunk.cardinality() > 0);
+    ordered
+}
+
+/// The key and the stream kind by which the sink compacts its input.
+///
+/// Compaction assumes that deletes take effect. It merges an insert or update into a later delete
+/// of the same key, and keeps only the last version of a stream key, as each update deletes the row
+/// of the version before. `ignore_delete` drops deletes before compaction, after which every
+/// inserted row stays in the downstream until an insert of the same downstream pk overwrites it,
+/// as in an upsert stream keyed by the downstream pk. That needs the inserts of a downstream pk in
+/// order, see [`live_rows_last`] for when they are not.
+fn compaction_key_and_kind(
+    stream_key: &[usize],
+    input_kind: StreamKind,
+    downstream_pk: Option<&[usize]>,
+    ignore_delete: bool,
+) -> (StreamKey, StreamKind) {
+    if ignore_delete {
+        (
+            downstream_pk.unwrap_or(stream_key).to_vec(),
+            StreamKind::Upsert,
+        )
+    } else {
+        (stream_key.to_vec(), input_kind)
+    }
+}
+
 /// When the sink is non-append-only, i.e. upsert or retract, we need to do some extra work for
 /// correctness and performance.
 #[derive(Clone, Copy, Debug)]
 struct NonAppendOnlyBehavior {
-    /// Whether the user specifies a primary key for the sink, and it matches the derived stream
-    /// key of the stream.
+    /// Whether the user specifies a primary key for the sink, and it matches the stream key that
+    /// the sink compacts by, from [`compaction_key_and_kind`].
     ///
     /// By matching, we mean that stream key is a subset of the downstream pk.
     pk_specified_and_matched: bool,
@@ -297,14 +345,21 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
 
         let non_append_only_behavior = if !sink_param.sink_type.is_append_only() {
-            let stream_key = &info.stream_key;
+            let (stream_key, _) = compaction_key_and_kind(
+                &info.stream_key,
+                input.stream_kind(),
+                sink_param.downstream_pk.as_deref(),
+                sink_param.ignore_delete,
+            );
             let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
                 .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
-            let force_compaction = sink_param
-                .properties
-                .get(SINK_USER_FORCE_COMPACTION)
-                .map(|v| v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
+            let enabled = |key: &str| {
+                (sink_param.properties.get(key)).is_some_and(|v| v.eq_ignore_ascii_case("true"))
+            };
+            // With `ignore_delete`, the changes are compacted by the downstream pk, which
+            // `preserve_row_level_changes` forbids, and there are no deletes to move first.
+            let force_compaction = enabled(SINK_USER_FORCE_COMPACTION)
+                && !(sink_param.ignore_delete && enabled(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES));
             Some(NonAppendOnlyBehavior {
                 pk_specified_and_matched,
                 force_compaction,
@@ -341,14 +396,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let actor_id = self.actor_context.id;
         let fragment_id = self.actor_context.fragment_id;
 
-        let stream_key = self.info.stream_key.clone();
         let metrics = self.actor_context.streaming_metrics.new_sink_exec_metrics(
             sink_id,
             actor_id,
             fragment_id,
         );
 
-        let input_kind = self.input.stream_kind();
+        let ignore_delete = self.sink_param.ignore_delete;
+        let (stream_key, input_kind) = compaction_key_and_kind(
+            &self.info.stream_key,
+            self.input.stream_kind(),
+            self.sink_param.downstream_pk.as_deref(),
+            ignore_delete,
+        );
         let input = self.input.execute();
 
         let input = input.inspect_ok(move |msg| {
@@ -358,33 +418,53 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
         });
 
-        let processed_input = Self::process_msg(
-            input,
-            self.sink_param.sink_type,
-            stream_key,
-            self.chunk_size,
-            self.input_data_types,
-            input_kind,
-            self.sink_param.downstream_pk.clone(),
-            self.non_append_only_behavior,
-            metrics.sink_chunk_buffer_size,
-            self.sink_param
-                .properties
-                .get(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES)
-                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
-            self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
-        );
+        let preserve_row_level_changes = (self.sink_param.properties)
+            .get(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES)
+            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+        // The downstream pk whose inserts `ignore_delete` cannot take in the order they arrive.
+        let unordered_downstream_pk = (self.sink_param.downstream_pk.clone()).filter(|pk| {
+            ignore_delete
+                && !self.sink_param.sink_type.is_append_only()
+                && !self.info.stream_key.iter().all(|i| pk.contains(i))
+        });
 
-        let processed_input = if self.sink_param.ignore_delete {
-            // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
-            processed_input
-                .map_ok(|msg| match msg {
-                    Message::Chunk(chunk) => Message::Chunk(force_append_only(chunk)),
-                    other => other,
-                })
-                .left_stream()
+        let processed_input = if let Some(downstream_pk) = unordered_downstream_pk {
+            Self::process_msg_live_rows_last(
+                input,
+                self.info.stream_key.clone(),
+                downstream_pk,
+                preserve_row_level_changes,
+                self.chunk_size,
+                self.input_data_types,
+                metrics.sink_chunk_buffer_size,
+            )
+            .left_stream()
         } else {
-            processed_input.right_stream()
+            let input = if ignore_delete {
+                // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
+                input
+                    .map_ok(|msg| match msg {
+                        Message::Chunk(chunk) => Message::Chunk(force_append_only(chunk)),
+                        other => other,
+                    })
+                    .left_stream()
+            } else {
+                input.right_stream()
+            };
+            Self::process_msg(
+                input,
+                self.sink_param.sink_type,
+                stream_key,
+                self.chunk_size,
+                self.input_data_types,
+                input_kind,
+                self.sink_param.downstream_pk.clone(),
+                self.non_append_only_behavior,
+                metrics.sink_chunk_buffer_size,
+                preserve_row_level_changes,
+                self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
+            )
+            .right_stream()
         };
 
         if self.sink.is_sink_into_table() {
@@ -573,6 +653,71 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             _ => (),
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// With `ignore_delete` and a downstream pk that does not contain the stream key, buffers each
+    /// epoch to emit its inserts in the order of [`live_rows_last`].
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn process_msg_live_rows_last(
+        input: impl MessageStream,
+        stream_key: StreamKey,
+        downstream_pk: Vec<usize>,
+        preserve_row_level_changes: bool,
+        chunk_size: usize,
+        input_data_types: Vec<DataType>,
+        sink_chunk_buffer_size_metrics: RelabeledAggregatedIntGauge,
+    ) {
+        let mut chunk_buffer = EstimatedVec::new();
+        let mut watermark: Option<super::Watermark> = None;
+        #[for_await]
+        for msg in input {
+            match msg? {
+                Message::Watermark(w) => watermark = Some(w),
+                Message::Chunk(c) => {
+                    chunk_buffer.push(c);
+                    sink_chunk_buffer_size_metrics.set(chunk_buffer.estimated_size() as i64);
+                }
+                Message::Barrier(barrier) => {
+                    let chunks = mem::take(&mut chunk_buffer).into_inner();
+                    let chunks = live_rows_last(chunks, &stream_key);
+                    if preserve_row_level_changes {
+                        // The target table sees every insert.
+                        let mut chunk_builder =
+                            StreamChunkBuilder::new(chunk_size, input_data_types.clone());
+                        for chunk in chunks {
+                            for (op, row) in chunk.rows() {
+                                if let Some(c) = chunk_builder.append_row(op, row) {
+                                    yield Message::Chunk(c);
+                                }
+                            }
+                        }
+                        if let Some(c) = chunk_builder.take() {
+                            yield Message::Chunk(c);
+                        }
+                    } else {
+                        // Keep the last insert of each downstream pk.
+                        let compactor = StreamChunkCompactor::new(
+                            downstream_pk.clone(),
+                            chunks,
+                            StreamKind::Upsert,
+                        );
+                        for c in compactor
+                            .into_compacted_chunks_reconstructed::<{ output_kind::UPSERT }>(
+                                chunk_size,
+                                input_data_types.clone(),
+                                InconsistencyBehavior::Warn,
+                            )
+                        {
+                            yield Message::Chunk(c);
+                        }
+                    }
+                    if let Some(w) = mem::take(&mut watermark) {
+                        yield Message::Watermark(w)
+                    }
+                    yield Message::Barrier(barrier);
                 }
             }
         }
@@ -2076,6 +2221,9 @@ mod test {
             },
             MockSource::with_messages(input).boxed(),
         );
+        let ignore_delete = properties
+            .get(risingwave_connector::sink::SINK_USER_IGNORE_DELETE_OPTION)
+            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
         let sink_param = SinkParam {
             sink_id: 0.into(),
             sink_name: "test".into(),
@@ -2083,7 +2231,7 @@ mod test {
             columns: columns.iter().map(|col| col.column_desc.clone()).collect(),
             downstream_pk: Some(downstream_pk),
             sink_type,
-            ignore_delete: false,
+            ignore_delete,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -2324,6 +2472,367 @@ mod test {
                     + 1 1 8 10",
                 ),
             ]
+        );
+    }
+
+    /// With `ignore_delete`, every inserted or updated row reaches the downstream, however the sink
+    /// compacts the changes.
+    #[tokio::test]
+    async fn test_ignore_delete_keeps_every_inserted_row() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        type Inputs = Vec<(StreamKind, Vec<Message>)>;
+
+        // The chunks of each epoch.
+        fn epochs(epochs: &[&[&str]]) -> Vec<Message> {
+            let mut messages = vec![Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))];
+            for (i, chunks) in epochs.iter().enumerate() {
+                messages.extend(
+                    (chunks.iter()).map(|chunk| Message::Chunk(StreamChunk::from_pretty(chunk))),
+                );
+                let epoch = test_epoch(i as u64 + 2);
+                messages.push(Message::Barrier(Barrier::new_test_barrier(epoch)));
+            }
+            messages
+        }
+
+        fn properties(extra: &[(&str, &str)]) -> BTreeMap<String, String> {
+            let mut properties = maplit::btreemap! {
+                "connector".to_owned() => "table".to_owned(),
+                "ignore_delete".to_owned() => "true".to_owned(),
+            };
+            properties.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+            properties
+        }
+
+        // A delete arrives with the insert or update before it, in the same chunk or a later one.
+        fn deletes_after_changes() -> Inputs {
+            vec![
+                (
+                    StreamKind::Retract,
+                    epochs(&[
+                        &[" I I
+                            + 3 30"],
+                        &[
+                            "  I I
+                             + 1 10
+                             - 1 10
+                            U- 3 30
+                            U+ 3 31
+                             - 3 31
+                             + 2 20",
+                            " I I
+                            - 2 20",
+                        ],
+                    ]),
+                ),
+                (
+                    StreamKind::Upsert,
+                    epochs(&[
+                        &[" I I
+                            + 3 30"],
+                        &[
+                            " I I
+                            + 1 10
+                            - 1 .
+                            + 3 31
+                            - 3 .
+                            + 2 20",
+                            " I I
+                            - 2 .",
+                        ],
+                    ]),
+                ),
+            ]
+        }
+
+        // An update moves stream key `1` from downstream pk `6` to `8`.
+        fn row_moved() -> Inputs {
+            vec![
+                (
+                    StreamKind::Retract,
+                    epochs(&[&["  I I
+                                 + 1 6
+                                U- 1 6
+                                U+ 1 8"]]),
+                ),
+                (
+                    StreamKind::Upsert,
+                    epochs(&[&[" I I
+                                + 1 6
+                                + 1 8"]]),
+                ),
+            ]
+        }
+
+        // Two stream keys insert downstream pk `1` in one epoch. There are only inserts, so the
+        // input kind does not matter.
+        fn same_pk_inserted_twice() -> Inputs {
+            vec![(
+                StreamKind::Retract,
+                epochs(&[&[" I I I
+                            + 1 1 10
+                            + 1 2 20"]]),
+            )]
+        }
+
+        // Each scenario runs with each sink configuration listed with it.
+        let scenarios = [
+            (
+                deletes_after_changes as fn() -> Inputs,
+                " I I
+                + 1 10
+                + 2 20
+                + 3 30
+                + 3 31",
+                vec![
+                    // Compacts each chunk.
+                    (properties(&[]), vec![0], vec![0]),
+                    // Buffers and compacts each epoch.
+                    (
+                        properties(&[
+                            ("connector", "blackhole"),
+                            (SINK_USER_FORCE_COMPACTION, "true"),
+                        ]),
+                        vec![0],
+                        vec![0],
+                    ),
+                ],
+            ),
+            (
+                row_moved,
+                " I I
+                + 1 6
+                + 1 8",
+                vec![
+                    // The stream key `0` does not determine the downstream pk `1`.
+                    (properties(&[]), vec![0], vec![1]),
+                    // The downstream pk `0, 1` contains the stream key, but each epoch is compacted.
+                    (
+                        properties(&[(SINK_USER_FORCE_COMPACTION, "true")]),
+                        vec![0],
+                        vec![0, 1],
+                    ),
+                ],
+            ),
+            (
+                same_pk_inserted_twice,
+                " I I I
+                + 1 1 10
+                + 1 2 20",
+                // The target table's conflict handling must see each insert, with or without
+                // `force_compaction`.
+                ["false", "true"]
+                    .map(|force_compaction| {
+                        let properties = properties(&[
+                            (SINK_USER_FORCE_COMPACTION, force_compaction),
+                            (SINK_USER_PRESERVE_ROW_LEVEL_CHANGES, "true"),
+                        ]);
+                        (properties, vec![0, 1], vec![0])
+                    })
+                    .to_vec(),
+            ),
+        ];
+
+        for (inputs, expected, configurations) in scenarios {
+            let expected = StreamChunk::from_pretty(expected).sort_rows();
+            for (properties, stream_key, downstream_pk) in configurations {
+                for (input_kind, input) in inputs() {
+                    let output = run_sink_executor(
+                        properties.clone(),
+                        SinkType::Upsert,
+                        input_kind,
+                        stream_key.clone(),
+                        downstream_pk.clone(),
+                        input,
+                    )
+                    .await;
+                    assert_eq!(
+                        StreamChunk::concat(output).sort_rows(),
+                        expected,
+                        "{properties:?} {input_kind:?} downstream pk {downstream_pk:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// With `ignore_delete`, the inserts left after dropping the deletes are compacted by the
+    /// downstream pk: an insert that a later insert of its downstream pk overwrites in the same
+    /// chunk, or epoch with `force_compaction`, is not emitted.
+    #[tokio::test]
+    async fn test_ignore_delete_compacts_by_downstream_pk() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        let input = |chunk: &str| {
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty(chunk)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            ]
+        };
+        // Row `1` is inserted and updated, which leaves two inserts of it without the delete.
+        let inputs = [
+            (
+                StreamKind::Retract,
+                "  I I
+                 + 1 10
+                U- 1 10
+                U+ 1 20",
+            ),
+            (
+                StreamKind::Upsert,
+                " I I
+                + 1 10
+                + 1 20",
+            ),
+        ];
+        let expected = StreamChunk::from_pretty(
+            " I I
+            + 1 20",
+        );
+
+        for force_compaction in ["false", "true"] {
+            let properties = maplit::btreemap! {
+                "connector".into() => "table".into(),
+                "ignore_delete".into() => "true".into(),
+                SINK_USER_FORCE_COMPACTION.into() => force_compaction.into(),
+            };
+            for (input_kind, chunk) in inputs {
+                let output = run_sink_executor(
+                    properties.clone(),
+                    SinkType::Upsert,
+                    input_kind,
+                    vec![0],
+                    vec![0],
+                    input(chunk),
+                )
+                .await;
+                assert_eq!(
+                    StreamChunk::concat(output),
+                    expected,
+                    "{properties:?} {input_kind:?}"
+                );
+            }
+        }
+    }
+
+    /// With `ignore_delete` and a downstream pk that does not contain the stream key, the inserts of
+    /// a downstream pk arrive in no order. The row that is still there at the barrier is emitted
+    /// last, and a row gone at the barrier is kept only if no later row of its downstream pk is.
+    #[tokio::test]
+    async fn test_ignore_delete_emits_live_row_last() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        fn input(epochs: &[&[&str]]) -> Vec<Message> {
+            let mut messages = vec![Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))];
+            for (i, chunks) in epochs.iter().enumerate() {
+                messages.extend(
+                    (chunks.iter()).map(|chunk| Message::Chunk(StreamChunk::from_pretty(chunk))),
+                );
+                let epoch = test_epoch(i as u64 + 2);
+                messages.push(Message::Barrier(Barrier::new_test_barrier(epoch)));
+            }
+            messages
+        }
+
+        fn properties(preserve_row_level_changes: &str) -> BTreeMap<String, String> {
+            maplit::btreemap! {
+                "connector".to_owned() => "table".to_owned(),
+                "ignore_delete".to_owned() => "true".to_owned(),
+                SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.to_owned() =>
+                    preserve_row_level_changes.to_owned(),
+            }
+        }
+
+        // The stream key is `(0, 1)` and the downstream pk is `0`. `(1, 2)` is inserted and
+        // deleted, and `(1, 3)` is inserted after it.
+        let live_row_arrives_first: &[&[&str]] = &[&[" I I
+            + 1 3
+            + 1 2
+            - 1 2"]];
+        let live_row_in_an_earlier_chunk: &[&[&str]] = &[&[
+            " I I
+            + 1 3",
+            " I I
+            + 1 2
+            - 1 2",
+        ]];
+        let in_upstream_order: &[&[&str]] = &[&[" I I
+            + 1 2
+            - 1 2
+            + 1 3"]];
+        let no_row_left: &[&[&str]] = &[&[" I I
+            + 1 2
+            - 1 2"]];
+
+        for (epochs, expected) in [
+            (live_row_arrives_first, "+ 1 3"),
+            (live_row_in_an_earlier_chunk, "+ 1 3"),
+            (in_upstream_order, "+ 1 3"),
+            (no_row_left, "+ 1 2"),
+        ] {
+            for input_kind in [StreamKind::Retract, StreamKind::Upsert] {
+                let output = run_sink_executor(
+                    properties("false"),
+                    SinkType::Upsert,
+                    input_kind,
+                    vec![0, 1],
+                    vec![0],
+                    input(epochs),
+                )
+                .await;
+                assert_eq!(
+                    StreamChunk::concat(output),
+                    StreamChunk::from_pretty(&format!(" I I\n{expected}")),
+                    "{epochs:?} {input_kind:?}"
+                );
+            }
+        }
+
+        // A row is updated and then deleted. The update is emitted, as no row is left.
+        let output = run_sink_executor(
+            properties("false"),
+            SinkType::Upsert,
+            StreamKind::Retract,
+            vec![0, 1],
+            vec![0],
+            input(&[
+                &[" I I I
+                    + 1 2 10"],
+                &["  I I I
+                    U- 1 2 10
+                    U+ 1 2 11
+                     - 1 2 11"],
+            ]),
+        )
+        .await;
+        assert_eq!(
+            StreamChunk::concat(output),
+            StreamChunk::from_pretty(
+                " I I I
+                + 1 2 10
+                + 1 2 11",
+            )
+        );
+
+        // A target table that handles conflicts itself gets every insert, in the same order.
+        let output = run_sink_executor(
+            properties("true"),
+            SinkType::Upsert,
+            StreamKind::Retract,
+            vec![0, 1],
+            vec![0],
+            input(live_row_arrives_first),
+        )
+        .await;
+        assert_eq!(
+            StreamChunk::concat(output),
+            StreamChunk::from_pretty(
+                " I I
+                + 1 2
+                + 1 3",
+            )
         );
     }
 }
