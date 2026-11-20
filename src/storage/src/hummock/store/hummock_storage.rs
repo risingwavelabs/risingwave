@@ -60,6 +60,7 @@ use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::store::full_text_writer::HummockFullTextWriter;
 use crate::hummock::store::object_index_writer::{
     HummockObjectIndexWriter, ObjectIndexWriterContext, ObjectIndexWriterImpl,
 };
@@ -828,6 +829,20 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
     }
 }
 
+impl StateStoreReadFullText for HummockStorageReadSnapshot {
+    async fn full_text_search(
+        &self,
+        tokens: Vec<String>,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<Bytes>> {
+        let version = self.get_object_index_version("full-text search").await?;
+        Ok(self
+            .hummock_version_reader
+            .full_text_search(version, self.table_id, tokens, limit)
+            .await?)
+    }
+}
+
 impl StateStoreReadLog for HummockStorage {
     type ChangeLogIter = ChangeLogIterator;
 
@@ -994,6 +1009,7 @@ impl HummockStorage {
 }
 
 impl StateStore for HummockStorage {
+    type FullTextWriter = HummockFullTextWriter;
     type Local = LocalHummockStorage;
     type ReadSnapshot = HummockStorageReadSnapshot;
     type VectorWriter = HummockVectorWriter;
@@ -1050,6 +1066,13 @@ impl StateStore for HummockStorage {
 
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
         HummockVectorWriter::new(self.new_object_index_writer(options.table_id))
+    }
+
+    async fn new_full_text_writer(
+        &self,
+        options: NewFullTextWriterOptions,
+    ) -> Self::FullTextWriter {
+        HummockFullTextWriter::new(self.new_object_index_writer(options.table_id))
     }
 }
 

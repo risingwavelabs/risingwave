@@ -182,6 +182,7 @@ impl IndexCatalog {
                     function_mapping,
                 }))
             }
+            TableType::FullTextIndex => unreachable!("full-text index planning is not enabled"),
             TableType::VectorIndex => {
                 assert_eq!(index_prost.index_columns_len, 1);
                 let included_info_columns = index_item[1..].iter().map(|item| {

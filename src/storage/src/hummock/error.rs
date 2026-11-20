@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_full_text::FullTextError;
 use risingwave_object_store::object::ObjectError;
 use risingwave_pb::id::TableId;
 use thiserror::Error;
@@ -184,6 +185,23 @@ impl HummockError {
 
     pub fn other(error: impl ToString) -> HummockError {
         HummockErrorInner::Other(error.to_string()).into()
+    }
+}
+
+impl From<FullTextError> for HummockError {
+    fn from(error: FullTextError) -> Self {
+        match error {
+            FullTextError::MagicMismatch { expected, found } => {
+                Self::magic_mismatch(expected, found)
+            }
+            FullTextError::InvalidFormatVersion(version) => Self::invalid_format_version(version),
+            FullTextError::ChecksumMismatch { expected, found } => {
+                Self::checksum_mismatch(expected, found)
+            }
+            FullTextError::Decode(message) => Self::decode_error(message),
+            FullTextError::Other(message) => Self::other(message),
+            error @ FullTextError::Backend(_) => Self::other(error.to_report_string()),
+        }
     }
 }
 

@@ -131,6 +131,7 @@ pub(super) fn derive_object_index_table_catalog(
         clean_watermark_indices: vec![],
         refreshable: false,
         vector_index_info,
+        full_text_index_info: None,
         cdc_table_type: None,
     })
 }

@@ -733,6 +733,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_hummock_sdk::ObjectIndexAdd;
+use risingwave_pb::hummock::full_text_index_delta::PbFullTextIndexAdds;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
@@ -860,12 +861,18 @@ impl LocalBarrierWorker {
             })
             .unwrap_or_default();
         let mut vector_index_adds = HashMap::new();
+        let mut full_text_index_adds = HashMap::new();
         for (table_id, adds) in object_index_adds {
             for add in adds {
                 match add {
                     ObjectIndexAdd::Vector(add) => vector_index_adds
                         .entry(table_id)
                         .or_insert_with(|| PbVectorIndexAdds { adds: vec![] })
+                        .adds
+                        .push(add.into()),
+                    ObjectIndexAdd::FullText(add) => full_text_index_adds
+                        .entry(table_id)
+                        .or_insert_with(|| PbFullTextIndexAdds { adds: vec![] })
                         .adds
                         .push(add.into()),
                 }
@@ -910,6 +917,7 @@ impl LocalBarrierWorker {
                         load_finished_sources: load_finished_source_ids,
                         cdc_source_offset_updated,
                         vector_index_adds,
+                        full_text_index_adds,
                         cdc_table_backfill_progress,
                         refresh_finished_actors,
                         iceberg_pk_index_sink_metadata,

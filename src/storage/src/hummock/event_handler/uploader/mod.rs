@@ -1932,12 +1932,7 @@ pub(crate) mod tests {
         }
         // A writer initialized for a future epoch does not participate in this checkpoint.
         uploader.register_object_index_writer(TEST_TABLE_ID, 3, epoch.next_epoch());
-        let add = ObjectIndexAdd::Vector(VectorIndexAdd::Flat(FlatIndexAdd {
-            vector_store_info_delta: VectorStoreInfoDelta {
-                next_vector_id: 0,
-                added_vector_files: vec![],
-            },
-        }));
+        let add = ObjectIndexAdd::FullText(Default::default());
         uploader.object_index_writer_seal_epoch(
             TEST_TABLE_ID,
             2,

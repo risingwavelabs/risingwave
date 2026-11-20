@@ -1400,6 +1400,8 @@ impl CatalogControllerInner {
                 TableType::Table,
                 TableType::MaterializedView,
                 TableType::Index,
+                TableType::VectorIndex,
+                TableType::FullTextIndex,
             ]))
             .column(table::Column::TableId)
             .into_tuple()

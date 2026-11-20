@@ -1367,7 +1367,7 @@ pub async fn refresh_relation_info_metrics(
         let relation_type = match table_type {
             TableType::Table => "table",
             TableType::MaterializedView => "materialized_view",
-            TableType::Index | TableType::VectorIndex => "index",
+            TableType::Index | TableType::VectorIndex | TableType::FullTextIndex => "index",
             TableType::Internal => "internal",
         };
         meta_metrics
