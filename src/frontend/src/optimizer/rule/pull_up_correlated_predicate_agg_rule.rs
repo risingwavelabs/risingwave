@@ -20,7 +20,9 @@ use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::plan_common::JoinType;
 
 use super::prelude::{PlanRef, *};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::expr::{
+    CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal,
+};
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::*;
@@ -60,6 +62,13 @@ use crate::utils::{Condition, IndexSet};
 ///                 |
 ///               Filter
 /// ```
+///
+/// Grouping by `xxx` drops the row the scalar aggregate yields for an empty input. The rule
+/// therefore requires the top `Project` to fold to a constant on an empty group (`count` is `0`,
+/// other aggregates are NULL): if the constant is NULL or the top `Filter` rejects it, the join
+/// type is kept as is; otherwise the join becomes `LeftOuter` and a `Project` above it restores
+/// the constant (e.g. `ARRAY[]` for `ARRAY(...)`, `0` for `count(*)`) when the right side is
+/// null-padded.
 pub struct PullUpCorrelatedPredicateAggRule {}
 impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -70,8 +79,19 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         };
         let top_filter_input = top_filter.input();
         let apply = top_filter_input.as_logical_apply()?;
-        let (apply_left, apply_right, apply_on, join_type, correlated_id, _, _) =
+        let (apply_left, apply_right, apply_on, join_type, correlated_id, correlated_indices, _) =
             apply.clone().decompose();
+
+        if let Some(plan) = self.split_cross_joined_subqueries(
+            apply_left.clone(),
+            apply_right.clone(),
+            &apply_on,
+            join_type,
+            correlated_id,
+            &correlated_indices,
+        ) {
+            return Some(LogicalFilter::create(plan, top_filter.predicate().clone()));
+        }
 
         let top_project = if let Some(project) = apply_right.as_logical_project() {
             project.clone()
@@ -152,66 +172,47 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
 
         let new_bottom_proj: PlanRef = LogicalProject::new(filter, bottom_proj_exprs).into();
 
-        // We can apply this rule only if:
-        // - For `LeftSemi`/`LeftAnti`, the apply's `on` condition is null for empty input,
-        //   since semi and anti joins don't pad a missing row with NULLs.
-        // - For other join types:
-        //   1. The `group by + proj` returns null for empty input
-        //   2. OR the top filter is null for empty input
-        let top_filter_rejects_null = {
-            // When group input is empty, if the agg is not `count` or `approx_count_distinct`, it would return null.
-            let null_agg_pos = agg_calls
-                .iter()
-                .positions(|agg_call| {
-                    !matches!(
-                        agg_call.agg_type,
-                        AggType::Builtin(PbAggKind::Count | PbAggKind::ApproxCountDistinct)
-                    )
-                })
-                .collect_vec();
-
-            // We don't have null args, so the output will never be null. Bail out.
-            if null_agg_pos.is_empty() {
-                return None;
+        // Grouping by the correlated key loses the row that a scalar agg produces for an empty
+        // input. We can apply this rule only if we know what the top project yields for that
+        // row (a constant, e.g. NULL, `0` for `count`, `ARRAY[]` for `ARRAY(...)`), so that we
+        // can either prove the top filter rejects it or re-create it above a left outer join.
+        let empty_values = top_proj_exprs
+            .iter()
+            .map(|expr| eval_on_empty_group(expr.clone(), &agg_calls))
+            .collect::<Option<Vec<_>>>()?;
+        let apply_left_len = apply_left.schema().len();
+        // Shift the top project expressions to the right by apply_left schema len, because it is
+        // used to check null-rejected by the top filter.
+        let mut top_proj_null_bitset =
+            FixedBitSet::with_capacity(top_project.base.schema().len() + apply_left_len);
+        for (i, value) in empty_values.iter().enumerate() {
+            if value.is_null() {
+                top_proj_null_bitset.insert(i + apply_left_len);
             }
-
-            // Try to prove that the expression is null-rejected by the top filter when not-count-aggs are null.
-            let mut agg_null_bitset = FixedBitSet::with_capacity(agg.base.schema().len());
-            for pos in null_agg_pos {
-                agg_null_bitset.insert(pos);
-            }
-
-            // Shift the top project expressions to the right by apply_left schema len, because it is used to check null-rejected by the top filter.
-            let apply_left_schema = apply_left.schema().len();
-            let mut top_proj_all_null = true;
-            let mut top_proj_null_bitset =
-                FixedBitSet::with_capacity(top_project.base.schema().len() + apply_left_schema);
-            for (i, expr) in top_proj_exprs.iter().enumerate() {
-                if Strong::is_null(expr, agg_null_bitset.clone()) {
-                    top_proj_null_bitset.insert(i + apply_left_schema);
-                } else {
-                    top_proj_all_null = false;
-                }
-            }
-
-            let top_filter_any_null = top_filter
-                .predicate()
+        }
+        let top_proj_all_null = top_proj_null_bitset.count_ones(..) == empty_values.len();
+        let top_filter_rejects_null = top_filter
+            .predicate()
+            .conjunctions
+            .iter()
+            .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone()));
+        // Whether the left-padded nulls of the left outer join must be replaced by the values
+        // the subquery yields on an empty group.
+        let fill_empty_values = !top_proj_all_null && !top_filter_rejects_null;
+        // Restoring the empty-group values needs a group key to tell null-padded rows apart.
+        if fill_empty_values && cor_eq_exprs_len == 0 {
+            return None;
+        }
+        // Semi and anti joins don't pad a missing row with NULLs, so the row the scalar agg
+        // yields for an empty input can only be dropped if the apply's `on` rejects it.
+        if matches!(join_type, JoinType::LeftSemi | JoinType::LeftAnti)
+            && !apply_on
                 .conjunctions
                 .iter()
-                .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone()));
-            let can_apply = match join_type {
-                JoinType::LeftSemi | JoinType::LeftAnti => apply_on
-                    .conjunctions
-                    .iter()
-                    .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone())),
-                _ => top_proj_all_null || top_filter_any_null,
-            };
-
-            if !can_apply {
-                return None;
-            }
-            top_filter_any_null
-        };
+                .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone()))
+        {
+            return None;
+        }
 
         // New agg with group key extracted from the cor_eq_exprs.
         let new_agg = Agg::new(
@@ -277,34 +278,106 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         let correlated_predicate = Condition {
             conjunctions: cor_eq_exprs,
         };
-        let (join_type, on, filter) = if join_type == JoinType::Inner && !top_filter_rejects_null {
-            // A scalar aggregate returns one row even for empty input. Grouping by the
-            // correlated columns removes that row, so preserve it with a left outer join.
-            // The original Apply's ON condition must still filter the resulting row.
-            (
-                JoinType::LeftOuter,
-                correlated_predicate,
-                top_filter.predicate().clone().and(apply_on),
-            )
-        } else {
-            (
-                join_type,
-                apply_on.and(correlated_predicate),
-                top_filter.predicate().clone(),
-            )
-        };
+        let (join_type, on, filter) =
+            if top_filter_rejects_null || (join_type != JoinType::Inner && top_proj_all_null) {
+                (
+                    join_type,
+                    apply_on.and(correlated_predicate),
+                    top_filter.predicate().clone(),
+                )
+            } else if join_type == JoinType::Inner
+                || (join_type == JoinType::LeftOuter && apply_on.always_true())
+            {
+                // A scalar aggregate returns one row even for empty input. Grouping by the
+                // correlated columns removes that row, so preserve it with a left outer join.
+                // The original Apply's ON condition must still filter the resulting row.
+                (
+                    JoinType::LeftOuter,
+                    correlated_predicate,
+                    top_filter.predicate().clone().and(apply_on),
+                )
+            } else {
+                return None;
+            };
 
-        let new_join = LogicalJoin::with_output_indices(
-            apply_left,
-            new_top_proj,
-            join_type,
-            on,
-            (0..apply.schema().len()).collect(),
-        )
-        .into();
+        let apply_len = apply.schema().len();
+        let new_join: PlanRef = if fill_empty_values {
+            // The row for an empty group is null-padded by the left outer join; restore the
+            // values the subquery yields on an empty group. The right side's first group key
+            // (right after the Apply's columns) is null iff the group is empty.
+            let new_join: PlanRef =
+                LogicalJoin::new(apply_left, new_top_proj, join_type, on).into();
+            let group_key_is_null: ExprImpl = FunctionCall::new_unchecked(
+                ExprType::IsNull,
+                vec![
+                    InputRef::new(
+                        apply_len,
+                        new_join.schema().fields[apply_len].data_type.clone(),
+                    )
+                    .into(),
+                ],
+                DataType::Boolean,
+            )
+            .into();
+            let exprs = new_join.schema().fields[..apply_len]
+                .iter()
+                .enumerate()
+                .map(|(i, field)| {
+                    let col: ExprImpl = InputRef::new(i, field.data_type.clone()).into();
+                    match i.checked_sub(apply_left_len).map(|j| &empty_values[j]) {
+                        Some(value) if !value.is_null() => FunctionCall::new_unchecked(
+                            ExprType::Case,
+                            vec![group_key_is_null.clone(), value.clone(), col],
+                            field.data_type.clone(),
+                        )
+                        .into(),
+                        _ => col,
+                    }
+                })
+                .collect_vec();
+            LogicalProject::new(new_join, exprs).into()
+        } else {
+            LogicalJoin::with_output_indices(
+                apply_left,
+                new_top_proj,
+                join_type,
+                on,
+                (0..apply_len).collect(),
+            )
+            .into()
+        };
 
         Some(LogicalFilter::create(new_join, filter))
     }
+}
+
+/// Value of `expr`, defined over the output of `agg_calls`, when the aggregate input is empty:
+/// `count` and `approx_count_distinct` yield `0`, every other built-in aggregate yields NULL.
+/// `None` if an aggregate's empty-group value is unknown (user-defined) or `expr` does not fold
+/// to a constant.
+fn eval_on_empty_group(expr: ExprImpl, agg_calls: &[PlanAggCall]) -> Option<ExprImpl> {
+    if agg_calls
+        .iter()
+        .any(|call| !matches!(call.agg_type, AggType::Builtin(_)))
+    {
+        return None;
+    }
+    struct EmptyGroupRewriter<'a>(&'a [PlanAggCall]);
+    impl ExprRewriter for EmptyGroupRewriter<'_> {
+        fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+            if matches!(
+                self.0[input_ref.index()].agg_type,
+                AggType::Builtin(PbAggKind::Count | PbAggKind::ApproxCountDistinct)
+            ) {
+                ExprImpl::literal_bigint(0)
+            } else {
+                ExprImpl::literal_null(input_ref.return_type())
+            }
+        }
+    }
+    let expr = EmptyGroupRewriter(agg_calls).rewrite_expr(expr);
+    let datum = expr.try_fold_const()?.ok()?;
+    Some(Literal::new(datum, expr.return_type()).into())
 }
 
 struct ShiftInputRefRewriter {
@@ -319,5 +392,43 @@ impl ExprRewriter for ShiftInputRefRewriter {
 impl PullUpCorrelatedPredicateAggRule {
     pub fn create() -> BoxedRule {
         Box::new(PullUpCorrelatedPredicateAggRule {})
+    }
+
+    /// Several subqueries in one select list are planned as a single `Apply` over a
+    /// `FullOuter` cross join of their (scalar aggregate) subplans. Split it into one `Apply`
+    /// per subquery, but only if every one of them is then pulled up by this rule, so that
+    /// we never fall back to the (more expensive when nested) general decorrelation.
+    fn split_cross_joined_subqueries(
+        &self,
+        apply_left: PlanRef,
+        apply_right: PlanRef,
+        apply_on: &Condition,
+        join_type: JoinType,
+        correlated_id: CorrelatedId,
+        correlated_indices: &[usize],
+    ) -> Option<PlanRef> {
+        let join = apply_right.as_logical_join()?;
+        if join.join_type() != JoinType::FullOuter
+            || !join.on().always_true()
+            || !join.output_indices_are_trivial()
+            || !apply_on.always_true()
+            || !matches!(join_type, JoinType::Inner | JoinType::LeftOuter)
+        {
+            return None;
+        }
+        let mut left = apply_left;
+        for right in [join.left(), join.right()] {
+            let apply = LogicalApply::create(
+                left,
+                right,
+                join_type,
+                Condition::true_cond(),
+                correlated_id,
+                correlated_indices.to_vec(),
+                true,
+            );
+            left = self.apply(apply)?;
+        }
+        Some(left)
     }
 }

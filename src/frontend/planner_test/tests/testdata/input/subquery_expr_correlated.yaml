@@ -490,12 +490,12 @@
     FROM array_types AS t0;
   expected_outputs:
     - batch_plan
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule restores the empty-group value above a left outer join
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- count is not null-propagating
+    -- count is not null-propagating: an empty group yields 0
     WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
@@ -510,22 +510,22 @@
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule restores a constant-folded empty-group value above a left outer join
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- Coalesce is not null-propagating
+    -- Coalesce is not null-propagating: an empty group yields 114514
     WHERE T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule with a null-rejecting conjunction in the outer filter
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- Can apply if any of the conjunction is null
+    -- The rule already fires on the Apply below the filter, so the null conjunction is not needed
     WHERE null AND T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
