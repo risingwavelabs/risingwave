@@ -32,13 +32,15 @@ async fn cache(
     shards: usize,
     ids: impl IntoIterator<Item = HummockSstableObjectId>,
 ) -> Arc<PinCache> {
-    PinCache::new(store, shards, ids)
+    PinCache::new(store, shards, ids).await.unwrap()
 }
 
 #[tokio::test]
 #[should_panic(expected = "pin cache shard count must be greater than zero")]
 async fn test_zero_shards_rejected() {
-    PinCache::new(in_memory_object_store(), 0, []);
+    PinCache::new(in_memory_object_store(), 0, [])
+        .await
+        .unwrap();
 }
 
 #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
