@@ -162,4 +162,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--self-test"]:
+        for boundary in range(1, 6):
+            verdict = investigate(lambda i, b, n: "oom" if i >= boundary else "pass")
+            assert verdict["verdict"] == "repeated_boundary"
+            assert verdict["first_bad"] == COMMITS[boundary]
+        for result in ("pass", "oom"):
+            assert investigate(lambda i, b, n: result)["verdict"] == "source_endpoints_not_bracketed"
+        print("Bisect driver startup and decision self-tests passed", flush=True)
+    else:
+        main()

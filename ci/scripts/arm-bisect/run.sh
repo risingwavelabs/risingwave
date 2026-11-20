@@ -11,6 +11,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+python3 ci/scripts/arm-bisect/source_bisect.py --self-test
+
 echo "--- Verify original hardware and source controls"
 test "$(uname -m)" = aarch64
 test "$(nproc)" = 32
@@ -25,4 +27,4 @@ printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-
 docker buildx create --name "$builder" --driver docker-container \
   --driver-opt image=moby/buildkit@sha256:92f93f25966c544549b88144406ce8cd9dcdf5df128250711031a4acd9149a8e
 docker buildx inspect --builder "$builder" --bootstrap | tee "$results/builder.txt"
-python3 ci/scripts/arm-bisect/bisect.py "$builder" "$results"
+python3 ci/scripts/arm-bisect/source_bisect.py "$builder" "$results"
