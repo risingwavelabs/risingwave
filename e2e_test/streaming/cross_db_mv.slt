@@ -19,21 +19,8 @@ insert into t1 select * from generate_series(1, 10000);
 statement ok
 set database to d2;
 
-# requires log store to support cross-db mv
-statement error
-create materialized view mv1 as select * from d1.public.t1;
-
 statement ok
-set database to d1;
-
-statement ok
-create subscription sub from t1 with(retention = '1D');
-
-statement ok
-create subscription sub2 from t1 with(retention = '1D');
-
-statement ok
-set database to d2;
+create schema s2;
 
 query ok
 select count(*) from d1.public.t1;
@@ -49,16 +36,17 @@ select count(*) from mv1;
 10000
 
 statement ok
-create table t2(v2 int);
+create table s2.t2(v2 int);
 
 statement ok
-insert into t2 select * from generate_series(1, 100);
+insert into s2.t2 select * from generate_series(1, 100);
 
 statement ok
-create materialized view mv2 as select t2.v2 from d1.public.t1 join t2 on t1.v1 = t2.v2;
+create materialized view s2.mv2 as
+select t2.v2 from d1.public.t1 join s2.t2 on t1.v1 = t2.v2;
 
 query ok
-select count(*) from mv2;
+select count(*) from s2.mv2;
 ----
 100
 
@@ -70,20 +58,13 @@ statement error
 drop table t1 cascade;
 
 statement ok
-drop subscription sub2;
-
-# requires at least one active subscription to maintain log store.
-statement error
-drop subscription sub;
-
-statement ok
 set database to d2;
 
 statement ok
 drop materialized view mv1;
 
 statement ok
-drop materialized view mv2;
+drop schema s2 cascade;
 
 statement ok
 set database to d1;

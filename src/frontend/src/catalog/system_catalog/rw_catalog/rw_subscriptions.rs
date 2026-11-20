@@ -28,7 +28,7 @@ struct RwSubscription {
     schema_name: String,
     owner: UserId,
     definition: String,
-    retention_seconds: i64,
+    retention_seconds: Option<i64>,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
@@ -51,6 +51,7 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
         .flat_map(|schema| {
             schema
                 .iter_subscription_with_acl(current_user)
+                .filter(|subscription| subscription.cross_db_downstream_job_id.is_none())
                 .map(|subscription| RwSubscription {
                     id: subscription.id,
                     name: subscription.name.clone(),
@@ -58,7 +59,7 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
                     schema_name: schema.name(),
                     owner: subscription.owner,
                     definition: subscription.definition.clone(),
-                    retention_seconds: subscription.retention_seconds as i64,
+                    retention_seconds: subscription.retention_seconds.map(|v| v as i64),
                     acl: get_acl_items(subscription.id, false, &users, username_map),
                     initialized_at: subscription
                         .initialized_at_epoch

@@ -583,7 +583,6 @@ pub async fn start_service_as_election_leader(
         stream_manager.clone(),
         source_manager.clone(),
         barrier_manager.clone(),
-        sink_manager.clone(),
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
         barrier_scheduler.clone(),

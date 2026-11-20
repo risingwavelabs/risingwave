@@ -239,7 +239,7 @@ pub(super) mod handlers {
         let subscriptions = srv
             .metadata_manager
             .catalog_controller
-            .list_subscriptions()
+            .list_user_created_subscriptions()
             .await
             .map_err(err)?;
 

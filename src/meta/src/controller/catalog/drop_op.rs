@@ -154,6 +154,8 @@ impl CatalogController {
         let mut objects_to_remove = root_objects.clone();
         objects_to_remove.extend(belonging_objects.iter().cloned());
         let removed_catalog_models = load_object_models(&txn, &objects_to_remove).await?;
+        let removed_cross_db_subscriptions =
+            resolve_cross_db_subscriptions(&txn, &removed_catalog_models).await?;
         removed_objects.extend(belonging_objects.into_iter().map(|obj| PartialObject {
             oid: obj.oid,
             obj_type: obj.obj_type,
@@ -354,6 +356,7 @@ impl CatalogController {
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
                 removed_iceberg_sink_ids,
+                removed_cross_db_subscriptions,
             },
             version,
         ))

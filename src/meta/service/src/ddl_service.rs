@@ -59,7 +59,6 @@ use tonic::{Request, Response, Status};
 use crate::MetaError;
 use crate::barrier::BarrierManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
-use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceStreamJobInfo, StreamingJobId,
@@ -85,7 +84,6 @@ impl DdlServiceImpl {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
-        sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
         iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
         barrier_scheduler: BarrierScheduler,
@@ -97,7 +95,6 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
-            sink_manager,
             iceberg_pk_index_sink_manager.clone(),
         )
         .await;
