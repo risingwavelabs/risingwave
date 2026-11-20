@@ -79,6 +79,11 @@ statement ok
 delete from a where x % 7 = 0;
 
 # Recover in the middle of the backfill. The lookups must restore which rows they can see.
+query I
+select count(*) from rw_ddl_progress;
+----
+1
+
 statement ok
 recover;
 

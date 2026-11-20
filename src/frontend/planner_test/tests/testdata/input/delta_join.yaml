@@ -174,3 +174,19 @@
     select a.a2, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
   expected_outputs:
   - stream_plan
+- name: multi-way delta join backfills a leaf when the first input is the center of a star
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (x int, y int, v int);
+    create index i_a_x on a(x);
+    create index i_a_y on a(y);
+    create table b (x int, v int);
+    create index i_b_x on b(x);
+    create table c (y int, v int);
+    create index i_c_y on c(y);
+    /* the plan of `delta_join_multiway_backfill.slt`, where `b` is backfilled */
+    select count(*) as n, sum(a.v) as sa, sum(b.v) as sb, sum(c.v) as sc
+    from a join b on a.x = b.x join c on a.y = c.y;
+  expected_outputs:
+  - stream_plan
