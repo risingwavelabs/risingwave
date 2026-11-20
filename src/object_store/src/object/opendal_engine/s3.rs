@@ -50,7 +50,11 @@ impl OpendalObjectStore {
         let op = new_operator(
             &config,
             Operator::new(builder)?
-                .with_context(OperationContext::new().with_http_transport(transport))
+                .with_context(
+                    OperationContext::new().with_http_transport(HttpTransporter::new(
+                        crate::object::refill_timing::TimedTransport(transport),
+                    )),
+                )
                 .layer(LoggingLayer::default()),
         );
 

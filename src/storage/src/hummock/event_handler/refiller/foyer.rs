@@ -503,10 +503,14 @@ impl CacheRefillTask {
             if admits as f64 / contexts.len() as f64 >= context.config.threshold {
                 let sstable_store = context.sstable_store.clone();
                 let refill = async move {
-                    let data = sstable_store
-                        .store()
-                        .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone())
-                        .await?;
+                    let store = sstable_store.store();
+                    let path = sstable_store.get_sst_data_path(task.sst.id);
+                    let before_read = Instant::now();
+                    let data = risingwave_object_store::object::refill_timing::refill_get(
+                        store.read(&path, range.clone()),
+                    )
+                    .await?;
+                    let returned = Instant::now();
                     let mut apply_disk_cache_futures = vec![];
                     for (w, r, uc) in contexts {
                         let offset = r.start - range.start;
@@ -531,7 +535,7 @@ impl CacheRefillTask {
                         .await
                         .map_err(HummockError::file_cache)?;
 
-                    Ok::<_, HummockError>(())
+                    Ok::<_, HummockError>((before_read, returned))
                 };
                 futures.push(async move {
                     GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
@@ -540,10 +544,17 @@ impl CacheRefillTask {
                     let now = Instant::now();
                     let task = tokio::spawn(async move {
                         let _permit = permit;
-                        refill.await?;
+                        let (before_read, returned) = refill.await?;
+                        let complete = Instant::now();
                         GLOBAL_CACHE_REFILL_METRICS
                             .data_refill_success_duration
-                            .observe(now.elapsed().as_secs_f64());
+                            .observe((complete - now).as_secs_f64());
+                        risingwave_object_store::object::refill_timing::observe_range(
+                            true,
+                            before_read - now,
+                            returned - before_read,
+                            complete - returned,
+                        );
                         Ok::<_, HummockError>(())
                     });
                     // A refill timeout drops this future. Cancel the range instead of detaching it.
