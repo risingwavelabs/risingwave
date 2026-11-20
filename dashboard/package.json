@@ -84,5 +84,11 @@
       "react": "^18.2.0",
       "react-dom": "^18.2.0"
     }
+  },
+  "pnpm": {
+    "overrides": {
+      "dompurify": "3.4.17",
+      "proxy-addr": "2.0.8"
+    }
   }
 }
