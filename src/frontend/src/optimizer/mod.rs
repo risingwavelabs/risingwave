@@ -1211,7 +1211,7 @@ impl LogicalPlanRoot {
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
-        let backfill_type = self.derive_backfill_type(false);
+        let backfill_type = self.derive_backfill_type(true);
         let stream_plan = self.gen_optimized_stream_plan(false, backfill_type)?;
 
         StreamMaterialize::create(

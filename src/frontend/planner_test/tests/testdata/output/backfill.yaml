@@ -276,6 +276,78 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
 
+- name: snapshot backfill is used for index when enabled
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t(a int, b int, primary key(a));
+    explain (distsql, verbose) create index idx_b on t(b);
+  explain_output: |+
+    Fragment 0
+    StreamMaterialize { columns: [b, a], stream_key: [b, a], pk_columns: [b, a], pk_conflict: NoCheck }
+    ├── output: [ t.b, t.a ]
+    ├── stream key: [ t.b, t.a ]
+    └── StreamExchange Hash([0]) from 1 { output: [ t.b, t.a ], stream key: [ t.a ] }
+
+    Fragment 1
+    StreamProject { exprs: [t.b, t.a] } { output: [ t.b, t.a ], stream key: [ t.a ] }
+    └── StreamTableScan { table: t, columns: [t.a, t.b], stream_scan_type: SnapshotBackfill, stream_key: [t.a], pk: [a], dist: UpstreamHashShard(t.a) }
+        ├── tables: [ StreamScan: 0 ]
+        ├── output: [ t.a, t.b ]
+        ├── stream key: [ t.a ]
+        ├── Upstream { output: [ a, b ], stream key: [] }
+        └── BatchPlanNode { output: [ a, b ], stream key: [] }
+
+    Table 0
+    ├── columns: [ vnode: smallint, epoch: bigint, row_count: bigint, is_epoch_finished: boolean, a: integer, _rw_timestamp: timestamp with time zone ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ b: integer, a: integer, _rw_timestamp: timestamp with time zone ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 2
+
+- name: snapshot backfill is not used for index when disabled
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    create table t(a int, b int, primary key(a));
+    explain (distsql, verbose) create index idx_b on t(b);
+  explain_output: |+
+    Fragment 0
+    StreamMaterialize { columns: [b, a], stream_key: [b, a], pk_columns: [b, a], pk_conflict: NoCheck }
+    ├── output: [ t.b, t.a ]
+    ├── stream key: [ t.b, t.a ]
+    └── StreamExchange Hash([0]) from 1 { output: [ t.b, t.a ], stream key: [ t.a ] }
+
+    Fragment 1
+    StreamProject { exprs: [t.b, t.a] } { output: [ t.b, t.a ], stream key: [ t.a ] }
+    └── StreamTableScan { table: t, columns: [t.a, t.b], stream_scan_type: ArrangementBackfill, stream_key: [t.a], pk: [a], dist: UpstreamHashShard(t.a) }
+        ├── tables: [ StreamScan: 0 ]
+        ├── output: [ t.a, t.b ]
+        ├── stream key: [ t.a ]
+        ├── Upstream { output: [ a, b ], stream key: [] }
+        └── BatchPlanNode { output: [ a, b ], stream key: [] }
+
+    Table 0
+    ├── columns: [ vnode: smallint, a: integer, backfill_finished: boolean, row_count: bigint, _rw_timestamp: timestamp with time zone ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ b: integer, a: integer, _rw_timestamp: timestamp with time zone ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 2
+
 - name: deprecated arrangement backfill switch is ignored for sink
   sql: |
     set streaming_use_snapshot_backfill = false;

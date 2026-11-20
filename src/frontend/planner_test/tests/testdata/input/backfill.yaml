@@ -124,6 +124,20 @@
     explain (distsql, verbose) create index idx_b on t(b);
   expected_outputs:
     - explain_output
+- name: snapshot backfill is used for index when enabled
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t(a int, b int, primary key(a));
+    explain (distsql, verbose) create index idx_b on t(b);
+  expected_outputs:
+    - explain_output
+- name: snapshot backfill is not used for index when disabled
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    create table t(a int, b int, primary key(a));
+    explain (distsql, verbose) create index idx_b on t(b);
+  expected_outputs:
+    - explain_output
 - name: deprecated arrangement backfill switch is ignored for sink
   sql: |
     set streaming_use_snapshot_backfill = false;
