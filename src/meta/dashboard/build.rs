@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use cargo_emit::{rerun_if_changed, rustc_cfg};
 
@@ -37,6 +38,7 @@ fn dest_dir() -> PathBuf {
 }
 
 fn build() -> anyhow::Result<()> {
+    let mut timings = String::new();
     // Watch the source inputs without watching Next.js output or vendored Monaco files.
     for path in [
         "components",
@@ -59,10 +61,16 @@ fn build() -> anyhow::Result<()> {
         ["install", "--frozen-lockfile"].as_slice(),
         ["run", "build"].as_slice(),
     ] {
+        let begin = Instant::now();
         let exit_status = Command::new("pnpm")
             .args(args)
             .current_dir(DASHBOARD_DIR)
             .status()?;
+        timings.push_str(&format!(
+            "pnpm {}: {:.3}s\n",
+            args.join(" "),
+            begin.elapsed().as_secs_f64()
+        ));
 
         if !exit_status.success() {
             anyhow::bail!(
@@ -73,12 +81,18 @@ fn build() -> anyhow::Result<()> {
         }
     }
 
+    let begin = Instant::now();
     let dest = dest_dir();
     let src = Path::new(DASHBOARD_DIR).join("out");
     if dest.try_exists()? {
         std::fs::remove_dir_all(&dest)?;
     }
     dircpy::copy_dir(src, dest)?;
+    timings.push_str(&format!(
+        "copy embedded assets: {:.3}s\n",
+        begin.elapsed().as_secs_f64()
+    ));
+    std::fs::write("/tmp/dashboard-build-timing.txt", timings)?;
 
     Ok(())
 }

@@ -68,7 +68,7 @@ if [[ "${ALWAYS_PULL:-false}" = "true" ]]; then
   PULL_PARAM="--pull"
 fi
 
-docker buildx build -f docker/Dockerfile \
+time docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
   --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
   -t "$image" \
@@ -80,10 +80,25 @@ docker buildx build -f docker/Dockerfile \
   .
 
 if [[ "$DOCKER_BUILD_TIMING" == "true" ]]; then
-  container_id=$(docker create "$image")
-  docker cp "${container_id}:/risingwave/bin/cargo-timing.html" ./cargo-timing.html
-  buildkite-agent artifact upload cargo-timing.html
-  exit 0
+  container_id=$(docker create --network none "$image" playground)
+  for artifact in cargo-timing.html rustc-timing.log dashboard-build-timing.txt; do
+    docker cp "${container_id}:/risingwave/bin/${artifact}" "./${artifact}"
+    buildkite-agent artifact upload "$artifact"
+  done
+  cat dashboard-build-timing.txt
+  docker start "$container_id"
+  for attempt in {1..30}; do
+    if docker exec "$container_id" curl --fail --silent http://127.0.0.1:5691/ -o /tmp/dashboard-index.html; then
+      docker exec "$container_id" test -s /tmp/dashboard-index.html
+      docker exec "$container_id" curl --fail --silent http://127.0.0.1:5691/risingwave.svg -o /tmp/dashboard-logo.svg
+      docker exec "$container_id" test -s /tmp/dashboard-logo.svg
+      echo 'Dashboard homepage and static assets served offline'
+      exit 0
+    fi
+    sleep 2
+  done
+  docker logs "$container_id"
+  exit 1
 fi
 
 echo "--- check the image can start correctly"

@@ -92,9 +92,12 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
-RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion --timings && \
+RUN set -o pipefail && \
   mkdir -p /risingwave/bin && \
+  cargo fetch && \
+  cargo rustc -p risingwave_cmd_all --bin risingwave --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion --timings -- -Ztime-passes \
+    2>&1 | tee /risingwave/bin/rustc-timing.log && \
+  cp /tmp/dashboard-build-timing.txt /risingwave/bin/ && \
   cp /risingwave/target/cargo-timings/cargo-timing.html /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
@@ -180,3 +183,5 @@ FROM risingwave-nodwp AS risingwave
 
 COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=rust-builder /risingwave/bin/cargo-timing.html /risingwave/bin/cargo-timing.html
+COPY --from=rust-builder /risingwave/bin/rustc-timing.log /risingwave/bin/rustc-timing.log
+COPY --from=rust-builder /risingwave/bin/dashboard-build-timing.txt /risingwave/bin/dashboard-build-timing.txt
