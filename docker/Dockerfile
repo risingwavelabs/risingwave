@@ -1,6 +1,6 @@
 FROM ubuntu:24.04 AS base
 
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 # Require Ubuntu's CVE-2026-114938 fix while allowing newer security updates.
 # https://ubuntu.com/security/notices/USN-9156-1
@@ -14,20 +14,10 @@ FROM base AS rust-base
 
 RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync
 
-# Install Node.js as dependency for building the dashboard.
-# Bump version together with `dashboard/.node-version`.
-ENV NVM_DIR /root/.nvm
-ENV NODE_VERSION 20.11.1
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
-  && . $NVM_DIR/nvm.sh \
-  && nvm install $NODE_VERSION \
-  && npm install --global pnpm@10.14.0
-ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
-
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
-ENV PATH /root/.cargo/bin:$PATH
+ENV PATH=/root/.cargo/bin:$PATH
 ENV CARGO_INCREMENTAL=0
 
 COPY rust-toolchain rust-toolchain
@@ -66,6 +56,26 @@ RUN cargo install addr2line --features bin --bin addr2line
 # RUN cargo chef cook --profile production --recipe-path recipe.json
 
 FROM rust-base AS rust-builder
+
+# Only the Rust build needs Node.js for the embedded dashboard.
+COPY dashboard/.node-version /tmp/dashboard-node-version
+RUN set -eu; \
+  node_version="$(cat /tmp/dashboard-node-version)"; \
+  node_arch="$(dpkg --print-architecture)"; \
+  if [ "$node_arch" = amd64 ]; then node_arch=x64; fi; \
+  archive="node-v${node_version}-linux-${node_arch}.tar.gz"; \
+  dist="https://nodejs.org/dist/v${node_version}"; \
+  cd /tmp; \
+  curl -fsSLO "$dist/$archive"; \
+  curl -fsSLO "$dist/SHASUMS256.txt"; \
+  grep -F "  $archive" SHASUMS256.txt | sha256sum -c -; \
+  mkdir -p /opt/node; \
+  tar -xzf "$archive" -C /opt/node --strip-components=1; \
+  rm "$archive" SHASUMS256.txt
+ENV PATH=/opt/node/bin:$PATH
+
+COPY dashboard/package.json /tmp/dashboard-package.json
+RUN npm install --global "$(node -p 'require("/tmp/dashboard-package.json").packageManager')"
 
 # Build application
 ARG GIT_SHA
@@ -129,7 +139,7 @@ RUN ./build-debezium.sh && \
 
 FROM base AS risingwave-nodwp
 
-LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
+LABEL org.opencontainers.image.source=https://github.com/risingwavelabs/risingwave
 
 RUN apt-get update && apt-get -y install linux-tools-generic \
   && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
@@ -153,14 +163,14 @@ COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 COPY --from=rust-builder /risingwave/lib/adbc /risingwave/lib/adbc
 
 # Set default playground mode to docker-playground profile
-ENV PLAYGROUND_PROFILE docker-playground
+ENV PLAYGROUND_PROFILE=docker-playground
 # Set default connector libs path
-ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
+ENV CONNECTOR_LIBS_PATH=/risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 # Runtime dynamic library search path for ADBC (Linux containers use LD_LIBRARY_PATH).
-ENV ADBC_DRIVER_PATH /risingwave/lib/adbc
-ENV LD_LIBRARY_PATH /risingwave/lib/adbc:${LD_LIBRARY_PATH}
+ENV ADBC_DRIVER_PATH=/risingwave/lib/adbc
+ENV LD_LIBRARY_PATH=/risingwave/lib/adbc
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "single_node" ]
