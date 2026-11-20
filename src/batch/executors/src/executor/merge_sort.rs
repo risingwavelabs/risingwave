@@ -23,12 +23,12 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::{MemMonitoredHeap, MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_common_estimate_size::EstimateSize;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, Executor};
 use crate::error::{BatchError, Result};
+use crate::spill::spill_file::BoundedChunkBuilder;
 
 pub struct MergeSortExecutor {
     inputs: Vec<BoxedExecutor>,
@@ -36,6 +36,7 @@ pub struct MergeSortExecutor {
     identity: String,
     schema: Schema,
     chunk_size: usize,
+    max_chunk_bytes: usize,
     mem_context: MemoryContext,
     min_heap: MemMonitoredHeap<HeapElem>,
     current_chunks: Vec<Option<DataChunk>, MonitoredGlobalAlloc>,
@@ -78,53 +79,38 @@ impl MergeSortExecutor {
             }
         }
 
-        while !self.min_heap.is_empty() {
-            // It is possible that we cannot produce this much as
-            // we may run out of input data chunks from sources.
-            let mut want_to_produce = self.chunk_size;
-
-            let mut builders: Vec<_> = self
-                .schema
-                .fields
-                .iter()
-                .map(|field| field.data_type.create_array_builder(self.chunk_size))
-                .collect();
-            let mut array_len = 0;
-            while want_to_produce > 0 && !self.min_heap.is_empty() {
-                let top_elem = self.min_heap.pop().unwrap();
-                let child_idx = top_elem.chunk_idx();
-                let cur_chunk = top_elem.chunk();
-                let row_idx = top_elem.elem_idx();
-                for (idx, builder) in builders.iter_mut().enumerate() {
-                    let chunk_arr = cur_chunk.column_at(idx);
-                    let chunk_arr = chunk_arr.as_ref();
-                    let datum = chunk_arr.value_at(row_idx).to_owned_datum();
-                    builder.append(&datum);
+        let mut builder = BoundedChunkBuilder::new(
+            self.schema.data_types(),
+            self.chunk_size,
+            self.max_chunk_bytes,
+        );
+        while let Some(top_elem) = self.min_heap.pop() {
+            let child_idx = top_elem.chunk_idx();
+            let cur_chunk = top_elem.chunk();
+            let row_idx = top_elem.elem_idx();
+            let output = builder.append_row(cur_chunk.row_at_unchecked_vis(row_idx));
+            // check whether we have another row from the same chunk being popped
+            let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
+            match possible_next_row_idx {
+                Some(next_row_idx) => {
+                    self.push_row_into_heap(child_idx, next_row_idx);
                 }
-                want_to_produce -= 1;
-                array_len += 1;
-                // check whether we have another row from the same chunk being popped
-                let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
-                match possible_next_row_idx {
-                    Some(next_row_idx) => {
-                        self.push_row_into_heap(child_idx, next_row_idx);
-                    }
-                    None => {
-                        self.get_input_chunk(&mut input_streams, child_idx).await?;
-                        if let Some(chunk) = &self.current_chunks[child_idx] {
-                            let next_row_idx = chunk.next_visible_row_idx(0);
-                            self.push_row_into_heap(child_idx, next_row_idx.unwrap());
-                        }
+                None => {
+                    self.get_input_chunk(&mut input_streams, child_idx).await?;
+                    if let Some(chunk) = &self.current_chunks[child_idx] {
+                        let next_row_idx = chunk.next_visible_row_idx(0);
+                        self.push_row_into_heap(child_idx, next_row_idx.unwrap());
                     }
                 }
             }
-
-            let columns = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect::<Vec<_>>();
-            let chunk = DataChunk::new(columns, array_len);
-            yield chunk
+            // It may hold the last reference to a chunk that was just replaced.
+            drop(top_elem);
+            if let Some(chunk) = output {
+                yield chunk;
+            }
+        }
+        if let Some(chunk) = builder.consume_all() {
+            yield chunk;
         }
     }
 
@@ -188,9 +174,16 @@ impl MergeSortExecutor {
             identity,
             schema,
             chunk_size,
+            max_chunk_bytes: usize::MAX,
             min_heap: MemMonitoredHeap::with_capacity(inputs_num, mem_context.clone()),
             current_chunks: Vec::with_capacity_in(inputs_num, mem_context.global_allocator()),
             mem_context,
         }
+    }
+
+    /// Also ends an output chunk once its arrays hold `max_chunk_bytes`.
+    pub fn with_max_chunk_bytes(mut self, max_chunk_bytes: usize) -> Self {
+        self.max_chunk_bytes = max_chunk_bytes;
+        self
     }
 }

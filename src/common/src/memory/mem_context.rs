@@ -158,6 +158,20 @@ impl MemoryContext {
         }
     }
 
+    /// Bytes that can still be charged before this context or one of its ancestors exceeds its
+    /// limit.
+    pub fn free_bytes(&self) -> u64 {
+        let Some(inner) = &self.inner else {
+            return u64::MAX;
+        };
+        let used = inner.counter.get_bytes_used().max(0) as u64;
+        let free = inner.mem_limit.saturating_sub(used);
+        match &inner.parent {
+            Some(parent) => free.min(parent.free_bytes()),
+            None => free,
+        }
+    }
+
     /// Check if the memory usage exceeds the limit.
     /// Returns `false` if the memory usage exceeds the limit.
     pub fn check_memory_usage(&self) -> bool {
@@ -184,5 +198,25 @@ impl Drop for MemoryContextInner {
         if let Some(p) = &self.parent {
             p.add_unchecked(-self.counter.get_bytes_used());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_free_bytes() {
+        let root = MemoryContext::root(TrAdderAtomic::new(0), 100);
+        let ctx = MemoryContext::new_with_mem_limit(Some(root.clone()), TrAdderAtomic::new(0), 60);
+        let sibling = MemoryContext::new(Some(root), TrAdderAtomic::new(0));
+        assert_eq!(ctx.free_bytes(), 60);
+        sibling.add_unchecked(70);
+        assert_eq!(ctx.free_bytes(), 30);
+        ctx.add_unchecked(20);
+        assert_eq!(ctx.free_bytes(), 10);
+        sibling.add_unchecked(50);
+        assert_eq!(ctx.free_bytes(), 0);
+        assert_eq!(MemoryContext::none().free_bytes(), u64::MAX);
     }
 }

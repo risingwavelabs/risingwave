@@ -14,12 +14,16 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use assert_matches::assert_matches;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use risingwave_common::memory::MemCounter;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -254,5 +258,26 @@ impl CreateSource for FakeCreateSource {
         _: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
+    }
+}
+
+/// A [`MemCounter`] that also records its highest usage.
+#[derive(Clone, Default)]
+pub struct PeakCounter(Arc<(AtomicI64, AtomicI64)>);
+
+impl PeakCounter {
+    pub fn peak(&self) -> i64 {
+        self.0.1.load(Ordering::Relaxed)
+    }
+}
+
+impl MemCounter for PeakCounter {
+    fn add(&self, bytes: i64) {
+        let used = self.0.0.fetch_add(bytes, Ordering::Relaxed) + bytes;
+        self.0.1.fetch_max(used, Ordering::Relaxed);
+    }
+
+    fn get_bytes_used(&self) -> i64 {
+        self.0.0.load(Ordering::Relaxed)
     }
 }

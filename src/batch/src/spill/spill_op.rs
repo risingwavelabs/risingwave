@@ -51,7 +51,7 @@ pub struct SpillOp {
 }
 
 impl SpillOp {
-    fn batch_spill_root() -> PathBuf {
+    pub(super) fn batch_spill_root() -> PathBuf {
         batch_spill_base_dir().join(RW_MANAGED_SPILL_DIR)
     }
 
