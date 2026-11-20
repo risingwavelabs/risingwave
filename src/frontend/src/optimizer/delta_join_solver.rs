@@ -66,8 +66,6 @@
 //!   possible that every lookup path produces different distribution. We need to shuffle them
 //!   before feeding data to union.
 
-#![expect(dead_code)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, anyhow};
@@ -132,6 +130,7 @@ pub enum ArrangeStrategy {
     /// The left-most table will be preferred to be the first lookup table.
     LeftFirst,
     /// The right-most table will be preferred to be the first lookup table.
+    #[cfg_attr(not(test), expect(dead_code))]
     RightFirst,
 }
 
@@ -175,6 +174,7 @@ pub enum StreamStrategy {
     /// The left-most table will be preferred to be the stream to lookup this epoch.
     LeftThisEpoch,
     /// The right-most table will be preferred to be the stream to lookup this epoch.
+    #[cfg_attr(not(test), expect(dead_code))]
     RightThisEpoch,
 }
 
@@ -234,7 +234,20 @@ pub struct DeltaJoinSolver {
 /// c -> a  -> b  ->
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), expect(dead_code))]
 pub struct LookupPath(JoinTable, pub Vec<JoinTable>);
+
+/// A [`LookupPath`] together with the join edge used by each lookup.
+///
+/// `edges[i].right` is the table looked up by the `i`-th lookup, and `edges[i].left` is a table
+/// that has already been joined before that lookup (either the stream table or a table looked up
+/// earlier), so `edges[i].left_join_key` and `edges[i].right_join_key` are the join keys of the
+/// stream side and the arrangement side of the lookup.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LookupPathWithEdges {
+    pub stream: JoinTable,
+    pub edges: Vec<JoinEdge>,
+}
 
 struct SolverEnv {
     /// Stores all join edges in map. [`JoinEdge`]'s left side is always the key in map.
@@ -295,7 +308,7 @@ impl DeltaJoinSolver {
         &self,
         solver_env: &SolverEnv,
         input_stream: JoinTable,
-    ) -> Result<LookupPath> {
+    ) -> Result<LookupPathWithEdges> {
         // The table available to query
         let mut current_table_set = BTreeSet::new();
         current_table_set.insert(input_stream);
@@ -303,8 +316,8 @@ impl DeltaJoinSolver {
         // The distribution of the current lookup.
         let mut current_distribution = vec![];
 
-        // The final lookup path.
-        let mut path = vec![];
+        // The final lookup path, as the join edge used by each lookup.
+        let mut path: Vec<JoinEdge> = vec![];
 
         fn satisfies_distribution(
             current_distribution: &[(JoinTable, Vec<usize>)],
@@ -350,7 +363,7 @@ impl DeltaJoinSolver {
             for table in &solver_env.arrange_placement_order {
                 if let Some(edge) = reachable_tables.get(table) {
                     current_table_set.insert(edge.right);
-                    path.push(edge.right);
+                    path.push(edge.clone());
                     current_distribution.push((edge.right, edge.right_join_key.clone()));
                     continue 'next_table;
                 }
@@ -375,7 +388,7 @@ impl DeltaJoinSolver {
             for table in &solver_env.arrange_placement_order {
                 if let Some(edge) = reachable_tables.get(table) {
                     current_table_set.insert(edge.right);
-                    path.push(edge.right);
+                    path.push(edge.clone());
                     current_distribution.clear();
                     current_distribution.push((edge.right, edge.right_join_key.clone()));
                     continue 'next_table;
@@ -393,10 +406,28 @@ impl DeltaJoinSolver {
             }
         }
 
-        Ok(LookupPath(input_stream, path))
+        Ok(LookupPathWithEdges {
+            stream: input_stream,
+            edges: path,
+        })
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn solve(&self) -> Result<Vec<LookupPath>> {
+        Ok(self
+            .solve_with_edges()?
+            .into_iter()
+            .map(|path| {
+                LookupPath(
+                    path.stream,
+                    path.edges.iter().map(|edge| edge.right).collect(),
+                )
+            })
+            .collect())
+    }
+
+    /// Same as [`DeltaJoinSolver::solve`], but also returns the join edge used by each lookup.
+    pub fn solve_with_edges(&self) -> Result<Vec<LookupPathWithEdges>> {
         let solver_env = SolverEnv::build_from(self);
 
         solver_env

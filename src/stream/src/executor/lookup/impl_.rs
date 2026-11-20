@@ -148,21 +148,20 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
         let arrangement_pk_indices = arrangement.stream_key().to_vec();
         let stream_pk_indices = stream.stream_key().to_vec();
 
-        // check if arrange join key is exactly the same as order rules
+        // check if arrange join key is exactly the same as the prefix of order rules
         {
             let mut arrange_join_key_indices = arrange_join_key_indices.clone();
             arrange_join_key_indices.sort_unstable();
             let mut arrangement_order_types_indices = arrangement_order_rules
                 .iter()
+                .take(arrange_join_key_indices.len())
                 .map(|x| x.column_index)
                 .collect_vec();
             arrangement_order_types_indices.sort_unstable();
             assert_eq!(
-                arrange_join_key_indices,
-                &arrangement_order_types_indices[0..arrange_join_key_indices.len()],
+                arrange_join_key_indices, arrangement_order_types_indices,
                 "invalid join key: arrange_join_key_indices = {:?}, order_rules: {:?}",
-                arrange_join_key_indices,
-                arrangement_order_rules
+                arrange_join_key_indices, arrangement_order_rules
             );
         }
 

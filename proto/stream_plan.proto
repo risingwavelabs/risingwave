@@ -837,6 +837,50 @@ message DeltaIndexJoinNode {
   catalog.Table left_visibility_table = 13;
 }
 
+// Delta join over three or more indexes. This is a pseudo plan node generated on frontend. The
+// fragmenter rewrites it into one chain of lookups per join input, and merges the chains with a
+// `LookupUnionNode`. Only inner equi-joins whose join graph is a tree are supported.
+message MultiwayDeltaIndexJoinNode {
+  // An index (or a primary table) of a join input. The inputs of this node are the scans of the
+  // arrangements, in the same order.
+  message Arrangement {
+    // The join input whose rows this arrangement holds.
+    uint32 input = 1;
+    // Table id of the index or table.
+    uint32 table_id = 2;
+    ArrangementInfo info = 3;
+  }
+  message LookupStep {
+    // The arrangement to look up, as an index into `arrangements`.
+    uint32 arrangement = 1;
+    // Join key of the stream side, as column indices of the rows joined so far on this path.
+    repeated uint32 stream_key = 2;
+    // Join key of the arrangement side, as column indices of the arrangement scan. It is the
+    // distribution key of the arrangement, in the same order.
+    repeated uint32 arrange_key = 3;
+    // Whether to look up the arrangement of the current epoch instead of the previous epoch.
+    bool use_current_epoch = 4;
+    // Set when the arrangement is backfilled. See `LookupNode.visibility_table`.
+    catalog.Table visibility_table = 5;
+  }
+  message LookupPath {
+    // The arrangement whose changes drive this path, as an index into `arrangements`.
+    uint32 stream_arrangement = 1;
+    // Lookups of the other join inputs, in order.
+    repeated LookupStep steps = 2;
+  }
+  repeated Arrangement arrangements = 1;
+  // One path per join input. The outputs of the paths are emitted in this order within each
+  // epoch, so that the path looking up only previous epochs comes first.
+  repeated LookupPath paths = 2;
+  // The output columns, as indices of the concatenation of all join inputs' columns in input
+  // order.
+  repeated uint32 output_indices = 3;
+  // The output columns to hash shuffle the outputs of the paths by before merging them, which is
+  // the distribution key of the output. If empty, the stream key is used.
+  repeated uint32 dist_key = 4;
+}
+
 message HopWindowNode {
   uint32 time_col = 1;
   data.Interval window_slide = 2;
@@ -1528,6 +1572,7 @@ message StreamNode {
     IcebergWithPkIndexPositionDeleteMergerNode iceberg_with_pk_index_position_delete_merger = 157;
     MatchRecognizeNode match_recognize = 158;
     CompactionResolverNode compaction_resolver = 159;
+    MultiwayDeltaIndexJoinNode multiway_delta_index_join = 160;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -1,0 +1,311 @@
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+set streaming_parallelism = 2;
+
+statement ok
+create table a (a1 int, a2 int);
+
+statement ok
+create index i_a1 on a(a1);
+
+statement ok
+set streaming_parallelism = 3;
+
+statement ok
+create table b (b1 int, b2 int);
+
+statement ok
+create index i_b1 on b(b1);
+
+statement ok
+create index i_b2 on b(b2);
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table c (c1 int, c2 int);
+
+statement ok
+create index i_c1 on c(c1);
+
+statement ok
+create index i_c2 on c(c2);
+
+statement ok
+set streaming_parallelism = 0;
+
+statement ok
+create table d (d1 int primary key, d2 int);
+
+statement ok
+insert into a values (1, 10), (2, 20), (null, 30);
+
+statement ok
+insert into b values (1, 100), (1, 200), (2, 100), (null, 300), (3, null);
+
+statement ok
+insert into c values (100, 1000), (200, 2000), (null, 3000);
+
+statement ok
+insert into d values (1000, 1), (2000, 2), (3000, 3);
+
+# Create the multi-way delta joins on the snapshot above.
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create materialized view v3 as
+select a.a2, b.b1, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+
+statement ok
+create materialized view v4 as
+select a.a2, b.b2, c.c2, d.d2 from a join b on a.a1 = b.b1 join c on b.b2 = c.c1 join d on c.c2 = d.d1;
+
+# The same join on the same key of three inputs.
+statement ok
+create materialized view v_same_key as
+select a.a2, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on a.a1 = c.c1;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+# The same joins with hash joins, to compare with.
+
+statement ok
+create materialized view h3 as
+select a.a2, b.b1, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+
+statement ok
+create materialized view h4 as
+select a.a2, b.b2, c.c2, d.d2 from a join b on a.a1 = b.b1 join c on b.b2 = c.c1 join d on c.c2 = d.d1;
+
+statement ok
+create materialized view h_same_key as
+select a.a2, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on a.a1 = c.c1;
+
+query IIII rowsort
+select * from v3;
+----
+10 1 100 1000
+10 1 200 2000
+20 2 100 1000
+
+query IIII rowsort
+select * from v4;
+----
+10 100 1000 1
+10 200 2000 2
+20 100 1000 1
+
+# Changes on every input, including null join keys, which never match.
+
+statement ok
+insert into a values (3, 40), (null, 50);
+
+statement ok
+insert into b values (3, 200), (null, 100), (2, null);
+
+statement ok
+insert into c values (300, 3000), (100, 1001), (null, 4000);
+
+statement ok
+insert into d values (4000, 4), (1001, 5);
+
+statement ok
+update b set b2 = 300 where b1 = 1 and b2 = 200;
+
+statement ok
+delete from c where c2 = 1000;
+
+statement ok
+update a set a2 = a2 + 1 where a1 = 2;
+
+statement ok
+delete from d where d1 = 2000;
+
+statement ok
+insert into c values (200, 2000);
+
+statement ok
+insert into a values (1, 60);
+
+query IIII rowsort
+select * from v3;
+----
+10 1 100 1001
+10 1 300 3000
+21 2 100 1001
+40 3 200 2000
+40 3 200 2000
+60 1 100 1001
+60 1 300 3000
+
+query IIII rowsort
+select * from v4;
+----
+10 100 1001 5
+10 300 3000 3
+21 100 1001 5
+60 100 1001 5
+60 300 3000 3
+
+query I
+select count(*) from (select a2, b1, b2, c2, count(*) from v3 group by a2, b1, b2, c2 except select a2, b1, b2, c2, count(*) from h3 group by a2, b1, b2, c2);
+----
+0
+
+query I
+select count(*) from (select a2, b1, b2, c2, count(*) from h3 group by a2, b1, b2, c2 except select a2, b1, b2, c2, count(*) from v3 group by a2, b1, b2, c2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, d2, count(*) from v4 group by a2, b2, c2, d2 except select a2, b2, c2, d2, count(*) from h4 group by a2, b2, c2, d2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, d2, count(*) from h4 group by a2, b2, c2, d2 except select a2, b2, c2, d2, count(*) from v4 group by a2, b2, c2, d2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, count(*) from v_same_key group by a2, b2, c2 except select a2, b2, c2, count(*) from h_same_key group by a2, b2, c2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, count(*) from h_same_key group by a2, b2, c2 except select a2, b2, c2, count(*) from v_same_key group by a2, b2, c2);
+----
+0
+
+# Changes of all rows of all inputs in one statement each.
+
+statement ok
+update a set a2 = a2 * 2;
+
+statement ok
+update b set b2 = b2 + 100 where b2 = 100;
+
+statement ok
+update c set c1 = c1 - 100 where c1 = 300;
+
+statement ok
+delete from a where a1 = 3;
+
+query I
+select count(*) from (select a2, b1, b2, c2, count(*) from v3 group by a2, b1, b2, c2 except select a2, b1, b2, c2, count(*) from h3 group by a2, b1, b2, c2);
+----
+0
+
+query I
+select count(*) from (select a2, b1, b2, c2, count(*) from h3 group by a2, b1, b2, c2 except select a2, b1, b2, c2, count(*) from v3 group by a2, b1, b2, c2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, d2, count(*) from v4 group by a2, b2, c2, d2 except select a2, b2, c2, d2, count(*) from h4 group by a2, b2, c2, d2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, d2, count(*) from h4 group by a2, b2, c2, d2 except select a2, b2, c2, d2, count(*) from v4 group by a2, b2, c2, d2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, count(*) from v_same_key group by a2, b2, c2 except select a2, b2, c2, count(*) from h_same_key group by a2, b2, c2);
+----
+0
+
+query I
+select count(*) from (select a2, b2, c2, count(*) from h_same_key group by a2, b2, c2 except select a2, b2, c2, count(*) from v_same_key group by a2, b2, c2);
+----
+0
+
+statement ok
+drop materialized view v3;
+
+statement ok
+drop materialized view v4;
+
+statement ok
+drop materialized view v_same_key;
+
+statement ok
+drop materialized view h3;
+
+statement ok
+drop materialized view h4;
+
+statement ok
+drop materialized view h_same_key;
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
+
+statement ok
+drop table c;
+
+statement ok
+drop table d;
+
+# An update of a row joins with itself in a self join. All inputs change the same join result in
+# one epoch, so the delta join must emit the changes in a consistent order.
+
+statement ok
+create table t (k int, v int, id int primary key);
+
+statement ok
+create index i_t_k on t(k) include (v);
+
+statement ok
+insert into t values (1, 10, 1), (1, 20, 2), (2, 30, 3);
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create materialized view v_self3 as
+select x.id as x_id, x.v as x_v, y.id as y_id, z.v as z_v
+from t x join t y on x.k = y.k join t z on y.k = z.k;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+statement ok
+update t set v = v + 1;
+
+statement ok
+update t set k = 2 where id = 1;
+
+query I
+select count(*) from v_self3;
+----
+9
+
+query I
+select count(*) from (
+  select x_id, x_v, y_id, z_v, count(*) from v_self3 group by x_id, x_v, y_id, z_v
+  except
+  select x.id, x.v, y.id, z.v, count(*) from t x join t y on x.k = y.k join t z on y.k = z.k
+  group by x.id, x.v, y.id, z.v
+);
+----
+0
+
+statement ok
+drop materialized view v_self3;
+
+statement ok
+drop table t;
