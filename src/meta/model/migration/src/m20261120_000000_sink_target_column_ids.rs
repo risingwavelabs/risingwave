@@ -44,14 +44,16 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .alter_table(
-                MigrationTable::alter()
-                    .table(Sink::Table)
-                    .add_column(ColumnDef::new(Sink::TargetColumnIds).json_binary())
-                    .to_owned(),
-            )
-            .await?;
+        if !manager.has_column("sink", "target_column_ids").await? {
+            manager
+                .alter_table(
+                    MigrationTable::alter()
+                        .table(Sink::Table)
+                        .add_column(ColumnDef::new(Sink::TargetColumnIds).json_binary())
+                        .to_owned(),
+                )
+                .await?;
+        }
 
         let connection = manager.get_connection();
         let database_backend = connection.get_database_backend();
