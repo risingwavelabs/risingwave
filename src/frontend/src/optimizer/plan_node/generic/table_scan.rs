@@ -31,7 +31,7 @@ use crate::catalog::table_catalog::TableType;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{FunctionalDependencySet, Order, WatermarkColumns};
-use crate::utils::{ColIndexMappingRewriteExt, Condition};
+use crate::utils::Condition;
 
 /// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]
@@ -194,23 +194,21 @@ impl TableScan {
             .collect()
     }
 
-    /// Return indices of fields the output is ordered by and
-    /// corresponding direction
-    pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_tb_idx = self.table_catalog.get_id_to_op_idx_mapping();
-        let order = Order::new(
-            self.table_catalog
-                .pk
-                .iter()
-                .map(|order| {
-                    let idx = id_to_tb_idx
-                        .get(&self.table_catalog.columns[order.column_index].column_id)
-                        .unwrap();
-                    ColumnOrder::new(*idx, order.order_type)
-                })
-                .collect(),
-        );
-        self.i2o_col_mapping().rewrite_provided_order(&order)
+    /// Returns the primary key order in output column indices and the number of
+    /// columns from the equality-constrained key prefix that appear in the output.
+    pub fn project_pk_order(&self, eq_prefix_len: usize) -> (Order, usize) {
+        let (fixed, remaining) = self.primary_key().split_at(eq_prefix_len);
+        let mapping = self.i2o_col_mapping();
+        let project = |key: &ColumnOrder| {
+            mapping
+                .try_map(key.column_index)
+                .map(|idx| ColumnOrder::new(idx, key.order_type))
+        };
+
+        let mut columns: Vec<_> = fixed.iter().filter_map(project).collect();
+        let visible_eq_prefix_len = columns.len();
+        columns.extend(remaining.iter().map_while(project));
+        (Order::new(columns), visible_eq_prefix_len)
     }
 
     /// get the Mapping of columnIndex from internal column index to output column index

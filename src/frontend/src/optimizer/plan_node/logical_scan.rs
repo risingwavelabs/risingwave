@@ -177,10 +177,9 @@ impl LogicalScan {
         &self.core.predicate
     }
 
-    /// Return indices of fields the output is ordered by and
-    /// corresponding direction
+    /// Maps primary key order to output indices, stopping at the first omitted key even if constant.
     pub fn get_out_column_index_order(&self) -> Order {
-        self.core.get_out_column_index_order()
+        self.core.project_pk_order(0).0
     }
 
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
