@@ -22,6 +22,7 @@
 
 mod backfill_tests;
 mod batch;
+mod cdc_schema_change;
 mod compaction;
 mod default_parallelism;
 mod license_cpu_limit;
