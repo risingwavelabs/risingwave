@@ -15,7 +15,6 @@
 use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{FormatEncodeOptions, ObjectName, Statement};
 use thiserror_ext::AsReport;
 
@@ -39,12 +38,7 @@ pub async fn handle_refresh_schema(
     table_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (original_table, has_incoming_sinks) =
-        fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-
-    if has_incoming_sinks {
-        bail_not_implemented!("alter table with incoming sinks");
-    }
+    let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     let format_encode = get_format_encode_from_table(&original_table)?;
     if !format_encode

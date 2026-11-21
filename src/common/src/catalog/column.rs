@@ -33,6 +33,7 @@ use super::{
 };
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
+use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::DatumToProtoExt;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
@@ -492,6 +493,64 @@ impl ColumnCatalog {
             Cow::Borrowed(&self.column_desc.name)
         }
     }
+}
+
+/// Pairs the columns of a table with the visible output columns of a plan that writes into it, such
+/// as `CREATE SINK ... INTO t`.
+///
+/// ```sql
+/// CREATE TABLE t (v1 INT, v2 INT AS v1 + 1, v3 INT, v4 INT);
+/// CREATE SINK s1 INTO t         AS SELECT a, b FROM src;
+/// CREATE SINK s2 INTO t(v3, v1) AS SELECT a, b FROM src;
+/// ```
+///
+/// - `target_columns`: the columns of `t` in table order, without `_rw_timestamp`. Generated
+///   columns such as `v2` stay in so that the result lines up with the table.
+/// - `column_list`: the names in `INTO t(...)` when the statement has them, in the order written.
+///   `s2` passes `Some(["v3", "v1"])`, `s1` passes `None`.
+/// - `visible_column_count`: how many visible columns the plan outputs, `2` for both sinks.
+///
+/// Returns one entry per target column, in table order. `Some(p)` means visible output column `p`
+/// writes it, `None` means nothing writes it and it takes its default, which is always the case
+/// for a generated column. With a column list, the names are matched: `s2` gives
+/// `[Some(1), None, Some(0), None]`. Without one, the visible output columns go to the table's
+/// DML columns by position: `s1` gives `[Some(0), None, Some(1), None]`, with `v4` left to its
+/// default because the plan has no third column.
+pub fn target_columns_to_visible_positions(
+    target_columns: &[ColumnCatalog],
+    column_list: Option<&[String]>,
+    visible_column_count: usize,
+) -> Vec<Option<usize>> {
+    let mut dml_i = 0;
+    target_columns
+        .iter()
+        .map(|column| {
+            if !column.can_dml() {
+                return None;
+            }
+            let position = match column_list {
+                Some(names) => names.iter().position(|name| name == column.name()),
+                None => (dml_i < visible_column_count).then_some(dml_i),
+            };
+            dml_i += 1;
+            position
+        })
+        .collect()
+}
+
+/// The ids of the target columns written by a plan, in the order of its visible output columns,
+/// from the `positions` returned by [`target_columns_to_visible_positions`].
+pub fn written_target_column_ids(
+    target_columns: &[ColumnCatalog],
+    positions: &[Option<usize>],
+) -> Vec<ColumnId> {
+    target_columns
+        .iter()
+        .zip_eq_fast(positions)
+        .filter_map(|(column, position)| position.map(|position| (position, column.column_id())))
+        .sorted()
+        .map(|(_, column_id)| column_id)
+        .collect()
 }
 
 impl FieldLike for ColumnDesc {

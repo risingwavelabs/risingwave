@@ -30,7 +30,7 @@ pub async fn handle_alter_watermark(
     with_ttl: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (original_catalog, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if original_catalog.webhook_info.is_some() {
         return Err(ErrorCode::BindError(

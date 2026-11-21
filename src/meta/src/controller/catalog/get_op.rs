@@ -276,23 +276,16 @@ impl CatalogController {
         table_id: TableId,
     ) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
-        let sink_objs = Sink::find()
-            .find_also_related(Object)
-            .filter(sink::Column::AutoRefreshSchemaFromTable.eq(table_id))
-            .all(&inner.db)
-            .await?;
-        let streaming_jobs = load_streaming_jobs_by_ids(
-            &inner.db,
-            sink_objs.iter().map(|(sink, _)| sink.sink_id.as_job_id()),
-        )
-        .await?;
-        Ok(sink_objs
-            .into_iter()
-            .map(|(sink, obj)| {
-                let streaming_job = streaming_jobs.get(&sink.sink_id.as_job_id()).cloned();
-                ObjectModel(sink, obj.unwrap(), streaming_job).into()
-            })
-            .collect())
+        inner
+            .get_sinks_by_table_column(sink::Column::AutoRefreshSchemaFromTable, table_id)
+            .await
+    }
+
+    pub async fn get_sinks_into_table(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        inner
+            .get_sinks_by_table_column(sink::Column::TargetTable, table_id)
+            .await
     }
 
     pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
@@ -784,6 +777,30 @@ impl CatalogController {
 }
 
 impl CatalogControllerInner {
+    pub(crate) async fn get_sinks_by_table_column(
+        &self,
+        table_column: sink::Column,
+        table_id: TableId,
+    ) -> MetaResult<Vec<PbSink>> {
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(table_column.eq(table_id))
+            .all(&self.db)
+            .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &self.db,
+            sink_objs.iter().map(|(sink, _)| sink.sink_id.as_job_id()),
+        )
+        .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| {
+                let streaming_job = streaming_jobs.get(&sink.sink_id.as_job_id()).cloned();
+                ObjectModel(sink, obj.unwrap(), streaming_job).into()
+            })
+            .collect())
+    }
+
     pub(crate) async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
         let sink_objs = Sink::find_by_id(sink_id)
             .find_also_related(Object)

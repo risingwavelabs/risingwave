@@ -237,6 +237,10 @@ message Sink {
   //
   // Should not directly access this field. Use method `ignore_delete()` instead.
   bool raw_ignore_delete = 28;
+
+  // only for the sink whose target is a table. Ids of the target table columns this sink writes, in the order of the sink's visible columns.
+  // The other columns of the target table take their defaults. Empty for sinks persisted before this field existed.
+  repeated int32 target_column_ids = 29;
 }
 
 message Subscription {

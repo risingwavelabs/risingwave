@@ -10,7 +10,9 @@ repository = { workspace = true }
 [dependencies]
 easy-ext = "1"
 prost = { workspace = true }
+risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
+risingwave_sqlparser = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 serde = { workspace = true }

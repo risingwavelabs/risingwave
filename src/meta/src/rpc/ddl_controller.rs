@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -2041,6 +2041,28 @@ impl DdlController {
             let target_table = tables
                 .first()
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", *table_id))?;
+            if sink.target_column_ids.is_empty() {
+                return Err(MetaError::invalid_parameter(format!(
+                    "sink \"{}\" writes no column of table \"{}\"",
+                    sink.name, target_table.name
+                )));
+            }
+            let missing_columns = missing_written_columns(
+                &sink.target_column_ids,
+                &sink.original_target_columns,
+                &target_table.columns,
+            );
+            if !missing_columns.is_empty() {
+                bail!(
+                    "sink \"{}\" writes column(s) {} that table \"{}\" no longer has; the table was altered while the sink was being created, retry",
+                    sink.name,
+                    missing_columns
+                        .iter()
+                        .map(|c| format!("\"{c}\""))
+                        .join(", "),
+                    target_table.name
+                );
+            }
             let sink_fragment = stream_job_fragments
                 .sink_fragment()
                 .ok_or_else(|| anyhow::anyhow!("sink fragment not found for sink {}", sink.id))?;
@@ -2137,6 +2159,46 @@ impl DdlController {
         }
 
         let id = stream_job.id();
+
+        if let StreamingJob::Table(_, table, ..) = stream_job {
+            let mut sinks_by_missing_column: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for sink in self
+                .metadata_manager
+                .catalog_controller
+                .get_sinks_into_table(table.id)
+                .await?
+            {
+                if sink.target_column_ids.is_empty() {
+                    return Err(MetaError::invalid_parameter(format!(
+                        "sink \"{}\" does not record which columns of table \"{}\" it writes; drop and recreate the sink before altering the table",
+                        sink.name, table.name
+                    )));
+                }
+                for column in missing_written_columns(
+                    &sink.target_column_ids,
+                    &sink.original_target_columns,
+                    &table.columns,
+                ) {
+                    sinks_by_missing_column
+                        .entry(column)
+                        .or_default()
+                        .insert(sink.name.clone());
+                }
+            }
+            if !sinks_by_missing_column.is_empty() {
+                return Err(MetaError::invalid_parameter(
+                    sinks_by_missing_column
+                        .into_iter()
+                        .map(|(column, sinks)| {
+                            format!(
+                                "failed to drop column \"{column}\" because it's written by sink(s) {}",
+                                sinks.iter().map(|s| format!("\"{s}\"")).join(", ")
+                            )
+                        })
+                        .join("; "),
+                ));
+            }
+        }
 
         // check if performing drop table connector
         let mut drop_table_associated_source_id = None;
@@ -2574,6 +2636,30 @@ pub fn build_upstream_sink_info(
     })
 }
 
+/// Names of the target table columns a sink writes (`target_column_ids`, the sink's persisted
+/// list) that are missing from `table_columns`, named after `original_target_columns`.
+pub fn missing_written_columns(
+    target_column_ids: &[i32],
+    original_target_columns: &[PbColumnCatalog],
+    table_columns: &[PbColumnCatalog],
+) -> Vec<String> {
+    let table_column_ids: HashSet<i32> = table_columns
+        .iter()
+        .map(|c| c.column_desc.as_ref().unwrap().column_id)
+        .collect();
+    target_column_ids
+        .iter()
+        .filter(|id| !table_column_ids.contains(id))
+        .map(|id| {
+            original_target_columns
+                .iter()
+                .find(|c| c.column_desc.as_ref().unwrap().column_id == *id)
+                .map(|c| c.column_desc.as_ref().unwrap().name.clone())
+                .unwrap_or_else(|| format!("#{id}"))
+        })
+        .collect()
+}
+
 pub fn refill_upstream_sink_union_in_table(
     union_fragment_root: &mut PbStreamNode,
     upstream_sink_infos: &Vec<UpstreamSinkInfo>,
@@ -2600,6 +2686,9 @@ pub fn refill_upstream_sink_union_in_table(
 mod tests {
     use std::num::NonZeroUsize;
 
+    use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::types::DataType;
+
     use super::*;
 
     #[test]
@@ -2623,6 +2712,31 @@ mod tests {
             result,
             Err(ref e) if matches!(e.inner(), MetaErrorInner::InvalidParameter(_))
         ));
+    }
+
+    #[test]
+    fn test_missing_written_columns() {
+        let column = |id: i32, name: &str| {
+            ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::new(id), DataType::Int32))
+                .to_protobuf()
+        };
+        let original = [column(1, "a"), column(2, "b"), column(3, "c")];
+        let after_drop_b = [column(1, "a"), column(3, "c")];
+        let after_re_add_b = [column(1, "a"), column(3, "c"), column(4, "b")];
+
+        assert_eq!(
+            missing_written_columns(&[1, 2], &original, &after_drop_b),
+            vec!["b"]
+        );
+        assert!(missing_written_columns(&[1], &original, &after_drop_b).is_empty());
+        assert_eq!(
+            missing_written_columns(&[1, 2], &original, &after_re_add_b),
+            vec!["b"]
+        );
+        assert_eq!(
+            missing_written_columns(&[1, 9], &original, &after_drop_b),
+            vec!["#9"]
+        );
     }
 
     #[test]
