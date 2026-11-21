@@ -336,24 +336,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             .max(1);
         let side_l_column_n = input_l.schema().len();
 
-        let schema_fields = match T {
-            JoinType::LeftSemi | JoinType::LeftAnti => input_l.schema().fields.clone(),
-            JoinType::RightSemi | JoinType::RightAnti => input_r.schema().fields.clone(),
-            _ => [
-                input_l.schema().fields.clone(),
-                input_r.schema().fields.clone(),
-            ]
-            .concat(),
-        };
-
-        let original_output_data_types = schema_fields
-            .iter()
-            .map(|field| field.data_type())
-            .collect_vec();
-        let actual_output_data_types = output_indices
-            .iter()
-            .map(|&idx| original_output_data_types[idx].clone())
-            .collect_vec();
+        let actual_output_data_types =
+            project_join_output_types(T, input_l.schema(), input_r.schema(), &output_indices);
 
         // Data types of of hash join state.
         let state_all_data_types_l = input_l.schema().data_types();
@@ -399,90 +383,28 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
 
-        let (left_to_output, right_to_output) = {
-            let (left_len, right_len) = if is_left_semi_or_anti(T) {
-                (state_all_data_types_l.len(), 0usize)
-            } else if is_right_semi_or_anti(T) {
-                (0usize, state_all_data_types_r.len())
-            } else {
-                (state_all_data_types_l.len(), state_all_data_types_r.len())
-            };
-            JoinStreamChunkBuilder::get_i2o_mapping(&output_indices, left_len, right_len)
-        };
-
-        let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
-        let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
-
-        let left_input_len = input_l.schema().len();
-        let right_input_len = input_r.schema().len();
-        let mut l2inequality_index = vec![vec![]; left_input_len];
-        let mut r2inequality_index = vec![vec![]; right_input_len];
-        let mut l_inequal_state_clean_columns = vec![];
-        let mut r_inequal_state_clean_columns = vec![];
-        let inequality_pairs = inequality_pairs
-            .into_iter()
-            .enumerate()
-            .map(|(index, pair)| {
-                // Map input columns to inequality index
-                // The second field indicates whether this column is required to be less than
-                // the corresponding column on the other side.
-                // For `left >= right`: left is NOT less than right, right IS less than left
-                // For `left <= right`: left IS less than right, right is NOT less than left
-                let left_is_larger = pair.left_side_is_larger();
-                l2inequality_index[pair.left_idx].push((index, !left_is_larger));
-                r2inequality_index[pair.right_idx].push((index, left_is_larger));
-
-                // Determine state cleanup columns
-                if pair.clean_left_state {
-                    l_inequal_state_clean_columns.push((pair.left_idx, index));
-                }
-                if pair.clean_right_state {
-                    r_inequal_state_clean_columns.push((pair.right_idx, index));
-                }
-
-                // Get output indices for watermark emission
-                // We only emit watermarks for the LARGER side's output columns
-                let output_indices = if pair.left_side_is_larger() {
-                    // Left is larger, emit for left output columns
-                    l2o_indexed
-                        .get_vec(&pair.left_idx)
-                        .cloned()
-                        .unwrap_or_default()
-                } else {
-                    // Right is larger, emit for right output columns
-                    r2o_indexed
-                        .get_vec(&pair.right_idx)
-                        .cloned()
-                        .unwrap_or_default()
-                };
-
-                (output_indices, pair)
-            })
-            .collect_vec();
-
-        let mut l_non_null_fields = l2inequality_index
-            .iter()
-            .positions(|inequalities| !inequalities.is_empty())
-            .collect_vec();
-        let mut r_non_null_fields = r2inequality_index
-            .iter()
-            .positions(|inequalities| !inequalities.is_empty())
-            .collect_vec();
-
-        if append_only_optimize {
-            l_inequal_state_clean_columns.clear();
-            r_inequal_state_clean_columns.clear();
-            l_non_null_fields.clear();
-            r_non_null_fields.clear();
-        }
+        let JoinColumnMappings {
+            left: left_columns,
+            right: right_columns,
+            inequality_pairs,
+        } = build_join_column_mappings(
+            T,
+            input_l.schema().len(),
+            input_r.schema().len(),
+            &output_indices,
+            inequality_pairs,
+            append_only_optimize,
+        );
 
         // Create degree tables with inequality column index for watermark-based cleaning.
         // The degree_inequality_idx is the column index in the input row that should be
         // stored in the degree table for inequality-based watermark cleaning.
-        let l_inequality_idx = l_inequal_state_clean_columns
+        let l_inequality_idx = left_columns
+            .state_clean_columns
             .first()
             .map(|(col_idx, _)| *col_idx);
-        let r_inequality_idx = r_inequal_state_clean_columns
+        let r_inequality_idx = right_columns
+            .state_clean_columns
             .first()
             .map(|(col_idx, _)| *col_idx);
 
@@ -529,11 +451,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 ),
                 join_key_indices: state_join_key_indices_l,
                 all_data_types: state_all_data_types_l,
-                i2o_mapping: left_to_output,
-                i2o_mapping_indexed: l2o_indexed,
-                input2inequality_index: l2inequality_index,
-                non_null_fields: l_non_null_fields,
-                state_clean_columns: l_inequal_state_clean_columns,
+                i2o_mapping: left_columns.i2o_mapping,
+                i2o_mapping_indexed: left_columns.i2o_mapping_indexed,
+                input2inequality_index: left_columns.input2inequality_index,
+                non_null_fields: left_columns.non_null_fields,
+                state_clean_columns: left_columns.state_clean_columns,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
                 _marker: PhantomData,
@@ -557,11 +479,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 join_key_indices: state_join_key_indices_r,
                 all_data_types: state_all_data_types_r,
                 start_pos: side_l_column_n,
-                i2o_mapping: right_to_output,
-                i2o_mapping_indexed: r2o_indexed,
-                input2inequality_index: r2inequality_index,
-                non_null_fields: r_non_null_fields,
-                state_clean_columns: r_inequal_state_clean_columns,
+                i2o_mapping: right_columns.i2o_mapping,
+                i2o_mapping_indexed: right_columns.i2o_mapping_indexed,
+                input2inequality_index: right_columns.input2inequality_index,
+                non_null_fields: right_columns.non_null_fields,
+                state_clean_columns: right_columns.state_clean_columns,
                 need_degree_table: need_degree_table_r,
                 _marker: PhantomData,
             },
@@ -914,23 +836,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         Ok(watermarks_to_emit)
     }
 
-    fn row_concat(
-        row_update: impl Row,
-        update_start_pos: usize,
-        row_matched: impl Row,
-        matched_start_pos: usize,
-    ) -> OwnedRow {
-        let mut new_row = vec![None; row_update.len() + row_matched.len()];
-
-        for (i, datum_ref) in row_update.iter().enumerate() {
-            new_row[i + update_start_pos] = datum_ref.to_owned_datum();
-        }
-        for (i, datum_ref) in row_matched.iter().enumerate() {
-            new_row[i + matched_start_pos] = datum_ref.to_owned_datum();
-        }
-        OwnedRow::new(new_row)
-    }
-
     /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_left(
         args: EqJoinArgs<'_, K, S, E>,
@@ -1117,17 +1022,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 $matched_row_ref:expr,
                 $from_cache:literal,
                 $map_output:expr,
+                $condition_satisfied:expr,
             ) => {
-                Self::handle_match_row::<_, _, SIDE, { JOIN_OP }, { $from_cache }>(
+                handle_match_row::<_, _, S, _, T, SIDE, { JOIN_OP }, { $from_cache }>(
                     row,
                     $matched_row,
                     $matched_row_ref,
                     hashjoin_chunk_builder,
                     $match_order_key_indices,
                     $degree_table,
-                    side_update.start_pos,
-                    side_match.start_pos,
-                    cond,
+                    $condition_satisfied,
                     &mut degree,
                     useful_state_clean_columns,
                     total_matches,
@@ -1158,6 +1062,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     cached_rows.values_mut(&side_match.all_data_types)
                 {
                     let matched_row = matched_row?;
+                    let join_condition_satisfied = if let Some(cond) = cond.as_ref() {
+                        check_join_condition(
+                            row,
+                            side_update.start_pos,
+                            &matched_row.row,
+                            side_match.start_pos,
+                            cond,
+                        )
+                        .await
+                    } else {
+                        true
+                    };
                     if let Some(chunk) = match_row!(
                         match_order_key_indices,
                         match_degree_state,
@@ -1165,9 +1081,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         Some(matched_row_ref),
                         true,
                         Either::Left,
-                    )
-                    .await
-                    {
+                        join_condition_satisfied,
+                    ) {
                         yield chunk;
                     }
                 }
@@ -1195,6 +1110,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
                     }
+                    let join_condition_satisfied = if let Some(cond) = cond.as_ref() {
+                        check_join_condition(
+                            row,
+                            side_update.start_pos,
+                            &matched_row.row,
+                            side_match.start_pos,
+                            cond,
+                        )
+                        .await
+                    } else {
+                        true
+                    };
                     if let Some(chunk) = match_row!(
                         match_order_key_indices,
                         degree_table,
@@ -1202,9 +1129,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         matched_row_ref,
                         false,
                         Either::Right,
-                    )
-                    .await
-                    {
+                        join_condition_satisfied,
+                    ) {
                         yield chunk;
                     }
                 }
@@ -1258,149 +1184,290 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             }
         }
     }
+}
 
-    #[expect(clippy::too_many_arguments)]
-    #[inline]
-    async fn handle_match_row<
-        'a,
-        R: Row,  // input row type
-        RO: Row, // output row type
-        const SIDE: SideTypePrimitive,
-        const JOIN_OP: JoinOpPrimitive,
-        const MATCHED_ROWS_FROM_CACHE: bool,
-    >(
-        update_row: RowRef<'a>,
-        mut matched_row: JoinRow<R>,
-        mut matched_row_cache_ref: Option<&mut E::EncodedRow>,
-        hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
-        match_order_key_indices: &[usize],
-        match_degree_table: &mut Option<TableInner<S>>,
-        side_update_start_pos: usize,
-        side_match_start_pos: usize,
-        cond: &Option<NonStrictExpression>,
-        update_row_degree: &mut u64,
-        useful_state_clean_columns: &[(usize, &'a Watermark)],
-        total_matches: &mut usize,
-        append_only_optimize: bool,
-        append_only_matched_row: &mut Option<JoinRow<RO>>,
-        matched_rows_to_clean: &mut Vec<JoinRow<RO>>,
-        map_output: impl Fn(R) -> RO,
-    ) -> Option<StreamChunk> {
-        let mut need_state_clean = false;
-        let mut chunk_opt = None;
-        // TODO(kwannoel): Instead of evaluating this every loop,
-        // we can call this only if there's a non-equi expression.
-        // check join cond
-        let join_condition_satisfied = Self::check_join_condition(
-            update_row,
-            side_update_start_pos,
-            &matched_row.row,
-            side_match_start_pos,
-            cond,
-        )
-        .await;
+fn project_join_output_types(
+    join_type: JoinTypePrimitive,
+    left: &Schema,
+    right: &Schema,
+    output_indices: &[usize],
+) -> Vec<DataType> {
+    let schema_fields = match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => left.fields.clone(),
+        JoinType::RightSemi | JoinType::RightAnti => right.fields.clone(),
+        _ => [left.fields.clone(), right.fields.clone()].concat(),
+    };
 
-        if join_condition_satisfied {
-            *total_matches += 1;
-            // update degree
-            *update_row_degree += 1;
-            // send matched row downstream
+    let original_output_data_types = schema_fields
+        .iter()
+        .map(|field| field.data_type())
+        .collect_vec();
+    output_indices
+        .iter()
+        .map(|&idx| original_output_data_types[idx].clone())
+        .collect_vec()
+}
 
-            // Inserts must happen before degrees are updated,
-            // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
-            if matches!(JOIN_OP, JoinOp::Insert)
-                && !forward_exactly_once(T, SIDE)
-                && let Some(chunk) =
-                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
-            {
-                chunk_opt = Some(chunk);
-            }
-            // TODO(kwannoel): We can actually statically decide this, using join side + join type.
-            if let Some(degree_table) = match_degree_table {
-                update_degree::<S, { JOIN_OP }>(
-                    match_order_key_indices,
-                    degree_table,
-                    &mut matched_row,
-                );
-                if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
-                    // update matched row in cache
-                    match JOIN_OP {
-                        JoinOp::Insert => matched_row_cache_ref.as_mut().unwrap().increase_degree(),
-                        JoinOp::Delete => matched_row_cache_ref.as_mut().unwrap().decrease_degree(),
-                    }
-                }
-            }
+struct JoinSideColumnMapping {
+    i2o_mapping: Vec<(usize, usize)>,
+    i2o_mapping_indexed: MultiMap<usize, usize>,
+    input2inequality_index: Vec<Vec<(usize, bool)>>,
+    non_null_fields: Vec<usize>,
+    state_clean_columns: Vec<(usize, usize)>,
+}
 
-            // Deletes must happen after degree table is updated.
-            // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
-            if matches!(JOIN_OP, JoinOp::Delete)
-                && !forward_exactly_once(T, SIDE)
-                && let Some(chunk) =
-                    hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
-            {
-                chunk_opt = Some(chunk);
-            }
+struct JoinColumnMappings {
+    left: JoinSideColumnMapping,
+    right: JoinSideColumnMapping,
+    inequality_pairs: Vec<(Vec<usize>, InequalityPairInfo)>,
+}
+
+fn build_join_column_mappings(
+    join_type: JoinTypePrimitive,
+    left_input_len: usize,
+    right_input_len: usize,
+    output_indices: &[usize],
+    inequality_pairs: Vec<InequalityPairInfo>,
+    append_only_optimize: bool,
+) -> JoinColumnMappings {
+    let (left_to_output, right_to_output) = {
+        let (left_len, right_len) = if is_left_semi_or_anti(join_type) {
+            (left_input_len, 0usize)
+        } else if is_right_semi_or_anti(join_type) {
+            (0usize, right_input_len)
         } else {
-            // check if need state cleaning
-            for (column_idx, watermark) in useful_state_clean_columns {
-                if matched_row.row.datum_at(*column_idx).is_some_and(|scalar| {
-                    scalar
-                        .default_cmp(&watermark.val.as_scalar_ref_impl())
-                        .is_lt()
-                }) {
-                    need_state_clean = true;
-                    break;
-                }
-            }
-        }
-        // If the stream is append-only and the join key covers pk in both side,
-        // then we can remove matched rows since pk is unique and will not be
-        // inserted again
-        if append_only_optimize {
-            assert_matches!(JOIN_OP, JoinOp::Insert);
-            // Since join key contains pk and pk is unique, there should be only
-            // one row if matched.
-            assert!(append_only_matched_row.is_none());
-            *append_only_matched_row = Some(matched_row.map(map_output));
-        } else if need_state_clean {
-            debug_assert!(
-                !append_only_optimize,
-                "`append_only_optimize` and `need_state_clean` must not both be true"
-            );
-            matched_rows_to_clean.push(matched_row.map(map_output));
-        }
+            (left_input_len, right_input_len)
+        };
+        JoinStreamChunkBuilder::get_i2o_mapping(output_indices, left_len, right_len)
+    };
 
-        chunk_opt
+    let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
+    let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
+
+    let mut l2inequality_index = vec![vec![]; left_input_len];
+    let mut r2inequality_index = vec![vec![]; right_input_len];
+    let mut l_inequal_state_clean_columns = vec![];
+    let mut r_inequal_state_clean_columns = vec![];
+    let inequality_pairs = inequality_pairs
+        .into_iter()
+        .enumerate()
+        .map(|(index, pair)| {
+            // Map input columns to inequality index
+            // The second field indicates whether this column is required to be less than
+            // the corresponding column on the other side.
+            // For `left >= right`: left is NOT less than right, right IS less than left
+            // For `left <= right`: left IS less than right, right is NOT less than left
+            let left_is_larger = pair.left_side_is_larger();
+            l2inequality_index[pair.left_idx].push((index, !left_is_larger));
+            r2inequality_index[pair.right_idx].push((index, left_is_larger));
+
+            // Determine state cleanup columns
+            if pair.clean_left_state {
+                l_inequal_state_clean_columns.push((pair.left_idx, index));
+            }
+            if pair.clean_right_state {
+                r_inequal_state_clean_columns.push((pair.right_idx, index));
+            }
+
+            // Get output indices for watermark emission
+            // We only emit watermarks for the LARGER side's output columns
+            let output_indices = if pair.left_side_is_larger() {
+                // Left is larger, emit for left output columns
+                l2o_indexed
+                    .get_vec(&pair.left_idx)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                // Right is larger, emit for right output columns
+                r2o_indexed
+                    .get_vec(&pair.right_idx)
+                    .cloned()
+                    .unwrap_or_default()
+            };
+
+            (output_indices, pair)
+        })
+        .collect_vec();
+
+    let mut l_non_null_fields = l2inequality_index
+        .iter()
+        .positions(|inequalities| !inequalities.is_empty())
+        .collect_vec();
+    let mut r_non_null_fields = r2inequality_index
+        .iter()
+        .positions(|inequalities| !inequalities.is_empty())
+        .collect_vec();
+
+    if append_only_optimize {
+        l_inequal_state_clean_columns.clear();
+        r_inequal_state_clean_columns.clear();
+        l_non_null_fields.clear();
+        r_non_null_fields.clear();
     }
 
-    // TODO(yuhao-su): We should find a better way to eval the expression
-    // without concat two rows.
-    // if there are non-equi expressions
-    // NOTE(kwannoel): We can probably let `eval` use `impl Row` instead of `OwnedRow`.
-    #[inline]
-    async fn check_join_condition(
-        row: impl Row,
-        side_update_start_pos: usize,
-        matched_row: impl Row,
-        side_match_start_pos: usize,
-        join_condition: &Option<NonStrictExpression>,
-    ) -> bool {
-        if let Some(join_condition) = join_condition {
-            let new_row = Self::row_concat(
-                row,
-                side_update_start_pos,
-                matched_row,
-                side_match_start_pos,
+    JoinColumnMappings {
+        left: JoinSideColumnMapping {
+            i2o_mapping: left_to_output,
+            i2o_mapping_indexed: l2o_indexed,
+            input2inequality_index: l2inequality_index,
+            non_null_fields: l_non_null_fields,
+            state_clean_columns: l_inequal_state_clean_columns,
+        },
+        right: JoinSideColumnMapping {
+            i2o_mapping: right_to_output,
+            i2o_mapping_indexed: r2o_indexed,
+            input2inequality_index: r2inequality_index,
+            non_null_fields: r_non_null_fields,
+            state_clean_columns: r_inequal_state_clean_columns,
+        },
+        inequality_pairs,
+    }
+}
+
+#[expect(clippy::too_many_arguments)]
+#[inline]
+fn handle_match_row<
+    'a,
+    R: Row,  // input row type
+    RO: Row, // output row type
+    S: StateStore,
+    C: CachedJoinRow,
+    const T: JoinTypePrimitive,
+    const SIDE: SideTypePrimitive,
+    const JOIN_OP: JoinOpPrimitive,
+    const MATCHED_ROWS_FROM_CACHE: bool,
+>(
+    update_row: RowRef<'a>,
+    mut matched_row: JoinRow<R>,
+    mut matched_row_cache_ref: Option<&mut C>,
+    hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
+    match_order_key_indices: &[usize],
+    match_degree_table: &mut Option<TableInner<S>>,
+    join_condition_satisfied: bool,
+    update_row_degree: &mut u64,
+    useful_state_clean_columns: &[(usize, &'a Watermark)],
+    total_matches: &mut usize,
+    append_only_optimize: bool,
+    append_only_matched_row: &mut Option<JoinRow<RO>>,
+    matched_rows_to_clean: &mut Vec<JoinRow<RO>>,
+    map_output: impl Fn(R) -> RO,
+) -> Option<StreamChunk> {
+    let mut need_state_clean = false;
+    let mut chunk_opt = None;
+
+    if join_condition_satisfied {
+        *total_matches += 1;
+        // update degree
+        *update_row_degree += 1;
+        // send matched row downstream
+
+        // Inserts must happen before degrees are updated,
+        // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
+        if matches!(JOIN_OP, JoinOp::Insert)
+            && !forward_exactly_once(T, SIDE)
+            && let Some(chunk) =
+                hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
+        {
+            chunk_opt = Some(chunk);
+        }
+        // TODO(kwannoel): We can actually statically decide this, using join side + join type.
+        if let Some(degree_table) = match_degree_table {
+            update_degree::<S, { JOIN_OP }>(
+                match_order_key_indices,
+                degree_table,
+                &mut matched_row,
             );
-            join_condition
-                .eval_row_infallible(&new_row)
-                .await
-                .map(|s| *s.as_bool())
-                .unwrap_or(false)
-        } else {
-            true
+            if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
+                // update matched row in cache
+                match JOIN_OP {
+                    JoinOp::Insert => matched_row_cache_ref.as_mut().unwrap().increase_degree(),
+                    JoinOp::Delete => matched_row_cache_ref.as_mut().unwrap().decrease_degree(),
+                }
+            }
+        }
+
+        // Deletes must happen after degree table is updated.
+        // FIXME(kwannoel): We should let deletes and inserts happen BEFORE degree updates.
+        if matches!(JOIN_OP, JoinOp::Delete)
+            && !forward_exactly_once(T, SIDE)
+            && let Some(chunk) =
+                hashjoin_chunk_builder.with_match::<JOIN_OP>(&update_row, &matched_row)
+        {
+            chunk_opt = Some(chunk);
+        }
+    } else {
+        // check if need state cleaning
+        for (column_idx, watermark) in useful_state_clean_columns {
+            if matched_row.row.datum_at(*column_idx).is_some_and(|scalar| {
+                scalar
+                    .default_cmp(&watermark.val.as_scalar_ref_impl())
+                    .is_lt()
+            }) {
+                need_state_clean = true;
+                break;
+            }
         }
     }
+    // If the stream is append-only and the join key covers pk in both side,
+    // then we can remove matched rows since pk is unique and will not be
+    // inserted again
+    if append_only_optimize {
+        assert_matches!(JOIN_OP, JoinOp::Insert);
+        // Since join key contains pk and pk is unique, there should be only
+        // one row if matched.
+        assert!(append_only_matched_row.is_none());
+        *append_only_matched_row = Some(matched_row.map(map_output));
+    } else if need_state_clean {
+        debug_assert!(
+            !append_only_optimize,
+            "`append_only_optimize` and `need_state_clean` must not both be true"
+        );
+        matched_rows_to_clean.push(matched_row.map(map_output));
+    }
+
+    chunk_opt
+}
+
+// TODO(yuhao-su): We should find a better way to eval the expression
+// without concat two rows.
+// if there are non-equi expressions
+// NOTE(kwannoel): We can probably let `eval` use `impl Row` instead of `OwnedRow`.
+#[inline]
+async fn check_join_condition(
+    row: impl Row,
+    side_update_start_pos: usize,
+    matched_row: impl Row,
+    side_match_start_pos: usize,
+    join_condition: &NonStrictExpression,
+) -> bool {
+    let new_row = row_concat(
+        row,
+        side_update_start_pos,
+        matched_row,
+        side_match_start_pos,
+    );
+    join_condition
+        .eval_row_infallible(&new_row)
+        .await
+        .map(|s| *s.as_bool())
+        .unwrap_or(false)
+}
+
+fn row_concat(
+    row_update: impl Row,
+    update_start_pos: usize,
+    row_matched: impl Row,
+    matched_start_pos: usize,
+) -> OwnedRow {
+    let mut new_row = vec![None; row_update.len() + row_matched.len()];
+
+    for (i, datum_ref) in row_update.iter().enumerate() {
+        new_row[i + update_start_pos] = datum_ref.to_owned_datum();
+    }
+    for (i, datum_ref) in row_matched.iter().enumerate() {
+        new_row[i + matched_start_pos] = datum_ref.to_owned_datum();
+    }
+    OwnedRow::new(new_row)
 }
 
 #[cfg(test)]
