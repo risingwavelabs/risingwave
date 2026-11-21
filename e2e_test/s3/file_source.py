@@ -328,7 +328,7 @@ def format_csv(data, with_header):
         csv_files.append(ostream.getvalue())
     return csv_files
 
-def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=True, dir="", compress=".gz"):
+def do_test(file_num, item_num_per_file, prefix, fmt, need_drop_table=True, dir="", compress=".gz"):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -445,7 +445,7 @@ FORMATTER = {
     }
 
 
-def test_batch_read(config, file_num, item_num_per_file, prefix, fmt, dir = "", compress=".gz"):
+def test_batch_read(file_num, item_num_per_file, prefix, fmt, dir = "", compress=".gz"):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -531,7 +531,7 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt, dir = "", 
     conn.close()
 
 
-def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias, dir):
+def upload_to_s3_bucket(minio_client, run_id, files, start_bias, dir):
     _local = lambda idx, start_bias: f"data_{idx + start_bias}.{fmt}"
     _s3 = lambda idx, start_bias: f"/{dir}/{run_id}_data_{idx + start_bias}.{fmt}"
     for idx, file_str in enumerate(files):
@@ -580,7 +580,6 @@ if __name__ == "__main__":
     assert fmt in FORMATTER, f"Unsupported format: {fmt}"
     formatted_files = FORMATTER[fmt](data)
 
-    config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
         endpoint="127.0.0.1:9301",
         access_key="hummockadmin",
@@ -618,10 +617,10 @@ if __name__ == "__main__":
 
     # do test
     print("Test streaming file source...\n")
-    do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
+    do_test(FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
     print("Test batch read file source...\n")
-    test_batch_read(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
+    test_batch_read(FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
     _s3 = lambda idx, start_bias: (
         f"{run_id}_data_{idx + start_bias}.{fmt}"
@@ -643,15 +642,15 @@ if __name__ == "__main__":
     print(f"S3 Source New File Test: run ID: {run_id} to bucket")
 
     formatted_batch1 = FORMATTER[fmt](data_batch1)
-    upload_to_s3_bucket(config, client, run_id, formatted_batch1, 0, "test_incremental/")
+    upload_to_s3_bucket(client, run_id, formatted_batch1, 0, "test_incremental/")
     _s3_incremental = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
 
-    # config in do_test that fs source's list interval is 1s
+    # do_test configures the source's list interval to 1s
     do_test(
-        config, len(data_batch1), ITEM_NUM_PER_FILE, run_id, fmt, need_drop_table=False, dir="test_incremental/", compress="")
+        len(data_batch1), ITEM_NUM_PER_FILE, run_id, fmt, need_drop_table=False, dir="test_incremental/", compress="")
 
     formatted_batch2 = FORMATTER[fmt](data_batch2)
-    upload_to_s3_bucket(config, client, run_id, formatted_batch2, split_idx, "test_incremental/")
+    upload_to_s3_bucket(client, run_id, formatted_batch2, split_idx, "test_incremental/")
 
     success_flag = check_for_new_files(FILE_NUM, ITEM_NUM_PER_FILE, fmt)
     if success_flag:
