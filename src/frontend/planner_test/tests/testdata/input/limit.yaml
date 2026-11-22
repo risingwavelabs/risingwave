@@ -100,3 +100,9 @@
     select 1 c from (select v from t limit 10) s;
   expected_outputs:
   - stream_plan
+- name: push limit into scan through column-reordering projection
+  sql: |
+    create table t (a int primary key, b int);
+    select b, a from t order by a limit 2 offset 3;
+  expected_outputs:
+  - batch_plan

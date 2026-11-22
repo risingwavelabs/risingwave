@@ -28,10 +28,21 @@ const ICEBERG_LIMIT_PUSHDOWN_THRESHOLD: u64 = 1_000_000;
 impl Rule<Batch> for BatchPushLimitToScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let limit: &BatchLimit = plan.as_batch_limit()?;
-        let limit_input = limit.input();
+        Self::push_limit_to_scan(limit, limit.input())
+    }
+}
+
+impl BatchPushLimitToScanRule {
+    fn push_limit_to_scan(limit: &BatchLimit, input: PlanRef) -> Option<PlanRef> {
+        if let Some(project) = input.as_batch_project()
+            && project.core().is_all_inputref()
+        {
+            let new_input = Self::push_limit_to_scan(limit, project.input())?;
+            return Some(project.clone_with_input(new_input).into());
+        }
 
         let pushed_limit = limit.limit().checked_add(limit.offset())?;
-        if let Some(scan) = limit_input.as_batch_seq_scan() {
+        if let Some(scan) = input.as_batch_seq_scan() {
             if scan.limit().is_some() {
                 return None;
             }
@@ -44,7 +55,7 @@ impl Rule<Batch> for BatchPushLimitToScanRule {
             return Some(limit.clone_with_input(new_scan.into()).into());
         }
 
-        let scan: &BatchIcebergScan = limit_input.as_batch_iceberg_scan()?;
+        let scan: &BatchIcebergScan = input.as_batch_iceberg_scan()?;
         if scan.limit().is_some() {
             return None;
         }
@@ -57,9 +68,7 @@ impl Rule<Batch> for BatchPushLimitToScanRule {
         let new_scan = scan.clone_with_limit(Some(pushed_limit));
         Some(limit.clone_with_input(new_scan.into()).into())
     }
-}
 
-impl BatchPushLimitToScanRule {
     pub fn create() -> BoxedRule {
         Box::new(BatchPushLimitToScanRule {})
     }
