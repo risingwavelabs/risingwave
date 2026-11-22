@@ -52,7 +52,7 @@ impl BatchTopN {
             self.core.limit_attr.with_ties(),
         );
         let new_offset = 0;
-        let partial_input: PlanRef = if input.order().satisfies(&self.core.order)
+        let partial_input: PlanRef = if input.satisfies_order(&self.core.order)
             && !self.core.limit_attr.with_ties()
         {
             let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
@@ -73,7 +73,7 @@ impl BatchTopN {
     }
 
     fn one_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
-        if input.order().satisfies(&self.core.order) && !self.core.limit_attr.with_ties() {
+        if input.satisfies_order(&self.core.order) && !self.core.limit_attr.with_ties() {
             let logical_limit =
                 generic::Limit::new(input, self.core.limit_attr.limit(), self.core.offset);
             let batch_limit = BatchLimit::new(logical_limit);

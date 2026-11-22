@@ -29,6 +29,10 @@ pub trait BatchPlanNodeMetadata: PhysicalPlanRef {
     fn orders(&self) -> Vec<Order> {
         vec![self.order().clone()]
     }
+
+    fn satisfies_order(&self, required: &Order) -> bool {
+        self.orders().iter().any(|order| order.satisfies(required))
+    }
 }
 
 /// Prelude for batch plan nodes.

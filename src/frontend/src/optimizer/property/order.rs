@@ -45,16 +45,6 @@ impl Order {
     pub fn len(&self) -> usize {
         self.column_orders.len()
     }
-
-    pub fn concat(self, other: Self) -> Self {
-        Self {
-            column_orders: self
-                .column_orders
-                .into_iter()
-                .chain(other.column_orders)
-                .collect(),
-        }
-    }
 }
 
 impl fmt::Display for Order {
@@ -96,7 +86,7 @@ impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: BatchPlanRef) -> Result<BatchPlanRef> {
         use crate::optimizer::plan_node::batch::prelude::*;
 
-        if !plan.orders().iter().any(|order| order.satisfies(self)) {
+        if !plan.satisfies_order(self) {
             Ok(self.enforce(plan))
         } else {
             Ok(plan)

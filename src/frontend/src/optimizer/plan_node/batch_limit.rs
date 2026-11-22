@@ -37,10 +37,10 @@ const LIMIT_SEQUENTIAL_EXCHANGE_THRESHOLD: u64 = 1024;
 
 impl BatchLimit {
     pub fn new(core: generic::Limit<PlanRef>) -> Self {
-        let base = PlanBase::new_batch_with_core(
+        let base = PlanBase::new_batch_with_core_and_orders(
             &core,
             core.input.distribution().clone(),
-            core.input.order().clone(),
+            core.input.orders(),
         );
         BatchLimit { base, core }
     }

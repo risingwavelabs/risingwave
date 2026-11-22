@@ -17,136 +17,58 @@ use std::collections::{BTreeMap, HashSet};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::prelude::{PlanRef, *};
-use crate::optimizer::plan_node::{LogicalProject, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 
 pub struct TopNOnIndexRule {}
 
 impl Rule<Logical> for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let logical_top_n: &LogicalTopN = plan.as_logical_top_n()?;
-        let logical_scan: LogicalScan = logical_top_n.input().as_logical_scan()?.to_owned();
-        let order = logical_top_n.topn_order();
-        if order.column_orders.is_empty() {
+        let top_n: &LogicalTopN = plan.as_logical_top_n()?;
+        let input = top_n.input();
+        let scan = input.as_logical_scan()?;
+        let order = top_n.topn_order();
+        if order.is_any() || scan.table_indexes().is_empty() {
             return None;
         }
-        if let Some(p) = self.try_on_pk(logical_top_n, logical_scan.clone(), order) {
-            Some(p)
-        } else {
-            self.try_on_index(logical_top_n, logical_scan, order)
+
+        let expanded_scan = (scan.output_col_idx() != scan.required_col_idx())
+            .then(|| scan.clone_with_output_indices(scan.required_col_idx().clone()));
+        let match_scan = expanded_scan.as_ref().unwrap_or(scan);
+        let output_col_map = Self::output_col_map(match_scan);
+        let prefix = Self::build_eq_const_prefix(match_scan, &output_col_map);
+        let pk_order = Order::new(
+            scan.primary_key()
+                .iter()
+                .map_while(|key| {
+                    output_col_map
+                        .get(&key.column_index)
+                        .map(|&idx| ColumnOrder::new(idx, key.order_type))
+                })
+                .skip_while(|key| prefix.contains(key))
+                .collect(),
+        );
+        if pk_order.satisfies(order) {
+            return None;
         }
+
+        let mut longest_prefix_len = 0;
+        let mut selected_scan = None;
+        for (index, fixed_prefix) in match_scan.indexes_satisfy_order_with_prefix(order, &prefix) {
+            if fixed_prefix.len() >= longest_prefix_len {
+                longest_prefix_len = fixed_prefix.len();
+                if let Some(index_scan) = scan.to_index_scan_if_index_covered(index) {
+                    selected_scan = Some(index_scan);
+                }
+            }
+        }
+        selected_scan.map(|scan| top_n.clone_with_input(scan.into()).into())
     }
 }
 
 impl TopNOnIndexRule {
     pub fn create() -> BoxedRule {
         Box::new(TopNOnIndexRule {})
-    }
-
-    fn try_on_index(
-        &self,
-        logical_top_n: &LogicalTopN,
-        logical_scan: LogicalScan,
-        required_order: &Order,
-    ) -> Option<PlanRef> {
-        let (scan_for_index, output_len, _output_col_map, prefix) =
-            Self::prepare_scan_for_predicate(logical_scan);
-        let scan_output_len = scan_for_index.output_col_idx().len();
-        let order_satisfied_index =
-            scan_for_index.indexes_satisfy_order_with_prefix(required_order, &prefix);
-        let mut longest_prefix: Option<Order> = None;
-        let mut selected_index = None;
-        for (index, prefix) in order_satisfied_index {
-            if prefix.len() >= longest_prefix.as_ref().map_or(0, |p| p.len()) {
-                longest_prefix = Some(prefix.clone());
-                if let Some(index_scan) = scan_for_index.to_index_scan_if_index_covered(index) {
-                    selected_index = Some(Self::finish_top_n(
-                        logical_top_n,
-                        index_scan.into(),
-                        prefix,
-                        output_len,
-                        scan_output_len,
-                    ));
-                }
-            }
-        }
-        selected_index
-    }
-
-    fn try_on_pk(
-        &self,
-        logical_top_n: &LogicalTopN,
-        logical_scan: LogicalScan,
-        order: &Order,
-    ) -> Option<PlanRef> {
-        let (scan_for_pk, output_len, output_col_map, prefix) =
-            Self::prepare_scan_for_predicate(logical_scan);
-        let scan_output_len = scan_for_pk.output_col_idx().len();
-        let unmatched_idx = output_col_map.len();
-        let primary_key = scan_for_pk.primary_key();
-        let primary_key_order = Order {
-            column_orders: primary_key
-                .iter()
-                .map(|o| {
-                    ColumnOrder::new(
-                        *output_col_map
-                            .get(&o.column_index)
-                            .unwrap_or(&unmatched_idx),
-                        o.order_type,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        };
-        let mut pk_orders_iter = primary_key_order.column_orders.iter().cloned().peekable();
-        let fixed_prefix = {
-            let mut fixed_prefix = vec![];
-            loop {
-                match pk_orders_iter.peek() {
-                    Some(order) if prefix.contains(order) => {
-                        let order = pk_orders_iter.next().unwrap();
-                        fixed_prefix.push(order);
-                    }
-                    _ => break,
-                }
-            }
-            Order {
-                column_orders: fixed_prefix,
-            }
-        };
-        let remaining_orders = Order {
-            column_orders: pk_orders_iter.collect(),
-        };
-        if !remaining_orders.satisfies(order) {
-            return None;
-        }
-        Some(Self::finish_top_n(
-            logical_top_n,
-            scan_for_pk.into(),
-            fixed_prefix,
-            output_len,
-            scan_output_len,
-        ))
-    }
-
-    fn prepare_scan_for_predicate(
-        logical_scan: LogicalScan,
-    ) -> (
-        LogicalScan,
-        usize,
-        BTreeMap<usize, usize>,
-        HashSet<ColumnOrder>,
-    ) {
-        let output_len = logical_scan.output_col_idx().len();
-        let scan = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
-            logical_scan
-        } else {
-            // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
-            // so `output_col_idx` is always a prefix of `required_col_idx`.
-            logical_scan.clone_with_output_indices(logical_scan.required_col_idx().clone())
-        };
-        let output_col_map = Self::output_col_map(&scan);
-        let prefix = Self::build_eq_const_prefix(&scan, &output_col_map);
-        (scan, output_len, output_col_map, prefix)
     }
 
     fn output_col_map(scan: &LogicalScan) -> BTreeMap<usize, usize> {
@@ -179,20 +101,5 @@ impl TopNOnIndexRule {
                     })
             })
             .collect()
-    }
-
-    fn finish_top_n(
-        logical_top_n: &LogicalTopN,
-        input: PlanRef,
-        prefix: Order,
-        output_len: usize,
-        scan_output_len: usize,
-    ) -> PlanRef {
-        let top_n = logical_top_n.clone_with_input_and_prefix(input, prefix);
-        if scan_output_len == output_len {
-            top_n.into()
-        } else {
-            LogicalProject::with_out_col_idx(top_n.into(), 0..output_len).into()
-        }
     }
 }

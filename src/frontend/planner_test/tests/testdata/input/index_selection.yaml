@@ -563,6 +563,27 @@
     select * from t1 where a = 1 order by b desc limit 10
   expected_outputs:
     - batch_plan
+- name: single-phase topn uses the visible suffix order through limit
+  sql: |
+    create table t (a int, b int);
+    create materialized view mv as select a, b from t order by a desc, b limit 100;
+    select a, b from mv where a = 10 order by b limit 1;
+  expected_outputs:
+    - batch_plan
+- name: topn keeps ties on an ordered index suffix
+  sql: |
+    create table t (a int, b int);
+    create index idx on t(a desc, b);
+    select * from t where a = 10 order by b fetch first 2 rows with ties;
+  expected_outputs:
+    - batch_plan
+- name: topn keeps sorting when the index suffix has a different null order
+  sql: |
+    create table t (a int, b int);
+    create index idx on t(a desc, b desc nulls first);
+    select * from t where a = 10 order by b desc nulls last limit 2;
+  expected_outputs:
+    - batch_plan
 - name: topn index selection + limit pushdown with multi point get
   sql: |
     create table t1 (a int, b int, c int);
