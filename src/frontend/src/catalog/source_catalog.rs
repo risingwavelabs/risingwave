@@ -191,8 +191,8 @@ impl SourceCatalog {
     /// Returns error if it's invalid.
     pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
         if self.with_properties.is_cdc_connector() || self.is_iceberg_update_source() {
-            // These sources infer their schema. Preserve the SQL primary key for update sources
-            // without adding inferred column definitions that their CREATE path rejects.
+            // CDC sources infer their schema. Iceberg update sources may key on the hidden
+            // upstream `_row_id`, which a purified column list cannot express.
             return self.create_sql_ast();
         }
 
