@@ -40,6 +40,7 @@ fi
 docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
   --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
+  --build-arg CARGO_BUILD_JOBS \
   -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
   --progress plain \
   --builder=container \

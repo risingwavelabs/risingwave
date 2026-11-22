@@ -80,6 +80,8 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
+ARG CARGO_BUILD_JOBS
+
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \

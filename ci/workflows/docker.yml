@@ -53,6 +53,9 @@ steps:
       build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
+    env:
+      # Cargo's jobserver also bounds parallel ThinLTO work within rustc.
+      CARGO_BUILD_JOBS: "8"
     plugins:
       - seek-oss/aws-sm#v2.3.2:
           env:
