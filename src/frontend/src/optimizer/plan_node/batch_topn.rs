@@ -51,25 +51,19 @@ impl BatchTopN {
             self.core.limit_attr.limit() + self.core.offset,
             self.core.limit_attr.with_ties(),
         );
-        let new_offset = 0;
-        let partial_input: PlanRef = if input.satisfies_order(&self.core.order)
-            && !self.core.limit_attr.with_ties()
-        {
-            let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
-            let batch_partial_limit = BatchLimit::new(logical_partial_limit);
-            batch_partial_limit.into()
-        } else {
-            let logical_partial_topn =
-                generic::TopN::without_group(input, new_limit, new_offset, self.core.order.clone());
-            let batch_partial_topn = Self::new(logical_partial_topn);
-            batch_partial_topn.into()
-        };
+        let (partial_input, exchange_order): (PlanRef, _) =
+            if input.satisfies_order(&self.core.order) && !self.core.limit_attr.with_ties() {
+                let partial_limit = generic::Limit::new(input, new_limit.limit(), 0);
+                (BatchLimit::new(partial_limit).into(), &self.core.order)
+            } else {
+                let partial_topn =
+                    generic::TopN::without_group(input, new_limit, 0, self.core.order.clone());
+                (Self::new(partial_topn).into(), &Order::any())
+            };
 
-        let ensure_single_dist =
-            RequiredDist::single().batch_enforce_if_not_satisfies(partial_input, &Order::any())?;
-
-        let batch_global_topn = self.clone_with_input(ensure_single_dist);
-        Ok(batch_global_topn.into())
+        let single_input =
+            RequiredDist::single().batch_enforce_if_not_satisfies(partial_input, exchange_order)?;
+        self.one_phase_topn(single_input)
     }
 
     fn one_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {

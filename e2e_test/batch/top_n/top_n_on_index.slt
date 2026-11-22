@@ -60,3 +60,34 @@ drop table t;
 
 statement ok
 drop table t1;
+
+statement ok
+SET QUERY_MODE TO distributed;
+
+statement ok
+create table t (a int, b int, id int, primary key (a, b, id));
+
+statement ok
+insert into t select 10, id % 16, id from generate_series(0, 63) as s(id);
+
+query II
+select b, id from t where a = 10 order by b, id limit 3 offset 31;
+----
+7 55
+8 8
+8 24
+
+query I
+select b from t where a = 10 order by b fetch first 5 rows with ties;
+----
+0
+0
+0
+0
+1
+1
+1
+1
+
+statement ok
+drop table t;

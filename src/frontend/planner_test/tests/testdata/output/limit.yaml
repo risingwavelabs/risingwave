@@ -201,8 +201,8 @@
     create table t (a int primary key, b int);
     select b, a from t order by a limit 2 offset 3;
   batch_plan: |-
-    BatchTopN { order: [t.a ASC], limit: 2, offset: 3 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 2, offset: 3 }
+    └─BatchExchange { order: [t.a ASC], dist: Single }
       └─BatchProject { exprs: [t.b, t.a] }
         └─BatchLimit { limit: 5, offset: 0 }
           └─BatchScan { table: t, columns: [t.a, t.b], limit: 5, distribution: UpstreamHashShard(t.a) }

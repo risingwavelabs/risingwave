@@ -570,6 +570,13 @@
     select a, b from mv where a = 10 order by b limit 1;
   expected_outputs:
     - batch_plan
+- name: merge sharded index scan in suffix order before applying offset
+  sql: |
+    create table t (a int, b int);
+    create index idx on t(a, b desc) distributed by (a, b);
+    select * from t where a = 10 order by b desc limit 2 offset 3;
+  expected_outputs:
+    - batch_plan
 - name: topn keeps ties on an ordered index suffix
   sql: |
     create table t (a int, b int);

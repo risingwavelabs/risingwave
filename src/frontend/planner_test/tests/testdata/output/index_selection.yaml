@@ -700,8 +700,8 @@
     create index idx1 on t1(a);
     select * from t1 order by a limit 1
   batch_plan: |-
-    BatchTopN { order: [idx1.a ASC], limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchExchange { order: [idx1.a ASC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 1, distribution: UpstreamHashShard(idx1.a) }
 - name: topn on primary key
@@ -710,8 +710,8 @@
     create index idx1 on t1(a);
     select * from t1 order by a limit 1
   batch_plan: |-
-    BatchTopN { order: [t1.a ASC], limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchExchange { order: [t1.a ASC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: t1, columns: [t1.a, t1.b], limit: 1, distribution: UpstreamHashShard(t1.a) }
 - name: topn on index with descending ordering
@@ -720,8 +720,8 @@
     create index idx1 on t1(a desc);
     select * from t1 order by a desc limit 1
   batch_plan: |-
-    BatchTopN { order: [idx1.a DESC], limit: 1, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchExchange { order: [idx1.a DESC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 1, distribution: UpstreamHashShard(idx1.a) }
 - name: topn on pk streaming case, should NOT optimized
@@ -924,8 +924,8 @@
     create index idx1 on t1(a);
     select * from t1 order by a limit 10
   batch_plan: |-
-    BatchTopN { order: [idx1.a ASC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx1.a ASC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown fails due to b desc != b asc
@@ -944,8 +944,8 @@
     create index idx1 on t1(a, b desc);
     select * from t1 where a = 1 order by b desc limit 10
   batch_plan: |-
-    BatchTopN { order: [idx1.b DESC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx1.b DESC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: single-phase topn uses the visible suffix order through limit
@@ -957,6 +957,16 @@
     BatchExchange { order: [mv.b ASC], dist: Single }
     └─BatchLimit { limit: 1, offset: 0 }
       └─BatchScan { table: mv, columns: [mv.a, mv.b], scan_ranges: [mv.a = Int32(10)], limit: 1, distribution: Single }
+- name: merge sharded index scan in suffix order before applying offset
+  sql: |
+    create table t (a int, b int);
+    create index idx on t(a, b desc) distributed by (a, b);
+    select * from t where a = 10 order by b desc limit 2 offset 3;
+  batch_plan: |-
+    BatchLimit { limit: 2, offset: 3 }
+    └─BatchExchange { order: [idx.b DESC], dist: Single }
+      └─BatchLimit { limit: 5, offset: 0 }
+        └─BatchScan { table: idx, columns: [idx.a, idx.b], scan_ranges: [idx.a = Int32(10)], limit: 5, distribution: UpstreamHashShard(idx.a, idx.b) }
 - name: topn keeps ties on an ordered index suffix
   sql: |
     create table t (a int, b int);
@@ -983,8 +993,8 @@
     create index idx1 on t1(a, c, b desc);
     select * from t1 where c = 1 and a = 2 order by b desc limit 10
   batch_plan: |-
-    BatchTopN { order: [idx1.b DESC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx1.b DESC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown with multi point get + unindexed point get
@@ -993,8 +1003,8 @@
     create index idx1 on t1(a, c, b desc);
     select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
   batch_plan: |-
-    BatchTopN { order: [idx1.b DESC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx1.b DESC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchFilter { predicate: (idx1.d = 3:Int32) }
           └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c, idx1.d], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], distribution: UpstreamHashShard(idx1.a) }
@@ -1007,8 +1017,8 @@
     create index idx4 on t1(b, a desc);
     select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
   batch_plan: |-
-    BatchTopN { order: [idx3.b DESC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx3.b DESC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c, idx3.d], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
 - name: topn index selection + limit pushdown with point get + descending order point get
@@ -1017,8 +1027,8 @@
     create index idx1 on t1(a asc, b);
     select * from t1 where a = 1 order by b limit 10;
   batch_plan: |-
-    BatchTopN { order: [idx1.b ASC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx1.b ASC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get
@@ -1029,8 +1039,8 @@
     create index idx3 on t1(a desc nulls last, c asc nulls first, b desc nulls last);
     select * from t1 where c = 2 and a = 2 order by b desc nulls last limit 10;
   batch_plan: |-
-    BatchTopN { order: [idx3.b DESC NULLS LAST], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx3.b DESC NULLS LAST], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
@@ -1038,8 +1048,8 @@
     create table t1 (a int, b int, c int, primary key (a, b, c));
     select * from t1 where a = 1 and b = 2 order by c limit 10;
   batch_plan: |-
-    BatchTopN { order: [t1.c ASC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [t1.c ASC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], scan_ranges: [t1.a = Int32(1) AND t1.b = Int32(2)], limit: 10, distribution: UpstreamHashShard(t1.a, t1.b, t1.c) }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
@@ -1048,8 +1058,8 @@
     create index idx1 on t1(a, b, c desc);
     select * from t1 where a = 1 and b = 2 order by c desc limit 10;
   batch_plan: |-
-    BatchTopN { order: [idx1.c DESC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [idx1.c DESC], dist: Single }
       └─BatchLimit { limit: 10, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1) AND idx1.b = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: Use primary table instead of indexes if possible
@@ -1096,8 +1106,8 @@
     select b from t where a = 1 order by b desc, c desc limit 1;
   batch_plan: |-
     BatchProject { exprs: [idx.b] }
-    └─BatchTopN { order: [idx.b DESC, idx.c DESC], limit: 1, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
+    └─BatchLimit { limit: 1, offset: 0 }
+      └─BatchExchange { order: [idx.b DESC, idx.c DESC], dist: Single }
         └─BatchProject { exprs: [idx.b, idx.c] }
           └─BatchLimit { limit: 1, offset: 0 }
             └─BatchScan { table: idx, columns: [idx.c, idx.b], scan_ranges: [idx.a = Int32(1)], limit: 1, distribution: SomeShard }
@@ -1107,8 +1117,8 @@
     select b from t where a = 1 order by b, c limit 1;
   batch_plan: |-
     BatchProject { exprs: [t.b] }
-    └─BatchTopN { order: [t.b ASC, t.c ASC], limit: 1, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
+    └─BatchLimit { limit: 1, offset: 0 }
+      └─BatchExchange { order: [t.b ASC, t.c ASC], dist: Single }
         └─BatchProject { exprs: [t.b, t.c] }
           └─BatchLimit { limit: 1, offset: 0 }
             └─BatchScan { table: t, columns: [t.c, t.b], scan_ranges: [t.a = Int32(1)], limit: 1, distribution: SomeShard }
@@ -1124,8 +1134,8 @@
     create table t (a int, b int, c int, d int, primary key (a, b, c, d));
     select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c limit 5;
   batch_plan: |-
-    BatchTopN { order: [t.c ASC], limit: 5, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 5, offset: 0 }
+    └─BatchExchange { order: [t.c ASC], dist: Single }
       └─BatchLimit { limit: 5, offset: 0 }
         └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
 - name: batch sort elimination with eq-prefix-derived orders
@@ -1140,8 +1150,8 @@
     create table t (a int, b int, c int, d int, primary key (a, b, c, d));
     select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
   batch_plan: |-
-    BatchTopN { order: [t.c ASC], limit: 5, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 5, offset: 0 }
+    └─BatchExchange { order: [t.c ASC], dist: Single }
       └─BatchLimit { limit: 5, offset: 0 }
         └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
 - name: index scan ordered by suffix after an unprojected constant key
