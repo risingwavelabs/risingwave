@@ -90,4 +90,17 @@ select b from t where a = 10 order by b fetch first 5 rows with ties;
 1
 
 statement ok
+create index idx_ab on t(a, b desc, id);
+
+statement ok
+insert into t values (11, 99, 1);
+
+query III
+select id, a, b from t where a = 10 and id % 3 = 1 order by b desc, id limit 3;
+----
+31 10 15
+46 10 14
+13 10 13
+
+statement ok
 drop table t;

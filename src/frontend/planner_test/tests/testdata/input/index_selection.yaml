@@ -563,6 +563,20 @@
     select * from t1 where a = 1 order by b desc limit 10
   expected_outputs:
     - batch_plan
+- name: topn restores the fixed index key in the select list after filtering
+  sql: |
+    create table t (a bigint, b int, c int, d int);
+    create index idx on t(a desc, b);
+    select c, a, b from t where a = 10::bigint and d > 0 order by b limit 2;
+  expected_outputs:
+    - batch_plan
+- name: topn preserves the stored representation of an equal numeric index key
+  sql: |
+    create table t (a numeric, b int);
+    create index idx on t(a, b);
+    select * from t where a = 1.00 order by b limit 2;
+  expected_outputs:
+    - batch_plan
 - name: single-phase topn uses the visible suffix order through limit
   sql: |
     create table t (a int, b int);

@@ -110,6 +110,23 @@ impl Order {
         true
     }
 
+    /// Return the fixed leading keys if the remaining order satisfies `required`.
+    pub fn fixed_prefix_for(
+        &self,
+        required: &Order,
+        is_fixed: impl Fn(usize) -> bool,
+    ) -> Option<&[ColumnOrder]> {
+        let len = self
+            .column_orders
+            .iter()
+            .take_while(|key| is_fixed(key.column_index))
+            .count();
+        let (prefix, suffix) = self.column_orders.split_at(len);
+        suffix
+            .starts_with(&required.column_orders)
+            .then_some(prefix)
+    }
+
     #[inline(always)]
     pub const fn any() -> Self {
         ANY_ORDER

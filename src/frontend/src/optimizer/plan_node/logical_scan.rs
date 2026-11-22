@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -196,20 +196,17 @@ impl LogicalScan {
 
     /// Return indexes can satisfy the required order.
     pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Arc<TableIndex>> {
-        self.indexes_satisfy_order_with_prefix(required_order, &HashSet::new())
+        self.indexes_satisfy_order_with_prefix(required_order, |_| false)
             .into_iter()
             .map(|(index, _)| index)
             .collect()
     }
 
-    /// Return indexes can satisfy the required order.
-    /// The `prefix` refers to optionally matching columns of the index
-    /// It is unordered initially.
-    /// If any are used, we will return the fixed `Order` prefix.
+    /// Return indexes that satisfy the required order and their equality-constrained prefixes.
     pub fn indexes_satisfy_order_with_prefix(
         &self,
         required_order: &Order,
-        prefix: &HashSet<ColumnOrder>,
+        is_fixed: impl Fn(usize) -> bool,
     ) -> Vec<(&Arc<TableIndex>, Order)> {
         let output_col_map = self
             .output_col_idx()
@@ -236,30 +233,9 @@ impl LogicalScan {
                 })
                 .collect();
 
-            let mut index_orders_iter = index_orders.into_iter().peekable();
-
-            // First check the prefix
-            let fixed_prefix = {
-                let mut fixed_prefix = vec![];
-                loop {
-                    match index_orders_iter.peek() {
-                        Some(index_col_order) if prefix.contains(index_col_order) => {
-                            let index_col_order = index_orders_iter.next().unwrap();
-                            fixed_prefix.push(index_col_order);
-                        }
-                        _ => break,
-                    }
-                }
-                Order {
-                    column_orders: fixed_prefix,
-                }
-            };
-
-            let remaining_orders = Order {
-                column_orders: index_orders_iter.collect(),
-            };
-            if remaining_orders.satisfies(required_order) {
-                index_catalog_and_orders.push((index, fixed_prefix));
+            let index_order = Order::new(index_orders);
+            if let Some(prefix) = index_order.fixed_prefix_for(required_order, &is_fixed) {
+                index_catalog_and_orders.push((index, Order::new(prefix.to_vec())));
             }
         }
         index_catalog_and_orders
@@ -527,8 +503,7 @@ impl LogicalScan {
                 self.table(),
                 self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
-            let mut scan = self.clone();
-            scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
+            let scan = self.clone_with_predicate(predicate);
 
             let plan: BatchPlanRef = if scan.core.predicate.always_false() {
                 LogicalValues::create(vec![], scan.core.schema(), scan.core.ctx).to_batch()?
