@@ -82,6 +82,13 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
 pub struct RowSeqScanExecutorBuilder {}
 
+fn scan_chunk_size(configured_chunk_size: usize, limit: Option<u64>) -> usize {
+    match limit {
+        Some(limit) => limit.min(configured_chunk_size as u64) as usize,
+        None => configured_chunk_size,
+    }
+}
+
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,
@@ -118,11 +125,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .query_epoch
             .ok_or_else(|| anyhow!("query_epoch not set in distributed lookup join"))?;
 
-        let chunk_size = if let Some(limit) = seq_scan_node.limit {
-            (limit as u32).min(source.context().get_config().developer.chunk_size as u32)
-        } else {
-            source.context().get_config().developer.chunk_size as u32
-        };
+        let chunk_size = scan_chunk_size(source.context().get_config().developer.chunk_size, limit);
         let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
@@ -132,7 +135,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_ranges,
                 ordered,
                 query_epoch,
-                chunk_size as usize,
+                chunk_size,
                 source.plan_node().get_identity().clone(),
                 limit,
                 metrics,
