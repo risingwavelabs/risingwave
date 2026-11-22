@@ -10,8 +10,7 @@
   batch_plan: |-
     BatchLimit { limit: 2, offset: 0 }
     └─BatchExchange { order: [t1.id ASC], dist: Single }
-      └─BatchLimit { limit: 2, offset: 0 }
-        └─BatchScan { table: t1, columns: [t1.id, t1.i], limit: 2, distribution: UpstreamHashShard(t1.id) }
+      └─BatchScan { table: t1, columns: [t1.id, t1.i], limit: 2, distribution: UpstreamHashShard(t1.id) }
   stream_plan: |-
     StreamMaterialize { columns: [id, i], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t1.id, t1.i] }

@@ -702,8 +702,7 @@
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
     └─BatchExchange { order: [idx1.a ASC], dist: Single }
-      └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 1, distribution: UpstreamHashShard(idx1.a) }
+      └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 1, distribution: UpstreamHashShard(idx1.a) }
 - name: topn on primary key
   sql: |
     create table t1 (a int primary key, b int);
@@ -712,8 +711,7 @@
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
     └─BatchExchange { order: [t1.a ASC], dist: Single }
-      └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: t1, columns: [t1.a, t1.b], limit: 1, distribution: UpstreamHashShard(t1.a) }
+      └─BatchScan { table: t1, columns: [t1.a, t1.b], limit: 1, distribution: UpstreamHashShard(t1.a) }
 - name: topn on index with descending ordering
   sql: |
     create table t1 (a int, b int);
@@ -722,8 +720,7 @@
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
     └─BatchExchange { order: [idx1.a DESC], dist: Single }
-      └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 1, distribution: UpstreamHashShard(idx1.a) }
+      └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 1, distribution: UpstreamHashShard(idx1.a) }
 - name: topn on pk streaming case, should NOT optimized
   sql: |
     create table t1 (a int primary key);
@@ -926,8 +923,7 @@
   batch_plan: |-
     BatchLimit { limit: 10, offset: 0 }
     └─BatchExchange { order: [idx1.a ASC], dist: Single }
-      └─BatchLimit { limit: 10, offset: 0 }
-        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+      └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown fails due to b desc != b asc
   sql: |
     create table t1 (a int, b int);
@@ -947,8 +943,7 @@
     BatchProject { exprs: [1:Int32, idx1.b] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [idx1.b DESC], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.b], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: idx1, columns: [idx1.b], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: SomeShard }
 - name: topn restores the fixed index key in the select list after filtering
   sql: |
     create table t (a bigint, b int, c int, d int);
@@ -970,8 +965,7 @@
   batch_plan: |-
     BatchLimit { limit: 2, offset: 0 }
     └─BatchExchange { order: [idx.b ASC], dist: Single }
-      └─BatchLimit { limit: 2, offset: 0 }
-        └─BatchScan { table: idx, columns: [idx.a, idx.b], scan_ranges: [idx.a = Decimal(Normalized(1.00))], limit: 2, distribution: UpstreamHashShard(idx.a) }
+      └─BatchScan { table: idx, columns: [idx.a, idx.b], scan_ranges: [idx.a = Decimal(Normalized(1.00))], limit: 2, distribution: UpstreamHashShard(idx.a) }
 - name: single-phase topn uses the visible suffix order through limit
   sql: |
     create table t (a int, b int);
@@ -991,8 +985,7 @@
     BatchProject { exprs: [10:Int32, idx.b] }
     └─BatchLimit { limit: 2, offset: 3 }
       └─BatchExchange { order: [idx.b DESC], dist: Single }
-        └─BatchLimit { limit: 5, offset: 0 }
-          └─BatchScan { table: idx, columns: [idx.b], scan_ranges: [idx.a = Int32(10)], limit: 5, distribution: SomeShard }
+        └─BatchScan { table: idx, columns: [idx.b], scan_ranges: [idx.a = Int32(10)], limit: 5, distribution: SomeShard }
 - name: topn keeps ties on an ordered index suffix
   sql: |
     create table t (a int, b int);
@@ -1023,8 +1016,7 @@
     BatchProject { exprs: [2:Int32, idx1.b, 1:Int32] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [idx1.b DESC], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.b], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: idx1, columns: [idx1.b], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], limit: 10, distribution: SomeShard }
 - name: topn index selection + limit pushdown with multi point get + unindexed point get
   sql: |
     create table t1 (a int, b int, c int, d int);
@@ -1049,8 +1041,7 @@
     BatchProject { exprs: [2:Int32, idx3.b, 1:Int32, 3:Int32] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [idx3.b DESC], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx3, columns: [idx3.b], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: idx3, columns: [idx3.b], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: SomeShard }
 - name: topn index selection + limit pushdown with point get + descending order point get
   sql: |
     create table t1 (a int, b int, c int);
@@ -1060,8 +1051,7 @@
     BatchProject { exprs: [1:Int32, idx1.b, idx1.c] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [idx1.b ASC], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: idx1, columns: [idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: SomeShard }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get
   sql: |
     create table t1 (a int, b int, c int);
@@ -1073,8 +1063,7 @@
     BatchProject { exprs: [2:Int32, idx3.b, 2:Int32] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [idx3.b DESC NULLS LAST], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx3, columns: [idx3.b], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: idx3, columns: [idx3.b], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: SomeShard }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
   sql: |
     create table t1 (a int, b int, c int, primary key (a, b, c));
@@ -1083,8 +1072,7 @@
     BatchProject { exprs: [1:Int32, 2:Int32, t1.c] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [t1.c ASC], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: t1, columns: [t1.c], scan_ranges: [t1.a = Int32(1) AND t1.b = Int32(2)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: t1, columns: [t1.c], scan_ranges: [t1.a = Int32(1) AND t1.b = Int32(2)], limit: 10, distribution: SomeShard }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
   sql: |
     create table t1 (a int, b int, c int, primary key (a, b, c));
@@ -1094,8 +1082,7 @@
     BatchProject { exprs: [1:Int32, 2:Int32, idx1.c] }
     └─BatchLimit { limit: 10, offset: 0 }
       └─BatchExchange { order: [idx1.c DESC], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.c], scan_ranges: [idx1.a = Int32(1) AND idx1.b = Int32(2)], limit: 10, distribution: SomeShard }
+        └─BatchScan { table: idx1, columns: [idx1.c], scan_ranges: [idx1.a = Int32(1) AND idx1.b = Int32(2)], limit: 10, distribution: SomeShard }
 - name: Use primary table instead of indexes if possible
   sql: |
     CREATE TABLE t1(id INT, t2_id INT, PRIMARY KEY(id));
@@ -1171,8 +1158,7 @@
     BatchProject { exprs: [1:Int32, 2:Int32, t.c, t.d] }
     └─BatchLimit { limit: 5, offset: 0 }
       └─BatchExchange { order: [t.c ASC], dist: Single }
-        └─BatchLimit { limit: 5, offset: 0 }
-          └─BatchScan { table: t, columns: [t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: SomeShard }
 - name: batch sort elimination with eq-prefix-derived orders
   sql: |
     create table t (a int, b int, c int, d int, primary key (a, b, c, d));
@@ -1188,8 +1174,7 @@
     BatchProject { exprs: [1:Int32, 2:Int32, t.c, t.d] }
     └─BatchLimit { limit: 5, offset: 0 }
       └─BatchExchange { order: [t.c ASC], dist: Single }
-        └─BatchLimit { limit: 5, offset: 0 }
-          └─BatchScan { table: t, columns: [t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: SomeShard }
 - name: index scan ordered by suffix after an unprojected constant key
   sql: |
     create table t (a int, b int);

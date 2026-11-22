@@ -53,8 +53,12 @@ impl BatchTopN {
         );
         let (partial_input, exchange_order): (PlanRef, _) =
             if input.satisfies_order(&self.core.order) && !self.core.limit_attr.with_ties() {
-                let partial_limit = generic::Limit::new(input, new_limit.limit(), 0);
-                (BatchLimit::new(partial_limit).into(), &self.core.order)
+                let partial = if let Some(scan) = input.as_batch_seq_scan() {
+                    scan.clone_with_limit(new_limit.limit()).into()
+                } else {
+                    BatchLimit::new(generic::Limit::new(input, new_limit.limit(), 0)).into()
+                };
+                (partial, &self.core.order)
             } else {
                 let partial_topn =
                     generic::TopN::without_group(input, new_limit, 0, self.core.order.clone());

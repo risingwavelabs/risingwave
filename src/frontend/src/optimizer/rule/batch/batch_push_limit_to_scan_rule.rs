@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::prelude::*;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::{BatchIcebergScan, BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{BatchIcebergScan, BatchLimit, PlanTreeNodeUnary};
 
 pub struct BatchPushLimitToScanRule {}
 
@@ -46,12 +44,7 @@ impl BatchPushLimitToScanRule {
             if scan.limit().is_some() {
                 return None;
             }
-            let new_scan = BatchSeqScan::new_with_dist(
-                scan.core().clone(),
-                scan.base.distribution().clone(),
-                scan.scan_ranges().iter().cloned().collect_vec(),
-                Some(pushed_limit),
-            );
+            let new_scan = scan.clone_with_limit(pushed_limit);
             return Some(limit.clone_with_input(new_scan.into()).into());
         }
 

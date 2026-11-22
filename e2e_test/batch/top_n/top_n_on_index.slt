@@ -103,4 +103,14 @@ select id, a, b from t where a = 10 and id % 3 = 1 order by b desc, id limit 3;
 13 10 13
 
 statement ok
+insert into t select 12, i, i from generate_series(1, 2048) as s(i);
+
+query III
+select count(*), min(b), max(b) from (
+  select b from t where a = 12 order by b desc limit 1025 offset 5
+) as page;
+----
+1025 1019 2043
+
+statement ok
 drop table t;

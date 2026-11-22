@@ -88,13 +88,13 @@ impl BatchSeqScan {
         Self::new_inner(core, Distribution::Single, scan_ranges, limit)
     }
 
-    pub fn new_with_dist(
-        core: generic::TableScan,
-        dist: Distribution,
-        scan_ranges: Vec<ScanRange>,
-        limit: Option<u64>,
-    ) -> Self {
-        Self::new_inner(core, dist, scan_ranges, limit)
+    pub fn clone_with_limit(&self, limit: u64) -> Self {
+        Self::new_inner(
+            self.core.clone(),
+            self.distribution().clone(),
+            self.scan_ranges.clone(),
+            Some(self.limit.map_or(limit, |existing| existing.min(limit))),
+        )
     }
 
     fn clone_with_dist(&self) -> Self {
