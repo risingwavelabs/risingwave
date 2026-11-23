@@ -4514,7 +4514,7 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
             expected
                 .into_iter()
                 .map(|id| HummockObjectId::Sstable(id.into()))
-                .collect(),
+                .collect::<HashSet<_>>(),
         );
     }
     insert_epoch_mapping(&env, table_id, 100, 2).await;
