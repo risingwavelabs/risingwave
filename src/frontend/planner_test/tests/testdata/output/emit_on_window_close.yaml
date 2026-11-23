@@ -453,3 +453,21 @@
         └─StreamGroupTopN [append_only] { order: [t.tm ASC], limit: 1, offset: 0, group_key: [t.foo], output_watermarks: [[t.tm]] }
           └─StreamExchange { dist: HashShard(t.foo) }
             └─StreamTableScan { table: t, columns: [t.tm, t.foo, t.bar, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: tables for outer joins in eowc mode
+  sql: |
+    create table a (k int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+    create table b (k int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+- id: eowc agg cannot group by the padded side of a left join
+  before:
+  - tables for outer joins in eowc mode
+  sql: select b.ts, count(*) from a left join b on a.ts = b.ts group by b.ts;
+  eowc_stream_error: |-
+    Not supported: Emit-On-Window-Close mode requires a watermark column in GROUP BY.
+    HINT: Please try to GROUP BY a watermark column
+- id: eowc select over a full join has no watermark column
+  before:
+  - tables for outer joins in eowc mode
+  sql: select a.ts, b.ts from a full join b on a.ts = b.ts;
+  eowc_stream_error: |-
+    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
+    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY

@@ -87,6 +87,8 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
 
         let null_safe = node.get_null_safe().clone();
         let use_cache = node.use_cache.unwrap_or(true);
+        let output_watermark_columns = (node.output_watermark_columns.as_ref())
+            .map(|cols| cols.indices.iter().map(|&idx| idx as usize).collect());
 
         // Previously, the `join_encoding_type` is persisted in the plan node.
         // Now it's always `Unspecified` and we should refer to the job's config override.
@@ -114,6 +116,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                     asof_desc,
                     use_cache,
                     params.config.developer.high_join_amplification_threshold,
+                    output_watermark_columns,
                 )
                 .boxed()
             };

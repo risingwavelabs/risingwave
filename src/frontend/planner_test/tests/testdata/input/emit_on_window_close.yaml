@@ -127,3 +127,21 @@
     ) where rn <= 1;
   expected_outputs:
     - eowc_stream_plan
+# An outer join keeps no watermark on the side it fills with NULL for unmatched rows.
+- id: tables for outer joins in eowc mode
+  sql: |
+    create table a (k int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+    create table b (k int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+  expected_outputs: []
+- id: eowc agg cannot group by the padded side of a left join
+  before:
+  - tables for outer joins in eowc mode
+  sql: select b.ts, count(*) from a left join b on a.ts = b.ts group by b.ts;
+  expected_outputs:
+  - eowc_stream_error
+- id: eowc select over a full join has no watermark column
+  before:
+  - tables for outer joins in eowc mode
+  sql: select a.ts, b.ts from a full join b on a.ts = b.ts;
+  expected_outputs:
+  - eowc_stream_error

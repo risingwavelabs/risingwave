@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_common::config::streaming::JoinEncodingType;
@@ -165,6 +166,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .high_join_amplification_threshold,
             join_encoding_type,
             watermark_indices_in_jk,
+            output_watermark_columns: (node.output_watermark_columns.as_ref())
+                .map(|cols| cols.indices.iter().map(|&idx| idx as usize).collect()),
         };
 
         let exec = args.dispatch()?;
@@ -196,6 +199,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     high_join_amplification_threshold: usize,
     join_encoding_type: JoinEncodingType,
     watermark_indices_in_jk: Vec<(usize, bool)>,
+    output_watermark_columns: Option<HashSet<usize>>,
 }
 
 fn resolve_clean_watermark_indices_in_jk(
@@ -252,6 +256,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.chunk_size,
                         self.high_join_amplification_threshold,
                         self.watermark_indices_in_jk.clone(),
+                        self.output_watermark_columns.clone(),
                     )
                     .boxed(),
                 )
