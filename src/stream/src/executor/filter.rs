@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Array, ArrayImpl, Op};
-use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::array::{Array, ArrayImpl, BoolArray, Op};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
@@ -151,6 +151,17 @@ impl<const UPSERT: bool> FilterExecutorInner<UPSERT> {
         } else {
             None
         })
+    }
+
+    /// [`Self::filter`] with `column[col_idx] IS NOT NULL` as the predicate.
+    pub(super) fn filter_not_null(
+        chunk: StreamChunk,
+        col_idx: usize,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = chunk.compact_vis();
+        let non_null = chunk.column_at(col_idx).null_bitmap().clone();
+        let pred = BoolArray::new(non_null, Bitmap::ones(chunk.capacity()));
+        Self::filter(chunk, Arc::new(pred.into()))
     }
 }
 

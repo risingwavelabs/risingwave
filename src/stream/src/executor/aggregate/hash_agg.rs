@@ -36,7 +36,7 @@ use super::{AggExecutorArgs, HashAggExecutorExtraArgs, agg_call_filter_res, iter
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTablePostCommit;
-use crate::executor::eowc::SortBuffer;
+use crate::executor::eowc::{SortBuffer, skip_null_rows};
 use crate::executor::monitor::HashAggMetrics;
 use crate::executor::prelude::*;
 
@@ -636,6 +636,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
                 }
                 Message::Chunk(chunk) => {
+                    let chunk = if this.emit_on_window_close {
+                        let Some(chunk) = skip_null_rows(chunk, window_col_idx)? else {
+                            continue;
+                        };
+                        chunk
+                    } else {
+                        chunk
+                    };
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
 
                     if vars.dirty_groups.estimated_heap_size() >= this.max_dirty_groups_heap_size {

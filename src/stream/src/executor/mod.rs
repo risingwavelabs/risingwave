@@ -1305,6 +1305,8 @@ impl Barrier {
     }
 }
 
+/// Promises that no later row has a value below `val` in column `col_idx`. NULL values are not
+/// covered: rows with NULL in the column may still follow, and consumers handle them themselves.
 #[derive(Debug, PartialEq, Eq, Clone, EstimateSize)]
 pub struct Watermark {
     pub col_idx: usize,

@@ -14,6 +14,7 @@
 
 use risingwave_common::array::Op;
 
+use super::skip_null_rows;
 use super::sort_buffer::SortBuffer;
 use crate::executor::prelude::*;
 
@@ -117,8 +118,10 @@ impl<S: StateStore> SortExecutor<S> {
                     continue;
                 }
                 Message::Chunk(chunk) => {
-                    vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
-                    this.buffer_table.try_flush().await?;
+                    if let Some(chunk) = skip_null_rows(chunk, this.sort_column_index)? {
+                        vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
+                        this.buffer_table.try_flush().await?;
+                    }
                 }
                 Message::Barrier(barrier) => {
                     let post_commit = this.buffer_table.commit(barrier.epoch).await?;
