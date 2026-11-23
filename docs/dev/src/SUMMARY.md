@@ -39,6 +39,7 @@
     - [Asynchronous Projection](./design/async-projection.md)
     - [Checkpoint](./design/checkpoint.md)
     - [Aggregation](./design/aggregation.md)
+    - [AI Decisions](./design/ai-decide.md)
     - [MView on Top of MView](./design/mv-on-mv.md)
     - [Backfill](./design/backfill.md)
     - [Streaming Parallelism Configuration](./design/streaming-parallelism.md)
