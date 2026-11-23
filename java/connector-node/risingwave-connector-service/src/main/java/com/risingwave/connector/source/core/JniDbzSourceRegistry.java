@@ -18,9 +18,6 @@ package com.risingwave.connector.source.core;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,83 +27,31 @@ public class JniDbzSourceRegistry {
 
     private static final ConcurrentHashMap<Long, JniDbzSourceHandler> sourceHandlers =
             new ConcurrentHashMap<>();
-    // Use handler identity, since recovery may start a replacement with the same source ID.
-    private static final ConcurrentHashMap<JniDbzSourceHandler, CleanupRetry>
-            pendingCleanupHandlers = new ConcurrentHashMap<>();
-    private static final ScheduledThreadPoolExecutor cleanupExecutor = newCleanupExecutor();
+    // Recovery may create another handler with the same source ID while cleanup is unfinished.
+    private static final Set<JniDbzSourceHandler> pendingCleanupHandlers =
+            ConcurrentHashMap.newKeySet();
 
-    private static ScheduledThreadPoolExecutor newCleanupExecutor() {
-        var executor =
-                new ScheduledThreadPoolExecutor(
-                        2,
-                        runnable -> {
-                            var thread = new Thread(runnable, "cdc-cleanup-retry");
-                            thread.setDaemon(true);
-                            return thread;
-                        });
-        // A cancelled delayed retry must not keep the handler and its JNI channel reachable.
-        executor.setRemoveOnCancelPolicy(true);
-        return executor;
-    }
-
-    /** Handlers with pending cleanup remain available while background retries run. */
     public static Set<JniDbzSourceHandler> getPendingCleanupHandlers() {
-        return Set.copyOf(pendingCleanupHandlers.keySet());
+        return Set.copyOf(pendingCleanupHandlers);
     }
 
     static void finishCleanup(JniDbzSourceHandler handler, boolean cleanupPending) {
-        if (!cleanupPending) {
-            var retry = pendingCleanupHandlers.remove(handler);
-            if (retry != null) {
-                retry.cancel();
-            }
-        } else {
-            pendingCleanupHandlers.computeIfAbsent(handler, CleanupRetry::new).schedule();
-        }
         unregister(handler);
-    }
-
-    private static final class CleanupRetry implements Runnable {
-        private final JniDbzSourceHandler handler;
-        private ScheduledFuture<?> scheduled;
-        private long delaySeconds = 1;
-        private boolean cancelled;
-
-        private CleanupRetry(JniDbzSourceHandler handler) {
-            this.handler = handler;
-        }
-
-        private synchronized void schedule() {
-            if (!cancelled && scheduled == null) {
-                scheduled = cleanupExecutor.schedule(this, delaySeconds, TimeUnit.SECONDS);
-                delaySeconds = Math.min(delaySeconds * 2, 60);
-            }
-        }
-
-        private synchronized void cancel() {
-            cancelled = true;
-            if (scheduled != null) {
-                // Let an active bounded cleanup finish; cancellation only removes queued work.
-                scheduled.cancel(false);
-            }
-        }
-
-        @Override
-        public void run() {
-            try {
-                // stop() serializes retries and rechecks live Debezium cleanup state, clearing
-                // stale timeouts when an earlier cleanup attempt has finished successfully.
-                if (pendingCleanupHandlers.get(handler) == this) {
-                    handler.stop();
-                }
-            } catch (Exception e) {
-                LOG.warn("Background cleanup failed for Engine#{}", handler.getSourceId(), e);
-            } finally {
-                synchronized (this) {
-                    scheduled = null;
-                    schedule();
-                }
-            }
+        if (cleanupPending && pendingCleanupHandlers.add(handler)) {
+            // Completion also notifies late subscribers, closing the check/register race.
+            handler.onCleanupComplete(
+                    () -> {
+                        pendingCleanupHandlers.remove(handler);
+                        Exception failure = handler.getStopFailure();
+                        if (failure != null) {
+                            LOG.warn(
+                                    "Cleanup completed with a failure for Engine#{}",
+                                    handler.getSourceId(),
+                                    failure);
+                        }
+                    });
+        } else if (!cleanupPending) {
+            pendingCleanupHandlers.remove(handler);
         }
     }
 

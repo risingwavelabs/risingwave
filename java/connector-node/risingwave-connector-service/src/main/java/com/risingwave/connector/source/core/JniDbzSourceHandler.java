@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 /** handler for starting a debezium source connectors for jni */
 public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
-    private static final int STOP_ATTEMPTS = 3;
 
     private final DbzConnectorConfig config;
     private final DbzCdcEngineRunner runner;
@@ -163,43 +162,19 @@ public class JniDbzSourceHandler {
         }
     }
 
-    /**
-     * Retry pending cleanup before releasing ownership. Historical errors remain reported, but do
-     * not keep this handler alive once no retryable cleanup remains.
-     */
+    /** Request cleanup once and retain ownership only while that attempt is unfinished. */
     public synchronized void stop() {
-        boolean interrupted = Thread.interrupted();
         try {
-            for (int attempt = 1; attempt <= STOP_ATTEMPTS; attempt++) {
-                try {
-                    runner.stop();
-                } catch (Exception e) {
-                    interrupted |= e instanceof InterruptedException;
-                    interrupted |= Thread.interrupted();
-                    LOG.warn(
-                            "Failed to stop Engine#{} (attempt {}/{})",
-                            config.getSourceId(),
-                            attempt,
-                            STOP_ATTEMPTS,
-                            e);
-                }
-                if (!runner.hasPendingCleanup()) {
-                    return;
-                }
-                if (attempt < STOP_ATTEMPTS) {
-                    try {
-                        TimeUnit.MILLISECONDS.sleep(100L * attempt);
-                    } catch (InterruptedException e) {
-                        interrupted = true;
-                    }
-                }
-            }
+            runner.stop();
+        } catch (Exception e) {
+            LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
         } finally {
             JniDbzSourceRegistry.finishCleanup(this, runner.hasPendingCleanup());
-            if (interrupted) {
-                Thread.currentThread().interrupt();
-            }
         }
+    }
+
+    void onCleanupComplete(Runnable callback) {
+        runner.onCleanupComplete(callback);
     }
 
     public Exception getStopFailure() {

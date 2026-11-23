@@ -80,10 +80,8 @@ public class DbzCdcEngine implements Runnable {
     }
 
     public void stop() throws Exception {
-        if (engine instanceof AsyncEmbeddedEngine<?> asyncEngine
-                && asyncEngine.isShutdownRequested()) {
-            asyncEngine.retryFailedTaskStops();
-        } else {
+        if (!(engine instanceof AsyncEmbeddedEngine<?> asyncEngine)
+                || !asyncEngine.isShutdownRequested()) {
             engine.close();
         }
         // close() may return normally even when task cleanup failed. Its callback and this
@@ -110,6 +108,14 @@ public class DbzCdcEngine implements Runnable {
     public boolean hasPendingCleanup() {
         return engine instanceof AsyncEmbeddedEngine<?> asyncEngine
                 && asyncEngine.hasPendingCleanup();
+    }
+
+    void onCleanupComplete(Runnable callback) {
+        if (engine instanceof AsyncEmbeddedEngine<?> asyncEngine) {
+            asyncEngine.cleanupCompletion().thenRun(callback);
+        } else {
+            callback.run();
+        }
     }
 
     void onCompletion(Runnable callback) {

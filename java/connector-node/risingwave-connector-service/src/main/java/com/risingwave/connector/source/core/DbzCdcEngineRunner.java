@@ -107,7 +107,7 @@ public class DbzCdcEngineRunner {
                                             sourceId,
                                             errorMsg);
                                 }
-                                // onCompletion ends the run loop. The JNI handler retries cleanup,
+                                // onCompletion ends the run loop. The JNI handler requests cleanup,
                                 // so this callback only reports the failure.
                             } else {
                                 LOG.info("engine#{} stopped normally. {}", sourceId, message);
@@ -180,8 +180,8 @@ public class DbzCdcEngineRunner {
         State previous = state;
         state = State.STOPPED;
         try {
-            // Historical errors are diagnostics, not evidence that another cleanup can help.
-            if (previous != State.STOPPED || hasPendingCleanup()) {
+            // Request cleanup only once; completion can outlive this bounded call.
+            if (previous != State.STOPPED) {
                 engine.stop();
                 stopFailure = null;
             }
@@ -200,6 +200,10 @@ public class DbzCdcEngineRunner {
         // live task-cleanup state rather than treating the return from close() as success.
         Exception cleanupFailure = engine.getCleanupFailure();
         return cleanupFailure != null ? cleanupFailure : (hasPendingCleanup() ? stopFailure : null);
+    }
+
+    void onCleanupComplete(Runnable callback) {
+        engine.onCleanupComplete(callback);
     }
 
     public boolean hasPendingCleanup() {
