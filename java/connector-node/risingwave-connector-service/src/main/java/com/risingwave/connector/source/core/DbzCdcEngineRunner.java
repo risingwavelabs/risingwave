@@ -102,12 +102,8 @@ public class DbzCdcEngineRunner {
                                             sourceId,
                                             errorMsg);
                                 }
-                                // We need to stop the engine runner on debezium engine failure
-                                try {
-                                    runner.stop();
-                                } catch (Exception e) {
-                                    LOG.warn("failed to stop the engine#{}", sourceId, e);
-                                }
+                                // onCompletion ends the run loop. The JNI handler retries cleanup,
+                                // so this callback only reports the failure.
                             } else {
                                 LOG.info("engine#{} stopped normally. {}", sourceId, message);
                             }

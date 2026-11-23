@@ -22,10 +22,15 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.connector.source.common.CdcSourceFactory;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamRequest;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import com.risingwave.proto.ConnectorServiceProto.SourceType;
@@ -219,6 +224,68 @@ public class DbzCdcEngineRunnerTest {
         }
     }
 
+    @Test(timeout = 20000)
+    public void jniHandlerRetriesCleanupBeforeUnregistering() throws Exception {
+        checkJniCleanup(false);
+    }
+
+    @Test(timeout = 20000)
+    public void jniHandlerRetainsFailedCleanupAcrossSourceReplacement() throws Exception {
+        checkJniCleanup(true);
+    }
+
+    private void checkJniCleanup(boolean keepFailing) throws Exception {
+        RetryStopTask.polling = new CountDownLatch(2);
+        RetryStopTask.failedStops.set(0);
+        RetryStopTask.successfulStops.set(0);
+        RetryStopTask.resourceOpen.set(true);
+        RetryStopTask.failAllStops.set(keepFailing);
+        var source = source();
+        var config = source.getConfig();
+        var props = config.getResolvedDebeziumProps();
+        props.setProperty("connector.class", RetryStopConnector.class.getName());
+        props.setProperty("tasks.max", "2");
+        props.setProperty(
+                "offset.storage", "org.apache.kafka.connect.storage.MemoryOffsetBackingStore");
+        var receiverOpen = new AtomicBoolean(true);
+        var channel = mock(CdcSourceChannel.class);
+        when(channel.send(nullable(byte[].class))).thenAnswer(invocation -> receiverOpen.get());
+        when(channel.sendError(anyString())).thenReturn(false);
+        var handler = new JniDbzSourceHandler(source, config, channel);
+        JniDbzSourceHandler replacement = null;
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var run = executor.submit(handler::start);
+            assertTrue(RetryStopTask.polling.await(5, TimeUnit.SECONDS));
+            receiverOpen.set(false);
+            run.get(5, TimeUnit.SECONDS);
+            assertEquals(3, RetryStopTask.failedStops.get());
+            assertEquals(1, RetryStopTask.successfulStops.get());
+            assertNull(JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
+            if (keepFailing) {
+                assertTrue(RetryStopTask.resourceOpen.get());
+                assertNotNull(handler.getStopFailure());
+                assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                replacement = new JniDbzSourceHandler(source, config, channel);
+                JniDbzSourceRegistry.register(replacement);
+                RetryStopTask.failAllStops.set(false);
+                handler.stop();
+                assertEquals(
+                        replacement, JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
+            }
+            assertFalse(RetryStopTask.resourceOpen.get());
+            assertNull(handler.getStopFailure());
+            assertFalse(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+        } finally {
+            receiverOpen.set(false);
+            RetryStopTask.failAllStops.set(false);
+            RetryStopTask.failedStops.set(2);
+            handler.stop();
+            if (replacement != null) {
+                JniDbzSourceRegistry.unregister(replacement);
+            }
+        }
+    }
+
     public static class RetryStopConnector extends SourceConnector {
         private Map<String, String> props;
 
@@ -258,6 +325,7 @@ public class DbzCdcEngineRunnerTest {
         private static final AtomicInteger failedStops = new AtomicInteger();
         private static final AtomicInteger successfulStops = new AtomicInteger();
         private static final AtomicBoolean resourceOpen = new AtomicBoolean();
+        private static final AtomicBoolean failAllStops = new AtomicBoolean();
         private boolean failStop;
 
         @Override
@@ -275,7 +343,7 @@ public class DbzCdcEngineRunnerTest {
         @Override
         public void stop() {
             if (failStop) {
-                if (failedStops.incrementAndGet() < 3) {
+                if (failedStops.incrementAndGet() < 3 || failAllStops.get()) {
                     throw new IllegalStateException("task cleanup failed");
                 }
                 resourceOpen.set(false);

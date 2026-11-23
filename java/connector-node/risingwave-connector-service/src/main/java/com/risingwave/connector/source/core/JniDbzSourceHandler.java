@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 /** handler for starting a debezium source connectors for jni */
 public class JniDbzSourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceHandler.class);
+    private static final int STOP_ATTEMPTS = 3;
 
     private final DbzConnectorConfig config;
     private final DbzCdcEngineRunner runner;
@@ -158,15 +159,50 @@ public class JniDbzSourceHandler {
             channel.sendError(t.getMessage());
 
         } finally {
-            try {
-                runner.stop();
-            } catch (Exception e) {
-                LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
-            } finally {
-                // remove the handler from registry
-                JniDbzSourceRegistry.unregister(this);
+            stop();
+        }
+    }
+
+    /**
+     * Retry cleanup before releasing ownership, retaining failures for inspection and later retry.
+     */
+    public synchronized void stop() {
+        boolean interrupted = Thread.interrupted();
+        boolean cleanedUp = false;
+        try {
+            for (int attempt = 1; attempt <= STOP_ATTEMPTS; attempt++) {
+                try {
+                    runner.stop();
+                    cleanedUp = true;
+                    return;
+                } catch (Exception e) {
+                    interrupted |= e instanceof InterruptedException;
+                    interrupted |= Thread.interrupted();
+                    LOG.warn(
+                            "Failed to stop Engine#{} (attempt {}/{})",
+                            config.getSourceId(),
+                            attempt,
+                            STOP_ATTEMPTS,
+                            e);
+                }
+                if (attempt < STOP_ATTEMPTS) {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(100L * attempt);
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
+                }
+            }
+        } finally {
+            JniDbzSourceRegistry.finishCleanup(this, cleanedUp);
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
+    }
+
+    public Exception getStopFailure() {
+        return runner.getStopFailure();
     }
 
     private boolean sendHandshakeMessage(CdcSourceChannel channel, boolean startOk) {
