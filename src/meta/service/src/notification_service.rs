@@ -194,8 +194,7 @@ impl NotificationServiceImpl {
             .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
             .await?;
         let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((worker_nodes, notification_version))
+        Ok((worker_nodes, cluster_guard.worker_node_version()))
     }
 
     async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {

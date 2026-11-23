@@ -107,13 +107,18 @@ impl From<SubscribeType> for Target {
 }
 
 #[derive(Debug)]
+enum TaskVersion {
+    Latest,
+    Global(NotificationVersion),
+    Worker(u64),
+}
+
+#[derive(Debug)]
 struct Task {
     target: Target,
     operation: Operation,
     info: Info,
-    /// `None` means using the latest version published to the notification queue without
-    /// incrementing it.
-    version: Option<NotificationVersion>,
+    version: TaskVersion,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
@@ -138,14 +143,19 @@ impl NotificationManager {
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
-                if let Some(version) = task.version {
-                    latest_version = version;
-                }
+                let response_version = match task.version {
+                    TaskVersion::Latest => latest_version,
+                    TaskVersion::Global(version) => {
+                        latest_version = version;
+                        version
+                    }
+                    TaskVersion::Worker(version) => version,
+                };
                 let response = SubscribeResponse {
                     status: None,
                     operation: task.operation as i32,
                     info: Some(task.info),
-                    version: latest_version,
+                    version: response_version,
                 };
                 core.lock().notify(task.target, response);
             }
@@ -170,7 +180,7 @@ impl NotificationManager {
         target: Target,
         operation: Operation,
         info: Info,
-        version: Option<NotificationVersion>,
+        version: TaskVersion,
     ) {
         let task = Task {
             target,
@@ -191,7 +201,7 @@ impl NotificationManager {
         let mut version_guard = self.version_generator.lock().await;
         version_guard.increase_version().await;
         let version = version_guard.current_version();
-        self.notify(target, operation, info, Some(version));
+        self.notify(target, operation, info, TaskVersion::Global(version));
         version
     }
 
@@ -219,7 +229,7 @@ impl NotificationManager {
                 SubscribeType::Frontend.into(),
                 operation,
                 info,
-                Some(version),
+                TaskVersion::Global(version),
             );
         }
 
@@ -229,7 +239,7 @@ impl NotificationManager {
     /// Add a notification using the latest version published to the queue without incrementing it.
     #[inline(always)]
     fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
-        self.notify(target, operation, info, None);
+        self.notify(target, operation, info, TaskVersion::Latest);
     }
 
     /// Queue the snapshot behind every notification published before it was read. The observer
@@ -301,6 +311,21 @@ impl NotificationManager {
         self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
     }
 
+    pub(crate) fn notify_frontend_worker(
+        &self,
+        operation: Operation,
+        worker: WorkerNode,
+        version: u64,
+    ) {
+        // Worker revisions order membership changes against the worker snapshot only.
+        self.notify(
+            SubscribeType::Frontend.into(),
+            operation,
+            Info::Node(worker),
+            TaskVersion::Worker(version),
+        );
+    }
+
     pub fn notify_hummock(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
     }
@@ -316,6 +341,7 @@ impl NotificationManager {
         info: Info,
         version: Option<NotificationVersion>,
     ) {
+        let version = version.map_or(TaskVersion::Latest, TaskVersion::Global);
         self.notify(SubscribeType::Hummock.into(), operation, info, version)
     }
 

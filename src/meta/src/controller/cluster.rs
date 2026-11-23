@@ -174,16 +174,19 @@ impl ClusterController {
     }
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let worker = inner.activate_worker(worker_id).await?;
 
         // Notify frontends of new compute node and frontend node.
         // Always notify because a running worker's property may have been changed.
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
-            self.env
-                .notification_manager()
-                .notify_frontend_without_version(Operation::Add, Info::Node(worker.clone()));
+            inner.worker_node_version += 1;
+            self.env.notification_manager().notify_frontend_worker(
+                Operation::Add,
+                worker.clone(),
+                inner.worker_node_version,
+            );
         }
         self.env
             .notification_manager()
@@ -193,14 +196,21 @@ impl ClusterController {
     }
 
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
-        let worker = self.inner.write().await.delete_worker(host_address).await?;
-
-        if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
-        {
-            self.env
-                .notification_manager()
-                .notify_frontend_without_version(Operation::Delete, Info::Node(worker.clone()));
-        }
+        let worker = {
+            let mut inner = self.inner.write().await;
+            let worker = inner.delete_worker(host_address).await?;
+            if worker.r#type() == PbWorkerType::ComputeNode
+                || worker.r#type() == PbWorkerType::Frontend
+            {
+                inner.worker_node_version += 1;
+                self.env.notification_manager().notify_frontend_worker(
+                    Operation::Delete,
+                    worker.clone(),
+                    inner.worker_node_version,
+                );
+            }
+            worker
+        };
 
         // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
@@ -492,6 +502,9 @@ pub struct ClusterControllerInner {
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
+    /// Orders frontend worker notifications against snapshots within this Meta process.
+    /// Mutations, version bumps, and enqueueing share the cluster write lock.
+    worker_node_version: u64,
     disable_automatic_parallelism_control: bool,
 }
 
@@ -527,8 +540,14 @@ impl ClusterControllerInner {
             db,
             available_transactional_ids,
             worker_extra_info,
+            worker_node_version: 0,
             disable_automatic_parallelism_control,
         })
+    }
+
+    /// Read under the same cluster guard as the snapshot's worker list.
+    pub fn worker_node_version(&self) -> u64 {
+        self.worker_node_version
     }
 
     pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
@@ -1070,6 +1089,96 @@ mod tests {
         assert_eq!(cluster_ctl.list_active_serving_workers().await?.len(), 0);
         assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_worker_changes_after_snapshot_read_are_not_filtered() -> MetaResult<()> {
+        use risingwave_pb::meta::SubscribeType;
+        use risingwave_pb::meta::{MetaSnapshot, meta_snapshot::SnapshotVersion};
+
+        let env = MetaSrvEnv::for_test().await;
+        let cluster = ClusterController::new(env.clone(), Duration::from_secs(1)).await?;
+        let notifications = env.notification_manager();
+        let catalog_version = notifications.current_version().await;
+        let host = mock_worker_hosts_for_test(1).pop().unwrap();
+        let worker = cluster
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                AddNodeProperty {
+                    parallelism: 1,
+                    is_streaming: true,
+                    is_serving: true,
+                    ..Default::default()
+                },
+                PbResource::default(),
+            )
+            .await?;
+        let (tx, mut rx) = unbounded_channel();
+        notifications.insert_sender(
+            SubscribeType::Frontend,
+            WorkerKey(HostAddress {
+                host: "frontend".into(),
+                port: 4566,
+            }),
+            tx.clone(),
+        );
+
+        for operation in [Operation::Add, Operation::Delete] {
+            // Simulate subscription taking the worker snapshot, then doing other
+            // work while a concurrent mutation publishes before snapshot enqueue.
+            let snapshot = {
+                let cluster = cluster.get_inner_read_guard().await;
+                let nodes = cluster
+                    .list_workers(Some(WorkerType::ComputeNode), Some(WorkerStatus::Running))
+                    .await?;
+                assert_eq!(
+                    nodes.iter().any(|node| node.id == worker),
+                    operation == Operation::Delete
+                );
+                MetaSnapshot {
+                    nodes,
+                    version: Some(SnapshotVersion {
+                        worker_node_version: cluster.worker_node_version(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }
+            };
+            let snapshot_version = snapshot.version.as_ref().unwrap().worker_node_version;
+            match operation {
+                Operation::Add => cluster.activate_worker(worker).await?,
+                Operation::Delete => {
+                    cluster.delete_worker(host.clone()).await?;
+                }
+                _ => unreachable!(),
+            }
+            notifications.notify_snapshot(tx.clone(), snapshot);
+            // The frontend drops pre-snapshot worker notifications at versions
+            // <= the snapshot's worker revision. These updates must survive.
+            let update = loop {
+                let notification = rx.recv().await.unwrap().unwrap();
+                match notification.info.as_ref() {
+                    Some(Info::ClusterResource(_)) => continue,
+                    _ => break notification,
+                }
+            };
+            assert_eq!(update.operation(), operation);
+            assert!(matches!(update.info, Some(Info::Node(node)) if node.id == worker));
+            assert_eq!(update.version, snapshot_version + 1);
+            loop {
+                let notification = rx.recv().await.unwrap().unwrap();
+                assert_eq!(notification.version, catalog_version);
+                match notification.info {
+                    Some(Info::ClusterResource(_)) => continue,
+                    Some(Info::Snapshot(_)) => break,
+                    info => panic!("unexpected notification: {info:?}"),
+                }
+            }
+        }
+
+        assert_eq!(notifications.current_version().await, catalog_version);
         Ok(())
     }
 
