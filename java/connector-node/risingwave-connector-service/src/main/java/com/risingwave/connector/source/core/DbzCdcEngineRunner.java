@@ -34,6 +34,8 @@ public class DbzCdcEngineRunner {
 
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean stopping = new AtomicBoolean(false);
+    private volatile Exception stopFailure;
     private DbzCdcEngine engine;
     private final DbzConnectorConfig config;
 
@@ -161,15 +163,35 @@ public class DbzCdcEngineRunner {
     }
 
     public void stop() throws Exception {
-        if (running.compareAndSet(true, false)) {
-            try {
-                engine.stop();
-                LOG.info("engine#{} terminated", engine.getId());
-            } finally {
-                // Interrupt the runner thread even if closing the engine fails.
-                executor.shutdownNow();
-            }
+        if (!stopping.compareAndSet(false, true)) {
+            return;
         }
+        try {
+            if (running.getAndSet(false) || stopFailure != null) {
+                try {
+                    engine.stop();
+                    stopFailure = null;
+                    LOG.info("engine#{} terminated", engine.getId());
+                } catch (Exception e) {
+                    stopFailure = e;
+                    LOG.error(
+                            "engine#{} cleanup failed; a subsequent stop will retry",
+                            engine.getId(),
+                            e);
+                    throw e;
+                } finally {
+                    // Interrupt the runner thread even if closing the engine fails.
+                    executor.shutdownNow();
+                }
+            }
+        } finally {
+            stopping.set(false);
+        }
+    }
+
+    /** A stopped running loop does not imply successful resource cleanup. */
+    public Exception getStopFailure() {
+        return stopFailure;
     }
 
     public DbzCdcEngine getEngine() {

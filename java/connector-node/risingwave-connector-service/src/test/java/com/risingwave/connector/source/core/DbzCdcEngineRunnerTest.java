@@ -18,6 +18,8 @@ package com.risingwave.connector.source.core;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -132,7 +134,15 @@ public class DbzCdcEngineRunnerTest {
             assertThrows(IllegalStateException.class, runner::stop);
             assertTrue(engine.terminated.await(5, TimeUnit.SECONDS));
             assertFalse(runner.isRunning());
+            assertNotNull(runner.getStopFailure());
+            engine.failStop = false;
+            runner.stop();
+            assertEquals(2, engine.stopCalls.get());
+            assertNull(runner.getStopFailure());
+            runner.stop();
+            assertEquals(2, engine.stopCalls.get());
         } finally {
+            engine.failStop = false;
             runner.stop();
         }
     }

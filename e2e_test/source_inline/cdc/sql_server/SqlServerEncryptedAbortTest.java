@@ -16,6 +16,10 @@
 
 package io.debezium.connector.sqlserver;
 
+import io.debezium.embedded.Connect;
+import io.debezium.engine.DebeziumEngine;
+
+import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -23,12 +27,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.Properties;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Regression test for aborting an encrypted connection blocked in a socket read. */
 public final class SqlServerEncryptedAbortTest {
@@ -83,6 +90,172 @@ public final class SqlServerEncryptedAbortTest {
         } finally {
             queryExecutor.shutdownNow();
         }
+        stopEngineBeforeStreaming(host, port, user, password, url);
+    }
+
+    private static void stopEngineBeforeStreaming(
+            String host, String port, String user, String password, String url) throws Exception {
+        var directory = Files.createTempDirectory("sqlserver-engine-stop-");
+        String applicationName =
+                "rw_shutdown_" + java.util.UUID.randomUUID().toString().replace("-", "");
+        String database = applicationName;
+        try (Connection control = DriverManager.getConnection(url, user, password);
+                Statement statement = control.createStatement()) {
+            statement.execute("CREATE DATABASE " + database);
+            statement.execute("USE " + database);
+            statement.execute("EXEC sys.sp_cdc_enable_db");
+            statement.execute("CREATE TABLE dbo.items (id INT PRIMARY KEY)");
+            statement.execute(
+                    "EXEC sys.sp_cdc_enable_table @source_schema = 'dbo', @source_name = 'items',"
+                        + " @role_name = NULL");
+        }
+        var props = new Properties();
+        props.setProperty("name", applicationName);
+        props.setProperty("topic.prefix", applicationName);
+        props.setProperty("connector.class", SqlServerConnector.class.getName());
+        props.setProperty("database.hostname", host);
+        props.setProperty("database.port", port);
+        props.setProperty("database.user", user);
+        props.setProperty("database.password", password);
+        props.setProperty("database.names", database);
+        props.setProperty("database.encrypt", "true");
+        props.setProperty("database.trustServerCertificate", "true");
+        props.setProperty("driver.applicationName", applicationName);
+        props.setProperty("snapshot.mode", "no_data");
+        props.setProperty("snapshot.delay.ms", "5000");
+        props.setProperty("snapshot.lock.timeout.ms", "600000");
+        props.setProperty("executor.shutdown.timeout.ms", "1000");
+        props.setProperty(
+                "offset.storage", "org.apache.kafka.connect.storage.FileOffsetBackingStore");
+        props.setProperty("offset.storage.file.filename", directory.resolve("offsets").toString());
+        props.setProperty(
+                "schema.history.internal", "io.debezium.storage.file.history.FileSchemaHistory");
+        props.setProperty(
+                "schema.history.internal.file.filename", directory.resolve("history").toString());
+        CountDownLatch taskStarted = new CountDownLatch(1);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var engine =
+                DebeziumEngine.create(Connect.class)
+                        .using(props)
+                        .using(
+                                new DebeziumEngine.ConnectorCallback() {
+                                    @Override
+                                    public void taskStarted() {
+                                        taskStarted.countDown();
+                                    }
+                                })
+                        .using(
+                                (success, message, error) -> {
+                                    if (!success) {
+                                        failure.set(
+                                                error == null
+                                                        ? new AssertionError(message)
+                                                        : error);
+                                    }
+                                    completed.countDown();
+                                })
+                        .notifying(record -> {})
+                        .build();
+        ExecutorService executor =
+                Executors.newFixedThreadPool(
+                        2,
+                        command -> {
+                            Thread thread = new Thread(command, "sqlserver-engine-stop-test");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        try (Connection control = DriverManager.getConnection(url, user, password);
+                Connection blocker = DriverManager.getConnection(url, user, password)) {
+            executor.submit(engine);
+            if (!taskStarted.await(30, TimeUnit.SECONDS)) {
+                throw new AssertionError("engine task did not start", failure.get());
+            }
+            int blockerId = sessionIdAndAssertEncrypted(blocker);
+            try (Statement statement = blocker.createStatement()) {
+                statement.execute("USE " + database);
+                blocker.setAutoCommit(false);
+                // Hold a schema modification lock while the snapshot tries to discover tables.
+                statement.execute("ALTER TABLE dbo.items ADD blocked INT NULL");
+            }
+            int sessionId = waitForEngineRequest(control, applicationName, blockerId);
+            // Exercise the real engine -> task -> coordinator stop path, without calling abort.
+            executor.submit(
+                            () -> {
+                                engine.close();
+                                return null;
+                            })
+                    .get(15, TimeUnit.SECONDS);
+            if (!completed.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("engine did not complete after stop");
+            }
+            if (failure.get() != null) {
+                throw new AssertionError("engine cleanup failed", failure.get());
+            }
+            waitForSessionClosed(control, sessionId);
+            waitForEngineSessionsClosed(control, applicationName);
+            blocker.rollback();
+        } finally {
+            executor.shutdownNow();
+            try (var files = Files.list(directory)) {
+                for (var file : files.toList()) {
+                    Files.deleteIfExists(file);
+                }
+            }
+            Files.deleteIfExists(directory);
+            try (Connection control = DriverManager.getConnection(url, user, password);
+                    Statement statement = control.createStatement()) {
+                statement.execute(
+                        "ALTER DATABASE " + database + " SET SINGLE_USER WITH ROLLBACK IMMEDIATE");
+                statement.execute("DROP DATABASE " + database);
+            }
+        }
+    }
+
+    private static void waitForEngineSessionsClosed(Connection control, String applicationName)
+            throws Exception {
+        long deadline = System.nanoTime() + READ_UNBLOCK_TIMEOUT.toNanos();
+        try (PreparedStatement statement =
+                control.prepareStatement(
+                        "SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE program_name = ?")) {
+            statement.setString(1, applicationName);
+            while (System.nanoTime() < deadline) {
+                try (ResultSet result = statement.executeQuery()) {
+                    result.next();
+                    if (result.getInt(1) == 0) {
+                        return;
+                    }
+                }
+                Thread.sleep(100);
+            }
+        }
+        throw new AssertionError("engine sessions survived stop");
+    }
+
+    private static int waitForEngineRequest(
+            Connection control, String applicationName, int blockerId) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        try (PreparedStatement statement =
+                control.prepareStatement(
+                        "SELECT s.session_id, c.encrypt_option FROM sys.dm_exec_sessions s "
+                                + "JOIN sys.dm_exec_connections c ON c.session_id = s.session_id "
+                                + "JOIN sys.dm_exec_requests r ON r.session_id = s.session_id "
+                                + "WHERE s.program_name = ? AND r.blocking_session_id = ?")) {
+            statement.setString(1, applicationName);
+            statement.setInt(2, blockerId);
+            while (System.nanoTime() < deadline) {
+                try (ResultSet result = statement.executeQuery()) {
+                    if (result.next()) {
+                        if (!"TRUE".equalsIgnoreCase(result.getString(2))) {
+                            throw new AssertionError("engine connection is not encrypted");
+                        }
+                        return result.getInt(1);
+                    }
+                }
+                Thread.sleep(100);
+            }
+        }
+        throw new AssertionError("engine did not reach pre-streaming blocked I/O");
     }
 
     private static int sessionIdAndAssertEncrypted(Connection connection) throws SQLException {
