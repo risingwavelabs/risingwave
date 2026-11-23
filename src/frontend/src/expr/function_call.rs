@@ -49,6 +49,17 @@ fn debug_binary_op(
 
 impl std::fmt::Debug for FunctionCall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.func_type == ExprType::AiDecide {
+            let mut builder = f.debug_tuple("AiDecide");
+            for (index, child) in self.inputs.iter().enumerate() {
+                if index == 4 {
+                    builder.field(&"<redacted>");
+                } else {
+                    builder.field(child);
+                }
+            }
+            return builder.finish();
+        }
         if f.alternate() {
             f.debug_struct("FunctionCall")
                 .field("func_type", &self.func_type)
@@ -323,6 +334,20 @@ pub struct FunctionCallDisplay<'a> {
 impl std::fmt::Debug for FunctionCallDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.function_call;
+        if that.func_type == ExprType::AiDecide {
+            let mut builder = f.debug_tuple("AiDecide");
+            for (index, child) in that.inputs.iter().enumerate() {
+                if index == 4 {
+                    builder.field(&"<redacted>");
+                } else {
+                    builder.field(&ExprDisplay {
+                        expr: child,
+                        input_schema: self.input_schema,
+                    });
+                }
+            }
+            return builder.finish();
+        }
         match &that.func_type {
             ExprType::Cast => {
                 assert_eq!(that.inputs.len(), 1);

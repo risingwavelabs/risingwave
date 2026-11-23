@@ -98,6 +98,8 @@ echo "--- e2e, $mode, streaming"
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}" --label "serial"
+# AI_DECIDE recovery restarts streaming actors and must run outside the parallel suite.
+risedev slt -p 4566 -d dev './e2e_test/streaming/ai_decide_recovery.slt.serial' --junit "streaming-ai-decide-recovery-${profile}"
 
 echo "--- Kill cluster"
 cluster_stop
