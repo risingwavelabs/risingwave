@@ -168,7 +168,7 @@ public class DbzCdcEngineRunner {
             return;
         }
         try {
-            if (running.getAndSet(false) || getStopFailure() != null) {
+            if (running.getAndSet(false) || hasPendingCleanup() || getStopFailure() != null) {
                 try {
                     engine.stop();
                     stopFailure = null;

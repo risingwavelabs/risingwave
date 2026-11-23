@@ -228,6 +228,93 @@ public class DbzCdcEngineRunnerTest {
         }
     }
 
+    @Test(timeout = 10000)
+    public void realEngineRetriesPendingCleanupWithoutRecordedFailure() throws Exception {
+        LateCreatedTask.entered = new CountDownLatch(1);
+        LateCreatedTask.release = new CountDownLatch(1);
+        LateCreatedTask.stops.set(0);
+        LateCreatedTask.resourceOpen.set(false);
+        var source = source();
+        var config = source.getConfig();
+        var props = config.getResolvedDebeziumProps();
+        props.setProperty("connector.class", LateCreatedConnector.class.getName());
+        props.setProperty("offset.storage", MemoryOffsetBackingStore.class.getName());
+        var completed = new CountDownLatch(1);
+        var engine =
+                new DbzCdcEngine(source, config, (ok, message, error) -> completed.countDown());
+        var runner = new DbzCdcEngineRunner(config, engine);
+        try {
+            assertFalse(runner.start(() -> false));
+            assertTrue(LateCreatedTask.entered.await(5, TimeUnit.SECONDS));
+            runner.stop();
+            LateCreatedTask.release.countDown();
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+
+            assertFalse(runner.isRunning());
+            assertNull(runner.getStopFailure());
+            assertTrue(runner.hasPendingCleanup());
+            assertTrue(LateCreatedTask.resourceOpen.get());
+            runner.stop();
+            assertFalse(runner.hasPendingCleanup());
+            assertFalse(LateCreatedTask.resourceOpen.get());
+            assertEquals(1, LateCreatedTask.stops.get());
+            runner.stop();
+            assertEquals(1, LateCreatedTask.stops.get());
+        } finally {
+            LateCreatedTask.release.countDown();
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            engine.stop();
+        }
+    }
+
+    public static class LateCreatedConnector extends SlowStopConnector {
+        @Override
+        public Class<? extends Task> taskClass() {
+            return LateCreatedTask.class;
+        }
+    }
+
+    public static class LateCreatedTask extends SourceTask {
+        static CountDownLatch entered;
+        static CountDownLatch release;
+        private static final AtomicInteger stops = new AtomicInteger();
+        private static final AtomicBoolean resourceOpen = new AtomicBoolean();
+
+        public LateCreatedTask() {
+            entered.countDown();
+            while (true) {
+                try {
+                    release.await();
+                    resourceOpen.set(true);
+                    return;
+                } catch (InterruptedException ignored) {
+                    // Model task creation that continues after the engine is stopped.
+                }
+            }
+        }
+
+        @Override
+        public void start(Map<String, String> props) {
+            throw new AssertionError("A task created after shutdown must not start");
+        }
+
+        @Override
+        public List<SourceRecord> poll() {
+            return List.of();
+        }
+
+        @Override
+        public void stop() {
+            stops.incrementAndGet();
+            resourceOpen.set(false);
+        }
+
+        @Override
+        public String version() {
+            return "1";
+        }
+    }
+
     @Test(timeout = 20000)
     public void jniHandlerRetriesCleanupBeforeUnregistering() throws Exception {
         checkJniCleanup(false);
@@ -546,6 +633,11 @@ public class DbzCdcEngineRunnerTest {
                 throw new IllegalStateException("close failed");
             }
             stopped.countDown();
+        }
+
+        @Override
+        public boolean hasPendingCleanup() {
+            return stopped.getCount() != 0;
         }
     }
 }
