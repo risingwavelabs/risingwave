@@ -32,7 +32,7 @@ public class JniDbzSourceRegistry {
             new ConcurrentHashMap<>();
     // Use handler identity, since recovery may start a replacement with the same source ID.
     private static final ConcurrentHashMap<JniDbzSourceHandler, CleanupRetry>
-            failedCleanupHandlers = new ConcurrentHashMap<>();
+            pendingCleanupHandlers = new ConcurrentHashMap<>();
     private static final ScheduledThreadPoolExecutor cleanupExecutor = newCleanupExecutor();
 
     private static ScheduledThreadPoolExecutor newCleanupExecutor() {
@@ -50,18 +50,18 @@ public class JniDbzSourceRegistry {
     }
 
     /** Handlers with pending cleanup remain available while background retries run. */
-    public static Set<JniDbzSourceHandler> getFailedCleanupHandlers() {
-        return Set.copyOf(failedCleanupHandlers.keySet());
+    public static Set<JniDbzSourceHandler> getPendingCleanupHandlers() {
+        return Set.copyOf(pendingCleanupHandlers.keySet());
     }
 
     static void finishCleanup(JniDbzSourceHandler handler, boolean cleanupPending) {
         if (!cleanupPending) {
-            var retry = failedCleanupHandlers.remove(handler);
+            var retry = pendingCleanupHandlers.remove(handler);
             if (retry != null) {
                 retry.cancel();
             }
         } else {
-            failedCleanupHandlers.computeIfAbsent(handler, CleanupRetry::new).schedule();
+            pendingCleanupHandlers.computeIfAbsent(handler, CleanupRetry::new).schedule();
         }
         unregister(handler);
     }
@@ -96,7 +96,7 @@ public class JniDbzSourceRegistry {
             try {
                 // stop() serializes retries and rechecks live Debezium cleanup state, clearing
                 // stale timeouts when an earlier cleanup attempt has finished successfully.
-                if (failedCleanupHandlers.get(handler) == this) {
+                if (pendingCleanupHandlers.get(handler) == this) {
                     handler.stop();
                 }
             } catch (Exception e) {

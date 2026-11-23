@@ -166,6 +166,46 @@ public class DbzCdcEngineRunnerTest {
         }
     }
 
+    @Test(timeout = 10000)
+    public void pendingCleanupDoesNotRequireARecordedFailure() throws Exception {
+        var source = source();
+        var config = source.getConfig();
+        var engine =
+                new WaitingEngine(source, config) {
+                    @Override
+                    public boolean hasPendingCleanup() {
+                        return stopCalls.get() < 2;
+                    }
+                };
+        var runner = new DbzCdcEngineRunner(config, engine);
+        try {
+            assertFalse(runner.start(() -> false));
+            assertTrue(engine.started.await(5, TimeUnit.SECONDS));
+            runner.stop();
+            assertFalse(runner.isRunning());
+            assertNull(runner.getStopFailure());
+            assertTrue(runner.hasPendingCleanup());
+            runner.stop();
+            assertFalse(runner.hasPendingCleanup());
+            runner.stop();
+            assertEquals(2, engine.stopCalls.get());
+        } finally {
+            runner.stop();
+        }
+    }
+
+    @Test(timeout = 10000)
+    public void stoppedRunnerCannotBeRestarted() throws Exception {
+        var source = source();
+        var config = source.getConfig();
+        var engine = new DbzCdcEngine(source, config, (ok, message, error) -> {});
+        var runner = new DbzCdcEngineRunner(config, engine);
+        runner.stop();
+        assertFalse(runner.hasPendingCleanup());
+        assertThrows(IllegalStateException.class, runner::start);
+        assertFalse(runner.isRunning());
+    }
+
     @Test(timeout = 20000)
     public void realEngineCleanupFailureRemainsRetryableAfterCompletion() throws Exception {
         RetryStopTask.polling = new CountDownLatch(2);
@@ -229,7 +269,7 @@ public class DbzCdcEngineRunnerTest {
     }
 
     @Test(timeout = 10000)
-    public void realEngineRetriesPendingCleanupWithoutRecordedFailure() throws Exception {
+    public void realEngineCompletesLateTaskCleanupWithoutManualRetry() throws Exception {
         LateCreatedTask.entered = new CountDownLatch(1);
         LateCreatedTask.release = new CountDownLatch(1);
         LateCreatedTask.stops.set(0);
@@ -239,6 +279,7 @@ public class DbzCdcEngineRunnerTest {
         var props = config.getResolvedDebeziumProps();
         props.setProperty("connector.class", LateCreatedConnector.class.getName());
         props.setProperty("offset.storage", MemoryOffsetBackingStore.class.getName());
+        props.setProperty(AsyncEngineConfig.TASK_MANAGEMENT_TIMEOUT_MS.name(), "100");
         var completed = new CountDownLatch(1);
         var engine =
                 new DbzCdcEngine(source, config, (ok, message, error) -> completed.countDown());
@@ -246,16 +287,14 @@ public class DbzCdcEngineRunnerTest {
         try {
             assertFalse(runner.start(() -> false));
             assertTrue(LateCreatedTask.entered.await(5, TimeUnit.SECONDS));
-            runner.stop();
+            assertThrows(Exception.class, runner::stop);
             assertTrue(runner.hasPendingCleanup());
             LateCreatedTask.release.countDown();
             assertTrue(completed.await(5, TimeUnit.SECONDS));
 
             assertFalse(runner.isRunning());
+            awaitCondition(() -> !runner.hasPendingCleanup());
             assertNull(runner.getStopFailure());
-            assertTrue(runner.hasPendingCleanup());
-            assertTrue(LateCreatedTask.resourceOpen.get());
-            runner.stop();
             assertFalse(runner.hasPendingCleanup());
             assertFalse(LateCreatedTask.resourceOpen.get());
             assertEquals(1, LateCreatedTask.stops.get());
@@ -292,9 +331,9 @@ public class DbzCdcEngineRunnerTest {
                 assertTrue(LateCreatedTask.entered.await(5, TimeUnit.SECONDS));
                 receiverOpen.set(false);
                 run.get(5, TimeUnit.SECONDS);
-                assertNull(handler.getStopFailure());
+                assertNotNull(handler.getStopFailure());
                 assertNull(JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
-                assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertTrue(JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
                 assertEquals(0, LateCreatedTask.stops.get());
                 replacement = new JniDbzSourceHandler(source, config, channel);
                 JniDbzSourceRegistry.register(replacement);
@@ -303,7 +342,7 @@ public class DbzCdcEngineRunnerTest {
                 LateCreatedTask.release.countDown();
                 awaitCondition(() -> LateCreatedTask.stops.get() == 1);
                 awaitCondition(
-                        () -> !JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                        () -> !JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
                 assertFalse(LateCreatedTask.resourceOpen.get());
                 assertNull(handler.getStopFailure());
                 assertEquals(
@@ -449,14 +488,14 @@ public class DbzCdcEngineRunnerTest {
             if (keepFailing) {
                 assertTrue(RetryStopTask.resourceOpen.get());
                 assertNotNull(handler.getStopFailure());
-                assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertTrue(JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
                 replacement = new JniDbzSourceHandler(source, config, channel);
                 JniDbzSourceRegistry.register(replacement);
                 // Let one background retry fail too, then recover without manually calling stop.
                 awaitCondition(() -> RetryStopTask.failedStops.get() >= 6);
                 RetryStopTask.failAllStops.set(false);
                 awaitCondition(
-                        () -> !JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                        () -> !JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
                 assertEquals(
                         replacement, JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
             }
@@ -468,7 +507,7 @@ public class DbzCdcEngineRunnerTest {
             } else {
                 assertNull(handler.getStopFailure());
             }
-            assertFalse(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+            assertFalse(JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
         } finally {
             receiverOpen.set(false);
             RetryStopTask.failAllStops.set(false);
@@ -506,7 +545,7 @@ public class DbzCdcEngineRunnerTest {
                 receiverOpen.set(false);
                 run.get(5, TimeUnit.SECONDS);
                 assertNotNull(handler.getStopFailure());
-                assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertTrue(JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
                 assertEquals(1, SlowStopTask.stops.get());
                 replacement = new JniDbzSourceHandler(source, config, channel);
                 JniDbzSourceRegistry.register(replacement);
@@ -514,7 +553,7 @@ public class DbzCdcEngineRunnerTest {
                 SlowStopTask.release.countDown();
                 assertTrue(SlowStopTask.cleaned.await(5, TimeUnit.SECONDS));
                 awaitCondition(
-                        () -> !JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                        () -> !JniDbzSourceRegistry.getPendingCleanupHandlers().contains(handler));
                 assertNull(handler.getStopFailure());
                 assertEquals(1, SlowStopTask.stops.get());
                 assertEquals(
