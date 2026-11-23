@@ -18,6 +18,9 @@ package com.risingwave.connector.source.core;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,21 +31,83 @@ public class JniDbzSourceRegistry {
     private static final ConcurrentHashMap<Long, JniDbzSourceHandler> sourceHandlers =
             new ConcurrentHashMap<>();
     // Use handler identity, since recovery may start a replacement with the same source ID.
-    private static final Set<JniDbzSourceHandler> failedCleanupHandlers =
-            ConcurrentHashMap.newKeySet();
+    private static final ConcurrentHashMap<JniDbzSourceHandler, CleanupRetry>
+            failedCleanupHandlers = new ConcurrentHashMap<>();
+    private static final ScheduledThreadPoolExecutor cleanupExecutor = newCleanupExecutor();
 
-    /** Failed handlers remain available for inspecting getStopFailure() and retrying stop(). */
+    private static ScheduledThreadPoolExecutor newCleanupExecutor() {
+        var executor =
+                new ScheduledThreadPoolExecutor(
+                        2,
+                        runnable -> {
+                            var thread = new Thread(runnable, "cdc-cleanup-retry");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        // A cancelled delayed retry must not keep the handler and its JNI channel reachable.
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
+
+    /** Failed handlers remain available for inspection while background cleanup retries run. */
     public static Set<JniDbzSourceHandler> getFailedCleanupHandlers() {
-        return Set.copyOf(failedCleanupHandlers);
+        return Set.copyOf(failedCleanupHandlers.keySet());
     }
 
     static void finishCleanup(JniDbzSourceHandler handler, boolean succeeded) {
         if (succeeded) {
-            failedCleanupHandlers.remove(handler);
+            var retry = failedCleanupHandlers.remove(handler);
+            if (retry != null) {
+                retry.cancel();
+            }
         } else {
-            failedCleanupHandlers.add(handler);
+            failedCleanupHandlers.computeIfAbsent(handler, CleanupRetry::new).schedule();
         }
         unregister(handler);
+    }
+
+    private static final class CleanupRetry implements Runnable {
+        private final JniDbzSourceHandler handler;
+        private ScheduledFuture<?> scheduled;
+        private long delaySeconds = 1;
+        private boolean cancelled;
+
+        private CleanupRetry(JniDbzSourceHandler handler) {
+            this.handler = handler;
+        }
+
+        private synchronized void schedule() {
+            if (!cancelled && scheduled == null) {
+                scheduled = cleanupExecutor.schedule(this, delaySeconds, TimeUnit.SECONDS);
+                delaySeconds = Math.min(delaySeconds * 2, 60);
+            }
+        }
+
+        private synchronized void cancel() {
+            cancelled = true;
+            if (scheduled != null) {
+                // Let an active bounded cleanup finish; cancellation only removes queued work.
+                scheduled.cancel(false);
+            }
+        }
+
+        @Override
+        public void run() {
+            try {
+                // stop() serializes retries and rechecks live Debezium cleanup state, clearing
+                // stale timeouts when an earlier cleanup attempt has finished successfully.
+                if (failedCleanupHandlers.get(handler) == this) {
+                    handler.stop();
+                }
+            } catch (Exception e) {
+                LOG.warn("Background cleanup failed for Engine#{}", handler.getSourceId(), e);
+            } finally {
+                synchronized (this) {
+                    scheduled = null;
+                    schedule();
+                }
+            }
+        }
     }
 
     public static void register(JniDbzSourceHandler handler) {

@@ -34,6 +34,7 @@ import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamRequest;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import com.risingwave.proto.ConnectorServiceProto.SourceType;
+import io.debezium.embedded.async.AsyncEngineConfig;
 import io.grpc.stub.StreamObserver;
 import java.util.HashMap;
 import java.util.List;
@@ -44,6 +45,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.source.SourceConnector;
@@ -267,8 +269,11 @@ public class DbzCdcEngineRunnerTest {
                 assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
                 replacement = new JniDbzSourceHandler(source, config, channel);
                 JniDbzSourceRegistry.register(replacement);
+                // Let one background retry fail too, then recover without manually calling stop.
+                awaitCondition(() -> RetryStopTask.failedStops.get() >= 6);
                 RetryStopTask.failAllStops.set(false);
-                handler.stop();
+                awaitCondition(
+                        () -> !JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
                 assertEquals(
                         replacement, JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
             }
@@ -283,6 +288,113 @@ public class DbzCdcEngineRunnerTest {
             if (replacement != null) {
                 JniDbzSourceRegistry.unregister(replacement);
             }
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void jniHandlerReapsCleanupThatCompletesAfterTimeout() throws Exception {
+        SlowStopTask.polling = new CountDownLatch(1);
+        SlowStopTask.release = new CountDownLatch(1);
+        SlowStopTask.cleaned = new CountDownLatch(1);
+        SlowStopTask.stops.set(0);
+        var source = source();
+        var config = source.getConfig();
+        var props = config.getResolvedDebeziumProps();
+        props.setProperty("connector.class", SlowStopConnector.class.getName());
+        props.setProperty(AsyncEngineConfig.TASK_MANAGEMENT_TIMEOUT_MS.name(), "100");
+        props.setProperty(
+                "offset.storage", "org.apache.kafka.connect.storage.MemoryOffsetBackingStore");
+        var receiverOpen = new AtomicBoolean(true);
+        var channel = mock(CdcSourceChannel.class);
+        when(channel.send(nullable(byte[].class))).thenAnswer(invocation -> receiverOpen.get());
+        when(channel.sendError(anyString())).thenReturn(false);
+        var handler = new JniDbzSourceHandler(source, config, channel);
+        JniDbzSourceHandler replacement = null;
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var run = executor.submit(handler::start);
+            try {
+                assertTrue(SlowStopTask.polling.await(5, TimeUnit.SECONDS));
+                receiverOpen.set(false);
+                run.get(5, TimeUnit.SECONDS);
+                assertNotNull(handler.getStopFailure());
+                assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertEquals(1, SlowStopTask.stops.get());
+                replacement = new JniDbzSourceHandler(source, config, channel);
+                JniDbzSourceRegistry.register(replacement);
+
+                SlowStopTask.release.countDown();
+                assertTrue(SlowStopTask.cleaned.await(5, TimeUnit.SECONDS));
+                awaitCondition(
+                        () -> !JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertNull(handler.getStopFailure());
+                assertEquals(1, SlowStopTask.stops.get());
+                assertEquals(
+                        replacement, JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
+            } finally {
+                receiverOpen.set(false);
+                SlowStopTask.release.countDown();
+                run.get(5, TimeUnit.SECONDS);
+                handler.stop();
+                if (replacement != null) {
+                    JniDbzSourceRegistry.unregister(replacement);
+                }
+            }
+        }
+    }
+
+    private static void awaitCondition(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(condition.getAsBoolean());
+    }
+
+    public static class SlowStopConnector extends RetryStopConnector {
+        @Override
+        public Class<? extends Task> taskClass() {
+            return SlowStopTask.class;
+        }
+
+        @Override
+        public List<Map<String, String>> taskConfigs(int maxTasks) {
+            return List.of(Map.of());
+        }
+    }
+
+    public static class SlowStopTask extends SourceTask {
+        static CountDownLatch polling;
+        static CountDownLatch release;
+        static CountDownLatch cleaned;
+        private static final AtomicInteger stops = new AtomicInteger();
+
+        @Override
+        public void start(Map<String, String> props) {}
+
+        @Override
+        public List<SourceRecord> poll() throws InterruptedException {
+            polling.countDown();
+            Thread.sleep(10);
+            return List.of();
+        }
+
+        @Override
+        public void stop() {
+            stops.incrementAndGet();
+            while (true) {
+                try {
+                    release.await();
+                    cleaned.countDown();
+                    return;
+                } catch (InterruptedException ignored) {
+                    // Model cleanup that completes after its caller's bounded wait expires.
+                }
+            }
+        }
+
+        @Override
+        public String version() {
+            return "1";
         }
     }
 
