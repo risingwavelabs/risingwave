@@ -93,3 +93,25 @@
   expected_outputs:
     - stream_plan
     - eowc_stream_plan
+- name: eowc agg grouped by columns derived from both keys of a join, whose keys share a column
+  sql: |
+    create table t (
+      foo int,
+      ts timestamp,
+      watermark for ts as ts - interval '5 minutes'
+    ) append only;
+    select
+      date_trunc('minute', t1.ts) as m1, date_trunc('minute', t2.ts) as m2, count(*) as cnt
+    from t as t1 join (select ts, ts + interval '1 minute' as ts2 from t) as t2
+      on t1.ts = t2.ts and t1.ts = t2.ts2
+    group by 1, 2;
+  expected_outputs:
+    - eowc_stream_plan
+- name: as-of join on an equal key with watermarks, also used by the inequality
+  sql: |
+    create table t1 (v1 int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+    create table t2 (v1 int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+    select t1.ts as ts1, t2.ts as ts2, t1.v1 as v1, t2.v1 as v2
+    from t1 asof join t2 on t1.ts = t2.ts and t1.ts <= t2.ts;
+  expected_outputs:
+    - stream_plan

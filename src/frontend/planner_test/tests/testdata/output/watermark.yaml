@@ -77,7 +77,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [t1_ts, ts2, t1_v1, t1_v2, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t1_ts], pk_columns: [t1._row_id, t2._row_id, t1_ts], pk_conflict: NoCheck, watermark_columns: [t1_ts, ts2] }
     └─StreamExchange { dist: HashShard(t1.ts, t1._row_id, t2._row_id) }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts], [t2.ts]], output: [t1.ts, t2.ts, t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts, t2.ts]], output: [t1.ts, t2.ts, t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
         ├─StreamExchange { dist: HashShard(t1.ts) }
         │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.ts) }
@@ -302,7 +302,7 @@
     └── StreamExchange Hash([0, 1, 4, 5]) from 1
 
     Fragment 1
-    StreamHashJoin [window, append_only] { type: Inner, predicate: mv1.ts1 = mv2.ts1 AND mv1.ts2 = mv2.ts2, conditions_to_clean_state_in_join_key: [(mv1.ts1 = mv2.ts1)], output_watermarks: [[mv1.ts1], [mv2.ts1], [mv1.ts2], [mv2.ts2]], output: [mv1.ts1, mv1.ts2, mv2.ts1, mv2.ts2, mv1.t1._row_id, mv2.t2._row_id] }
+    StreamHashJoin [window, append_only] { type: Inner, predicate: mv1.ts1 = mv2.ts1 AND mv1.ts2 = mv2.ts2, conditions_to_clean_state_in_join_key: [(mv1.ts1 = mv2.ts1)], output_watermarks: [[mv1.ts1, mv2.ts1], [mv1.ts2, mv2.ts2]], output: [mv1.ts1, mv1.ts2, mv2.ts1, mv2.ts2, mv1.t1._row_id, mv2.t2._row_id] }
     ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0, 1]) from 2
     └── StreamExchange Hash([0, 1]) from 3
@@ -344,7 +344,7 @@
     └── StreamExchange Hash([0, 4, 5]) from 1
 
     Fragment 1
-    StreamHashJoin [window, append_only] { type: Inner, predicate: mv1.ts1 = mv2.ts1 AND (mv1.ts2 >= mv2.ts2) AND (mv1.ts2 <= $expr1), conditions_to_clean_state_in_join_key: [(mv1.ts1 = mv2.ts1)], output_watermarks: [[mv1.ts1], [mv2.ts1], [mv1.ts2]], output: [mv1.ts1, mv1.ts2, mv2.ts1, mv2.ts2, mv1.t1._row_id, mv2.t2._row_id] }
+    StreamHashJoin [window, append_only] { type: Inner, predicate: mv1.ts1 = mv2.ts1 AND (mv1.ts2 >= mv2.ts2) AND (mv1.ts2 <= $expr1), conditions_to_clean_state_in_join_key: [(mv1.ts1 = mv2.ts1)], output_watermarks: [[mv1.ts1, mv2.ts1], [mv1.ts2]], output: [mv1.ts1, mv1.ts2, mv2.ts1, mv2.ts2, mv1.t1._row_id, mv2.t2._row_id] }
     ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange Hash([0]) from 3
