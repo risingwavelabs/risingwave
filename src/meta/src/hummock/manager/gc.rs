@@ -621,6 +621,7 @@ mod retention_tests;
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
