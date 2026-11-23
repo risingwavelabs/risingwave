@@ -247,6 +247,7 @@ public class DbzCdcEngineRunnerTest {
             assertFalse(runner.start(() -> false));
             assertTrue(LateCreatedTask.entered.await(5, TimeUnit.SECONDS));
             runner.stop();
+            assertTrue(runner.hasPendingCleanup());
             LateCreatedTask.release.countDown();
             assertTrue(completed.await(5, TimeUnit.SECONDS));
 
@@ -264,6 +265,62 @@ public class DbzCdcEngineRunnerTest {
             LateCreatedTask.release.countDown();
             assertTrue(completed.await(5, TimeUnit.SECONDS));
             engine.stop();
+        }
+    }
+
+    @Test(timeout = 20000)
+    public void jniHandlerRetainsCleanupUntilTaskCreationFinishes() throws Exception {
+        LateCreatedTask.entered = new CountDownLatch(1);
+        LateCreatedTask.release = new CountDownLatch(1);
+        LateCreatedTask.stops.set(0);
+        LateCreatedTask.resourceOpen.set(false);
+        var source = source();
+        var config = source.getConfig();
+        var props = config.getResolvedDebeziumProps();
+        props.setProperty("connector.class", LateCreatedConnector.class.getName());
+        props.setProperty("offset.storage", MemoryOffsetBackingStore.class.getName());
+        props.setProperty(AsyncEngineConfig.TASK_MANAGEMENT_TIMEOUT_MS.name(), "100");
+        var receiverOpen = new AtomicBoolean(true);
+        var channel = mock(CdcSourceChannel.class);
+        when(channel.send(nullable(byte[].class))).thenAnswer(invocation -> receiverOpen.get());
+        when(channel.sendError(anyString())).thenReturn(false);
+        var handler = new JniDbzSourceHandler(source, config, channel);
+        JniDbzSourceHandler replacement = null;
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var run = executor.submit(handler::start);
+            try {
+                assertTrue(LateCreatedTask.entered.await(5, TimeUnit.SECONDS));
+                receiverOpen.set(false);
+                run.get(5, TimeUnit.SECONDS);
+                assertNull(handler.getStopFailure());
+                assertNull(JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
+                assertTrue(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertEquals(0, LateCreatedTask.stops.get());
+                replacement = new JniDbzSourceHandler(source, config, channel);
+                JniDbzSourceRegistry.register(replacement);
+
+                // The registry must own cleanup before any task cleanup record exists.
+                LateCreatedTask.release.countDown();
+                awaitCondition(() -> LateCreatedTask.stops.get() == 1);
+                awaitCondition(
+                        () -> !JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
+                assertFalse(LateCreatedTask.resourceOpen.get());
+                assertNull(handler.getStopFailure());
+                assertEquals(
+                        replacement, JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
+            } finally {
+                receiverOpen.set(false);
+                LateCreatedTask.release.countDown();
+                run.get(5, TimeUnit.SECONDS);
+                awaitCondition(
+                        () -> {
+                            handler.stop();
+                            return LateCreatedTask.stops.get() == 1;
+                        });
+                if (replacement != null) {
+                    JniDbzSourceRegistry.unregister(replacement);
+                }
+            }
         }
     }
 
