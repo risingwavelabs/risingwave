@@ -30,6 +30,7 @@ fn env_var_is_true(key: &str) -> bool {
 }
 
 const DASHBOARD_DIR: &str = "../../../dashboard";
+const DASHBOARD_BUILD_SYNC_DIR: &str = "RW_DASHBOARD_BUILD_SYNC_DIR";
 
 fn dest_dir() -> PathBuf {
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -37,30 +38,62 @@ fn dest_dir() -> PathBuf {
 }
 
 fn build() -> anyhow::Result<()> {
-    // TODO(bugen): we should include all files and subdirectories under `DASHBOARD_DIR`
-    // while excluding the `out` directory. There's no elegant way to do this.
-    rerun_if_changed!(format!("{DASHBOARD_DIR}/components"));
-
-    for args in [
-        ["install", "--frozen-lockfile"].as_slice(),
-        ["run", "build"].as_slice(),
+    // Watch the source inputs without watching Next.js output or vendored Monaco files.
+    for path in [
+        "components",
+        "hook",
+        "lib",
+        "pages",
+        "public/risingwave.svg",
+        "scripts",
+        "styles",
+        ".pnpmfile.cjs",
+        "next.config.js",
+        "package.json",
+        "pnpm-lock.yaml",
+        "tsconfig.json",
     ] {
-        let exit_status = Command::new("pnpm")
-            .args(args)
-            .current_dir(DASHBOARD_DIR)
-            .status()?;
+        rerun_if_changed!(format!("{DASHBOARD_DIR}/{path}"));
+    }
+    rerun_if_changed!("../../../proto");
 
+    cargo_emit::rerun_if_env_changed!(DASHBOARD_BUILD_SYNC_DIR);
+    if let Some(sync_dir) = std::env::var_os(DASHBOARD_BUILD_SYNC_DIR) {
+        let sync_dir = Path::new(&sync_dir);
+        // Docker builds the assets alongside the Rust dependencies.
+        let exit_status = Command::new("flock")
+            .arg("--shared")
+            .arg(sync_dir.join("lock"))
+            .args(["test", "-f"])
+            .arg(sync_dir.join("ready"))
+            .status()?;
         if !exit_status.success() {
-            anyhow::bail!(
-                "pnpm {} failed with status: {}",
-                args.join(" "),
-                exit_status
-            );
+            anyhow::bail!("the parallel Dashboard build failed");
+        }
+    } else {
+        for args in [
+            ["install", "--frozen-lockfile"].as_slice(),
+            ["run", "build"].as_slice(),
+        ] {
+            let exit_status = Command::new("pnpm")
+                .args(args)
+                .current_dir(DASHBOARD_DIR)
+                .status()?;
+            if !exit_status.success() {
+                anyhow::bail!(
+                    "pnpm {} failed with status: {}",
+                    args.join(" "),
+                    exit_status
+                );
+            }
         }
     }
 
     let dest = dest_dir();
     let src = Path::new(DASHBOARD_DIR).join("out");
+    if dest.try_exists()? {
+        std::fs::remove_dir_all(&dest)?;
+    }
     dircpy::copy_dir(src, dest)?;
 
     Ok(())

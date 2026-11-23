@@ -17,6 +17,8 @@ fi
 
 mkdir -p proto/gen
 
+# The dashboard reads protobuf JSON and does not use the generated partial constructors.
+# Checking their recursive types is expensive for messages with large oneof unions.
 protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --experimental_allow_proto3_optional \
     --ts_proto_out=proto/gen/ \
@@ -26,6 +28,7 @@ protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_opt=enumsAsLiterals=true \
     --ts_proto_opt=outputEncodeMethods=false \
     --ts_proto_opt=outputClientImpl=false \
+    --ts_proto_opt=outputPartialMethods=false \
     --ts_proto_opt=stringEnums=true \
     tmp_gen/*.proto
 
