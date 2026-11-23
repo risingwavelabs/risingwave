@@ -195,7 +195,7 @@ jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 # Keep the direct Lance dependencies aligned with the version pinned by LanceDB.
 lance = { version = "=9.0.0", default-features = false }
-lance-table = { version = "=9.0.0", default-features = false }
+lance-table = { version = "=14.0.2", default-features = false }
 lancedb = { version = "=0.33.0", default-features = false }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.18"
