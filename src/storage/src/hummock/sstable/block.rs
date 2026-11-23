@@ -140,6 +140,27 @@ impl RestartPoint {
     }
 }
 
+#[derive(Clone, Debug)]
+enum RestartIndex {
+    Expanded(Vec<RestartPoint>),
+    /// The block's raw bytes hold consecutive little-endian offsets at `Block::data_len`.
+    /// A single length-type run applies to every offset, so no side allocation is needed.
+    Uniform {
+        count: u32,
+        key_len_type: LenType,
+        value_len_type: LenType,
+    },
+}
+
+impl RestartIndex {
+    fn expanded_capacity(&self) -> usize {
+        match self {
+            Self::Expanded(points) => points.capacity(),
+            Self::Uniform { .. } => 0,
+        }
+    }
+}
+
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
@@ -150,7 +171,7 @@ pub struct Block {
     table_id: TableId,
 
     /// Restart points.
-    restart_points: Vec<RestartPoint>,
+    restart_points: RestartIndex,
 
     hitmap: Hitmap<{ Self::HITMAP_ELEMS }>,
 }
@@ -257,6 +278,17 @@ impl Block {
     }
 
     pub fn decode_from_raw(buf: Bytes) -> Self {
+        Self::decode_from_raw_impl::<true>(buf)
+    }
+
+    /// Pre-borrow decoder kept as the native benchmark's owned-index control.
+    #[cfg(feature = "test")]
+    #[doc(hidden)]
+    pub fn decode_from_raw_owned_for_bench(buf: Bytes) -> Self {
+        Self::decode_from_raw_impl::<false>(buf)
+    }
+
+    fn decode_from_raw_impl<const BORROW_UNIFORM: bool>(buf: Bytes) -> Self {
         let table_id = (&buf[buf.len() - 4..]).get_u32_le();
         let n_index = (&buf[buf.len() - 8..buf.len() - 4]).get_u32_le() as usize;
         let index_start = buf.len() - 8 - n_index * RestartPoint::size_of();
@@ -269,11 +301,25 @@ impl Block {
             value_len_type: LenType::from(entry[4] & 0x0f),
         };
         let mut current = decode_index(index_entries.next().unwrap());
-        let mut next = index_entries.next().map(decode_index);
         let n_restarts = (&buf[index_start - 4..index_start]).get_u32_le() as usize;
         let data_len = index_start - 4 - n_restarts * size_of::<u32>();
         let (offsets, remainder) = buf[data_len..index_start - 4].as_chunks::<4>();
         assert!(remainder.is_empty());
+        // Mixed blocks retain materialized types so seeks never need a second binary search.
+        if BORROW_UNIFORM && n_index == 1 {
+            return Block {
+                data: buf,
+                data_len,
+                restart_points: RestartIndex::Uniform {
+                    count: n_restarts as u32,
+                    key_len_type: current.key_len_type,
+                    value_len_type: current.value_len_type,
+                },
+                table_id: TableId::new(table_id),
+                hitmap: Hitmap::default(),
+            };
+        }
+        let mut next = index_entries.next().map(decode_index);
         let mut restart_points = Vec::with_capacity(n_restarts);
         for bytes in offsets {
             let offset = u32::from_le_bytes(*bytes);
@@ -292,7 +338,7 @@ impl Block {
         Block {
             data: buf,
             data_len,
-            restart_points,
+            restart_points: RestartIndex::Expanded(restart_points),
             table_id: TableId::new(table_id),
             hitmap: Hitmap::default(),
         }
@@ -351,7 +397,7 @@ impl Block {
         Block {
             data: buf,
             data_len,
-            restart_points,
+            restart_points: RestartIndex::Expanded(restart_points),
             table_id: TableId::new(table_id),
             hitmap: Hitmap::default(),
         }
@@ -366,14 +412,14 @@ impl Block {
 
     pub fn capacity(&self) -> usize {
         self.data.len()
-            + self.restart_points.capacity() * std::mem::size_of::<u32>()
+            + self.restart_points.expanded_capacity() * std::mem::size_of::<u32>()
             + std::mem::size_of::<u32>()
     }
 
     pub fn estimated_memory_weight(&self) -> usize {
         size_of::<Self>()
             + self.data.len()
-            + self.restart_points.capacity() * size_of::<RestartPoint>()
+            + self.restart_points.expanded_capacity() * size_of::<RestartPoint>()
             + Hitmap::<{ Self::HITMAP_ELEMS }>::bytes()
     }
 
@@ -381,22 +427,55 @@ impl Block {
         self.table_id
     }
 
+    fn restart_offsets(&self, count: u32) -> &[[u8; 4]] {
+        let start = self.data_len;
+        let end = start + count as usize * size_of::<u32>();
+        self.data[start..end].as_chunks::<4>().0
+    }
+
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> RestartPoint {
-        self.restart_points[index]
+        match &self.restart_points {
+            RestartIndex::Expanded(points) => points[index],
+            &RestartIndex::Uniform {
+                count,
+                key_len_type,
+                value_len_type,
+            } => RestartPoint {
+                offset: u32::from_le_bytes(self.restart_offsets(count)[index]),
+                key_len_type,
+                value_len_type,
+            },
+        }
     }
 
     /// Gets restart point len.
     pub fn restart_point_len(&self) -> usize {
-        self.restart_points.len()
+        match &self.restart_points {
+            RestartIndex::Expanded(points) => points.len(),
+            &RestartIndex::Uniform { count, .. } => count as usize,
+        }
     }
 
     /// Searches the index of the restart point by partition point.
-    pub fn search_restart_partition_point<P>(&self, pred: P) -> usize
+    pub fn search_restart_partition_point<P>(&self, mut pred: P) -> usize
     where
         P: FnMut(&RestartPoint) -> bool,
     {
-        self.restart_points.partition_point(pred)
+        match &self.restart_points {
+            RestartIndex::Expanded(points) => points.partition_point(pred),
+            &RestartIndex::Uniform {
+                count,
+                key_len_type,
+                value_len_type,
+            } => self.restart_offsets(count).partition_point(|&offset| {
+                pred(&RestartPoint {
+                    offset: u32::from_le_bytes(offset),
+                    key_len_type,
+                    value_len_type,
+                })
+            }),
+        }
     }
 
     pub fn data(&self) -> &[u8] {
@@ -1123,6 +1202,7 @@ mod tests {
             assert_eq!(capacity, builder.approximate_len() - 9);
             let buf = builder.build().to_vec();
             let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
+            assert!(matches!(&block.restart_points, RestartIndex::Expanded(_)));
             let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
             bi.seek_to_first();
             assert!(bi.is_valid());
@@ -1183,10 +1263,18 @@ mod tests {
         let buffer = bincode::serialize(&block).unwrap();
         let blk: Block = bincode::deserialize(&buffer).unwrap();
 
+        assert!(matches!(
+            &block.restart_points,
+            RestartIndex::Uniform { .. }
+        ));
+        assert!(matches!(&blk.restart_points, RestartIndex::Uniform { .. }));
         assert_eq!(block.data, blk.data);
         assert_eq!(block.data_len, blk.data_len);
         assert_eq!(block.table_id, blk.table_id,);
-        assert_eq!(block.restart_points, blk.restart_points);
+        assert_eq!(block.restart_point_len(), blk.restart_point_len());
+        for i in 0..block.restart_point_len() {
+            assert_eq!(block.restart_point(i), blk.restart_point(i));
+        }
     }
 
     #[test]
