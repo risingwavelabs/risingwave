@@ -748,7 +748,7 @@ mod tests {
             plan.rewrite_paths,
             ["small-a".to_owned(), "small-b".to_owned()]
                 .into_iter()
-                .collect()
+                .collect::<HashSet<_>>()
         );
     }
 
@@ -782,7 +782,7 @@ mod tests {
             plan.rewrite_paths,
             ["small-a".to_owned(), "small-b".to_owned()]
                 .into_iter()
-                .collect()
+                .collect::<HashSet<_>>()
         );
     }
 
@@ -804,7 +804,7 @@ mod tests {
             plan.rewrite_paths,
             ["oldest-a".to_owned(), "oldest-b".to_owned()]
                 .into_iter()
-                .collect()
+                .collect::<HashSet<_>>()
         );
     }
 
