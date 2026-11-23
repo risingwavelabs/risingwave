@@ -49,13 +49,13 @@ public class JniDbzSourceRegistry {
         return executor;
     }
 
-    /** Failed handlers remain available for inspection while background cleanup retries run. */
+    /** Handlers with pending cleanup remain available while background retries run. */
     public static Set<JniDbzSourceHandler> getFailedCleanupHandlers() {
         return Set.copyOf(failedCleanupHandlers.keySet());
     }
 
-    static void finishCleanup(JniDbzSourceHandler handler, boolean succeeded) {
-        if (succeeded) {
+    static void finishCleanup(JniDbzSourceHandler handler, boolean cleanupPending) {
+        if (!cleanupPending) {
             var retry = failedCleanupHandlers.remove(handler);
             if (retry != null) {
                 retry.cancel();

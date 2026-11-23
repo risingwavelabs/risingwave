@@ -39,6 +39,7 @@ import io.grpc.stub.StreamObserver;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +52,7 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
+import org.apache.kafka.connect.storage.MemoryOffsetBackingStore;
 import org.junit.Test;
 
 public class DbzCdcEngineRunnerTest {
@@ -237,18 +239,55 @@ public class DbzCdcEngineRunnerTest {
     }
 
     private void checkJniCleanup(boolean keepFailing) throws Exception {
+        checkJniCleanup(keepFailing, false);
+    }
+
+    @Test(timeout = 20000)
+    public void jniHandlerReleasesHistoricalOffsetStoreFailure() throws Exception {
+        checkJniCleanup(false, true);
+    }
+
+    @Test(timeout = 20000)
+    public void jniHandlerReapsRecoveredTaskWithHistoricalOffsetStoreFailure() throws Exception {
+        checkJniCleanup(true, true);
+    }
+
+    public static class ReleasingFailStore extends MemoryOffsetBackingStore {
+        private static final AtomicInteger stops = new AtomicInteger();
+        private static final AtomicBoolean released = new AtomicBoolean();
+
+        @Override
+        public Set<Map<String, Object>> connectorPartitions(String connectorName) {
+            return Set.of();
+        }
+
+        @Override
+        public void stop() {
+            super.stop();
+            stops.incrementAndGet();
+            released.set(true);
+            throw new IllegalStateException("offset store stop failed");
+        }
+    }
+
+    private void checkJniCleanup(boolean keepFailing, boolean failStore) throws Exception {
         RetryStopTask.polling = new CountDownLatch(2);
         RetryStopTask.failedStops.set(0);
         RetryStopTask.successfulStops.set(0);
         RetryStopTask.resourceOpen.set(true);
         RetryStopTask.failAllStops.set(keepFailing);
+        ReleasingFailStore.stops.set(0);
+        ReleasingFailStore.released.set(false);
         var source = source();
         var config = source.getConfig();
         var props = config.getResolvedDebeziumProps();
         props.setProperty("connector.class", RetryStopConnector.class.getName());
         props.setProperty("tasks.max", "2");
         props.setProperty(
-                "offset.storage", "org.apache.kafka.connect.storage.MemoryOffsetBackingStore");
+                "offset.storage",
+                failStore
+                        ? ReleasingFailStore.class.getName()
+                        : MemoryOffsetBackingStore.class.getName());
         var receiverOpen = new AtomicBoolean(true);
         var channel = mock(CdcSourceChannel.class);
         when(channel.send(nullable(byte[].class))).thenAnswer(invocation -> receiverOpen.get());
@@ -278,7 +317,13 @@ public class DbzCdcEngineRunnerTest {
                         replacement, JniDbzSourceRegistry.getSourceHandler(handler.getSourceId()));
             }
             assertFalse(RetryStopTask.resourceOpen.get());
-            assertNull(handler.getStopFailure());
+            if (failStore) {
+                assertTrue(ReleasingFailStore.released.get());
+                assertEquals(1, ReleasingFailStore.stops.get());
+                assertEquals("offset store stop failed", handler.getStopFailure().getMessage());
+            } else {
+                assertNull(handler.getStopFailure());
+            }
             assertFalse(JniDbzSourceRegistry.getFailedCleanupHandlers().contains(handler));
         } finally {
             receiverOpen.set(false);

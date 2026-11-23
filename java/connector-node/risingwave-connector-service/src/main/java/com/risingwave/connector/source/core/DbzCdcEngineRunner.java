@@ -175,10 +175,7 @@ public class DbzCdcEngineRunner {
                     LOG.info("engine#{} terminated", engine.getId());
                 } catch (Exception e) {
                     stopFailure = e;
-                    LOG.error(
-                            "engine#{} cleanup failed; a subsequent stop will retry",
-                            engine.getId(),
-                            e);
+                    LOG.error("engine#{} shutdown failed", engine.getId(), e);
                     throw e;
                 } finally {
                     // Interrupt the runner thread even if closing the engine fails.
@@ -196,6 +193,10 @@ public class DbzCdcEngineRunner {
         // live task-cleanup state rather than treating the return from close() as success.
         Exception cleanupFailure = engine.getCleanupFailure();
         return cleanupFailure != null ? cleanupFailure : stopFailure;
+    }
+
+    public boolean hasPendingCleanup() {
+        return engine.hasPendingCleanup();
     }
 
     public DbzCdcEngine getEngine() {

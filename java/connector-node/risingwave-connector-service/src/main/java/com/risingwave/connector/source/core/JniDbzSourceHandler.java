@@ -164,17 +164,15 @@ public class JniDbzSourceHandler {
     }
 
     /**
-     * Retry cleanup before releasing ownership, retaining failures for inspection and later retry.
+     * Retry pending cleanup before releasing ownership. Historical errors remain reported, but do
+     * not keep this handler alive once no retryable cleanup remains.
      */
     public synchronized void stop() {
         boolean interrupted = Thread.interrupted();
-        boolean cleanedUp = false;
         try {
             for (int attempt = 1; attempt <= STOP_ATTEMPTS; attempt++) {
                 try {
                     runner.stop();
-                    cleanedUp = true;
-                    return;
                 } catch (Exception e) {
                     interrupted |= e instanceof InterruptedException;
                     interrupted |= Thread.interrupted();
@@ -185,6 +183,9 @@ public class JniDbzSourceHandler {
                             STOP_ATTEMPTS,
                             e);
                 }
+                if (!runner.hasPendingCleanup()) {
+                    return;
+                }
                 if (attempt < STOP_ATTEMPTS) {
                     try {
                         TimeUnit.MILLISECONDS.sleep(100L * attempt);
@@ -194,7 +195,7 @@ public class JniDbzSourceHandler {
                 }
             }
         } finally {
-            JniDbzSourceRegistry.finishCleanup(this, cleanedUp);
+            JniDbzSourceRegistry.finishCleanup(this, runner.hasPendingCleanup());
             if (interrupted) {
                 Thread.currentThread().interrupt();
             }

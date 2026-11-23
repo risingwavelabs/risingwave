@@ -106,6 +106,12 @@ public class DbzCdcEngine implements Runnable {
         return null;
     }
 
+    /** Pending cleanup is independent of historical errors from completed shutdown operations. */
+    public boolean hasPendingCleanup() {
+        return engine instanceof AsyncEmbeddedEngine<?> asyncEngine
+                && asyncEngine.hasPendingCleanup();
+    }
+
     void onCompletion(Runnable callback) {
         this.onCompletion = callback;
     }
