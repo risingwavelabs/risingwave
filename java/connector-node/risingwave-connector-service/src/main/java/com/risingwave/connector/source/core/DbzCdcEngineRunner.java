@@ -127,11 +127,16 @@ public class DbzCdcEngineRunner {
 
     private void withEngine(DbzCdcEngine engine) {
         this.engine = engine;
+        engine.onCompletion(
+                () -> {
+                    running.set(false);
+                    executor.shutdown();
+                });
     }
 
     DbzCdcEngineRunner(DbzConnectorConfig config, DbzCdcEngine engine) {
         this(config);
-        this.engine = engine;
+        withEngine(engine);
     }
 
     /** Start to run the cdc engine */
@@ -167,7 +172,7 @@ public class DbzCdcEngineRunner {
             return;
         }
         try {
-            if (running.getAndSet(false) || stopFailure != null) {
+            if (running.getAndSet(false) || getStopFailure() != null) {
                 try {
                     engine.stop();
                     stopFailure = null;
@@ -191,7 +196,10 @@ public class DbzCdcEngineRunner {
 
     /** A stopped running loop does not imply successful resource cleanup. */
     public Exception getStopFailure() {
-        return stopFailure;
+        // Completion callbacks can report failures after stop() returned. Consult the engine's
+        // live task-cleanup state rather than treating the return from close() as success.
+        Exception cleanupFailure = engine.getCleanupFailure();
+        return cleanupFailure != null ? cleanupFailure : stopFailure;
     }
 
     public DbzCdcEngine getEngine() {
