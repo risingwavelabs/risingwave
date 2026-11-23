@@ -24,8 +24,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model::{FragmentId, WorkerId};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
+use risingwave_pb::common::ClusterResource;
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -181,22 +180,6 @@ impl NotificationServiceImpl {
             .collect()
     }
 
-    async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
-        let cluster_guard = self
-            .metadata_manager
-            .cluster_controller
-            .get_inner_read_guard()
-            .await;
-        let compute_nodes = cluster_guard
-            .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
-            .await?;
-        let frontends = cluster_guard
-            .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
-            .await?;
-        let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
-        Ok((worker_nodes, cluster_guard.worker_node_version()))
-    }
-
     async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {
         let catalog_guard = self
             .metadata_manager
@@ -259,7 +242,7 @@ impl NotificationServiceImpl {
         })
     }
 
-    async fn frontend_subscribe(&self) -> MetaResult<MetaSnapshot> {
+    async fn frontend_subscribe(&self, tx: mpsc::UnboundedSender<Notification>) -> MetaResult<()> {
         let (
             (
                 databases,
@@ -299,8 +282,6 @@ impl NotificationServiceImpl {
 
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
-        let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
-
         let hummock_version = self
             .hummock_manager
             .on_current_version(|version| {
@@ -321,33 +302,41 @@ impl NotificationServiceImpl {
 
         let cluster_resource = self.get_cluster_resource().await?;
 
-        Ok(MetaSnapshot {
-            databases,
-            schemas,
-            sources,
-            sinks,
-            tables,
-            indexes,
-            views,
-            subscriptions,
-            functions,
-            connections,
-            secrets: decrypted_secrets,
-            users,
-            nodes,
-            hummock_version: Some(hummock_version),
-            version: Some(SnapshotVersion {
-                catalog_version,
-                worker_node_version,
-                streaming_worker_slot_mapping_version,
-            }),
-            serving_worker_slot_mappings,
-            streaming_worker_slot_mappings,
-            session_params,
-            object_dependencies,
-            cluster_resource: Some(cluster_resource),
-            ..Default::default()
-        })
+        self.metadata_manager
+            .cluster_controller
+            .with_frontend_worker_snapshot(|nodes, worker_node_version| {
+                let snapshot = MetaSnapshot {
+                    databases,
+                    schemas,
+                    sources,
+                    sinks,
+                    tables,
+                    indexes,
+                    views,
+                    subscriptions,
+                    functions,
+                    connections,
+                    secrets: decrypted_secrets,
+                    users,
+                    nodes,
+                    hummock_version: Some(hummock_version),
+                    version: Some(SnapshotVersion {
+                        catalog_version,
+                        worker_node_version,
+                        streaming_worker_slot_mapping_version,
+                    }),
+                    serving_worker_slot_mappings,
+                    streaming_worker_slot_mappings,
+                    session_params,
+                    object_dependencies,
+                    cluster_resource: Some(cluster_resource),
+                    ..Default::default()
+                };
+                self.env
+                    .notification_manager()
+                    .notify_snapshot(tx, snapshot);
+            })
+            .await
     }
 
     async fn hummock_subscribe(&self, worker_id: WorkerId) -> MetaResult<MetaSnapshot> {
@@ -424,7 +413,10 @@ impl NotificationService for NotificationServiceImpl {
 
         let meta_snapshot = match subscribe_type {
             SubscribeType::Compactor => self.compactor_subscribe().await?,
-            SubscribeType::Frontend => self.frontend_subscribe().await?,
+            SubscribeType::Frontend => {
+                self.frontend_subscribe(tx).await?;
+                return Ok(Response::new(UnboundedReceiverStream::new(rx)));
+            }
             SubscribeType::Hummock => {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())
