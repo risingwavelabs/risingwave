@@ -13372,6 +13372,7 @@ dependencies = [
  "risingwave_jni_core",
  "risingwave_meta_node",
  "risingwave_rt",
+ "serde_json",
  "shell-words",
  "strum 0.28.0",
  "strum_macros 0.28.0",

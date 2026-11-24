@@ -105,6 +105,7 @@ enum Component {
     /// We only expose high-level configuration options,
     /// which map across multiple nodes.
     SingleNode,
+    Connectors,
 }
 
 impl Component {
@@ -124,6 +125,7 @@ impl Component {
             Self::Playground => playground(),
             Self::Standalone => standalone(parse_opts(matches)),
             Self::SingleNode => single_node(parse_opts(matches)),
+            Self::Connectors => connectors(parse_opts(matches)),
         }
     }
 
@@ -138,6 +140,7 @@ impl Component {
             Component::Playground => vec!["play"],
             Component::Standalone => vec![],
             Component::SingleNode => vec!["single-node", "single"],
+            Component::Connectors => vec![],
         }
     }
 
@@ -153,6 +156,9 @@ impl Component {
                 .about("Shortcut for `single-node --in-memory`, should not be used in production"),
             Component::Standalone => StandaloneOpts::augment_args(cmd),
             Component::SingleNode => SingleNodeOpts::augment_args(cmd),
+            Component::Connectors => ConnectorsOpts::augment_args(cmd.about(
+                "List the source and sink connectors this build supports, with their WITH options",
+            )),
         }
     }
 
@@ -251,6 +257,28 @@ fn playground() -> ! {
     single_node(SingleNodeOpts::new_for_playground());
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum ConnectorsFormat {
+    Json,
+}
+
+#[derive(Debug, Clone, Args)]
+struct ConnectorsOpts {
+    #[clap(long, value_enum, default_value_t = ConnectorsFormat::Json)]
+    format: ConnectorsFormat,
+}
+
+fn connectors(opts: ConnectorsOpts) -> ! {
+    let connectors = risingwave_connector::connector_options::connectors();
+    match opts.format {
+        ConnectorsFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&connectors).expect("connectors serialize to JSON")
+        ),
+    }
+    std::process::exit(0);
+}
+
 #[cfg(test)]
 mod tests {
     use std::assert_matches;
@@ -299,6 +327,12 @@ mod tests {
         .unwrap_err();
         assert_matches!(e.kind(), ErrorKind::UnknownArgument);
         assert!(e.to_string().contains("my-bad-arg"), "{e}")
+    }
+
+    #[test]
+    fn test_connectors() {
+        let (c, _) = parse_args(["./risingwave", "connectors", "--format", "json"]).unwrap();
+        assert_matches!(c, Component::Connectors);
     }
 
     #[test]
