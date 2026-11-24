@@ -36,14 +36,13 @@ use risingwave_common::types::{DataType, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
-use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
-    sink_is_exactly_once,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -719,6 +718,27 @@ impl SinkCreateMode {
     }
 }
 
+fn is_iceberg_pk_index_properties(properties: &BTreeMap<String, String>) -> bool {
+    properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+        && properties
+            .get(ENABLE_PK_INDEX)
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn ensure_replace_sink_not_iceberg_pk_index(properties: &BTreeMap<String, String>) -> Result<()> {
+    if is_iceberg_pk_index_properties(properties) {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK does not support Iceberg sinks with `enable_pk_index='true'`".to_owned(),
+            "the Iceberg pk-index writer has internal state and must be rebuilt by snapshot backfill"
+                .to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 async fn create_sink_or_replace(
     mut handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
@@ -880,6 +900,7 @@ fn prepare_replace_sink(
         )
         .into());
     }
+    ensure_replace_sink_not_iceberg_pk_index(&handle_args.with_options)?;
     match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
         Some(value) if !value.eq_ignore_ascii_case("false") => {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -920,13 +941,7 @@ fn prepare_replace_sink(
             )
             .into());
         }
-        if sink_is_exactly_once(&sink.properties)? {
-            return Err(ErrorCode::NotSupported(
-                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
-                "set is_exactly_once=false or recreate the sink manually".to_owned(),
-            )
-            .into());
-        }
+        ensure_replace_sink_not_iceberg_pk_index(&sink.properties)?;
         sink.clone()
     };
 
@@ -1281,24 +1296,6 @@ pub mod tests {
         );
     }
 
-    #[test]
-    fn test_sink_replace_requires_exactly_once_state_defaults() {
-        let properties = BTreeMap::from([("connector".to_owned(), "iceberg".to_owned())]);
-        assert!(super::sink_is_exactly_once(&properties).unwrap());
-
-        let properties = BTreeMap::from([
-            ("connector".to_owned(), "iceberg".to_owned()),
-            ("is_exactly_once".to_owned(), "false".to_owned()),
-        ]);
-        assert!(!super::sink_is_exactly_once(&properties).unwrap());
-
-        let properties = BTreeMap::from([
-            ("connector".to_owned(), "jdbc".to_owned()),
-            ("is_exactly_once".to_owned(), "true".to_owned()),
-        ]);
-        assert!(!super::sink_is_exactly_once(&properties).unwrap());
-    }
-
     #[tokio::test]
     async fn test_create_sink_handler() {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
@@ -1366,6 +1363,17 @@ pub mod tests {
         // Frontend leaves the replacement job foreground for the meta foreground wait path.
         // Meta switches it to background when marking the job Creating during cutover.
         assert_eq!(sink.create_type, CreateType::Foreground);
+
+        let sql = r#"REPLACE SINK snk1 FROM mv1
+                    WITH (connector = 'iceberg', type = 'upsert', enable_pk_index = 'true');"#
+            .to_owned();
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "REPLACE SINK does not support Iceberg sinks with `enable_pk_index='true'`"
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]

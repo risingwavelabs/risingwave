@@ -94,6 +94,15 @@ docker build . -f docker/Dockerfile
 
 from the project root.
 
+The standard and HDFS images require Ubuntu's OpenJDK 21 package version
+`21.0.13.1+2-1~24.04.1` or newer to address
+[CVE-2026-114938](https://ubuntu.com/security/notices/USN-9156-1).
+The build installs the latest available JDK and fails if the installed runtime
+is below this minimum. Private Ubuntu mirrors must provide the security update.
+To refresh an existing image's JDK, rebuild with `--pull --no-cache`, then replace
+the running containers with the rebuilt image. Restarting an old image does not
+update its JDK.
+
 To build the images without SIMD vector extensions, run
 
 ```

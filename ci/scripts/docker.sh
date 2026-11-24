@@ -32,25 +32,36 @@ docker buildx create \
   --name container \
   --driver=docker-container
 
-PULL_PARAM=""
+cache_ref="ghcr.io/risingwavelabs/risingwave-build-cache:${arch}"
+build_args=(
+  -f docker/Dockerfile
+  --build-arg "GIT_SHA=${BUILDKITE_COMMIT}"
+  --build-arg "CARGO_PROFILE=${CARGO_PROFILE}"
+  --progress plain
+  --builder=container
+  --cache-from "type=registry,ref=${cache_ref}"
+)
+pull_args=()
 if [[ "${ALWAYS_PULL:-false}" = "true" ]]; then
-  PULL_PARAM="--pull"
+  pull_args=(--pull)
 fi
+tag="${BUILDKITE_COMMIT}-${arch}"
+test_image="risingwave-image-test:${tag}"
+container_id=
+cleanup() {
+  if [[ -n "$container_id" ]]; then
+    docker rm -f "$container_id" >/dev/null || true
+  fi
+  docker image rm "$test_image" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
-docker buildx build -f docker/Dockerfile \
-  --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
-  --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
-  -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
-  --progress plain \
-  --builder=container \
-  --load \
-  ${PULL_PARAM} \
-  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
-  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+docker buildx build "${build_args[@]}" "${pull_args[@]}" \
+  --target risingwave-nodwp --load -t "$test_image" \
   .
 
 echo "--- check the image can start correctly"
-container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
+container_id=$(docker run -d "$test_image" playground)
 sleep 10
 container_status=$(docker inspect --format='{{.State.Status}}' "$container_id")
 if [ "$container_status" != "running" ]; then
@@ -60,12 +71,10 @@ if [ "$container_status" != "running" ]; then
   exit 1
 fi
 
-echo "--- docker images"
-docker images
-
-echo "--- docker push to ghcr"
-docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
-
-echo "--- docker push to dockerhub"
-docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
-docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+echo "--- export and push the image with debug symbols"
+# Publish single-architecture manifests for multi-arch-docker.sh.
+docker buildx build "${build_args[@]}" \
+  --target risingwave --provenance=false --push \
+  -t "${ghcraddr}:${tag}" -t "${dockerhubaddr}:${tag}" \
+  --cache-to "type=registry,ref=${cache_ref}" \
+  .

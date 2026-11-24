@@ -553,23 +553,16 @@ services:
       - ..:/risingwave
 
   release-env-x86:
-    # Build binaries on a earlier Linux distribution (therefore with earlier version GLIBC)
-    # `manylinux_2_28` is based on AlmaLinux 8 with GLIBC 2.28.
-    #
-    # GLIBC versions on some systems:
-    # - Amazon Linux 2023 (AL2023): 2.34
-    # - Ubuntu 20.04: 2.31
-    #
-    # Systems that we don't provide support for:
-    # - Ubuntu 18.04: 2.27 (Already EOL 2023-05-31)
-    # - Amazon Linux 2: 2.26 (Originally EOL 2023-06-30, superseded by AL2023)
-    image: quay.io/pypa/manylinux_2_28_x86_64:2025.03.23-1
+    # Build standalone Linux releases on AlmaLinux 9 with glibc 2.34.
+    # Amazon Linux 2023, RHEL 9, and Ubuntu 22.04 meet this glibc baseline.
+    # RHEL 8 and Ubuntu 20.04 have older glibc versions.
+    image: quay.io/pypa/manylinux_2_34_x86_64:2026.11.14-1
     working_dir: /mnt
     volumes:
       - ..:/mnt
 
   release-env-arm:
-    image: quay.io/pypa/manylinux_2_28_aarch64:2025.03.23-1
+    image: quay.io/pypa/manylinux_2_34_aarch64:2026.11.14-1
     working_dir: /mnt
     volumes:
       - ..:/mnt

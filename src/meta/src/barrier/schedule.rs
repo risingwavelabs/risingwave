@@ -875,6 +875,7 @@ mod tests {
         async fn post_collect_command(
             &self,
             _command: crate::barrier::command::PostCollectCommand,
+            _epoch: risingwave_common::util::epoch::EpochPair,
         ) -> MetaResult<()> {
             unimplemented!()
         }

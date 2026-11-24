@@ -136,7 +136,7 @@ impl_stream_node_body!(Source(SourceNode) => SourceExecutorBuilder);
 fn iceberg_update_list_mode(source: &StreamSource, params: &ExecutorParams) -> StreamResult<bool> {
     let enabled = iceberg_update_mode(
         &source.with_properties,
-        &source.refresh_mode,
+        &source.ingest_mode,
         source.rate_limit,
         source.row_id_index,
         params.info.stream_kind,
@@ -161,7 +161,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
+            let is_full_reload_refresh = is_full_reload_refresh(&source.ingest_mode);
             let exec = {
                 let source_id = source.source_id;
                 let source_name = source.source_name.clone();

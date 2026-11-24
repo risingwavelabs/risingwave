@@ -99,8 +99,12 @@ pub fn try_purify_table_source_create_sql_ast(
             .iter()
             .find(|c| c.name.real_value() == column.name())
         {
-            // If the column is already defined in the persisted definition, retrieve it.
-            existing.clone()
+            let mut existing = existing.clone();
+            // Keep the bound type on replan even if SQL omitted it at creation.
+            existing
+                .data_type
+                .get_or_insert_with(|| column.data_type().to_ast());
+            existing
         } else {
             assert!(
                 !column.is_generated(),

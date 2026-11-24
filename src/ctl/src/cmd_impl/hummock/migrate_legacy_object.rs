@@ -55,7 +55,7 @@ pub async fn migrate_legacy_object(
     let ObjectStoreImpl::Opendal(opendal) = store else {
         return Err(anyhow!("OpenDAL is required"));
     };
-    let mut iter = opendal.list(source_dir, None, None).await?;
+    let mut iter = opendal.list(source_dir).await?;
     let mut count = 0;
     println!("Migration is started: from {source_dir} to {target_dir}.");
     let mut from_to = Vec::with_capacity(concurrency as usize);

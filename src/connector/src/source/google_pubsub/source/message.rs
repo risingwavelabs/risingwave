@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{TimeZone, Utc};
-use google_cloud_pubsub::subscriber::ReceivedMessage;
+use gcloud_pubsub::subscriber::ReceivedMessage;
 
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 

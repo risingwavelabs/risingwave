@@ -22,10 +22,11 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
-    GetStreamingStatsRequest, GetStreamingStatsResponse, HeapProfilingRequest,
-    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
-    ProfilingResponse, StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetLogFilterRequest, GetProfileStatsRequest,
+    GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, LogFilterState, ProfilingRequest, ProfilingResponse,
+    SetLogFilterRequest, StackTraceRequest, StackTraceResponse,
 };
 use tonic::transport::Endpoint;
 
@@ -43,6 +44,28 @@ pub struct MonitorClient {
 }
 
 impl MonitorClient {
+    /// Return the process-wide stdout/stderr filter on any node type.
+    pub async fn get_log_filter(&self) -> Result<LogFilterState> {
+        Ok(self
+            .monitor_client
+            .clone()
+            .get_log_filter(GetLogFilterRequest {})
+            .await
+            .map_err(RpcError::from_monitor_status)?
+            .into_inner())
+    }
+
+    /// Replace startup `RUST_LOG` and runtime directives, or reset with `None`.
+    pub async fn set_log_filter(&self, filter: Option<String>) -> Result<LogFilterState> {
+        Ok(self
+            .monitor_client
+            .clone()
+            .set_log_filter(SetLogFilterRequest { filter })
+            .await
+            .map_err(RpcError::from_monitor_status)?
+            .into_inner())
+    }
+
     pub async fn new(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", host_addr))?
             .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))

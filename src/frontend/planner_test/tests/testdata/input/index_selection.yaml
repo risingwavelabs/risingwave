@@ -415,6 +415,20 @@
     select * from t1 where a like 'ABC%'
   expected_outputs:
   - batch_plan
+- name: trailing underscore LIKE keeps residual filter with index range
+  sql: |
+    create table t1 (a varchar);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC_'
+  expected_outputs:
+  - batch_plan
+- name: escaped underscore prefix LIKE uses index range without residual filter
+  sql: |
+    create table t1 (a varchar);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC\_%'
+  expected_outputs:
+  - batch_plan
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);
