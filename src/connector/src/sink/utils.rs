@@ -105,6 +105,7 @@ pub(crate) mod dummy {
     impl<S: FeatureNotEnabledSinkMarker> Sink for FeatureNotEnabledSink<S> {
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
+        const ENABLED: bool = false;
         const SINK_NAME: &'static str = S::SINK_NAME;
 
         async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {

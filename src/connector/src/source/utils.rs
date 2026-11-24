@@ -77,6 +77,7 @@ macro_rules! feature_gated_source_mod {
                 type SplitReader = [<$struct_prefix:camel SplitReader>];
 
                 const SOURCE_NAME: &'static str = [<$source_name:upper _CONNECTOR>];
+                const ENABLED: bool = false;
             }
 
             #[doc = "A dummy split that always returns an error, as the feature `source-" $source_name "` is currently not enabled."]

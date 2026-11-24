@@ -825,6 +825,9 @@ fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
 
+    /// `false` for the stand-in a build compiles when this sink's feature is disabled.
+    const ENABLED: bool = true;
+
     type LogSinker: LogSinker;
 
     /// Return whether this sink uses exactly-once commit state for the loaded properties.

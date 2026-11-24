@@ -114,6 +114,8 @@ pub trait SourceProperties:
     TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecret
 {
     const SOURCE_NAME: &'static str;
+    /// `false` for the stand-in a build compiles when this source's feature is disabled.
+    const ENABLED: bool = true;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
         + Into<SplitImpl>;
