@@ -621,6 +621,7 @@ mod retention_tests;
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -654,7 +655,7 @@ mod tests {
         let (ids, count, size) = GcManager::list_objects_batch(&mut objects, 10, 2)
             .await
             .unwrap();
-        assert_eq!(ids, [HummockObjectId::Sstable(2.into())].into());
+        assert_eq!(ids, HashSet::from([HummockObjectId::Sstable(2.into())]));
         assert_eq!((count, size), (1, 2));
         let (ids, count, size) = GcManager::list_objects_batch(&mut objects, 10, 2)
             .await

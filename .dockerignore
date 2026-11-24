@@ -45,6 +45,13 @@ log/
 .bin/
 
 # generated files
+dashboard/.next/
+dashboard/node_modules/
+dashboard/out/
+dashboard/proto/gen/
+dashboard/public/monaco/
+dashboard/tmp_gen/
+dashboard/*.tsbuildinfo
 risedev-components.user.env
 riselab-components.user.env
 

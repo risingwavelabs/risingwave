@@ -1,0 +1,10 @@
+# RECOVER restarts all streaming jobs; run only in the serial recovery suite.
+# The local HTTP server stays alive so its request count spans the recovery.
+skipif madsim
+system ok
+python3 e2e_test/streaming/ai_decide_recovery.py
+----
+ai_decide recovery integration passed
+
+
+# The helper cleans up its SQL objects and HTTP server before returning.

@@ -18,8 +18,9 @@ use opendal::layers::{
     ConcurrentLimitLayer as OpendalConcurrentLimitLayer, ConcurrentLimitSemaphore,
 };
 use opendal::raw::{
-    Layer, OpCopier, OpCopy, OpCreateDir, OpList, OpPresign, OpRead, OpRename, OpStat, OpWrite,
-    RpCreateDir, RpPresign, RpRename, RpStat, Service, ServiceInfo, Servicer, oio,
+    Layer, OpCompose, OpCopy, OpCreateDir, OpList, OpPresign, OpRead, OpRename, OpRestore, OpStat,
+    OpWrite, RpCreateDir, RpPresign, RpRename, RpRestore, RpStat, Service, ServiceInfo, Servicer,
+    oio,
 };
 use opendal::{Capability, OperationContext, Result};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -94,6 +95,7 @@ struct ConcurrentLimitService {
 }
 
 impl Service for ConcurrentLimitService {
+    type Composer = oio::Composer;
     type Copier = oio::Copier;
     type Deleter = oio::Deleter;
     type Lister = ConcurrentLimitLister;
@@ -148,9 +150,22 @@ impl Service for ConcurrentLimitService {
         from: &str,
         to: &str,
         args: OpCopy,
-        opts: OpCopier,
     ) -> Result<Self::Copier> {
-        self.limited.copy(ctx, from, to, args, opts)
+        self.limited.copy(ctx, from, to, args)
+    }
+
+    // Forward compose and restore so they match capability(); the defaults return Unsupported.
+    fn compose(&self, ctx: &OperationContext, to: &str, args: OpCompose) -> Result<Self::Composer> {
+        self.limited.compose(ctx, to, args)
+    }
+
+    async fn restore(
+        &self,
+        ctx: &OperationContext,
+        path: &str,
+        args: OpRestore,
+    ) -> Result<RpRestore> {
+        self.limited.restore(ctx, path, args).await
     }
 
     async fn rename(
