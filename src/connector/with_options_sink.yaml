@@ -2125,6 +2125,20 @@ SqlServerConfig:
     field_type: usize
     required: false
     default: '1024'
+  - name: sqlserver.connect_timeout_ms
+    field_type: u64
+    comments: |-
+      Milliseconds allowed to establish a connection: TCP connect, TLS and login. Unset or 0
+      means no limit.
+    required: false
+    default: Default::default
+  - name: sqlserver.command_timeout_ms
+    field_type: u64
+    comments: |-
+      Milliseconds to wait for each response of SQL Server while a statement runs, including the
+      first one. This does not limit the total time of a statement. Unset or 0 means no limit.
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true

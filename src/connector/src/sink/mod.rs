@@ -1312,7 +1312,10 @@ impl From<RedisError> for SinkError {
 
 impl From<tiberius::error::Error> for SinkError {
     fn from(err: tiberius::error::Error) -> Self {
-        SinkError::SqlServer(anyhow!(err))
+        SinkError::SqlServer(crate::connector_common::sql_server::hint_command_timeout(
+            err,
+            "sqlserver.command_timeout_ms",
+        ))
     }
 }
 
