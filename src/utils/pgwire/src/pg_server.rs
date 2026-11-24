@@ -249,7 +249,7 @@ async fn validate_jwt_with_cache(
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
-    let mut jwks = cache.get(jwks_url, Instant::now()).await?;
+    let mut jwks = cache.get(jwks_url).await?;
     // A signing-key rotation shows up as a token whose `kid` the cached set does not have.
     // Refetch then, rate-limited by the cache, rather than reject logins until the TTL ends.
     // Only for an allowed algorithm, so a token that would be rejected anyway never causes a
@@ -258,9 +258,7 @@ async fn validate_jwt_with_cache(
         && ALLOWED_JWT_ALGORITHMS.contains(&header.alg)
         && find_compatible_jwk(&jwks, kid, header.alg).is_none()
     {
-        jwks = cache
-            .refetch_for_unknown_kid(jwks_url, Instant::now())
-            .await?;
+        jwks = cache.refetch_for_unknown_kid(jwks_url).await?;
     }
     validate_jwt_with_jwks(jwt, &jwks, issuer, audience, metadata)
 }
@@ -871,7 +869,7 @@ mod tests {
         use std::collections::{HashMap, VecDeque};
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
         use base64::Engine;
         use jsonwebtoken::{Algorithm, EncodingKey, Header};
@@ -1489,6 +1487,7 @@ mod tests {
             });
             let cache = JwksCache::with_durations(
                 fetcher,
+                Box::new(Instant::now),
                 Duration::from_secs(300),
                 Duration::ZERO,
                 Duration::from_secs(3600),

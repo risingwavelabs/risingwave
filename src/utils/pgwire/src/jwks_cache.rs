@@ -55,6 +55,9 @@ const _: () = assert!(JWKS_MIN_REFETCH_INTERVAL.as_nanos() < JWKS_TTL.as_nanos()
 pub(crate) type JwksFetcher =
     Box<dyn Fn(String) -> BoxFuture<'static, Result<Jwks, BoxedError>> + Send + Sync>;
 
+/// Reads the current time. Injected so tests control the clock.
+pub(crate) type Clock = Box<dyn Fn() -> Instant + Send + Sync>;
+
 /// The production fetcher: an HTTP GET with a timeout, which fails on a non-success status.
 ///
 /// One HTTP client is built here and shared by every fetch, so fetches reuse its connection
@@ -94,6 +97,7 @@ struct Slot {
 
 pub(crate) struct JwksCache {
     fetch: JwksFetcher,
+    clock: Clock,
     ttl: Duration,
     min_refetch_interval: Duration,
     max_staleness: Duration,
@@ -106,6 +110,7 @@ impl JwksCache {
     pub(crate) fn new(fetch: JwksFetcher) -> Self {
         Self::with_durations(
             fetch,
+            Box::new(Instant::now),
             JWKS_TTL,
             JWKS_MIN_REFETCH_INTERVAL,
             JWKS_MAX_STALENESS,
@@ -114,6 +119,7 @@ impl JwksCache {
 
     pub(crate) fn with_durations(
         fetch: JwksFetcher,
+        clock: Clock,
         ttl: Duration,
         min_refetch_interval: Duration,
         max_staleness: Duration,
@@ -126,6 +132,7 @@ impl JwksCache {
         );
         Self {
             fetch,
+            clock,
             ttl,
             min_refetch_interval,
             max_staleness,
@@ -138,10 +145,13 @@ impl JwksCache {
     }
 
     /// Returns the JWK Set for `url`, fetching it when there is none or it is older than the
-    /// TTL. `now` is taken by the caller, so tests control the clock.
-    pub(crate) async fn get(&self, url: &str, now: Instant) -> Result<Arc<Jwks>, BoxedError> {
+    /// TTL.
+    pub(crate) async fn get(&self, url: &str) -> Result<Arc<Jwks>, BoxedError> {
         let slot = self.slot(url);
         let mut slot = slot.lock().await;
+        // Read after the lock is taken: a login that waited for a concurrent fetch decides with
+        // the time it got the lock, not the time it arrived.
+        let now = (self.clock)();
         if let Some(cached) = &slot.cached
             && now.saturating_duration_since(cached.fetched_at) < self.ttl
         {
@@ -163,13 +173,10 @@ impl JwksCache {
     /// a fetch for `url` was attempted within the refetch interval. Returns the set to verify
     /// against: the new one, or, when rate-limited, the current one (which a concurrent
     /// login may just have refreshed).
-    pub(crate) async fn refetch_for_unknown_kid(
-        &self,
-        url: &str,
-        now: Instant,
-    ) -> Result<Arc<Jwks>, BoxedError> {
+    pub(crate) async fn refetch_for_unknown_kid(&self, url: &str) -> Result<Arc<Jwks>, BoxedError> {
         let slot = self.slot(url);
         let mut slot = slot.lock().await;
+        let now = (self.clock)();
         if let Some(last) = slot.last_attempt
             && now.saturating_duration_since(last) < self.min_refetch_interval
         {
@@ -180,27 +187,32 @@ impl JwksCache {
         self.refresh(&mut slot, url, now).await
     }
 
+    /// Fetches the JWK Set for `url` into `slot`. `started` is when the fetch begins; it is
+    /// both the new set's fetch time and the attempt time.
     async fn refresh(
         &self,
         slot: &mut Slot,
         url: &str,
-        now: Instant,
+        started: Instant,
     ) -> Result<Arc<Jwks>, BoxedError> {
         let fetched = (self.fetch)(url.to_owned()).await;
         // Recorded after the fetch returns, not before it: if this future is dropped while
         // fetching, no attempt is recorded, and the next login fetches instead of reporting a
         // failure that never happened.
-        slot.last_attempt = Some(now);
+        slot.last_attempt = Some(started);
         match fetched {
             Ok(jwks) => {
                 let jwks = Arc::new(jwks);
                 slot.cached = Some(Cached {
                     jwks: jwks.clone(),
-                    fetched_at: now,
+                    fetched_at: started,
                 });
                 Ok(jwks)
             }
-            Err(error) => match self.serve_stale(slot, now) {
+            // The fallback's age check reads the clock again: a failed fetch can take up to
+            // `JWKS_FETCH_TIMEOUT`, and the set must not be served once it is older than the
+            // maximum staleness at the time the fetch failed.
+            Err(error) => match self.serve_stale(slot, (self.clock)()) {
                 Some(stale) => {
                     tracing::warn!(
                         url,
@@ -278,12 +290,61 @@ mod tests {
     const STALE: Duration = Duration::from_secs(3600);
     const URL: &str = "https://idp.example/jwks";
 
-    fn cache(script: Vec<Result<Vec<&'static str>, ()>>) -> (JwksCache, Arc<AtomicUsize>) {
+    /// A clock the test sets and advances by hand.
+    #[derive(Clone)]
+    struct TestClock(Arc<parking_lot::Mutex<Instant>>);
+
+    impl TestClock {
+        fn new() -> Self {
+            Self(Arc::new(parking_lot::Mutex::new(Instant::now())))
+        }
+
+        fn set(&self, now: Instant) {
+            *self.0.lock() = now;
+        }
+
+        fn advance(&self, by: Duration) {
+            *self.0.lock() += by;
+        }
+
+        fn as_clock(&self) -> Clock {
+            let clock = self.clone();
+            Box::new(move || *clock.0.lock())
+        }
+    }
+
+    /// A cache on a [`TestClock`]. Its calls take the time to set the clock to first.
+    struct Harness {
+        cache: JwksCache,
+        clock: TestClock,
+    }
+
+    impl Harness {
+        fn new(fetcher: JwksFetcher, clock: TestClock) -> Self {
+            Self {
+                cache: JwksCache::with_durations(fetcher, clock.as_clock(), TTL, INTERVAL, STALE),
+                clock,
+            }
+        }
+
+        async fn get(&self, url: &str, now: Instant) -> Result<Arc<Jwks>, BoxedError> {
+            self.clock.set(now);
+            self.cache.get(url).await
+        }
+
+        async fn refetch_for_unknown_kid(
+            &self,
+            url: &str,
+            now: Instant,
+        ) -> Result<Arc<Jwks>, BoxedError> {
+            self.clock.set(now);
+            self.cache.refetch_for_unknown_kid(url).await
+        }
+    }
+
+    fn cache(script: Vec<Result<Vec<&'static str>, ()>>) -> (Harness, Arc<AtomicUsize>) {
         let (fetcher, calls) = scripted(script);
-        (
-            JwksCache::with_durations(fetcher, TTL, INTERVAL, STALE),
-            calls,
-        )
+        (Harness::new(fetcher, TestClock::new()), calls)
     }
 
     #[tokio::test]
@@ -379,6 +440,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stale_set_is_not_served_when_a_failed_refetch_ends_past_max_staleness() {
+        let clock = TestClock::new();
+        let fetch_clock = clock.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        // The first fetch succeeds at once; the second takes ten seconds and then fails.
+        let fetcher: JwksFetcher = Box::new(move |_url| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                async { Ok(jwks_with_kids(&["a"])) }.boxed()
+            } else {
+                fetch_clock.advance(Duration::from_secs(10));
+                async { Err(BoxedError::from("injected fetch failure")) }.boxed()
+            }
+        });
+        let cache = Harness::new(fetcher, clock);
+        let t0 = Instant::now();
+        cache.get(URL, t0).await.unwrap();
+
+        // The refetch starts while the set is within the maximum staleness and fails after it
+        // has passed: the set is not served.
+        let err = cache
+            .get(URL, t0 + STALE - Duration::from_secs(5))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("injected fetch failure"), "{err}");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn test_failed_first_fetch_is_an_error_and_is_not_retried_immediately() {
         let (cache, calls) = cache(vec![Err(()), Ok(vec!["a"])]);
         let t0 = Instant::now();
@@ -405,7 +495,7 @@ mod tests {
                 async { Ok(jwks_with_kids(&["a"])) }.boxed()
             }
         });
-        let cache = JwksCache::with_durations(fetcher, TTL, INTERVAL, STALE);
+        let cache = Harness::new(fetcher, TestClock::new());
         let t0 = Instant::now();
 
         // A login starts the first fetch and is dropped while it is in flight.
