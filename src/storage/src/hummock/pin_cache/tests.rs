@@ -18,8 +18,6 @@ use std::time::Duration;
 use bytes::Bytes;
 use risingwave_common::config::{RwConfig, extract_storage_memory_config};
 use risingwave_common::system_param::system_params_for_test;
-use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::ObjectStoreRef;
 
 use super::PinCache;
 use super::test_utils::{
@@ -27,17 +25,9 @@ use super::test_utils::{
 };
 use crate::opts::StorageOpts;
 
-async fn cache(
-    store: ObjectStoreRef,
-    shards: usize,
-    ids: impl IntoIterator<Item = HummockSstableObjectId>,
-) -> Arc<PinCache> {
-    PinCache::new(store, shards, ids)
-}
-
-#[tokio::test]
+#[test]
 #[should_panic(expected = "pin cache shard count must be greater than zero")]
-async fn test_zero_shards_rejected() {
+fn test_zero_shards_rejected() {
     PinCache::new(in_memory_object_store(), 0, []);
 }
 
@@ -45,7 +35,7 @@ async fn test_zero_shards_rejected() {
 #[tokio::test]
 async fn test_read_and_unregister_lifecycle() {
     let (_dir, store) = local_object_store().await;
-    let cache = cache(store, 1, [1001.into()]).await;
+    let cache = PinCache::new(store, 1, [1001.into()]);
     assert!(cache.is_registered(1001.into()));
     assert!(cache.get(1001.into()).is_none());
     let bytes = Bytes::from_static(b"complete sst");
@@ -70,7 +60,7 @@ async fn test_read_and_unregister_lifecycle() {
 
 #[tokio::test]
 async fn test_read_failure_withdraws_route_without_unregistering() {
-    let cache = cache(in_memory_object_store(), 1, [1001.into()]).await;
+    let cache = PinCache::new(in_memory_object_store(), 1, [1001.into()]);
     install_file_for_test(&cache, 1001.into(), Bytes::from_static(b"complete")).await;
     let reader = cache.get(1001.into()).unwrap();
     cache.store.delete(&reader.file.path).await.unwrap();
@@ -89,7 +79,7 @@ async fn test_other_shard_does_not_block_object_operations() {
     let system_params = system_params_for_test().into();
     let memory = extract_storage_memory_config(&config);
     let opts = StorageOpts::from((&config, &system_params, &memory));
-    let cache = cache(in_memory_object_store(), opts.pin_cache_shard_num, []).await;
+    let cache = PinCache::new(in_memory_object_store(), opts.pin_cache_shard_num, []);
     assert_eq!(cache.shards.len(), 3);
     let blocked = object_in_shard(0, 3);
     let available = object_in_shard(2, 3);
@@ -118,7 +108,7 @@ async fn test_other_shard_does_not_block_object_operations() {
 
 #[tokio::test]
 async fn test_object_membership_across_shards() {
-    let cache = cache(in_memory_object_store(), 3, []).await;
+    let cache = PinCache::new(in_memory_object_store(), 3, []);
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
     cache.register_objects(objects);
     for id in objects {
