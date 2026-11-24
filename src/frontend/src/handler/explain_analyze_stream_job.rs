@@ -585,8 +585,8 @@ mod graph {
     };
     use risingwave_pb::id::{ActorId, GlobalOperatorId};
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
+    use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
     use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
-    use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
     use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
@@ -671,13 +671,9 @@ mod graph {
                 .expect("should have node body")
                 .into();
             let operator_id = unique_operator_id(fragment_id, node.operator_id);
-            if let Some(merge_node) = node.node_body.as_ref()
-                && let NodeBody::Merge(box MergeNode {
-                    upstream_fragment_id,
-                    ..
-                }) = merge_node
-            {
-                fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
+            if let Some(NodeBody::Merge(merge_node)) = node.node_body.as_ref() {
+                fragment_id_to_merge_operator_id
+                    .insert(merge_node.upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
             let dependency_ids = dependencies

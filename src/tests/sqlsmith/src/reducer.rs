@@ -160,14 +160,15 @@ fn find_ddl_references_for_query_in_set_expr(
     ddl_references: &mut HashSet<String>,
 ) {
     match set_expr {
-        SetExpr::Select(box Select {
-            from,
-            selection,
-            projection,
-            group_by,
-            having,
-            ..
-        }) => {
+        SetExpr::Select(select) => {
+            let Select {
+                from,
+                selection,
+                projection,
+                group_by,
+                having,
+                ..
+            } = select.as_ref();
             // Scan FROM clause
             for table_with_joins in from {
                 find_ddl_references_for_query_in_table_with_joins(table_with_joins, ddl_references);
