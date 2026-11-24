@@ -154,6 +154,7 @@ impl Service for ConcurrentLimitService {
         self.limited.copy(ctx, from, to, args)
     }
 
+    // Forward compose and restore so they match capability(); the defaults return Unsupported.
     fn compose(&self, ctx: &OperationContext, to: &str, args: OpCompose) -> Result<Self::Composer> {
         self.limited.compose(ctx, to, args)
     }
