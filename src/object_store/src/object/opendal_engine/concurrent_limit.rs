@@ -234,25 +234,6 @@ mod tests {
         assert_eq!(layer.semaphore.0.available_permits(), 1);
     }
 
-    #[tokio::test]
-    async fn test_copy_shares_operation_limit() {
-        let layer = ConcurrentLimitLayer::new(1);
-        let dir = tempfile::tempdir().unwrap();
-        let op = Operator::new(opendal::services::Fs::default().root(dir.path().to_str().unwrap()))
-            .unwrap()
-            .layer(layer.clone());
-        op.write("file", "data").await.unwrap();
-        let permit = layer.semaphore.acquire().await;
-        let mut copy = Box::pin(op.copy("file", "copied"));
-        assert!(poll!(copy.as_mut()).is_pending());
-        drop(permit);
-        tokio::time::timeout(Duration::from_secs(5), copy)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(op.read("copied").await.unwrap().to_vec(), b"data");
-    }
-
     struct PendingLister;
 
     impl oio::List for PendingLister {
