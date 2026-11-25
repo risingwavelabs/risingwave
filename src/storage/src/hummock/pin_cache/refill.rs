@@ -244,9 +244,9 @@ impl PinCache {
         object_id: HummockSstableObjectId,
         mut download: PinCacheDownload,
     ) -> bool {
-        let mut state = self.shard(object_id).state.write();
-        let Some(object) = state.objects.get_mut(&object_id) else {
-            drop(state);
+        let mut objects = self.shard(object_id).objects.write();
+        let Some(object) = objects.get_mut(&object_id) else {
+            drop(objects);
             return false;
         };
         object.publish(download.file.take().unwrap());

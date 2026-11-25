@@ -39,12 +39,12 @@ mod read;
 mod recovery;
 mod refill;
 mod storage;
+pub(crate) use refill::PinCacheDownloadError;
 #[cfg(test)]
 pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use self::refill::PinCacheDownloadError;
 use self::storage::PinCacheStorageState;
 use crate::hummock::SstableBlockIndex;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -92,22 +92,8 @@ impl PinCacheObject {
 /// invoking callbacks, or acquiring the cache's storage lock.
 #[derive(Default)]
 struct PinCacheShard {
-    state: RwLock<PinCacheShardState>,
+    objects: RwLock<HashMap<HummockSstableObjectId, PinCacheObject>>,
     read_requests: Mutex<HashMap<SstableBlockIndex, read::ReadRequest>>,
-}
-
-/// One shard's registered object index.
-#[derive(Default)]
-struct PinCacheShardState {
-    objects: HashMap<HummockSstableObjectId, PinCacheObject>,
-}
-
-impl PinCacheShardState {
-    fn register_object(&mut self, id: HummockSstableObjectId) {
-        self.objects
-            .entry(id)
-            .or_insert(PinCacheObject { published: None });
-    }
 }
 
 /// A local whole-SST cache. The remote object store remains authoritative.
@@ -121,6 +107,7 @@ pub(crate) struct PinCache {
     storage: Mutex<PinCacheStorageState>,
     // Serializes capacity probes/admission with GC path claims and deletion acknowledgment.
     capacity_gate: tokio::sync::Mutex<()>,
+    // Largest physical SST rejected since the worker last took the pressure hint.
     gc_pressure_bytes: AtomicU64,
     #[cfg(test)]
     test_hooks: test_utils::PinCacheTestHooks,
@@ -159,10 +146,10 @@ impl PinCache {
         };
         let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
         for &id in expected_sizes.keys() {
-            let state = pin_cache.shards[Self::shard_index(id, shard_num)]
-                .state
-                .get_mut();
-            state.register_object(id);
+            pin_cache.shards[Self::shard_index(id, shard_num)]
+                .objects
+                .get_mut()
+                .insert(id, PinCacheObject { published: None });
         }
         let metrics = &*GLOBAL_PIN_CACHE_METRICS;
         let objects = pin_cache.store.list("").await;
@@ -203,8 +190,8 @@ impl PinCache {
         self: &Arc<Self>,
         object_id: HummockSstableObjectId,
     ) -> Option<PinCacheReadHandle> {
-        let state = self.shard(object_id).state.read();
-        let file = Arc::clone(state.objects.get(&object_id)?.published.as_ref()?);
+        let objects = self.shard(object_id).objects.read();
+        let file = Arc::clone(objects.get(&object_id)?.published.as_ref()?);
         Some(PinCacheReadHandle {
             pin_cache: Arc::clone(self),
             object_id,

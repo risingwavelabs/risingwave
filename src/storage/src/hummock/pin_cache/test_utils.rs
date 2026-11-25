@@ -52,7 +52,7 @@ impl PinCache {
         *self.test_hooks.space_probe.lock() = Some(Arc::new(probe));
     }
 
-    pub(super) fn watch_space_probes_for_test(
+    pub(in crate::hummock) fn watch_space_probes_for_test(
         &self,
     ) -> mpsc::UnboundedReceiver<oneshot::Sender<()>> {
         let (tx, rx) = mpsc::unbounded_channel();
