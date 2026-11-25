@@ -202,15 +202,14 @@ impl ClusterController {
                 .notify_frontend_without_version(Operation::Delete, Info::Node(worker.clone()));
         }
 
-        // Keep license manager in sync with the latest cluster resource.
-        self.update_cluster_resource_for_license().await?;
-
-        // Notify local subscribers.
-        // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
-        // local notification.
+        // Any worker type may pin Hummock resources. Notify local subscribers before the
+        // fallible resource refresh so its failure cannot skip cleanup for a deleted worker.
         self.env
             .notification_manager()
             .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()));
+
+        // Keep license manager in sync with the latest cluster resource.
+        self.update_cluster_resource_for_license().await?;
 
         Ok(worker)
     }
@@ -974,7 +973,12 @@ impl ClusterControllerInner {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::version::MAX_HUMMOCK_VERSION_ID;
+    use risingwave_meta_model::hummock_pinned_version;
+    use sea_orm::ConnectionTrait;
+
     use super::*;
+    use crate::hummock::test_utils::setup_compute_env;
 
     fn mock_worker_hosts_for_test(count: usize) -> Vec<HostAddress> {
         (0..count)
@@ -1069,6 +1073,78 @@ mod tests {
         assert_eq!(cluster_ctl.list_active_streaming_workers().await?.len(), 0);
         assert_eq!(cluster_ctl.list_active_serving_workers().await?.len(), 0);
         assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_worker_notifies_on_resource_refresh_error() -> MetaResult<()> {
+        let (env, hummock_manager, cluster_ctl, worker_id) = setup_compute_env(5013).await;
+        let worker = cluster_ctl.get_worker_by_id(worker_id).await?.unwrap();
+        let remaining_worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                HostAddress {
+                    host: "127.0.0.1".to_owned(),
+                    port: 5014,
+                },
+                AddNodeProperty::default(),
+                PbResource::default(),
+            )
+            .await?;
+        let pinned_version = hummock_manager.pin_version(worker_id).await.unwrap();
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            pinned_version.id
+        );
+
+        let (notification_tx, mut notification_rx) = unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(notification_tx);
+
+        // Inject a decoding error into the resource query only after worker deletion succeeds.
+        // The trigger affects this test's database without a process-wide failpoint.
+        let db = &env.meta_store_ref().conn;
+        db.execute_unprepared(&format!(
+            "CREATE TRIGGER fail_resource_refresh AFTER DELETE ON worker
+             WHEN OLD.worker_id = {worker_id}
+             BEGIN
+                 UPDATE worker_property SET parallelism = 'invalid integer'
+                 WHERE worker_id = {remaining_worker_id};
+             END"
+        ))
+        .await?;
+        cluster_ctl.cluster_resource().await?;
+
+        // Keep reporting the refresh error, even though deletion has already succeeded.
+        assert!(
+            cluster_ctl
+                .delete_worker(worker.host.unwrap())
+                .await
+                .is_err()
+        );
+        assert!(cluster_ctl.cluster_resource().await.is_err());
+        assert!(cluster_ctl.get_worker_by_id(worker_id).await?.is_none());
+        assert!(cluster_ctl.heartbeat(worker_id).await.is_err());
+        assert!(matches!(
+            notification_rx.try_recv().unwrap(),
+            LocalNotification::WorkerNodeDeleted(deleted) if deleted.id == worker_id
+        ));
+
+        // The running Hummock notification worker must release the pin without a meta restart.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hummock_manager.get_min_pinned_version_id().await != MAX_HUMMOCK_VERSION_ID {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("deleted worker's Hummock pin was not released");
+        assert!(
+            hummock_pinned_version::Entity::find_by_id(worker_id)
+                .one(db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
