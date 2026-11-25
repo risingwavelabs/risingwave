@@ -19,6 +19,7 @@ use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
@@ -27,11 +28,11 @@ use crate::error::StreamResult;
 use crate::executor::source::{
     BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchOpendalFsFetchExecutor,
     BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor, IcebergUpdateFetchExecutor,
-    SourceStateTableHandler, StreamSourceCore,
+    LoadRetryPolicy, SourceStateTableHandler, StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
-use crate::from_proto::source::{iceberg_update_mode, is_full_reload_refresh};
+use crate::from_proto::source::iceberg_update_mode;
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -49,8 +50,9 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let is_full_reload_refresh = is_full_reload_refresh(&source.ingest_mode);
-
+        let ingest_mode = IngestMode::from_proto(source.ingest_mode.as_ref())?;
+        let is_full_reload_refresh = ingest_mode.is_full_reload();
+        let is_bounded = ingest_mode.is_bounded();
         let source_id = source.source_id;
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
@@ -76,7 +78,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let vnodes = Some(Arc::new(params.vnode_bitmap));
         let is_iceberg_update = iceberg_update_mode(
             &source.with_properties,
-            &source.ingest_mode,
+            &ingest_mode,
             source.rate_limit,
             source.row_id_index,
             params.info.stream_kind,
@@ -165,7 +167,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         params.info.stream_key.clone(),
                     )
                     .boxed()
-                } else if is_full_reload_refresh {
+                } else if is_full_reload_refresh || is_bounded {
                     BatchIcebergFetchExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
@@ -173,6 +175,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         params.local_barrier_manager.clone(),
                         params.config.clone(),
                         source.associated_table_id,
+                        LoadRetryPolicy::from_ingest_mode(&ingest_mode),
                     )
                     .boxed()
                 } else {

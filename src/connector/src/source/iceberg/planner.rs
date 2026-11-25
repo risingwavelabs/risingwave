@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use super::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
 use super::{IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit};
 use crate::error::ConnectorResult;
+use crate::source::ingest_mode::IngestMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IcebergScanTaskBatchMode {
@@ -248,6 +249,25 @@ pub enum IcebergBoundedScan {
     Snapshot { snapshot_id: i64 },
 }
 
+/// What a batch load reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IcebergLoadTarget {
+    /// The snapshot that is current when the load is planned (refresh / full reload).
+    #[default]
+    CurrentSnapshot,
+    /// A snapshot resolved ahead of time (bounded ingestion).
+    Bounded(IcebergBoundedScan),
+}
+
+impl IcebergLoadTarget {
+    pub fn from_ingest_mode(ingest_mode: &IngestMode) -> Self {
+        ingest_mode
+            .iceberg_bounded_scan()
+            .map(Self::Bounded)
+            .unwrap_or_default()
+    }
+}
+
 impl IcebergBoundedScan {
     pub fn from_proto(scan: PbIcebergBoundedScan) -> ConnectorResult<Self> {
         match scan.scan {
@@ -295,6 +315,29 @@ impl IcebergScanPlanner {
         self.plan_snapshot(&table, current_snapshot.snapshot_id())
             .await
             .map(Some)
+    }
+
+    pub async fn plan_bounded_scan(
+        &self,
+        scan: IcebergBoundedScan,
+    ) -> ConnectorResult<IcebergScanPlan> {
+        let table = self.properties.load_table().await?;
+        match scan {
+            IcebergBoundedScan::Snapshot { snapshot_id } => {
+                self.plan_snapshot(&table, snapshot_id).await
+            }
+        }
+    }
+
+    /// Plans the files of a batch load. Returns `None` if the table has no snapshot yet.
+    pub async fn plan_load(
+        &self,
+        target: IcebergLoadTarget,
+    ) -> ConnectorResult<Option<IcebergScanPlan>> {
+        match target {
+            IcebergLoadTarget::CurrentSnapshot => self.plan_current_snapshot().await,
+            IcebergLoadTarget::Bounded(scan) => self.plan_bounded_scan(scan).await.map(Some),
+        }
     }
 
     pub async fn plan_incremental(
