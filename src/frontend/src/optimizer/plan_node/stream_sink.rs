@@ -27,7 +27,9 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK};
+use risingwave_connector::sink::iceberg::{
+    ENABLE_PK_INDEX, ICEBERG_SINK, LEGACY_PK_INDEX_FILE_PATH,
+};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -314,6 +316,12 @@ impl StreamSink {
             && properties
                 .get(ENABLE_PK_INDEX)
                 .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+
+        // New pk-index sinks store data file uuids in the PK index. Sinks created before the
+        // option existed have no such key and keep the legacy full-path layout.
+        if is_iceberg_pk_index && properties.get(LEGACY_PK_INDEX_FILE_PATH).is_none() {
+            properties.insert(LEGACY_PK_INDEX_FILE_PATH.to_owned(), "false".to_owned());
+        }
 
         // For Iceberg pk-index sinks, the iceberg primary key is derived entirely from the
         // upstream stream key, so the user must not specify `primary_key` explicitly.

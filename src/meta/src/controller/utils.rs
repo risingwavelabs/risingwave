@@ -28,6 +28,7 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_connector::WithOptionsSecResolved;
+use risingwave_connector::source::cdc::{CDC_COLUMN_EXCLUDE_LIST, parse_cdc_column_exclude_list};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
@@ -61,7 +62,8 @@ use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispat
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
 use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::{
-    Ident, ObjectName, SecretRefAsType, SecretRefValue, SqlOption, Statement as SqlStatement,
+    CstyleEscapedString, Ident, ObjectName, SecretRefAsType, SecretRefValue, SqlOption,
+    SqlOptionValue, Statement as SqlStatement, Value,
 };
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
@@ -2097,7 +2099,7 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
                 error = %e.as_report(),
                 "failed to parse table definition")
         })
-        .unwrap()
+        .ok()?
         .try_into()
         .unwrap();
     if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
@@ -2107,6 +2109,28 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
     } else {
         None
     }
+}
+
+/// Columns listed in `column.exclude.list` in a CDC table definition. Empty if the definition
+/// cannot be parsed or has no such option.
+pub fn extract_cdc_excluded_columns_from_definition(table_definition: &str) -> HashSet<String> {
+    let Ok(SqlStatement::CreateTable { with_options, .. }) =
+        Parser::parse_exactly_one(table_definition)
+    else {
+        return HashSet::new();
+    };
+    with_options
+        .iter()
+        .find(|o| o.name.real_value() == CDC_COLUMN_EXCLUDE_LIST)
+        .and_then(|o| match &o.value {
+            SqlOptionValue::Value(Value::SingleQuotedString(s))
+            | SqlOptionValue::Value(Value::CstyleEscapedString(CstyleEscapedString {
+                value: s,
+                ..
+            })) => Some(parse_cdc_column_exclude_list(s)),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 /// `rename_relation` renames the target relation and its definition,
@@ -2134,7 +2158,8 @@ pub async fn rename_relation(
             let old_name = relation.name.clone();
             relation.name = object_name.into();
             if obj.obj_type != ObjectType::View {
-                relation.definition = alter_relation_rename(&relation.definition, object_name);
+                relation.definition = alter_relation_rename(&relation.definition, object_name)
+                    .with_context(|| format!("failed to rename {old_name}"))?;
             }
             let active_model = $table::ActiveModel {
                 $identity: Set(relation.$identity),
@@ -2292,7 +2317,10 @@ pub async fn rename_relation_refer(
                 .await?
                 .unwrap();
             relation.definition =
-                alter_relation_rename_refs(&relation.definition, old_name, object_name);
+                alter_relation_rename_refs(&relation.definition, old_name, object_name)
+                    .with_context(|| {
+                        format!("failed to update the definition of {}", relation.name)
+                    })?;
             let active_model = $table::ActiveModel {
                 $identity: Set(relation.$identity),
                 definition: Set(relation.definition.clone()),

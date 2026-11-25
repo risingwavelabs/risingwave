@@ -26,7 +26,7 @@ use thiserror_ext::AsReport as _;
 
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use crate::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType};
+use crate::source::cdc::CdcSourceRuntimeFlags;
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
     DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
@@ -123,12 +123,9 @@ impl SourceReader {
 
     /// Refer to `WaitCheckpointWorker` for more details.
     pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
-        if dispatch_cdc_source_type!(
-            CdcSourceType::from(&self.config),
-            T,
-            T::NEEDS_OFFSET_COMMIT_ON_CHECKPOINT,
-            false
-        ) {
+        if self.config.native_cdc_type().is_some_and(|cdc_type| {
+            dispatch_cdc_source_type!(cdc_type, T, T::NEEDS_OFFSET_COMMIT_ON_CHECKPOINT, false)
+        }) {
             return Ok(Some(WaitCheckpointTask::CommitCdcOffset(None)));
         }
         Ok(match &self.config {

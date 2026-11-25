@@ -177,6 +177,9 @@ for_all_wrapped_id_fields! (
         BatchQueryCommittedEpoch {
             hummock_version_id: HummockVersionId,
         }
+        BatchQueryLatestCommittedEpoch {
+            hummock_version_id: HummockVersionId,
+        }
         WorkerNode {
             id: WorkerId,
         }
@@ -688,6 +691,10 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
             worker_id: WorkerId,
         }
+        ListBoundedJobsResponse.BoundedJob {
+            job_id: JobId,
+            source_id: SourceId,
+        }
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
@@ -841,6 +848,9 @@ for_all_wrapped_id_fields! (
         LoadFinishMutation {
             associated_source_id: SourceId,
         }
+        LoadId {
+            source_id: SourceId,
+        }
         LookupNode {
             table_id: TableId,
             index_id: TableId,
@@ -974,6 +984,9 @@ for_all_wrapped_id_fields! (
             reporter_actor_id: ActorId,
             table_id: TableId,
             associated_source_id: SourceId,
+        }
+        BarrierCompleteResponse.LoadProgress {
+            reporter_actor_id: ActorId,
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
@@ -1284,6 +1297,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
+        .type_attribute(
+            "stream_plan.EowcOverWindowNodeVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
         .type_attribute(
             "plan_common.ColumnDescVersion",
             "#[derive(prost_helpers::Version)]",

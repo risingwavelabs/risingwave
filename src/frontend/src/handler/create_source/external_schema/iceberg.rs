@@ -23,43 +23,57 @@ pub async fn extract_iceberg_columns(
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
         let table = properties.load_table().await?;
-        let iceberg_schema: arrow_schema_iceberg::Schema =
-            ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
-
-        let mut columns: Vec<ColumnCatalog> = iceberg_schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| -> anyhow::Result<ColumnCatalog> {
-                let column_desc = ColumnDesc::named(
-                    field.name(),
-                    ColumnId::new((i + 1).try_into().unwrap()),
-                    IcebergArrowConvert
-                        .type_from_field(field)
-                        .with_context(|| {
-                            format!(
-                                "failed to infer RisingWave type for Iceberg field {}",
-                                field.name()
-                            )
-                        })?,
-                );
-                Ok(ColumnCatalog {
-                    column_desc,
-                    // hide the _row_id column for iceberg engine table
-                    // This column is auto generated when users define a table without primary key
-                    is_hidden: field.name() == ROW_ID_COLUMN_NAME,
-                })
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        columns.extend(ColumnCatalog::iceberg_hidden_cols());
-
-        tracing::info!("iceberg columns: {:?}", columns);
-
-        Ok(columns)
+        columns_from_table(&table, properties.streaming_updates)
     } else {
-        Err(anyhow!(format!(
-            "Invalid properties for iceberg source: {:?}",
-            props
-        )))
+        anyhow::bail!("invalid connector for Iceberg schema inference")
     }
+}
+
+fn columns_from_table(
+    table: &::iceberg::table::Table,
+    streaming_updates: bool,
+) -> anyhow::Result<Vec<ColumnCatalog>> {
+    let iceberg_schema: arrow_schema_iceberg::Schema =
+        ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
+
+    let mut columns: Vec<ColumnCatalog> = iceberg_schema
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, field)| -> anyhow::Result<ColumnCatalog> {
+            let column_desc = ColumnDesc::named(
+                field.name(),
+                ColumnId::new((i + 1).try_into().unwrap()),
+                IcebergArrowConvert
+                    .type_from_field(field)
+                    .with_context(|| {
+                        format!(
+                            "failed to infer RisingWave type for Iceberg field {}",
+                            field.name()
+                        )
+                    })?,
+            );
+            Ok(ColumnCatalog {
+                column_desc,
+                // hide the _row_id column for iceberg engine table
+                // This column is auto generated when users define a table without primary key
+                is_hidden: field.name() == ROW_ID_COLUMN_NAME,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    if streaming_updates {
+        anyhow::ensure!(
+            !columns.iter().any(ColumnCatalog::is_iceberg_hidden_column),
+            "Iceberg update sources cannot expose reserved physical metadata columns"
+        );
+        risingwave_connector::source::iceberg::update_planner::IcebergUpdateBinding::bind_columns(
+            table, &columns,
+        )?;
+    } else {
+        columns.extend(ColumnCatalog::iceberg_hidden_cols());
+    }
+
+    tracing::info!("iceberg columns: {:?}", columns);
+
+    Ok(columns)
 }

@@ -798,6 +798,12 @@ impl Binder {
                 })),
 
                 // AI model functions
+                ("ai_decide", raw(|_, inputs| super::ai_decide::bind(inputs))),
+                ("ai_questions", raw(|_, inputs| super::ai_decide::questions(inputs))),
+                ("ai_prob_question", raw(|_, inputs| super::ai_decide::question("noul", inputs))),
+                ("ai_choice_question", raw(|_, inputs| super::ai_decide::question("choice", inputs))),
+                ("ai_score_question", raw(|_, inputs| super::ai_decide::question("score", inputs))),
+                ("ai_option", raw(|_, inputs| super::ai_decide::option(inputs))),
                 ("openai_embedding", guard_by_len(|_binder, [arg0, arg1]| {
                     // check if the first two arguments are constants
                     if let ExprImpl::Literal(config) = &arg0 && let Some(ScalarImpl::Jsonb(_config)) = config.get_data() {

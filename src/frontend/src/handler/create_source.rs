@@ -16,14 +16,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
-use rand::Rng;
 use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
@@ -36,8 +35,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_desc, get_supported_additional_columns,
-    source_add_partition_offset_cols,
+    build_additional_column_desc, source_add_partition_offset_cols,
 };
 use risingwave_connector::parser::{
     AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
@@ -55,11 +53,10 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, CdcSourceRuntimeFlags,
-    MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
-    SQL_SERVER_CDC_CONNECTOR,
+    CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY,
+    CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CdcSourceDdlValidator, CdcSourceRuntimeFlags,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -77,12 +74,12 @@ use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, dispatch_c
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
-use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
+use risingwave_pb::plan_common::source_ingest_mode::{IngestMode, SourceIngestModeStreaming};
+use risingwave_pb::plan_common::{EncodeType, FormatType, SourceIngestMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
     ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
@@ -99,7 +96,7 @@ use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
     reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_table::{
@@ -114,9 +111,10 @@ use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{BackfillType, LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
+use crate::utils::data_type::DataTypeToAst;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options, resolve_source_refresh_mode_in_with_option,
+    resolve_secret_ref_in_with_options, resolve_source_ingest_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -124,9 +122,10 @@ mod external_schema;
 pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
+use external_schema::{format_to_prost, row_encode_to_prost};
 mod validate;
+pub use validate::validate_compatibility;
 use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
-pub use validate::{validate_compatibility, validate_heartbeat_interval};
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
@@ -146,8 +145,8 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
 fn try_consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Option<AstString> {
-    format_encode_options.remove(key).map(AstString)
+) -> Option<String> {
+    format_encode_options.remove(key)
 }
 
 fn try_consume_schema_registry_config_from_options(
@@ -188,7 +187,7 @@ fn try_consume_pulsar_schema_config_from_options(
 fn consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Result<AstString> {
+) -> Result<String> {
     try_consume_string_from_options(format_encode_options, key).ok_or(RwError::from(ProtocolError(
         format!("missing field {} in options", key),
     )))
@@ -544,6 +543,16 @@ pub(crate) async fn bind_source_pk(
     sql_defined_pk_names: Vec<String>,
     with_properties: &WithOptionsSecResolved,
 ) -> Result<Vec<String>> {
+    if with_properties.is_iceberg_update_source() {
+        if sql_defined_pk_names.is_empty() {
+            return Err(InvalidInputSyntax(
+                "Iceberg streaming_updates requires a SQL PRIMARY KEY for retracting ingestion"
+                    .to_owned(),
+            )
+            .into());
+        }
+        return Ok(sql_defined_pk_names);
+    }
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let include_key_column_name: Option<String> = {
         // iter columns to check if contains additional columns from key part
@@ -767,19 +776,34 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<(WithOptions, SourceRefreshMode)> {
+) -> Result<(WithOptions, SourceIngestMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
-    validate_compatibility(format_encode, &mut with_properties)?;
-    let refresh_mode = {
-        let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
-        if is_create_source && refresh_mode.is_some() {
+    // The planner and executors decide the ingestion mode from plaintext options only, while
+    // connector property extraction would also read a secret value.
+    if with_properties.is_iceberg_connector()
+        && with_properties
+            .secret_ref()
+            .contains_key(risingwave_connector::source::iceberg::STREAMING_UPDATES_KEY)
+    {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "streaming_updates cannot be provided as a SECRET; use a plaintext 'true' or 'false'"
+                .to_owned(),
+        )));
+    }
+    let (_, secret_refs) =
+        resolve_secret_ref_in_with_options(with_properties.clone(), &handler_args.session)?
+            .into_parts();
+    validate_compatibility(format_encode, &mut with_properties, &secret_refs)?;
+    let ingest_mode = {
+        let ingest_mode = resolve_source_ingest_mode_in_with_option(&mut with_properties)?;
+        if is_create_source && ingest_mode.is_some() {
             return Err(RwError::from(ProtocolError(
                 "`refresh_mode` only supported for CREATE TABLE".to_owned(),
             )));
         }
 
-        refresh_mode.unwrap_or(SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+        ingest_mode.unwrap_or(SourceIngestMode {
+            ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
         })
     };
 
@@ -793,7 +817,36 @@ pub fn bind_connector_props(
             with_properties.get_connector().unwrap(),
         ))));
     }
-    if is_create_source && create_cdc_source_job {
+    if with_properties.is_cdc_connector() {
+        if with_properties.contains_key(CDC_TRANSACTIONAL_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_TRANSACTIONAL_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave enables transaction metadata itself for the connectors that support it",
+                CDC_TRANSACTIONAL_KEY
+            ))));
+        }
+        if with_properties.contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+            || with_properties
+                .secret_ref()
+                .contains_key(CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "'{}' cannot be set: RisingWave sets it itself for the connectors that commit offsets to the upstream database",
+                CDC_NEEDS_OFFSET_COMMIT_ON_CHECKPOINT_KEY
+            ))));
+        }
+        if with_properties
+            .secret_ref()
+            .contains_key(AUTO_SCHEMA_CHANGE_KEY)
+        {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "'{}' cannot be provided as a SECRET; use a plaintext 'true' or 'false'",
+                AUTO_SCHEMA_CHANGE_KEY
+            ))));
+        }
         if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
             && value.parse::<bool>().map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
@@ -802,9 +855,28 @@ pub fn bind_connector_props(
                 ))
             })?
         {
+            if !dispatch_cdc_source_type!(
+                with_properties.cdc_source_type(),
+                T,
+                T::CAN_AUTO_SCHEMA_CHANGE,
+                false
+            ) {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "auto schema change for connector {}",
+                        with_properties.get_connector().unwrap()
+                    ),
+                    format!(
+                        "Remove the '{}' option or set it to false",
+                        AUTO_SCHEMA_CHANGE_KEY
+                    ),
+                )
+                .into());
+            }
             Feature::CdcAutoSchemaChange.check_available()?;
         }
-
+    }
+    if is_create_source && create_cdc_source_job {
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
@@ -825,15 +897,7 @@ pub fn bind_connector_props(
             );
         }
     }
-    if with_properties.is_mysql_cdc_connector() {
-        // Generate a random server id for mysql cdc source if needed
-        // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-        // group (that is, different from any other server id being used by any master or slave)
-        with_properties
-            .entry("server.id".to_owned())
-            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
-    }
-    Ok((with_properties, refresh_mode))
+    Ok((with_properties, ingest_mode))
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -901,7 +965,7 @@ pub async fn bind_create_source_or_table_with_connector(
     full_name: ObjectName,
     format_encode: FormatEncodeOptions,
     with_properties: WithOptions,
-    sql_columns_defs: &[ColumnDef],
+    mut sql_columns_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     wildcard_idx: Option<usize>,
     source_watermarks: Vec<SourceWatermark>,
@@ -912,7 +976,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-    refresh_mode: SourceRefreshMode,
+    ingest_mode: SourceIngestMode,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -953,29 +1017,18 @@ pub async fn bind_create_source_or_table_with_connector(
         }
     }
 
-    let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
+    let sql_pk_names = bind_sql_pk_names(&sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    if with_properties.is_iceberg_connector() {
-        if is_create_source && !sql_pk_names.is_empty() {
-            return Err(ErrorCode::NotSupported(
-                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
-                    .to_owned(),
-                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
-                    .to_owned(),
-            )
-            .into());
-        }
-
-        // FIXME: ideally we can support it, but current way of handling iceberg additional columns
-        // are problematic. They are treated as normal user columns, so they will be lost if we
-        // allow user to specify columns. See `extract_iceberg_columns`.
-        if !sql_columns_defs.is_empty() {
-            return Err(RwError::from(InvalidInputSyntax(
-                r#"Schema is automatically inferred for iceberg source and should not be specified
-
-HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
-            )));
-        }
+    if with_properties.is_iceberg_connector()
+        && is_create_source
+        && !with_properties.is_iceberg_update_source()
+        && !sql_pk_names.is_empty()
+    {
+        return Err(ErrorCode::NotSupported(
+            "PRIMARY KEY is not supported for Iceberg append-only sources".to_owned(),
+            "Please remove the PRIMARY KEY clause or set streaming_updates = 'true' for supported RisingWave-written tables.".to_owned(),
+        )
+        .into());
     }
 
     // Same for ADBC Snowflake connector - schema is automatically inferred
@@ -991,18 +1044,58 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
 HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<columns>) WITH (...)`."#.to_owned(),
         )));
     }
-    let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
+    if with_properties.is_iceberg_connector()
+        && matches!(sql_column_strategy, SqlColumnStrategy::FollowChecked)
+        && let Some(source_columns) = &columns_from_resolve_source
+    {
+        // Infer types only for regular columns; hidden columns are kept separately below.
+        for column in &mut sql_columns_defs {
+            if column.data_type.is_some() || column.is_generated() {
+                continue;
+            }
+            let name = column.name.real_value();
+            let upstream_column = source_columns
+                .iter()
+                .find(|column| !column.is_hidden() && column.name() == name)
+                .ok_or_else(|| {
+                    ProtocolError(format!(
+                        "Column \"{name}\" is defined in SQL but not found in the source"
+                    ))
+                })?;
+            column.data_type = Some(upstream_column.data_type().to_ast());
+        }
+    }
+    let columns_from_sql = bind_sql_columns(&sql_columns_defs, false)?;
 
     reject_variant_columns_for_unsupported_encoding(&format_encode, &columns_from_sql)?;
+
+    // Columns declared in SQL select only visible Iceberg columns. The hidden ones (the upstream
+    // `_row_id` and the position metadata used to apply deletes) must be kept as inferred.
+    let iceberg_hidden_columns = if with_properties.is_iceberg_connector() {
+        columns_from_resolve_source
+            .iter()
+            .flatten()
+            .filter(|column| column.is_hidden())
+            .cloned()
+            .collect_vec()
+    } else {
+        vec![]
+    };
 
     let mut columns = bind_all_columns(
         &format_encode,
         columns_from_resolve_source,
         columns_from_sql,
-        sql_columns_defs,
+        &sql_columns_defs,
         wildcard_idx,
         sql_column_strategy,
     )?;
+
+    for hidden in iceberg_hidden_columns {
+        if !columns.iter().any(|column| column.name() == hidden.name()) {
+            columns.push(hidden);
+        }
+    }
 
     // add additional columns before bind pk, because `format upsert` requires the key column
     handle_addition_columns(
@@ -1085,6 +1178,12 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     )
     .await?;
 
+    // An upstream Iceberg table may have its own `_row_id` column. Without a primary key, we
+    // generate our own row ID under that name, so the upstream column cannot be ingested.
+    if with_properties.is_iceberg_connector() && pk_names.is_empty() {
+        columns.retain(|column| column.name() != ROW_ID_COLUMN_NAME);
+    }
+
     // User may specify a generated or additional column with the same name as one from the external schema.
     // Ensure duplicated column names are handled here.
     if let Some(duplicated_name) = columns.iter().map(|c| c.name()).duplicates().next() {
@@ -1138,7 +1237,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         source_name.clone(),
         &mut columns,
         // TODO(st1page): pass the ref
-        sql_columns_defs,
+        &sql_columns_defs,
         &pk_col_ids,
     )?;
     check_format_encode(&with_properties, row_id_index, &columns)?;
@@ -1172,8 +1271,9 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        refresh_mode: Some(refresh_mode),
+        ingest_mode: Some(ingest_mode),
     };
+    source.validate_iceberg_update_source()?;
     Ok(source)
 }
 
@@ -1206,7 +1306,7 @@ pub async fn handle_create_source(
         return handle_create_cdc_table_source(handler_args, stmt).await;
     }
 
-    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -1229,8 +1329,7 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, ingest_mode) = bind_connector_props(&handler_args, &format_encode, true)?;
     if let Some(connector) = with_properties.get_connector() {
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
@@ -1266,7 +1365,7 @@ pub async fn handle_create_source(
         stmt.source_name,
         format_encode,
         with_properties,
-        &stmt.columns,
+        stmt.columns,
         stmt.constraints,
         stmt.wildcard_idx,
         stmt.source_watermarks,
@@ -1277,7 +1376,7 @@ pub async fn handle_create_source(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
@@ -1407,12 +1506,14 @@ async fn handle_create_cdc_table_source(
         .into());
     }
 
-    let (cdc_with_options, external_table_name) = derive_with_options_for_cdc_table(
+    let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
         &upstream_source.with_properties,
         cdc_table_info.external_table_name.clone(),
     )?;
     let (mut columns, pk_names, pk_comparisons) = match stmt.wildcard_idx {
-        Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+        Some(_) => {
+            bind_cdc_table_schema_externally(cdc_with_options.clone(), &HashSet::new()).await?
+        }
         None => {
             let (columns, pk_names) =
                 bind_cdc_table_schema(&stmt.columns, &stmt.constraints, false)?;
@@ -1527,7 +1628,7 @@ async fn handle_create_cdc_table_source(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: None,
-        refresh_mode: upstream_source.refresh_mode,
+        ingest_mode: upstream_source.ingest_mode,
     };
 
     session
@@ -1541,7 +1642,7 @@ pub(super) fn generate_stream_graph_for_source(
     handler_args: HandlerArgs,
     source_catalog: SourceCatalog,
 ) -> Result<PbStreamFragmentGraph> {
-    let context = OptimizerContext::from_handler_args(handler_args);
+    let context = OptimizerContext::from_handler_args(handler_args)?;
     let source_node = LogicalSource::with_catalog(
         Rc::new(source_catalog),
         SourceNodeKind::CreateSharedSource,
@@ -1558,6 +1659,14 @@ pub(super) fn generate_stream_graph_for_source(
     let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
+
+#[cfg(all(test, not(madsim)))]
+#[path = "create_source/iceberg_update_test.rs"]
+mod iceberg_update_tests;
+
+#[cfg(all(test, not(madsim)))]
+#[path = "create_source/iceberg_declared_columns_test.rs"]
+mod iceberg_declared_columns_tests;
 
 #[cfg(test)]
 pub mod tests {

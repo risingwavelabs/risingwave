@@ -84,6 +84,12 @@ pub async fn handle_alter_set_schema(
                 if old_schema_name == new_schema_name {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
+                if source.associated_table_id.is_some() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "Use `ALTER TABLE` to alter a table with connector.".to_owned(),
+                    )
+                    .into());
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**source)?;
                 catalog_reader.check_relation_name_duplicated(
                     db_name,

@@ -85,6 +85,9 @@ pub async fn handle_alter_streaming_rate_limit(
                 )
                 .into());
             }
+            if source.is_iceberg_update_source() {
+                bail!("Iceberg streaming_updates does not support rate limiting");
+            }
             (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
         (PbThrottleTarget::Table, PbThrottleType::Dml) => {

@@ -22,6 +22,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::{JobId, PartialGraphId};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -94,7 +95,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     async fn abort_and_mark_blocked(
         &self,
         recovery: RecoveryStart,
-        recovery_reason: RecoveryReason,
+        recovery_reason: &RecoveryReason,
     ) -> MetaResult<()>;
     async fn mark_ready(
         &self,
@@ -111,9 +112,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Run the post-collect work of `command`, carried by the barrier of `epoch`, after the
+    /// barrier has been collected and committed.
     fn post_collect_command(
         &self,
         command: PostCollectCommand,
+        epoch: EpochPair,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     fn notify_creating_job_failed(

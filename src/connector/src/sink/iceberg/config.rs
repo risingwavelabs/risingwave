@@ -141,6 +141,7 @@ pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 
 pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT: u64 = 7 * 24 * 60 * 60 * 1000;
 pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM: u64 = 24 * 60 * 60 * 1000;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
+pub const LEGACY_PK_INDEX_FILE_PATH: &str = "legacy_pk_index_file_path";
 
 pub const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
@@ -533,6 +534,24 @@ pub struct IcebergConfig {
     #[with_option(iceberg_engine)]
     pub enable_pk_index: bool,
 
+    /// Whether the PK index of a pk-index sink stores full data file paths. Default is true.
+    /// When false, the sink writes every data file as `{data_location}/{uuid}.parquet` and the
+    /// PK index only stores the 16-byte uuid, from which the path is rebuilt. New pk-index sinks
+    /// are created with false; sinks created before this option existed keep the legacy layout.
+    /// It must not change after the sink is created.
+    ///
+    /// While it is false, the table's data location must never change: neither the
+    /// `write.data.path` or `write.folder-storage.path` table property nor the table location.
+    /// RisingWave never changes them, but it cannot stop other engines from doing so. After such
+    /// a change, uuids already in the PK index rebuild paths that do not exist, and the position
+    /// deletes written for those rows silently have no effect.
+    #[serde(
+        rename = "legacy_pk_index_file_path",
+        default = "default_true",
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub legacy_pk_index_file_path: bool,
+
     #[serde(flatten)]
     pub unknown_fields: std::collections::HashMap<String, String>,
 }
@@ -568,6 +587,11 @@ impl IcebergConfig {
             )));
         }
         Ok(())
+    }
+
+    /// Whether this is a pk-index sink whose PK index stores data file uuids instead of paths.
+    pub fn pk_index_stores_file_uuid(&self) -> bool {
+        self.enable_pk_index && !self.legacy_pk_index_file_path
     }
 
     pub(crate) fn validate_enable_pk_index(&self) -> Result<()> {

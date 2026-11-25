@@ -471,7 +471,7 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
                                 if column
                                     .flags()
-                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                    .contains(mysql_async::consts::ColumnFlags::BINARY_FLAG)
                                 {
                                     DataType::Bytea
                                 } else {

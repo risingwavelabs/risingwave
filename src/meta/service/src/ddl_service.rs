@@ -29,6 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
 use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
+use risingwave_meta::controller::utils::extract_cdc_excluded_columns_from_definition;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -1416,11 +1417,15 @@ impl DdlService for DdlServiceImpl {
                     &original_columns_by_name,
                 );
 
+                let excluded_columns =
+                    extract_cdc_excluded_columns_from_definition(&table.definition);
+
                 let collect_new_columns = |table_change: &TableSchemaChange| {
                     let mut new_columns: HashSet<(String, DataType)> =
                         HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
                             let col = ColumnCatalog::from(col.clone());
                             cdc_auto_schema_change_comparable_column(&col)
+                                .filter(|(name, _)| !excluded_columns.contains(name))
                         }));
 
                     // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns.
@@ -2057,7 +2062,10 @@ fn normalize_cdc_auto_schema_change_column_names(
     cdc_table_type: PbCdcTableType,
     original_columns_by_name: &HashMap<String, ColumnCatalog>,
 ) -> TableSchemaChange {
-    if cdc_table_type != PbCdcTableType::Mysql {
+    if !matches!(
+        cdc_table_type,
+        PbCdcTableType::Mysql | PbCdcTableType::Mariadb
+    ) {
         return table_change;
     }
 

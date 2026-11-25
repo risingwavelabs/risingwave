@@ -185,7 +185,10 @@ impl CreatingStreamingJobControl {
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
         let opts = &partial_graph_manager.control_stream_manager().env.opts;
-        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(
+            opts.in_flight_barrier_nums,
+            opts.snapshot_backfill_barrier_amplification_factor,
+        );
 
         let mut job = Self {
             control: IndependentJobControl::new(independent_job_info),
@@ -736,7 +739,10 @@ impl CreatingStreamingJobControl {
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
         let opts = &partial_graph_recoverer.control_stream_manager().env.opts;
-        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(
+            opts.in_flight_barrier_nums,
+            opts.snapshot_backfill_barrier_amplification_factor,
+        );
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
@@ -1105,7 +1111,6 @@ impl CreatingStreamingJobControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manager::MetaOpts;
 
     #[test]
     fn test_finishing_progress_before_first_checkpoint() {
@@ -1259,20 +1264,13 @@ mod tests {
 
     #[test]
     fn test_snapshot_backfill_max_pending_barrier_num() {
-        let mut opts = MetaOpts::test(false);
-        opts.in_flight_barrier_nums = 10;
-
-        opts.snapshot_backfill_barrier_amplification_factor = 0;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
-
-        opts.snapshot_backfill_barrier_amplification_factor = 1;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
-
-        opts.snapshot_backfill_barrier_amplification_factor = 10;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 100);
-
-        opts.in_flight_barrier_nums = usize::MAX;
-        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), usize::MAX);
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(10, 0), 10);
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(10, 1), 10);
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(10, 10), 100);
+        assert_eq!(
+            snapshot_backfill_max_pending_barrier_num(usize::MAX, 10),
+            usize::MAX
+        );
     }
 
     #[test]

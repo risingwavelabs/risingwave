@@ -17,7 +17,7 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow, bail};
 use itertools::Itertools;
-use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
+use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
 
 use crate::ServiceConfig;
 
@@ -215,6 +215,7 @@ impl ConfigExpander {
                     "doris" => ServiceConfig::Doris(serde_yaml::from_str(&out_str)?),
                     "starrocks" => ServiceConfig::Starrocks(serde_yaml::from_str(&out_str)?),
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
+                    "mariadb" => ServiceConfig::MariaDb(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
                     "oracle" => ServiceConfig::Oracle(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),

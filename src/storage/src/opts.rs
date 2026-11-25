@@ -62,12 +62,16 @@ pub struct StorageOpts {
     pub meta_cache_shard_num: usize,
     /// Eviction config for meta cache.
     pub meta_cache_eviction_config: EvictionConfig,
+    /// Number of lifecycle lock shards in the Pin Cache.
+    pub pin_cache_shard_num: usize,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
     pub max_cached_recent_versions_number: usize,
 
     pub max_prefetch_block_number: usize,
+
+    pub sstable_meta_fetch_concurrency: usize,
 
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
@@ -247,9 +251,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
+            pin_cache_shard_num: c.storage.cache.pin_cache_shard_num,
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
+            sstable_meta_fetch_concurrency: c.storage.sstable_meta_fetch_concurrency,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,

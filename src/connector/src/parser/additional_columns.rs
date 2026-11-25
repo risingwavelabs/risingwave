@@ -27,8 +27,9 @@ use risingwave_pb::plan_common::{
     AdditionalTableName,
 };
 
+use crate::dispatch_cdc_source_type;
 use crate::error::ConnectorResult;
-use crate::source::cdc::MONGODB_CDC_CONNECTOR;
+use crate::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
     NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
@@ -84,17 +85,6 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                 POSIX_FS_CONNECTOR,
                 HashSet::from(["file", "offset", "payload"]),
             ),
-            // mongodb-cdc doesn't support cdc backfill table
-            (
-                MONGODB_CDC_CONNECTOR,
-                HashSet::from([
-                    "timestamp",
-                    "partition",
-                    "offset",
-                    "database_name",
-                    "collection_name",
-                ]),
-            ),
             (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
         ])
     });
@@ -109,17 +99,6 @@ pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'stat
             "table_name",
         ]))
     });
-
-pub fn get_supported_additional_columns(
-    connector_name: &str,
-    is_cdc_backfill: bool,
-) -> Option<&HashSet<&'static str>> {
-    if is_cdc_backfill {
-        CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS.as_ref()
-    } else {
-        COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name)
-    }
-}
 
 pub fn gen_default_addition_col_name(
     connector_name: &str,
@@ -153,27 +132,42 @@ pub fn build_additional_column_desc(
     reject_unknown_connector: bool,
     is_cdc_backfill_table: bool,
 ) -> ConnectorResult<ColumnDesc> {
-    let compatible_columns = match (
-        get_supported_additional_columns(connector_name, is_cdc_backfill_table),
-        reject_unknown_connector,
-    ) {
-        (Some(compat_cols), _) => compat_cols,
-        (None, false) => &COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
-        (None, true) => {
+    let checked_by_cdc_source = reject_unknown_connector
+        && !is_cdc_backfill_table
+        && dispatch_cdc_source_type!(
+            CdcSourceType::from(connector_name),
+            T,
+            {
+                T::check_include_column(additional_col_type)?;
+                true
+            },
+            false
+        );
+    if !checked_by_cdc_source {
+        let supported_columns = if is_cdc_backfill_table {
+            CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS.as_ref()
+        } else {
+            COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name)
+        };
+        let compatible_columns = match (supported_columns, reject_unknown_connector) {
+            (Some(compat_cols), _) => compat_cols,
+            (None, false) => &COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
+            (None, true) => {
+                bail!(
+                    "additional column is not supported for connector {}, acceptable connectors: {:?}",
+                    connector_name,
+                    COMPATIBLE_ADDITIONAL_COLUMNS.keys(),
+                );
+            }
+        };
+        if !compatible_columns.contains(additional_col_type) {
             bail!(
-                "additional column is not supported for connector {}, acceptable connectors: {:?}",
+                "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
+                additional_col_type,
                 connector_name,
-                COMPATIBLE_ADDITIONAL_COLUMNS.keys(),
+                compatible_columns
             );
         }
-    };
-    if !compatible_columns.contains(additional_col_type) {
-        bail!(
-            "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
-            additional_col_type,
-            connector_name,
-            compatible_columns
-        );
     }
 
     let column_name = column_alias.unwrap_or_else(|| {

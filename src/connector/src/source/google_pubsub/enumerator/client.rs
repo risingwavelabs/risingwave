@@ -15,7 +15,7 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use google_cloud_pubsub::subscription::SeekTo;
+use gcloud_pubsub::subscription::SeekTo;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;

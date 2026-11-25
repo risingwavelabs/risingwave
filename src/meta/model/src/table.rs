@@ -144,14 +144,16 @@ pub enum CdcTableType {
     Postgres,
     #[sea_orm(string_value = "MYSQL")]
     Mysql,
+    #[sea_orm(string_value = "MARIADB")]
+    Mariadb,
     #[sea_orm(string_value = "SQLSERVER")]
     #[serde(rename = "Sqlserver")] // keep the serde name used in meta backup snapshots
     SqlServer,
     #[sea_orm(string_value = "MONGO")]
     #[serde(rename = "Mongo")] // keep the serde name used in meta backup snapshots
     Mongodb,
-    #[sea_orm(string_value = "CITUS")]
-    Citus,
+    #[sea_orm(string_value = "ORACLE")]
+    Oracle,
 }
 
 impl From<CdcTableType> for PbCdcTableType {
@@ -159,9 +161,10 @@ impl From<CdcTableType> for PbCdcTableType {
         match cdc_table_type {
             CdcTableType::Postgres => Self::Postgres,
             CdcTableType::Mysql => Self::Mysql,
+            CdcTableType::Mariadb => Self::Mariadb,
             CdcTableType::SqlServer => Self::SqlServer,
             CdcTableType::Mongodb => Self::Mongodb,
-            CdcTableType::Citus => Self::Citus,
+            CdcTableType::Oracle => Self::Oracle,
             CdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -172,9 +175,10 @@ impl From<PbCdcTableType> for CdcTableType {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
             PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Mariadb => Self::Mariadb,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
-            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Oracle => Self::Oracle,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -394,7 +398,8 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::SqlServer,
                     4 => CdcTableType::Mongodb,
-                    5 => CdcTableType::Citus,
+                    6 => CdcTableType::Mariadb,
+                    7 => CdcTableType::Oracle,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
@@ -412,9 +417,10 @@ mod tests {
             (CdcTableType::Unspecified, "UNSPECIFIED", "Unspecified"),
             (CdcTableType::Postgres, "POSTGRES", "Postgres"),
             (CdcTableType::Mysql, "MYSQL", "Mysql"),
+            (CdcTableType::Mariadb, "MARIADB", "Mariadb"),
             (CdcTableType::SqlServer, "SQLSERVER", "Sqlserver"),
             (CdcTableType::Mongodb, "MONGO", "Mongo"),
-            (CdcTableType::Citus, "CITUS", "Citus"),
+            (CdcTableType::Oracle, "ORACLE", "Oracle"),
         ] {
             assert_eq!(cdc_table_type.to_value(), sea_orm_value);
             assert_eq!(

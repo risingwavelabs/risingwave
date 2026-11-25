@@ -18,6 +18,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
+use risingwave_connector::sink::iceberg::LEGACY_PK_INDEX_FILE_PATH;
 use risingwave_pb::stream_plan::compaction_resolver_node::PkColumn;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{
@@ -88,6 +89,20 @@ fn output_schema() -> Schema {
     ])
 }
 
+/// The PK index column locating the data file of a row. Sinks without the legacy file path layout
+/// store the 16-byte data file uuid instead of the full path (see `PkIndexDataFileLocator`).
+fn data_file_field(sink_desc: &SinkDesc) -> Field {
+    let legacy = sink_desc
+        .properties
+        .get(LEGACY_PK_INDEX_FILE_PATH)
+        .is_none_or(|v| !v.eq_ignore_ascii_case("false"));
+    if legacy {
+        Field::with_name(DataType::Varchar, "file_path")
+    } else {
+        Field::with_name(DataType::Bytea, "file_uuid")
+    }
+}
+
 /// Schema of the transient compaction resolver output consumed by the writer's right input.
 fn resolver_output_schema(sink_desc: &SinkDesc) -> Result<Schema> {
     let downstream_pk = sink_desc
@@ -98,7 +113,7 @@ fn resolver_output_schema(sink_desc: &SinkDesc) -> Result<Schema> {
         .iter()
         .map(|&idx| Field::from(&sink_desc.columns[idx].column_desc))
         .collect();
-    fields.push(Field::with_name(DataType::Varchar, "file_path"));
+    fields.push(data_file_field(sink_desc));
     fields.push(Field::with_name(DataType::Int64, "position"));
     Ok(Schema::new(fields))
 }
@@ -113,7 +128,7 @@ fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
     for &idx in downstream_pk {
         builder.add_column(&Field::from(&sink_desc.columns[idx].column_desc));
     }
-    builder.add_column(&Field::with_name(DataType::Varchar, "file_path"));
+    builder.add_column(&data_file_field(sink_desc));
     builder.add_column(&Field::with_name(DataType::Int64, "position"));
 
     for idx in 0..downstream_pk.len() {
@@ -205,7 +220,7 @@ impl StreamIcebergWithPkIndexWriter {
             })
             .collect();
         // The resolver output projects the PK columns first in `pk_columns` order, followed by
-        // `file_path` and `position`. These are output-schema indices, not data-file indices.
+        // the data file column and `position`. These are output-schema indices, not data-file indices.
         let resolver_stream_key: Vec<u32> = (0..pk_columns.len() as u32).collect();
 
         // The writer's normal input must have a fragment boundary so that it is rendered as a
@@ -398,5 +413,21 @@ mod tests {
         assert_eq!(table.pk().len(), 2);
         assert_eq!(table.distribution_key(), &[0, 1]);
         assert_eq!(table.read_prefix_len_hint, 2);
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_stores_file_uuid() {
+        let mut desc = test_sink_desc();
+        desc.properties
+            .insert(LEGACY_PK_INDEX_FILE_PATH.to_owned(), "false".to_owned());
+
+        let table = build_iceberg_pk_state_table(&desc).unwrap();
+        assert_eq!(table.columns()[1].name(), "file_uuid");
+        assert_eq!(table.columns()[1].data_type(), &DataType::Bytea);
+        assert_eq!(table.columns()[2].name(), "position");
+
+        let resolver_schema = resolver_output_schema(&desc).unwrap();
+        assert_eq!(resolver_schema.fields()[1].name, "file_uuid");
+        assert_eq!(resolver_schema.fields()[1].data_type, DataType::Bytea);
     }
 }

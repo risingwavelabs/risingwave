@@ -9,7 +9,6 @@ compute_batch_total_mem	gauge		Total number of memory usage for batch tasks.		sr
 user_compute_error_cnt	counter	error_type,executor_name,fragment_id	Compute errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_sink_error_cnt	counter	error_type,sink_id,sink_name,fragment_id	Sink errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_source_error_cnt	counter	error_type,source_id,source_name,fragment_id	Source errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
-aws_sdk_retry_counts	counter		Total number of aws sdk retry happens		src/common/metrics/src/lib.rs
 connection_count	gauge	connection_type,uri	The number of current existing connection		src/common/metrics/src/monitor/connection.rs
 connection_create_rate	counter	connection_type,uri	Rate on creating new connection		src/common/metrics/src/monitor/connection.rs
 connection_err_rate	counter	connection_type,uri	Error rate on creating new connection		src/common/metrics/src/monitor/connection.rs
@@ -146,6 +145,8 @@ kinesis_lag_latency_ms	histogram	source_id,source_name,fragment_id,shard_id	Lag 
 kinesis_rebuild_shard_iter_count	counter	source_id,source_name,fragment_id,shard_id	Total number of times rebuild shard iter in kinesis source		src/connector/src/source/monitor/metrics.rs
 kinesis_throughput_exceeded_count	counter	source_id,source_name,fragment_id,shard_id	Total number of times throughput exceeded in kinesis source		src/connector/src/source/monitor/metrics.rs
 kinesis_timeout_count	counter	source_id,source_name,fragment_id,shard_id	Total number of times timeout in kinesis source		src/connector/src/source/monitor/metrics.rs
+mariadb_cdc_binlog_file_seq_max	gauge	source_id,hostname,port	MariaDB CDC upstream binlog file sequence number (maximum/newest)		src/connector/src/source/monitor/metrics.rs
+mariadb_cdc_binlog_file_seq_min	gauge	source_id,hostname,port	MariaDB CDC upstream binlog file sequence number (minimum/oldest)		src/connector/src/source/monitor/metrics.rs
 mysql_cdc_binlog_file_seq_max	gauge	source_id,hostname,port	MySQL CDC upstream binlog file sequence number (maximum/newest)		src/connector/src/source/monitor/metrics.rs
 mysql_cdc_binlog_file_seq_min	gauge	source_id,hostname,port	MySQL CDC upstream binlog file sequence number (minimum/oldest)		src/connector/src/source/monitor/metrics.rs
 parquet_source_skip_row_count	counter	actor_id,source_id,source_name,fragment_id	Total number of rows that have been set to null in parquet source		src/connector/src/source/monitor/metrics.rs
@@ -294,12 +295,12 @@ object_store_operation_latency	histogram	media_type,type	Total latency of operat
 object_store_read_bytes	counter		Total bytes of requests read from object store		src/object_store/src/object/object_metrics.rs
 object_store_request_retry_count	counter	type	The number of retry times of object store request		src/object_store/src/object/object_metrics.rs
 object_store_write_bytes	counter		Total bytes of requests read from object store		src/object_store/src/object/object_metrics.rs
-refill_bytes	counter	type,op	refill bytes		src/storage/src/hummock/event_handler/refiller.rs
-refill_duration	histogram	type,op	refill duration		src/storage/src/hummock/event_handler/refiller.rs
-refill_queue_total	gauge		refill queue total		src/storage/src/hummock/event_handler/refiller.rs
-refill_total	counter	type,op	refill total		src/storage/src/hummock/event_handler/refiller.rs
 recent_filter_items	gauge		Item numbers of the recent filter.		src/storage/src/hummock/recent_filter/mod.rs
 recent_filter_ops	counter	op	Ops of the recent filter.		src/storage/src/hummock/recent_filter/mod.rs
+refill_bytes	counter	type,op	refill bytes		src/storage/src/monitor/cache_refill_metrics.rs
+refill_duration	histogram	type,op	refill duration		src/storage/src/monitor/cache_refill_metrics.rs
+refill_queue_total	gauge		refill queue total		src/storage/src/monitor/cache_refill_metrics.rs
+refill_total	counter	type,op	refill total		src/storage/src/monitor/cache_refill_metrics.rs
 compactor_compact_sst_duration	histogram		Total time of compact_key_range that have been issued to state store		src/storage/src/monitor/compactor_metrics.rs
 compactor_compact_task_duration	histogram	group,level	Total time of compact that have been issued to state store		src/storage/src/monitor/compactor_metrics.rs
 compactor_compaction_event_consumed_latency	histogram		The latency of each event being consumed		src/storage/src/monitor/compactor_metrics.rs
@@ -479,6 +480,8 @@ stream_join_matched_join_keys	histogram	actor_id,fragment_id,table_id	The number
 stream_lookup_cache_miss_count	counter	actor_id,table_id,fragment_id	Lookup executor cache miss count		src/stream/src/executor/monitor/streaming_stats.rs
 stream_lookup_cached_entry_count	gauge	actor_id,table_id,fragment_id	Total entry counts in lookup executor cache		src/stream/src/executor/monitor/streaming_stats.rs
 stream_lookup_total_query_cache_count	counter	actor_id,table_id,fragment_id	Lookup executor query cache total count		src/stream/src/executor/monitor/streaming_stats.rs
+stream_mariadb_cdc_state_binlog_file_seq	gauge	source_id	Current binlog file sequence number stored in MariaDB CDC state table		src/stream/src/executor/monitor/streaming_stats.rs
+stream_mariadb_cdc_state_binlog_position	gauge	source_id	Current binlog position stored in MariaDB CDC state table		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_evicted_rows_count	counter	actor_id,table_id,fragment_id	Buffered rows evicted by the match recognize executor		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_matches_emitted_count	counter	actor_id,table_id,fragment_id	Matches emitted by the match recognize executor		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_retained_rows	gauge	actor_id,table_id,fragment_id	Rows currently retained in memory by the match recognize executor, summed over the actor's partitions		src/stream/src/executor/monitor/streaming_stats.rs

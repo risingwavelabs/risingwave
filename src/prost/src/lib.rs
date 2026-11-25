@@ -850,6 +850,30 @@ mod tests {
     use crate::stream_plan::stream_node::NodeBody;
 
     #[test]
+    fn test_decode_legacy_keyed_changelog() {
+        use prost::Message;
+
+        use crate::stream_plan::ChangeLogNode;
+        use crate::stream_plan::change_log_node::{Keyed, Mode};
+
+        // A keyed plan with need_op=true, distribution_keys=[1], stream_keys=[0],
+        // and the original empty Keyed message at tag 3.
+        let legacy_plan = &[0x08, 0x01, 0x12, 0x01, 0x01, 0x1a, 0x00, 0x22, 0x01, 0x00][..];
+        let node = ChangeLogNode::decode(legacy_plan).unwrap();
+        assert_eq!(
+            node,
+            ChangeLogNode {
+                need_op: true,
+                distribution_keys: vec![1],
+                stream_keys: vec![0],
+                mode: Some(Mode::Keyed(Keyed {
+                    additional_key_columns: vec![],
+                })),
+            }
+        );
+    }
+
+    #[test]
     fn test_getter() {
         let data_type: DataType = DataType {
             type_name: data_type::TypeName::Double.into(),

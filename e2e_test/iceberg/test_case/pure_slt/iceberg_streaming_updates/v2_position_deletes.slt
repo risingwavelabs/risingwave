@@ -1,0 +1,231 @@
+# Iceberg V2: the PK-index sink writes file-scoped Parquet position deletes.
+# A real PK-index sink writes to a RiseDev Lakekeeper table, and both CREATE SOURCE
+# and CREATE TABLE ingest it with streaming_updates at parallelism 2. Covers
+# bootstrap, update, delete and same-key reinsertion. Compaction and snapshot
+# expiration stay disabled so every snapshot is a logical change.
+control substitution on
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS streaming_updates_v2_groups;
+
+statement ok
+DROP TABLE IF EXISTS streaming_updates_v2_table;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS streaming_updates_v2_rows;
+
+statement ok
+DROP SOURCE IF EXISTS streaming_updates_v2_source;
+
+statement ok
+DROP SINK IF EXISTS streaming_updates_v2_sink;
+
+statement ok
+DROP TABLE IF EXISTS streaming_updates_v2_input;
+
+statement ok
+DROP CONNECTION IF EXISTS streaming_updates_v2_conn;
+
+# Lakekeeper data persists across local runs; start from a fresh external table.
+system ok
+python3 e2e_test/iceberg/test_case/pure_slt/iceberg_streaming_updates/lakekeeper_drop_table.py --catalog-uri "${RISEDEV_LAKEKEEPER_URL}/catalog" --table rw_streaming_updates_v2
+
+statement ok
+SET streaming_parallelism = 2;
+
+statement ok
+CREATE CONNECTION streaming_updates_v2_conn WITH (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = '${RISEDEV_LAKEKEEPER_URL}/catalog',
+    warehouse.path = 'risingwave-warehouse',
+    s3.endpoint = '${RISEDEV_MINIO_ENDPOINT}',
+    s3.access.key = '${RISEDEV_MINIO_ACCESS_KEY}',
+    s3.secret.key = '${RISEDEV_MINIO_SECRET_KEY}',
+    s3.region = 'us-east-1',
+    s3.path.style.access = 'true'
+);
+
+statement ok
+CREATE TABLE streaming_updates_v2_input (id int PRIMARY KEY, label varchar, v bigint);
+
+statement ok
+CREATE SINK streaming_updates_v2_sink FROM streaming_updates_v2_input WITH (
+    connector = 'iceberg',
+    connection = streaming_updates_v2_conn,
+    database.name = 'public',
+    table.name = 'rw_streaming_updates_v2',
+    create_table_if_not_exists = 'true',
+    type = 'upsert',
+    write_mode = 'merge-on-read',
+    format_version = '2',
+    enable_pk_index = 'true',
+    enable_compaction = 'false',
+    enable_snapshot_expiration = 'false',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+INSERT INTO streaming_updates_v2_input VALUES (1, 'a', 10), (2, 'a', 20), (3, 'b', 30);
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE streaming_updates_v2_source (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    connection = streaming_updates_v2_conn,
+    database.name = 'public',
+    table.name = 'rw_streaming_updates_v2',
+    streaming_updates = 'true'
+);
+
+# The batch read proves the sink committed before the streaming jobs bootstrap.
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_source;
+----
+1 a 10
+2 a 20
+3 b 30
+
+statement ok
+CREATE MATERIALIZED VIEW streaming_updates_v2_rows AS SELECT * FROM streaming_updates_v2_source;
+
+# A second independent job on the same Iceberg table checks task-completion isolation.
+statement ok
+CREATE TABLE streaming_updates_v2_table (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    connection = streaming_updates_v2_conn,
+    database.name = 'public',
+    table.name = 'rw_streaming_updates_v2',
+    streaming_updates = 'true'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW streaming_updates_v2_groups AS
+SELECT label, count(*) AS n, sum(v) AS total FROM streaming_updates_v2_table GROUP BY label;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_rows;
+----
+1 a 10
+2 a 20
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_groups;
+----
+a 2 30
+b 1 30
+
+statement ok
+UPDATE streaming_updates_v2_input SET label = 'b', v = 100 WHERE id = 1;
+
+statement ok
+FLUSH;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_rows;
+----
+1 b 100
+2 a 20
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_groups;
+----
+a 1 20
+b 2 130
+
+statement ok
+DELETE FROM streaming_updates_v2_input WHERE id = 2;
+
+statement ok
+FLUSH;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_rows;
+----
+1 b 100
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_groups;
+----
+b 2 130
+
+statement ok
+INSERT INTO streaming_updates_v2_input VALUES (2, 'c', 200);
+
+statement ok
+FLUSH;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_rows;
+----
+1 b 100
+2 c 200
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM streaming_updates_v2_groups;
+----
+b 2 130
+c 1 200
+
+query T
+SELECT NOT EXISTS (
+  (SELECT * FROM streaming_updates_v2_input EXCEPT SELECT * FROM streaming_updates_v2_rows)
+  UNION ALL
+  (SELECT * FROM streaming_updates_v2_rows EXCEPT SELECT * FROM streaming_updates_v2_input)
+);
+----
+t
+
+# Bootstrap, update, delete and reinsertion each reach a separate commit.
+query T retry 30 backoff 1s
+SELECT count(*) >= 4 FROM rw_iceberg_snapshots WHERE source_name = 'streaming_updates_v2_source';
+----
+t
+
+query T retry 30 backoff 1s
+SELECT count(*) > 0 FROM rw_iceberg_files
+WHERE source_name = 'streaming_updates_v2_source' AND content = 'PositionDeletes' AND file_format = 'parquet';
+----
+t
+
+query T retry 30 backoff 1s
+SELECT count(*) = 0 FROM rw_iceberg_files
+WHERE source_name = 'streaming_updates_v2_source' AND content = 'PositionDeletes' AND file_format <> 'parquet';
+----
+t
+
+query T retry 30 backoff 1s
+SELECT count(*) = 0 FROM rw_iceberg_files
+WHERE source_name = 'streaming_updates_v2_source' AND content = 'EqualityDeletes';
+----
+t
+
+statement ok
+DROP MATERIALIZED VIEW streaming_updates_v2_groups;
+
+statement ok
+DROP TABLE streaming_updates_v2_table;
+
+statement ok
+DROP MATERIALIZED VIEW streaming_updates_v2_rows;
+
+statement ok
+DROP SOURCE streaming_updates_v2_source;
+
+statement ok
+DROP SINK streaming_updates_v2_sink;
+
+statement ok
+DROP TABLE streaming_updates_v2_input;
+
+statement ok
+DROP CONNECTION streaming_updates_v2_conn;
+
+system ok
+python3 e2e_test/iceberg/test_case/pure_slt/iceberg_streaming_updates/lakekeeper_drop_table.py --catalog-uri "${RISEDEV_LAKEKEEPER_URL}/catalog" --table rw_streaming_updates_v2

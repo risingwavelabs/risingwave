@@ -40,9 +40,12 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_connector::source::cdc::{
-    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
+    CDC_COLUMN_EXCLUDE_LIST, CdcSourceExternalTableIdentifier, build_cdc_table_id,
+    parse_cdc_column_exclude_list,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type,
+};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
@@ -75,7 +78,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    derive_connect_properties_for_cdc_table, not_null_check_for_cdc_table,
     reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
@@ -485,7 +488,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let (with_properties, refresh_mode) =
+    let (with_properties, ingest_mode) =
         bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
@@ -516,14 +519,14 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut handler_args)?;
     let rate_limit = overwrite_options.source_rate_limit;
     let source = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
         format_encode,
         with_properties,
-        &column_defs,
+        column_defs,
         constraints,
         wildcard_idx,
         source_watermarks,
@@ -534,11 +537,11 @@ pub(crate) async fn gen_create_table_plan_with_source(
         CreateSourceType::Table,
         rate_limit,
         sql_column_strategy,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
-    let context = OptimizerContext::new(handler_args, explain_options);
+    let context = OptimizerContext::new(handler_args, explain_options)?;
 
     let (plan, table) = gen_table_plan_with_source(
         context.into(),
@@ -913,6 +916,12 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
     let cdc_table_type = ExternalCdcTableType::from_properties(&options);
+    let canonical_name = dispatch_cdc_source_type!(
+        options.cdc_source_type(),
+        T,
+        T::canonical_name(&options),
+        unreachable!("CDC table without a CDC connector")
+    );
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id, // id of cdc source streaming job
@@ -932,7 +941,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     let logical_scan = LogicalCdcScan::create(
-        external_table_name.clone(),
+        external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
@@ -948,15 +957,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let cdc_table_id_external_table_name = if let ExternalCdcTableType::Postgres = cdc_table_type
-        && let Some(normalized_table_name) =
-            normalize_simple_postgres_quoted_table_name(&external_table_name)
-    {
-        normalized_table_name
-    } else {
-        external_table_name
-    };
-    let cdc_table_id = build_cdc_table_id(source.id, &cdc_table_id_external_table_name);
+    let cdc_table_id = build_cdc_table_id(source.id, &canonical_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -1058,7 +1059,7 @@ pub(super) async fn handle_create_table_plan(
             None,
         ),
         (None, None) => {
-            let context = OptimizerContext::new(handler_args, explain_options);
+            let context = OptimizerContext::new(handler_args, explain_options)?;
             let (plan, table) = gen_create_table_plan(
                 context,
                 table_name.clone(),
@@ -1111,14 +1112,36 @@ pub(super) async fn handle_create_table_plan(
                 source.clone()
             };
             check_cdc_source_select_privilege(session, &source)?;
-            let (cdc_with_options, normalized_external_table_name) =
-                derive_with_options_for_cdc_table(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
+            let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
+
+            let excluded_columns = match handler_args.with_options.get(CDC_COLUMN_EXCLUDE_LIST) {
+                Some(list) => {
+                    let columns = parse_cdc_column_exclude_list(list);
+                    if columns.is_empty() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_COLUMN_EXCLUDE_LIST}` must list at least one column"
+                        ))
+                        .into());
+                    }
+                    if wildcard_idx.is_none() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_COLUMN_EXCLUDE_LIST}` requires the `(*)` wildcard in the column list"
+                        ))
+                        .into());
+                    }
+                    columns
+                }
+                None => HashSet::new(),
+            };
 
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
-                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                Some(_) => {
+                    bind_cdc_table_schema_externally(cdc_with_options.clone(), &excluded_columns)
+                        .await?
+                }
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
@@ -1153,12 +1176,12 @@ pub(super) async fn handle_create_table_plan(
             reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
-                OptimizerContext::new(handler_args, explain_options).into();
+                OptimizerContext::new(handler_args, explain_options)?.into();
             let shared_source_id = source.id;
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                normalized_external_table_name,
+                external_table_name,
                 column_defs,
                 source_watermarks,
                 columns,
@@ -1707,9 +1730,9 @@ pub async fn create_iceberg_engine_table(
     source_handler_args.with_options =
         WithOptions::new(source_with, Default::default(), connection_ref);
 
-    let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
+    let overwrite_options = OverwriteOptions::new(&mut source_handler_args)?;
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
+    let (with_properties, ingest_mode) =
         bind_connector_props(&source_handler_args, &format_encode, true)?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
@@ -1739,7 +1762,7 @@ pub async fn create_iceberg_engine_table(
         create_source_stmt.source_name,
         format_encode,
         with_properties,
-        &create_source_stmt.columns,
+        create_source_stmt.columns,
         create_source_stmt.constraints,
         create_source_stmt.wildcard_idx,
         create_source_stmt.source_watermarks,
@@ -1750,7 +1773,7 @@ pub async fn create_iceberg_engine_table(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
@@ -1937,7 +1960,7 @@ pub async fn generate_stream_graph_for_replace_table(
             TableJobType::General,
         ),
         (None, None) => {
-            let context = OptimizerContext::from_handler_args(handler_args);
+            let context = OptimizerContext::from_handler_args(handler_args)?;
             let (plan, table) = gen_create_table_plan(
                 context,
                 table_name,
@@ -1963,11 +1986,10 @@ pub async fn generate_stream_graph_for_replace_table(
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-            let (cdc_with_options, normalized_external_table_name) =
-                derive_with_options_for_cdc_table(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
+            let (cdc_with_options, external_table_name) = derive_connect_properties_for_cdc_table(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
             let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
@@ -1981,11 +2003,11 @@ pub async fn generate_stream_graph_for_replace_table(
             reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
-                OptimizerContext::new(handler_args, ExplainOptions::default()).into();
+                OptimizerContext::new(handler_args, ExplainOptions::default())?.into();
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                normalized_external_table_name,
+                external_table_name,
                 columns,
                 source_watermarks,
                 column_catalogs,

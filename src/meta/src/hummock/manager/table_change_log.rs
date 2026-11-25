@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, anyhow};
@@ -31,6 +32,7 @@ use crate::controller::streaming_job::{
 };
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::gc::change_log_retention::RetainedChangeLogBatch;
 use crate::hummock::model::ext::to_table_change_log;
 
 #[derive(Clone, Debug)]
@@ -324,10 +326,18 @@ impl HummockManager {
                 change_log.truncate(truncate_epoch);
             }
         }
+        // Transfer the already collected IDs without a second per-object pass under
+        // the versioning lock. Keep a shared handle for the minor-GC queue below.
+        let may_delete_object_ids = Arc::new(may_delete_object_ids);
+        self.gc_manager
+            .change_log_retention
+            .retain_batch(RetainedChangeLogBatch::ObjectIds(
+                may_delete_object_ids.clone(),
+            ));
         drop(versioning);
         let may_delete_object_count = may_delete_object_ids.len();
         self.gc_manager
-            .add_may_delete_object_ids(may_delete_object_ids.into_iter());
+            .add_may_delete_object_ids(may_delete_object_ids.iter().copied());
         let truncation_time = truncation_started_at.elapsed();
         tracing::info!(
             resolution_time = ?resolution_time,

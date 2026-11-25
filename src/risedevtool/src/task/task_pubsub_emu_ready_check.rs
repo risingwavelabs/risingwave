@@ -16,7 +16,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use google_cloud_pubsub::client::Client;
+use gcloud_pubsub::client::Client;
 
 use crate::{ExecuteContext, PubsubConfig, Task};
 

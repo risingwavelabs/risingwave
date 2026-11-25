@@ -23,32 +23,34 @@ use risingwave_batch::task::BatchManager;
 use risingwave_batch::task::await_tree_key::BatchTask;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::{MetricLevel, ServerConfig};
+use risingwave_common::util::tracing::log_filter;
 use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
-    GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    GetTableCacheRefillStatsRequest, GetTableCacheRefillStatsResponse, HeapProfilingRequest,
-    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
-    ProfilingResponse, RelationStats, StackTraceRequest, StackTraceResponse,
-    TieredCacheTracingRequest, TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetLogFilterRequest,
+    GetProfileStatsRequest, GetProfileStatsResponse, GetStreamingStatsRequest,
+    GetStreamingStatsResponse, GetTableCacheRefillStatsRequest, GetTableCacheRefillStatsResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, LogFilterState, ProfilingRequest, ProfilingResponse, RelationStats,
+    SetLogFilterRequest, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
+    TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::event_handler::refiller::{
     TableCacheRefillContext, TableCacheRefillMonitorSnapshot,
 };
 use risingwave_storage::hummock::store::HummockStorage;
-use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
+use risingwave_storage::hummock::{Block, SstableBlockIndex, SstableMetaCacheValue};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
-type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
+type MetaCache = HybridCache<HummockSstableObjectId, SstableMetaCacheValue>;
 type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
 
 #[derive(Clone)]
@@ -83,6 +85,20 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
+    async fn set_log_filter(
+        &self,
+        request: Request<SetLogFilterRequest>,
+    ) -> Result<Response<LogFilterState>, Status> {
+        log_filter::set_log_filter_rpc(request)
+    }
+
+    async fn get_log_filter(
+        &self,
+        request: Request<GetLogFilterRequest>,
+    ) -> Result<Response<LogFilterState>, Status> {
+        log_filter::get_log_filter_rpc(request)
+    }
+
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,

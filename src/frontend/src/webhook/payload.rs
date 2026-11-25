@@ -99,7 +99,7 @@ fn json_properties_from_headers(headers: &HeaderMap) -> Result<JsonProperties> {
     let time_handling = parse_time_handling(headers, WEBHOOK_JSON_TIME_HANDLING_HEADER)?;
     let bigint_unsigned_handling =
         parse_bigint_unsigned_handling(headers, WEBHOOK_JSON_BIGINT_UNSIGNED_HANDLING_HEADER)?;
-    let handle_toast_columns =
+    let handle_postgres_toast_columns =
         parse_bool_header(headers, WEBHOOK_JSON_HANDLE_TOAST_COLUMNS_HEADER)?.unwrap_or(false);
 
     Ok(JsonProperties {
@@ -108,7 +108,7 @@ fn json_properties_from_headers(headers: &HeaderMap) -> Result<JsonProperties> {
         timestamptz_handling,
         time_handling,
         bigint_unsigned_handling,
-        handle_toast_columns,
+        handle_postgres_toast_columns,
     })
 }
 
@@ -286,7 +286,7 @@ mod tests {
             config.bigint_unsigned_handling,
             Some(BigintUnsignedHandlingMode::Precise)
         ));
-        assert!(config.handle_toast_columns);
+        assert!(config.handle_postgres_toast_columns);
     }
 
     #[test]

@@ -626,22 +626,13 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn list(
-        &self,
-        prefix: &str,
-        start_after: Option<String>,
-        limit: Option<usize>,
-    ) -> ObjectResult<ObjectMetadataIter> {
-        Ok(Box::pin(
-            S3ObjectIter::new(
-                self.client.clone(),
-                self.bucket.clone(),
-                prefix.to_owned(),
-                self.config.clone(),
-                start_after,
-            )
-            .take(limit.unwrap_or(usize::MAX)),
-        ))
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        Ok(Box::pin(S3ObjectIter::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            prefix.to_owned(),
+            self.config.clone(),
+        )))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -695,7 +686,7 @@ impl S3ObjectStore {
                     Err(_) => false,
                 };
 
-                let sdk_config = sdk_config_loader.load().await;
+                let sdk_config = Box::pin(sdk_config_loader.load()).await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
@@ -719,7 +710,7 @@ impl S3ObjectStore {
             }
             Err(_) => {
                 // s3
-                let sdk_config = sdk_config_loader.load().await;
+                let sdk_config = Box::pin(sdk_config_loader.load()).await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
@@ -776,15 +767,17 @@ impl S3ObjectStore {
         );
         #[cfg(not(madsim))]
         let builder = aws_sdk_s3::config::Builder::from(
-            &aws_config::ConfigLoader::default()
-                // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
-                .credentials_provider(Credentials::from_keys(
-                    access_key_id,
-                    secret_access_key,
-                    None,
-                ))
-                .load()
-                .await,
+            &Box::pin(
+                aws_config::ConfigLoader::default()
+                    // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
+                    .credentials_provider(Credentials::from_keys(
+                        access_key_id,
+                        secret_access_key,
+                        None,
+                    ))
+                    .load(),
+            )
+            .await,
         )
         .force_path_style(true)
         .identity_cache(
@@ -972,17 +965,10 @@ struct S3ObjectIter {
     >,
 
     config: Arc<ObjectStoreConfig>,
-    start_after: Option<String>,
 }
 
 impl S3ObjectIter {
-    fn new(
-        client: Client,
-        bucket: String,
-        prefix: String,
-        config: Arc<ObjectStoreConfig>,
-        start_after: Option<String>,
-    ) -> Self {
+    fn new(client: Client, bucket: String, prefix: String, config: Arc<ObjectStoreConfig>) -> Self {
         Self {
             buffer: VecDeque::default(),
             client,
@@ -992,7 +978,6 @@ impl S3ObjectIter {
             is_truncated: Some(true),
             send_future: None,
             config,
-            start_after,
         }
     }
 }
@@ -1011,8 +996,6 @@ impl Stream for S3ObjectIter {
                     self.is_truncated = is_truncated;
                     self.buffer.extend(more);
                     self.send_future = None;
-                    // only the first request may set start_after
-                    self.start_after = None;
                     self.poll_next(cx)
                 }
                 Err(e) => {
@@ -1029,10 +1012,6 @@ impl Stream for S3ObjectIter {
             .list_objects_v2()
             .bucket(&self.bucket)
             .prefix(&self.prefix);
-        #[cfg(not(madsim))]
-        if let Some(start_after) = self.start_after.as_ref() {
-            request = request.start_after(start_after);
-        }
         if let Some(continuation_token) = self.next_continuation_token.as_ref() {
             request = request.continuation_token(continuation_token);
         }
