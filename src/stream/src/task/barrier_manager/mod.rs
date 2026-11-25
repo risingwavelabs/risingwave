@@ -34,6 +34,13 @@ use crate::task::barrier_manager::progress::BackfillState;
 use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, StreamEnvironment};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadProgress {
+    ListFinished,
+    ReaderDone,
+    Failed,
+}
+
 /// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::PartialGraphState`].
 ///
 /// See [`crate::task`] for architecture overview.
@@ -52,17 +59,11 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         progress: progress::TableChangeLogProgress,
     },
-    ReportSourceListFinished {
+    ReportLoadProgress {
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: TableId,
-        associated_source_id: SourceId,
-    },
-    ReportSourceLoadFinished {
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: TableId,
-        associated_source_id: SourceId,
+        source_id: SourceId,
+        progress: LoadProgress,
     },
     RefreshFinished {
         epoch: EpochPair,
@@ -198,33 +199,18 @@ impl LocalBarrierManager {
         rx
     }
 
-    pub fn report_source_list_finished(
+    pub fn report_load_progress(
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: TableId,
-        associated_source_id: SourceId,
+        source_id: SourceId,
+        progress: LoadProgress,
     ) {
-        self.send_event(LocalBarrierEvent::ReportSourceListFinished {
+        self.send_event(LocalBarrierEvent::ReportLoadProgress {
             epoch,
             actor_id,
-            table_id,
-            associated_source_id,
-        });
-    }
-
-    pub fn report_source_load_finished(
-        &self,
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: TableId,
-        associated_source_id: SourceId,
-    ) {
-        self.send_event(LocalBarrierEvent::ReportSourceLoadFinished {
-            epoch,
-            actor_id,
-            table_id,
-            associated_source_id,
+            source_id,
+            progress,
         });
     }
 
