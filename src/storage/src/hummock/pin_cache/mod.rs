@@ -29,6 +29,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
 mod membership;
+mod recovery;
 #[cfg(test)]
 pub(super) mod test_utils;
 #[cfg(test)]
@@ -141,13 +142,13 @@ impl PinCacheReadHandle {
 }
 
 impl PinCache {
-    /// Registers initial objects without reading or writing local files.
-    /// Recovery is added separately before this backend is connected to production reads.
-    pub(crate) fn new(
+    /// Recovers local files selected by the initial pin-policy/version membership before sharing.
+    /// An incomplete inventory fails initialization; no partially recovered cache is returned.
+    pub(crate) async fn new(
         store: ObjectStoreRef,
         shard_num: usize,
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
-    ) -> Arc<Self> {
+    ) -> ObjectResult<Arc<Self>> {
         assert!(
             shard_num > 0,
             "pin cache shard count must be greater than zero"
@@ -159,13 +160,23 @@ impl PinCache {
                 .collect(),
         };
         for id in objects {
-            pin_cache.shards[Self::shard_index(id, shard_num)]
-                .get_mut()
-                .register_object(id);
+            let state = pin_cache.shards[Self::shard_index(id, shard_num)].get_mut();
+            state.register_object(id);
         }
-        GLOBAL_PIN_CACHE_METRICS.published_objects.set(0);
-        GLOBAL_PIN_CACHE_METRICS.published_bytes.set(0);
-        Arc::new(pin_cache)
+        let metrics = &*GLOBAL_PIN_CACHE_METRICS;
+        let objects = pin_cache.store.list("").await;
+        let recovered = pin_cache
+            .recover_local_files(objects)
+            .await
+            .inspect_err(|_| {
+                metrics.recovery_failures.inc();
+            })?;
+        metrics
+            .published_objects
+            .set(metric_bytes(recovered.objects));
+        metrics.published_bytes.set(metric_bytes(recovered.bytes));
+        metrics.recovery_ready.set(1);
+        Ok(Arc::new(pin_cache))
     }
 
     pub(crate) fn get(
