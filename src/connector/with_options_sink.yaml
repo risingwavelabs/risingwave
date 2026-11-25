@@ -33,7 +33,7 @@ AzblobConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 BigQueryConfig:
@@ -112,7 +112,7 @@ BigQueryConfig:
   - name: aws.msk.signer_timeout_sec
     field_type: u64
     required: false
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: bigquery.change_sequence_number
@@ -150,7 +150,7 @@ ClickHouseConfig:
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 DeltaLakeConfig:
@@ -217,7 +217,7 @@ DeltaLakeConfig:
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: is_exactly_once
@@ -244,7 +244,7 @@ DorisConfig:
   - name: doris.partial_update
     field_type: String
     required: false
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: doris.stream_load.http.timeout.ms
@@ -374,7 +374,7 @@ ElasticSearchConfig:
     field_type: usize
     required: true
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: false
     default: '"upsert" . to_owned ()'
@@ -449,7 +449,7 @@ FsConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 GcsConfig:
@@ -482,7 +482,7 @@ GcsConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 GooglePubSubConfig:
@@ -533,13 +533,13 @@ HttpConfig:
       Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
       for `jsonb`.
     required: false
-  - name: r#type
+  - name: type
     field_type: String
     comments: Sink type, must be "append-only".
     required: true
 IcebergConfig:
   fields:
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: force_append_only
@@ -1424,7 +1424,7 @@ LanceDbConfig:
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: is_exactly_once
@@ -1446,7 +1446,7 @@ MongodbConfig:
       `db_name.collection_name`. Data can also be written to dynamic collections, see `collection.name.field`
       for more information.
     required: true
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: collection.name.field
@@ -1572,7 +1572,7 @@ MqttConfig:
     comments: Whether the message should be retained by the broker
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: topic.field
@@ -1620,7 +1620,7 @@ NatsConfig:
     field_type: bool
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 OpenSearchConfig:
@@ -1667,7 +1667,7 @@ OpenSearchConfig:
     field_type: usize
     required: true
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: false
     default: '"upsert" . to_owned ()'
@@ -1706,7 +1706,7 @@ PostgresConfig:
     field_type: usize
     required: false
     default: '1024'
-  - name: r#type
+  - name: type
     field_type: String
     required: true
   - name: tcp.keepalive.enable
@@ -1973,7 +1973,7 @@ SnowflakeConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 SnowflakeV2Config:
@@ -2125,7 +2125,7 @@ SqlServerConfig:
     field_type: usize
     required: false
     default: '1024'
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 StarrocksConfig:
@@ -2227,7 +2227,7 @@ StarrocksConfig:
       When omitted, use the server default. Independent of the client HTTP timeout.
     required: false
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 TurbopufferConfig:
@@ -2269,7 +2269,7 @@ TurbopufferConfig:
     required: false
     default: DEFAULT_MAX_LINGER_SECOND
     allow_alter_on_fly: true
-  - name: r#type
+  - name: type
     field_type: String
     required: true
 WebhdfsConfig:
@@ -2293,6 +2293,6 @@ WebhdfsConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
-  - name: r#type
+  - name: type
     field_type: String
     required: true

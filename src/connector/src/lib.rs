@@ -55,6 +55,7 @@ pub mod sink;
 pub mod source;
 
 pub mod connector_common;
+pub mod connector_options;
 
 pub use paste::paste;
 pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};

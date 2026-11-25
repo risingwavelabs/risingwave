@@ -20,6 +20,7 @@ use itertools::Itertools;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
+use syn::ext::IdentExt;
 use syn::{Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type, parse_file};
 use thiserror_ext::AsReport;
 use walkdir::{DirEntry, WalkDir};
@@ -195,7 +196,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> BTreeMap<String, StructInfo>
                     required = false;
                 }
 
-                let name = rename.unwrap_or_else(|| field_name.to_string());
+                let name = rename.unwrap_or_else(|| field_name.unraw().to_string());
 
                 // Assemble the information
                 struct_info.fields.push(FieldInfo {

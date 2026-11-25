@@ -183,6 +183,7 @@ sea-schema = { version = "0.16", default-features = false, features = [
 serde = { workspace = true, features = ["rc"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
+serde_yaml = "0.9"
 simd-json = { version = "0.18.1", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
@@ -237,7 +238,6 @@ proc-macro2 = "1.0"
 quote = "1"
 rand = { workspace = true }
 serde = { workspace = true }
-serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
 tonic-prost = "0.14"
