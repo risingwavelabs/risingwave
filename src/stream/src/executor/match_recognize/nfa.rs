@@ -1225,7 +1225,16 @@ impl Nfa {
                 }
                 let (state, pos) = (top.state, top.pos);
                 match goal.enter(self, state, pos) {
-                    Enter::Verdict => return Ok(Some((pos, std::mem::take(path)))),
+                    Enter::Verdict => {
+                        // Only the finder's caller reads the labels. The liveness and extension
+                        // probes discard them, so the buffer stays in the scratch and the next
+                        // walk does not grow it again.
+                        let labels = match goal {
+                            Goal::Accept { .. } => std::mem::take(path),
+                            Goal::Boundary { .. } | Goal::AcceptOrBlocked { .. } => Vec::new(),
+                        };
+                        return Ok(Some((pos, labels)));
+                    }
                     Enter::Dead => {
                         Self::pop_failed(
                             stack,
@@ -3095,6 +3104,64 @@ mod tests {
                     .unwrap();
                 assert_eq!(with, plain, "position {p}");
             }
+        }
+    }
+
+    /// A probe that succeeds leaves the label buffer in the scratch: its callers read only the
+    /// verdict, and a gate that checks one match after another would otherwise grow the buffer
+    /// again for each.
+    #[tokio::test]
+    async fn successful_probes_keep_the_label_buffer() {
+        let n_rows = 40;
+        let nfa = Nfa::compile(&plus(vars("a"), false));
+        let m = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+        let mut scratch = WalkScratch::default();
+
+        // Alive at the boundary from row 0: the walk bound all 40 rows.
+        assert!(
+            nfa.reaches_boundary_alive_with(
+                0,
+                n_rows,
+                &m,
+                &mut ScanBudget::unlimited(),
+                true,
+                &mut scratch,
+            )
+            .await
+            .unwrap()
+        );
+        assert!(scratch.bufs.path.capacity() >= n_rows);
+        let buffer = scratch.bufs.path.as_ptr();
+
+        for p in 0..n_rows {
+            assert!(
+                nfa.reaches_boundary_alive_with(
+                    p,
+                    n_rows,
+                    &m,
+                    &mut ScanBudget::unlimited(),
+                    true,
+                    &mut scratch,
+                )
+                .await
+                .unwrap(),
+                "position {p}"
+            );
+            assert_eq!(scratch.bufs.path.as_ptr(), buffer, "position {p}");
+        }
+        // The extension probe accepts on every call (it is asked about a real match).
+        for end in [n_rows, n_rows / 2] {
+            nfa.may_extend_with(
+                0,
+                end,
+                &m,
+                &mut ScanBudget::unlimited(),
+                true,
+                &mut scratch,
+            )
+            .await
+            .unwrap();
+            assert_eq!(scratch.bufs.path.as_ptr(), buffer, "end {end}");
         }
     }
 }
