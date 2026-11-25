@@ -10,6 +10,7 @@ repository = { workspace = true }
 [features]
 test = ["risingwave_hummock_sdk/test"]
 failpoints = ["fail/failpoints"]
+sync_point = ["sync-point/sync_point"]
 
 [dependencies]
 anyhow = "1"

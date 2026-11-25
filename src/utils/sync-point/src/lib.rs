@@ -19,6 +19,12 @@ use std::time::Duration;
 
 use futures_util::future::{BoxFuture, FutureExt};
 
+#[cfg(feature = "sync_point")]
+mod pause;
+
+#[cfg(feature = "sync_point")]
+pub use pause::Pause;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Wait for signal {0} timeout")]
@@ -108,6 +114,10 @@ pub fn remove_action(sync_point: SyncPoint) {
 
 /// Mark a sync point.
 pub async fn on(sync_point: SyncPoint) {
+    #[cfg(feature = "sync_point")]
+    if pause::on(sync_point).await {
+        return;
+    }
     if let Some(sync_facility) = SYNC_FACILITY.get() {
         sync_facility.on(sync_point).await;
     }

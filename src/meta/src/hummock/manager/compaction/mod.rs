@@ -625,9 +625,8 @@ impl HummockManager {
                 .initiate_task_heartbeat(compact_task.clone());
         }
         drop(compaction_guard);
-        #[cfg(test)]
-        super::tests::pause_after_compaction_assignment_publication(self).await;
         if !pick_tasks.is_empty() {
+            sync_point::sync_point!("COMPACTION_ASSIGNMENT_PUBLISHED");
             self.metrics
                 .compact_task_batch_count
                 .with_label_values(&["batch_get_compact_task"])
