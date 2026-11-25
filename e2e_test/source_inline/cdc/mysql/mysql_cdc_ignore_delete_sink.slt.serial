@@ -1,0 +1,105 @@
+# An upsert sink with `ignore_delete` drops deletes and keeps every inserted or updated value, even
+# when a delete of the same key reaches the sink together with them. A CDC table source feeds the
+# sink directly, so both changes of one MySQL transaction arrive in the same chunk.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Make the test rerunnable after a partial failure.
+statement ok
+DROP SINK IF EXISTS mysql_ignore_delete_sink;
+
+statement ok
+DROP TABLE IF EXISTS mysql_ignore_delete_target;
+
+statement ok
+DROP SOURCE IF EXISTS s_mysql_ignore_delete CASCADE;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_ignore_delete;
+    CREATE TABLE mysql_ignore_delete (id INT NOT NULL PRIMARY KEY, v INT NOT NULL);
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'mysql-ignore-delete-cdc'@'%';
+    CREATE USER 'mysql-ignore-delete-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'mysql-ignore-delete-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE SOURCE s_mysql_ignore_delete WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'mysql-ignore-delete-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5407'
+);
+
+sleep 2s
+
+statement ok
+CREATE SOURCE mysql_ignore_delete (*)
+WITH (snapshot = 'false')
+FROM s_mysql_ignore_delete TABLE 'risedev.mysql_ignore_delete';
+
+statement ok
+CREATE TABLE mysql_ignore_delete_target (id INT PRIMARY KEY, v INT);
+
+statement ok
+CREATE SINK mysql_ignore_delete_sink INTO mysql_ignore_delete_target FROM mysql_ignore_delete
+WITH (type = 'upsert', ignore_delete = 'true');
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_ignore_delete VALUES (3, 30);
+"
+
+query II retry 30 backoff 1s
+SELECT id, v FROM mysql_ignore_delete_target ORDER BY id;
+----
+3 30
+
+# Row 1 is inserted and deleted, and row 3 updated and deleted, each in one transaction. Row 2 is
+# deleted in a later transaction.
+system ok
+mysql -e "
+    USE risedev;
+    BEGIN; INSERT INTO mysql_ignore_delete VALUES (1, 10); DELETE FROM mysql_ignore_delete WHERE id = 1; COMMIT;
+    BEGIN; UPDATE mysql_ignore_delete SET v = 31 WHERE id = 3; DELETE FROM mysql_ignore_delete WHERE id = 3; COMMIT;
+    INSERT INTO mysql_ignore_delete VALUES (2, 20);
+    DELETE FROM mysql_ignore_delete WHERE id = 2;
+"
+
+query II retry 30 backoff 1s
+SELECT id, v FROM mysql_ignore_delete_target ORDER BY id;
+----
+1 10
+2 20
+3 31
+
+statement ok
+DROP SINK mysql_ignore_delete_sink;
+
+statement ok
+DROP TABLE mysql_ignore_delete_target;
+
+statement ok
+DROP SOURCE mysql_ignore_delete;
+
+statement ok
+DROP SOURCE s_mysql_ignore_delete;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE mysql_ignore_delete;
+    DROP USER IF EXISTS 'mysql-ignore-delete-cdc'@'%';
+"
