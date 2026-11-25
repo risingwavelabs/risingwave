@@ -46,3 +46,41 @@
     select * from t where (v1,v2) > (null::int,1);
   expected_outputs:
   - batch_plan
+- name: "A struct value is not a row constructor: NULL is its largest field value, so no scan range."
+  sql: |
+    create table t(v1 int, v2 int, primary key(v1, v2));
+    select * from t where (v1,v2) > '(1,2)'::struct<x int, y int>;
+  expected_outputs:
+  - batch_plan
+- name: "`=` on row constructors is the AND of its fields."
+  sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1, v2));
+    select * from t where (v1,v2) = (1,2);
+  expected_outputs:
+  - batch_plan
+- name: "`<>` on row constructors is the OR of its fields."
+  sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1, v2));
+    select * from t where (v1,v2) <> (1,2);
+  expected_outputs:
+  - batch_plan
+- name: "`IN` on row constructors is the OR of their equalities."
+  sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1, v2));
+    select * from t where (v1,v2) in ((1,2),(3,4));
+  expected_outputs:
+  - batch_plan
+- name: "`BETWEEN` on row constructors uses row comparisons."
+  sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1, v2));
+    select * from t where (v1,v2) between (1,2) and (3,4);
+  expected_outputs:
+  - batch_plan
+- name: A row constructor join condition gives per-column join keys.
+  sql: |
+    create table t1(a int, b int);
+    create table t2(x int, y int);
+    select * from t1 join t2 on (t1.a, t1.b) = (t2.x, t2.y);
+  expected_outputs:
+  - batch_plan
+  - stream_plan

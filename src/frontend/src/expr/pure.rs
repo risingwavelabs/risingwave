@@ -118,6 +118,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::LessThanOrEqual
             | Type::GreaterThan
             | Type::GreaterThanOrEqual
+            | Type::RowLessThan
+            | Type::RowLessThanOrEqual
+            | Type::RowGreaterThan
+            | Type::RowGreaterThanOrEqual
             | Type::And
             | Type::Or
             | Type::Not
