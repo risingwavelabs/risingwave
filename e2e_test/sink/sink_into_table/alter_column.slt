@@ -63,14 +63,53 @@ select * from m_simple;
 300	301
 4	NULL
 
-statement error dropping columns in target table of sinks is not supported
+# Only `s_simple_2` writes `v2` (positional, two columns), so it is the only sink named.
+statement error failed to drop column "v2" because it's written by sink\(s\) "s_simple_2"
 alter table m_simple drop column v2;
 
 statement ok
-drop sink s_simple_1;
+drop sink s_simple_2;
+
+# `s_simple_1` writes `v1` only, so `v2` can be dropped while the sink is running.
+statement ok
+alter table m_simple drop column v2;
 
 statement ok
-drop sink s_simple_2;
+insert into t_simple_1 values (5);
+
+statement ok
+flush;
+
+query I rowsort
+select * from m_simple;
+----
+1
+100
+2
+200
+3
+300
+4
+5
+
+# A re-added column with the same name is a fresh column that the sink does not write.
+statement ok
+alter table m_simple add column v2 int default 42;
+
+statement ok
+insert into t_simple_1 values (6);
+
+statement ok
+flush;
+
+query II rowsort
+select * from m_simple where v1 in (5, 6);
+----
+5	42
+6	42
+
+statement ok
+drop sink s_simple_1;
 
 statement ok
 drop table t_simple_1;
@@ -130,11 +169,57 @@ select * from t_row_id_as_primary_key;
 2	1000	NULL
 3	1000	NULL
 
-statement ok
-drop sink s1;
+# `s1` writes `v1` only; `s11` writes all three columns.
+statement error failed to drop column "v3" because it's written by sink\(s\) "s11"
+alter table t_row_id_as_primary_key drop column v3;
 
 statement ok
 drop sink s11;
+
+statement ok
+alter table t_row_id_as_primary_key drop column v3;
+
+statement ok
+insert into t_s1 values (4);
+
+statement ok
+flush;
+
+query II rowsort
+select * from t_row_id_as_primary_key;
+----
+1	1000
+1001	2001
+1002	2002
+1003	2003
+2	1000
+3	1000
+4	1000
+
+# `v2` existed when `s1` was created, but `s1` writes `v1` only.
+statement ok
+alter table t_row_id_as_primary_key drop column v2;
+
+statement ok
+insert into t_s1 values (5);
+
+statement ok
+flush;
+
+query I rowsort
+select * from t_row_id_as_primary_key;
+----
+1
+1001
+1002
+1003
+2
+3
+4
+5
+
+statement ok
+drop sink s1;
 
 statement ok
 drop table t_row_id_as_primary_key;
@@ -247,8 +332,25 @@ c 13 1000
 d 14 1000
 e 15 1000
 
-statement error dropping columns in target table of sinks is not supported
+# `s_alter_1` names `(v2, v1)`, so `v2` is written and `v3` is not.
+statement error failed to drop column "v2" because it's written by sink\(s\) "s_alter_1"
 alter table m_alter_1 drop column v2;
+
+statement ok
+alter table m_alter_1 drop column v3;
+
+statement ok
+insert into t_alter_1 values (6, 'f');
+
+query TI rowsort
+select * from m_alter_1;
+----
+a 11
+b 12
+c 13
+d 14
+e 15
+f 16
 
 statement ok
 drop sink s_alter_1;
@@ -303,7 +405,7 @@ recover;
 statement ok
 insert into t_drop_1 values (1, 'a'), (2, 'b'), (3, 'c');
 
-statement error dropping columns in target table of sinks is not supported
+statement error failed to drop column "v2" because it's written by sink\(s\) "s_drop_1"
 alter table m_drop_1 drop column v2;
 
 statement ok
@@ -322,18 +424,41 @@ select * from m_drop_1;
 statement ok
 alter table m_drop_1 add column v3 int default 1000;
 
-query II rowsort
+# Re-add the dropped `v2` before the new sink exists.
+statement ok
+alter table m_drop_1 add column v2 varchar;
+
+query IIT rowsort
 select * from m_drop_1;
 ----
-1 1000
-2 1000
-3 1000
+1 1000 NULL
+2 1000 NULL
+3 1000 NULL
 
 statement ok
 create sink s_drop_1 into m_drop_1 (v1, v3) as select v1, v1 + 10 from t_drop_1;
 
 statement ok
 insert into t_drop_1 values (4, 'd'), (5, 'e');
+
+query IIT rowsort
+select * from m_drop_1;
+----
+1 11 NULL
+2 12 NULL
+3 13 NULL
+4 14 NULL
+5 15 NULL
+
+statement error failed to drop column "v3" because it's written by sink\(s\) "s_drop_1"
+alter table m_drop_1 drop column v3;
+
+# `v2` existed when the new sink was created, but `(v1, v3)` does not name it.
+statement ok
+alter table m_drop_1 drop column v2;
+
+statement ok
+insert into t_drop_1 values (6, 'f');
 
 query II rowsort
 select * from m_drop_1;
@@ -343,9 +468,7 @@ select * from m_drop_1;
 3 13
 4 14
 5 15
-
-statement error dropping columns in target table of sinks is not supported
-alter table m_drop_1 drop column v2;
+6 16
 
 statement ok
 drop sink s_drop_1;
@@ -466,6 +589,31 @@ select * from m_multi_a;
 3	NULL
 300	NULL
 
+# Neither sink writes the later-added `v2`.
+statement ok
+alter table m_multi_a drop column v2;
+
+statement ok
+insert into t_multi_a1 values (4);
+
+statement ok
+insert into t_multi_a2 values (400);
+
+statement ok
+flush;
+
+query I rowsort
+select * from m_multi_a;
+----
+1
+100
+2
+200
+3
+300
+4
+400
+
 statement ok
 drop sink s_multi_a1;
 
@@ -480,6 +628,40 @@ drop table t_multi_a2;
 
 statement ok
 drop table m_multi_a;
+
+# two positional sinks write the same non-pk column: both are named
+statement ok
+create table t_multi_d1 (v1 int, v2 int);
+
+statement ok
+create table t_multi_d2 (v1 int, v2 int);
+
+statement ok
+create table m_multi_d (v1 int primary key, v2 int);
+
+statement ok
+create sink s_multi_d1 into m_multi_d as select v1, v2 from t_multi_d1;
+
+statement ok
+create sink s_multi_d2 into m_multi_d as select v1, v2 from t_multi_d2;
+
+statement error failed to drop column "v2" because it's written by sink\(s\) "s_multi_d1", "s_multi_d2"
+alter table m_multi_d drop column v2;
+
+statement ok
+drop sink s_multi_d1;
+
+statement ok
+drop sink s_multi_d2;
+
+statement ok
+drop table t_multi_d1;
+
+statement ok
+drop table t_multi_d2;
+
+statement ok
+drop table m_multi_d;
 
 # multiple sinks exist before alter: with default, then add a new sink using new column, then alter again
 statement ok

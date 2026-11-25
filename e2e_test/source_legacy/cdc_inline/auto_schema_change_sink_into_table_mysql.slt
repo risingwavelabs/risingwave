@@ -1,0 +1,134 @@
+control substitution on
+
+# Auto schema change of a CDC table that is the target of a sink: dropping a column some sink
+# writes is rejected (schema kept, failure recorded in `rw_event_logs`), dropping a column no sink
+# writes goes through.
+
+system ok
+mysql -e "DROP DATABASE IF EXISTS sink_target_asc; CREATE DATABASE sink_target_asc;"
+
+system ok
+mysql -e "
+    USE sink_target_asc;
+    CREATE TABLE orders(
+         id BIGINT PRIMARY KEY,
+         amount INT,
+         note VARCHAR(32)
+    );
+    INSERT INTO orders VALUES(1, 10, 'first');
+    "
+
+statement ok
+create source mysql_sink_target_asc with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'root',
+ password = '${MYSQL_PWD:}',
+ database.name = 'sink_target_asc',
+ server.id = '5703',
+ auto.schema.change = 'true'
+);
+
+statement ok
+create table rw_orders (id bigint, amount int, note varchar, primary key (id)) from mysql_sink_target_asc table 'sink_target_asc.orders';
+
+statement ok
+create table extra_orders (id bigint primary key, amount int);
+
+statement ok
+insert into extra_orders values (100, 1000);
+
+statement ok
+create sink sink_orders into rw_orders (id, amount) as select id, amount from extra_orders;
+
+query IIT retry 4 backoff 1s
+select id, amount, note from rw_orders order by id;
+----
+1 10 first
+100 1000 NULL
+
+# `note` is written by no sink, so the upstream drop is replicated.
+system ok
+mysql -e "
+  USE sink_target_asc;
+  ALTER TABLE orders DROP COLUMN note;
+"
+
+query TTTT retry 4 backoff 1s
+describe rw_orders;
+----
+id bigint false NULL
+amount integer false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_orders NULL NULL
+
+# `amount` is written by `sink_orders`, so the upstream drop is rejected and the schema is kept.
+system ok
+mysql -e "
+  USE sink_target_asc;
+  ALTER TABLE orders DROP COLUMN amount;
+"
+
+query T retry 4 backoff 1s
+select info->'autoSchemaChangeFail'->>'failInfo' like '%failed to drop column "amount" because it''s written by sink(s) "sink_orders"%'
+from rw_catalog.rw_event_logs
+where event_type = 'AUTO_SCHEMA_CHANGE_FAIL' and info->'autoSchemaChangeFail'->>'tableName' = 'rw_orders'
+order by timestamp desc limit 1;
+----
+t
+
+query TTTT
+describe rw_orders;
+----
+id bigint false NULL
+amount integer false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_orders NULL NULL
+
+statement ok
+insert into extra_orders values (101, 1001);
+
+query II retry 4 backoff 1s
+select id, amount from rw_orders order by id;
+----
+1 10
+100 1000
+101 1001
+
+# Once the sink is gone, `amount` can be dropped by hand. Only then does the table match the
+# upstream schema again, so the next upstream DDL goes through.
+statement ok
+drop sink sink_orders;
+
+statement ok
+alter table rw_orders drop column amount;
+
+system ok
+mysql -e "
+  USE sink_target_asc;
+  ALTER TABLE orders ADD COLUMN v1 INT DEFAULT 5;
+"
+
+query TTTT retry 4 backoff 1s
+describe rw_orders;
+----
+id bigint false NULL
+v1 integer false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_orders NULL NULL
+
+statement ok
+drop table extra_orders;
+
+statement ok
+drop source mysql_sink_target_asc cascade;
+
+system ok
+mysql -e "DROP DATABASE IF EXISTS sink_target_asc;"

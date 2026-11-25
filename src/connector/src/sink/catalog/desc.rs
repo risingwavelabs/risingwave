@@ -121,6 +121,7 @@ impl SinkDesc {
             initialized_at_cluster_version: None,
             create_type: self.create_type,
             original_target_columns: vec![],
+            target_column_ids: vec![],
             stream_job_status: StreamJobStatus::Creating,
         }
     }

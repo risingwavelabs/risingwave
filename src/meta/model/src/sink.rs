@@ -79,6 +79,7 @@ pub struct Model {
     pub secret_ref: Option<SecretRef>,
     pub original_target_columns: Option<ColumnCatalogArray>,
     pub auto_refresh_schema_from_table: Option<TableId>,
+    pub target_column_ids: Option<I32Array>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -139,6 +140,9 @@ impl From<PbSink> for ActiveModel {
             secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
             original_target_columns: Set(Some(pb_sink.original_target_columns.into())),
             auto_refresh_schema_from_table: Set(pb_sink.auto_refresh_schema_from_table),
+            target_column_ids: Set(
+                (!pb_sink.target_column_ids.is_empty()).then(|| pb_sink.target_column_ids.into())
+            ),
         }
     }
 }

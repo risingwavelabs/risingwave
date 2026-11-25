@@ -67,10 +67,7 @@ select * from t
 1 ABC 2
 8 XYZ 9
 
-statement ok
-DROP SINK sk;
-
-# Now, refresh table schema. Should reflect the new schema.
+# Now, refresh table schema with the sink still running. Should reflect the new schema.
 statement ok
 ALTER TABLE t REFRESH SCHEMA;
 
@@ -138,6 +135,13 @@ Caused by these errors (recent errors listed first):
 # Drop generated column
 statement ok
 ALTER TABLE t DROP COLUMN gen_col;
+
+# Refresh table schema should still fail: the sink writes `bar`
+statement error failed to drop column "bar" because it's written by sink\(s\) "sk"
+ALTER TABLE t REFRESH SCHEMA;
+
+statement ok
+DROP SINK sk;
 
 # Refresh table schema
 statement ok

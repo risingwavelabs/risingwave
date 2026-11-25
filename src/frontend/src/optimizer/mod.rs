@@ -46,7 +46,7 @@ mod plan_expr_visitor;
 mod rule;
 pub mod variant_key;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use educe::Educe;
@@ -59,6 +59,7 @@ use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+    target_columns_to_visible_positions,
 };
 use risingwave_common::session_config::LocalityBackfillMode;
 use risingwave_common::types::DataType;
@@ -1396,37 +1397,15 @@ impl<P: PlanPhase> PlanRoot<P> {
         tar_cols: &[ColumnCatalog],
         user_specified_columns: bool,
     ) -> Vec<Option<usize>> {
-        #[expect(clippy::disallowed_methods)]
-        let visible_cols: Vec<(usize, String)> = self
-            .out_fields
-            .ones()
-            .zip_eq(self.out_names.iter().cloned())
-            .collect_vec();
-
-        let visible_col_idxes = visible_cols.iter().map(|(i, _)| *i).collect_vec();
-        let visible_col_idxes_by_name = visible_cols
-            .iter()
-            .map(|(i, name)| (name.as_ref(), *i))
-            .collect::<BTreeMap<_, _>>();
-
-        // Without a column list, the plan's columns go to the target's DML columns by position,
-        // skipping generated columns.
-        let mut dml_i = 0;
-        tar_cols
-            .iter()
-            .map(|tar_col| {
-                if !tar_col.can_dml() {
-                    return None;
-                }
-                let plan_i = if user_specified_columns {
-                    visible_col_idxes_by_name.get(tar_col.name()).cloned()
-                } else {
-                    visible_col_idxes.get(dml_i).copied()
-                };
-                dml_i += 1;
-                plan_i
-            })
-            .collect()
+        let visible_col_idxes = self.out_fields.ones().collect_vec();
+        target_columns_to_visible_positions(
+            tar_cols,
+            user_specified_columns.then_some(self.out_names.as_slice()),
+            visible_col_idxes.len(),
+        )
+        .into_iter()
+        .map(|position| position.map(|position| visible_col_idxes[position]))
+        .collect()
     }
 }
 

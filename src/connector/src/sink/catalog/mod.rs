@@ -20,8 +20,8 @@ use std::fmt::{Display, Formatter};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, StreamJobStatus,
-    TableId, UserId,
+    ColumnCatalog, ColumnId, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId,
+    StreamJobStatus, TableId, UserId,
 };
 pub use risingwave_common::id::SinkId;
 use risingwave_common::util::epoch::Epoch;
@@ -363,6 +363,10 @@ pub struct SinkCatalog {
 
     /// Only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
     pub original_target_columns: Vec<ColumnCatalog>,
+
+    /// Only for the sink whose target is a table. Ids of the target table columns this sink writes,
+    /// in the order of the sink's visible columns. Empty for sinks persisted before this field existed.
+    pub target_column_ids: Vec<ColumnId>,
 }
 
 impl SinkCatalog {
@@ -404,6 +408,11 @@ impl SinkCatalog {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             auto_refresh_schema_from_table: self.auto_refresh_schema_from_table,
+            target_column_ids: self
+                .target_column_ids
+                .iter()
+                .map(|id| id.get_id())
+                .collect_vec(),
         }
     }
 
@@ -517,6 +526,11 @@ impl From<PbSink> for SinkCatalog {
                 .original_target_columns
                 .into_iter()
                 .map(ColumnCatalog::from)
+                .collect_vec(),
+            target_column_ids: pb
+                .target_column_ids
+                .into_iter()
+                .map(ColumnId::new)
                 .collect_vec(),
         }
     }

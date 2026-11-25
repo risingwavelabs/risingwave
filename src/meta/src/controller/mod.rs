@@ -390,6 +390,11 @@ impl From<ObjectModel<sink::Model>> for PbSink {
                 .map(|cols| cols.to_protobuf())
                 .unwrap_or_default(),
             auto_refresh_schema_from_table: value.0.auto_refresh_schema_from_table,
+            target_column_ids: value
+                .0
+                .target_column_ids
+                .map(|ids| ids.into_inner())
+                .unwrap_or_default(),
         }
     }
 }

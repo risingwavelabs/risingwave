@@ -138,8 +138,7 @@ pub async fn handle_alter_table_column(
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (original_catalog, has_incoming_sinks) =
-        fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if original_catalog.is_iceberg_engine_table()
         && matches!(
@@ -180,12 +179,6 @@ pub async fn handle_alter_table_column(
     else {
         panic!("unexpected statement: {:?}", definition);
     };
-
-    if has_incoming_sinks && matches!(operation, AlterTableOperation::DropColumn { .. }) {
-        Err(ErrorCode::InvalidInputSyntax(
-            "dropping columns in target table of sinks is not supported".to_owned(),
-        ))?;
-    }
 
     // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
     // `FollowUnchecked` if the operation is `DropColumn`.
@@ -363,7 +356,7 @@ pub async fn handle_alter_table_column(
 pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
-) -> Result<(Arc<TableCatalog>, bool)> {
+) -> Result<Arc<TableCatalog>> {
     let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -387,13 +380,7 @@ pub fn fetch_table_catalog_for_alter(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
-        let has_incoming_sinks = reader
-            .get_schema_by_id(table.database_id, table.schema_id)?
-            .table_incoming_sinks(table.id)
-            .map(|sinks| !sinks.is_empty())
-            .unwrap_or(false);
-
-        Ok((table.clone(), has_incoming_sinks))
+        Ok(table.clone())
     }
 }
 

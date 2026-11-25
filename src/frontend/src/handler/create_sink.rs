@@ -27,13 +27,14 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowData
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    Schema,
+    Schema, target_columns_to_visible_positions, written_target_column_ids,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK, IcebergConfig};
@@ -454,11 +455,11 @@ pub async fn gen_sink_plan(
     let target_table_catalog = stmt
         .into_table_name
         .as_ref()
-        .map(|table_name| fetch_table_catalog_for_alter(session, table_name).map(|t| t.0))
+        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
         .transpose()?;
 
     if let Some(target_table_catalog) = &target_table_catalog {
-        if let Some(col_names) = col_names {
+        if let Some(col_names) = &col_names {
             let target_table_columns = target_table_catalog
                 .columns()
                 .iter()
@@ -530,7 +531,7 @@ pub async fn gen_sink_plan(
             )
             .collect();
 
-    let sink_catalog = sink_desc.into_catalog(
+    let mut sink_catalog = sink_desc.into_catalog(
         sink_schema_id,
         sink_database_id,
         session.user_id(),
@@ -547,11 +548,18 @@ pub async fn gen_sink_plan(
         }
 
         let table_columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
+        let positions = target_columns_to_visible_positions(
+            &table_columns_without_rw_timestamp,
+            col_names.as_deref(),
+            sink_catalog.visible_columns().count(),
+        );
+        sink_catalog.target_column_ids =
+            written_target_column_ids(&table_columns_without_rw_timestamp, &positions);
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
             &table_columns_without_rw_timestamp,
-            user_specified_columns,
+            &positions,
         )?;
 
         let logical_project = generic::Project::new(exprs, sink_plan);
@@ -995,62 +1003,32 @@ pub(crate) fn derive_default_column_project_for_sink(
     sink: &SinkCatalog,
     sink_schema: &Schema,
     columns: &[ColumnCatalog],
-    user_specified_columns: bool,
+    positions: &[Option<usize>],
 ) -> Result<Vec<ExprImpl>> {
     assert_eq!(sink.full_schema().len(), sink_schema.len());
 
     let default_column_exprs = TableCatalog::default_column_exprs(columns);
-
-    let mut exprs = vec![];
 
     let sink_visible_col_idxes = sink
         .full_columns()
         .iter()
         .positions(|c| !c.is_hidden())
         .collect_vec();
-    let sink_visible_col_idxes_by_name = sink
-        .full_columns()
+
+    columns
         .iter()
+        .zip_eq_fast(positions)
         .enumerate()
-        .filter(|(_, c)| !c.is_hidden())
-        .map(|(i, c)| (c.name(), i))
-        .collect::<BTreeMap<_, _>>();
-
-    // Without a column list, the sink's columns go to the table's DML columns by position, skipping
-    // generated columns.
-    let mut dml_idx = 0;
-    for (idx, column) in columns.iter().enumerate() {
-        if !column.can_dml() {
-            continue;
-        }
-        let sink_col_pos = dml_idx;
-        dml_idx += 1;
-
-        let default_col_expr =
-            || -> ExprImpl { rewrite_now_to_proctime(default_column_exprs[idx].clone()) };
-
-        let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
-            derive_sink_to_table_expr(sink_schema, sink_col_idx, column.data_type())
-        };
-
-        // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
-        // The missing columns will be filled with default value (`null` if not explicitly defined).
-        // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
-        if user_specified_columns {
-            if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
-                exprs.push(sink_col_expr(*idx)?);
-            } else {
-                exprs.push(default_col_expr());
-            }
-        } else {
-            if sink_col_pos < sink_visible_col_idxes.len() {
-                exprs.push(sink_col_expr(sink_visible_col_idxes[sink_col_pos])?);
-            } else {
-                exprs.push(default_col_expr());
-            };
-        }
-    }
-    Ok(exprs)
+        .filter(|(_, (column, _))| column.can_dml())
+        .map(|(idx, (column, position))| match position {
+            Some(position) => derive_sink_to_table_expr(
+                sink_schema,
+                sink_visible_col_idxes[*position],
+                column.data_type(),
+            ),
+            None => Ok(rewrite_now_to_proctime(default_column_exprs[idx].clone())),
+        })
+        .try_collect()
 }
 
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
