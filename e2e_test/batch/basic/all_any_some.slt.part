@@ -128,3 +128,18 @@ a2 f
 
 statement ok
 drop materialized view mv;
+
+# These are not valid in Postgres, but stored definitions may have them.
+statement ok
+create view any_in_stored_definition as select case 1 when any(array[1, 2]) then 'y' else 'n' end as c, true and any(array[true, false]) as t;
+
+statement ok
+alter view any_in_stored_definition rename to any_in_stored_definition_2;
+
+query TT
+select * from any_in_stored_definition_2;
+----
+y t
+
+statement ok
+drop view any_in_stored_definition_2;
