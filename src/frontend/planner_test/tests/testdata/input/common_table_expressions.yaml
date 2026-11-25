@@ -35,3 +35,14 @@
   expected_outputs:
   - logical_plan
   - stream_plan
+- name: Preserve the CTE projection type when eliminating a true filter
+  sql: |
+    create table t (c0 int);
+    with q as (
+      select cast(t.c0 > cast(null as int) as int) as c0 from t
+    )
+    select c0 from q where false
+    union all
+    select c0 from q where true;
+  expected_outputs:
+  - batch_plan

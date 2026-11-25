@@ -127,3 +127,39 @@ with cte as (
     2 as col
 )
 select cte.col from cte;
+
+statement ok
+create table t (c0 int);
+
+query I
+with q as (select (c0 > null::int)::int as c0 from t)
+select c0 from q where false
+union all
+select c0 from q where true;
+----
+
+statement ok
+insert into t values (1);
+
+query IT
+with q as (select (c0 > null::int)::int as c0 from t)
+select c0, pg_typeof(c0) from (
+    select c0 from q where false
+    union all
+    select c0 from q where true
+) u;
+----
+NULL integer
+
+query BT
+with q as (select c0 > null::int as c0 from t)
+select c0, pg_typeof(c0) from (
+    select c0 from q where false
+    union all
+    select c0 from q where true
+) u;
+----
+NULL boolean
+
+statement ok
+drop table t;
