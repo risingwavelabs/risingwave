@@ -621,6 +621,16 @@ impl Deadline {
             Deadline::Never => true,
         }
     }
+
+    /// Whether this window closes strictly before `other`'s. A window that never closes is
+    /// before nothing and after every finite deadline.
+    fn is_before(&self, other: &Deadline) -> bool {
+        match (self, other) {
+            (Deadline::At(a), Deadline::At(b)) => a.default_cmp(b).is_lt(),
+            (Deadline::At(_), Deadline::Never) => true,
+            (Deadline::Never, _) => false,
+        }
+    }
 }
 
 /// The error report the `WITHIN` deadline expression is built over: the sum leaving the order key
@@ -805,10 +815,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             } else {
                 false
             };
+            // Over a buffer in deadline order, a closed start row means every gap row before it
+            // has closed too. Otherwise the gate must look at each gap row's own window.
+            let gap_windows = match watermark {
+                Some(w) if within_final && run.deadlines_inverted() => Some(w),
+                _ => None,
+            };
             // A spent budget cannot decide a STRUCTURAL hold: every walk short-circuits to
             // "undecided", which the gate must read as hold. A WITHIN-final match is different —
             // its window has closed, so `match_is_final` returns FINAL for it before spending
-            // anything, and it needs no walk at all. Those MUST still be drained: leaving one
+            // anything, and it needs no walk at all (unless a gap row's window is still open,
+            // which holds it like any structural hold; the prune below never passes an open,
+            // undecided row, so the match is not lost). Those MUST still be drained: leaving one
             // withheld while `prune_dead_prefix` treats its window-closed start row as dead is how
             // a starved visit loses a match outright. It is also the ONLY way a starved partition
             // sheds anything — `prune_dead_prefix` returns early while the matcher is incomplete —
@@ -839,6 +857,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     start,
                     run.rows.len(),
                     within_final,
+                    gap_windows.map(|w| (run.rows.as_slice(), w)),
                     statically_terminal,
                     budget,
                     memoizable,
@@ -971,7 +990,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         //
         // This is NOT about a spent budget — do not gate it on `budget.hit`. With the budget spent
         // this function has already returned above, and even reaching here the loop stops at the
-        // first window-open position, which is at or before any held match's start. The case it
+        // first window-open position it cannot prove dead. The case it
         // guards has budget to spare: the loop skips a window-closed row on `deadline < w` WITHOUT
         // consulting the matcher, while the emission gate holds a match because a *gap* position
         // before its start is still alive at the boundary. The held match's own start row can then
@@ -1136,20 +1155,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 let run = parts
                     .entry(pk)
                     .or_insert_with(|| PartitionRun::new(nfa.clone(), skip.clone()));
-                // The emit path and the dead-prefix prune binary-search `rows` by `seq`; pin the
-                // invariant where it is produced: state-table key order must feed each partition's
-                // seqs in strictly increasing order (the ordered-input contract).
-                debug_assert!(
-                    run.rows.last().is_none_or(|last| last.seq < seq),
-                    "state-table iteration fed a non-increasing seq into a partition buffer"
-                );
-                debug_assert!(
-                    run.rows
-                        .last()
-                        .is_none_or(|last| last.order_key.default_cmp(&order_key).is_le()),
-                    "state-table iteration fed a decreasing order key into a partition buffer"
-                );
-                run.rows.push(BufferedRow {
+                // State-table key order feeds each partition in buffer order; `push_row` pins it.
+                run.push_row(BufferedRow {
                     seq,
                     order_key,
                     deadline,
@@ -1352,17 +1359,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         let run = parts
                             .entry_ref(&pk)
                             .or_insert_with(|| PartitionRun::new(nfa.clone(), skip.clone()));
-                        // The wakeup index files a partition under its FIRST row's deadline and
-                        // relies on deadlines being non-decreasing along the buffer: rows arrive
-                        // order-key sorted (the ordered-input contract) and the deadline is
-                        // monotone in the order key. Pin the half the index depends on.
-                        debug_assert!(
-                            run.rows
-                                .last()
-                                .is_none_or(|last| last.order_key.default_cmp(&order_key).is_le()),
-                            "the ordered input fed a decreasing order key into a partition buffer"
-                        );
-                        run.rows.push(BufferedRow {
+                        // Rows arrive order-key sorted (the ordered-input contract). The deadline
+                        // usually follows the order key, but need not: `push_row` tracks the
+                        // exception (see `PartitionRun::deadlines_inverted`).
+                        run.push_row(BufferedRow {
                             seq,
                             order_key,
                             deadline,
@@ -1642,6 +1642,9 @@ struct PartitionRun {
     /// its deadline. Kept here so the hot path sets it with a byte store and clones the key only
     /// on the `false → true` transition.
     pending: bool,
+    /// `seq` of the latest row pushed with a deadline below that of the row before it. See
+    /// [`Self::deadlines_inverted`].
+    last_inverted_seq: Option<i64>,
 }
 
 impl PartitionRun {
@@ -1652,6 +1655,48 @@ impl PartitionRun {
             held: None,
             indexed_deadline: None,
             pending: false,
+            last_inverted_seq: None,
+        }
+    }
+
+    /// Append a row to the buffer. Every push goes through here: it pins the order the buffer
+    /// relies on and tracks where the deadlines fall out of it.
+    fn push_row(&mut self, row: BufferedRow) {
+        if let Some(last) = self.rows.last() {
+            // The emit path and the dead-prefix prune binary-search `rows` by `seq`, and
+            // `deadlines_inverted` compares against it: both the ordered input and the
+            // state-table key order must feed a partition strictly increasing seqs and
+            // non-decreasing order keys.
+            debug_assert!(
+                last.seq < row.seq,
+                "a non-increasing seq was fed into a partition buffer"
+            );
+            debug_assert!(
+                last.order_key.default_cmp(&row.order_key).is_le(),
+                "a decreasing order key was fed into a partition buffer"
+            );
+            if row.deadline.is_before(&last.deadline) {
+                self.last_inverted_seq = Some(row.seq);
+            }
+        }
+        self.rows.push(row);
+    }
+
+    /// Whether the buffer holds a row whose deadline is earlier than that of a row before it.
+    ///
+    /// Order keys are non-decreasing along the buffer, but `deadline = order_key + bound` is not
+    /// always monotone in the order key: a `timestamptz` key with a calendar-day bound is
+    /// evaluated in the session time zone, and across a DST transition (in either direction) a
+    /// later row can get an earlier deadline. The first row's deadline is then not the earliest
+    /// one in the buffer, and a closed window no longer implies that every earlier one closed.
+    ///
+    /// `last_inverted_seq` is the last row that fell below its predecessor. Rows leave the buffer
+    /// only as a prefix ([`MatchRecognizeExecutor::consume_prefix`]) and seqs only grow, so once
+    /// the first buffered row is that row or a later one, the buffer is in deadline order.
+    fn deadlines_inverted(&self) -> bool {
+        match (self.last_inverted_seq, self.rows.first()) {
+            (Some(inverted), Some(first)) => first.seq < inverted,
+            _ => false,
         }
     }
 }
@@ -1685,9 +1730,9 @@ fn debug_check_accounting(
 /// A watermark `w` changes a partition's state in exactly three ways, each with a known lower
 /// bound on `w`: the deadline prune skips rows with `deadline < w`; `WITHIN` finality decides the
 /// first provisional match once its start row's `deadline < w`; and a budget-truncated scan or
-/// freeze resumes. Rows are sorted by order key within a partition and `deadline = order_key +
-/// bound` is monotone in it (an overflow is `Deadline::Never`, which sorts last), so the first two
-/// happen no earlier than `rows[0].deadline`, and the third is not watermark-dependent at all.
+/// freeze resumes. While the buffer is in deadline order (an overflow is `Deadline::Never`, which
+/// sorts last), the first two happen no earlier than `rows[0].deadline`, and the third is not
+/// watermark-dependent at all.
 /// Everything else a visit does — the emission gate's gap and extension verdicts, the structural
 /// liveness prune — is a pure function of the buffer and cannot change without the buffer
 /// changing. An arrival changes it; so does the visit's own deadline prune, which runs AFTER the
@@ -1699,6 +1744,11 @@ fn debug_check_accounting(
 /// rather than a verdict, a matcher asking for a refresh, and a visit whose deadline prune evicted
 /// rows (its gate ran over the buffer before them). A partition that is neither has nothing a
 /// watermark could change, and skipping it yields exactly the output the full pass did.
+///
+/// The buffer is in deadline order whenever the deadline is monotone in the order key, which is
+/// not guaranteed: see [`PartitionRun::deadlines_inverted`]. A partition whose buffer may be out
+/// of deadline order is kept pending, so it is visited at every watermark as the full pass did,
+/// until the out-of-order rows are consumed.
 ///
 /// `due` buckets partitions by deadline so a whole expired bucket pops at once and a re-key is
 /// two `O(log n)` map operations; `Deadline::Never` partitions are never filed and wake only via
@@ -1740,6 +1790,9 @@ impl WakeupIndex {
             }
             run.indexed_deadline = desired.cloned();
         }
+        // The first row's deadline is the earliest only over a buffer in deadline order. Without
+        // that, fall back to visiting at every watermark.
+        let pending = pending || run.deadlines_inverted();
         if pending && !run.pending {
             run.pending = true;
             self.pending.insert(pk.clone());
@@ -1796,7 +1849,8 @@ impl WakeupIndex {
     /// The index invariant, checked in debug builds and tests: every filed key names a partition
     /// in `parts` whose `indexed_deadline` is the bucket key and whose first row carries that
     /// deadline (so a filed partition is non-empty), no bucket is empty, every pending key names a
-    /// partition with `pending` set, and no partition is filed or pending without the index knowing.
+    /// partition with `pending` set, no partition is filed or pending without the index knowing,
+    /// and a partition whose deadlines may be out of order is pending.
     /// Together these bound the index by the partition map.
     fn check_consistent(
         &self,
@@ -1844,6 +1898,24 @@ impl WakeupIndex {
                 "{recorded} partitions record a filing, {filed} are filed"
             ));
         }
+        if let Some((pk, _)) = parts
+            .iter()
+            .find(|(_, r)| r.deadlines_inverted() && !r.pending)
+        {
+            return Err(format!(
+                "{pk:?} holds out-of-order deadlines but is not pending"
+            ));
+        }
+        if let Some((pk, _)) = parts.iter().find(|(_, r)| {
+            !r.deadlines_inverted()
+                && !r
+                    .rows
+                    .is_sorted_by(|a, b| !b.deadline.is_before(&a.deadline))
+        }) {
+            return Err(format!(
+                "{pk:?} holds out-of-order deadlines that were not tracked"
+            ));
+        }
         let marked = parts.values().filter(|r| r.pending).count();
         if marked != self.pending.len() {
             return Err(format!(
@@ -1872,10 +1944,14 @@ impl<S: StateStore> Execute for MatchRecognizeExecutor<S> {
 /// plus a future `n` yields the leftmost-preferred match). The matcher's freeze gate proves region
 /// deadness before retiring its cursor; this is the same discipline anchored at emission:
 ///
-/// - a closed `WITHIN` window (`within_final`) decides everything: every gap row's window closed
-///   no later than this match's (order keys are non-decreasing), a gap match over the existing
-///   rows would have been the finder's leftmost result already, and any future row violates the
-///   inclusive span bound for every start at or before this one;
+/// - a closed `WITHIN` window (`within_final`) decides everything, provided every gap row's
+///   window has closed as well: a gap match over the existing rows would have been the finder's
+///   leftmost result already, and any future row violates the inclusive span bound for this
+///   start and for every gap start. Over a buffer in deadline order the gap rows closed no later
+///   than this match's start row. Otherwise (`gap_windows`, see
+///   [`PartitionRun::deadlines_inverted`]) each gap row is checked: one whose window is still
+///   open can still start a leftmost-preferred match with a future row, so it must be provably
+///   dead at the boundary like any other gap position;
 /// - otherwise every gap position must be provably dead at the boundary — on a spent budget the
 ///   answer is HOLD, since a fabricated "dead" is precisely the lost-match bug class — and the
 ///   finder's preferred result from `start` must be un-improvable by future rows
@@ -1893,6 +1969,7 @@ async fn match_is_final(
     start: usize,
     n_rows: usize,
     within_final: bool,
+    gap_windows: Option<(&[BufferedRow], &ScalarImpl)>,
     statically_terminal: bool,
     budget: &mut ScanBudget,
     memoize: bool,
@@ -1907,10 +1984,16 @@ async fn match_is_final(
         start <= n_rows,
         "match_is_final start out of range: start={start} n={n_rows}"
     );
-    if within_final {
+    if within_final && gap_windows.is_none() {
         return Ok(true);
     }
     for p in resume_pos..start {
+        if within_final
+            && let Some((rows, w)) = gap_windows
+            && rows[p].deadline.closed_at(w)
+        {
+            continue;
+        }
         let alive = nfa
             .reaches_boundary_alive(p, n_rows, matcher, budget, memoize)
             .await?;
@@ -1920,7 +2003,8 @@ async fn match_is_final(
     }
     // A fixed-length linear pattern has exactly one path: an accepted match can never be
     // superseded from its own start, so the probe is statically decided (see [`Nfa::is_linear`]).
-    if statically_terminal {
+    // A closed window decides it too: no future row can satisfy the span bound from `start`.
+    if within_final || statically_terminal {
         return Ok(true);
     }
     let extend = nfa
@@ -2471,9 +2555,33 @@ mod tests {
             start: usize,
             within_final: bool,
         ) -> bool {
+            gate_with_windows(pattern, rows, resume_pos, start, within_final, None).await
+        }
+
+        /// `deadlines`, when given, are the rows' `WITHIN` deadlines, read at watermark 10.
+        async fn gate_with_windows(
+            pattern: &Pattern,
+            rows: &str,
+            resume_pos: usize,
+            start: usize,
+            within_final: bool,
+            deadlines: Option<&[i64]>,
+        ) -> bool {
             let nfa = Nfa::compile(pattern);
             let matcher = SetMatcher::new(sets(rows));
             let mut budget = ScanBudget::unlimited();
+            let buffer: Option<Vec<BufferedRow>> = deadlines.map(|ds| {
+                ds.iter()
+                    .enumerate()
+                    .map(|(i, &d)| BufferedRow {
+                        seq: i as i64,
+                        order_key: Some(ScalarImpl::Int64(0)),
+                        deadline: Deadline::At(ScalarImpl::Int64(d)),
+                        row: OwnedRow::new(vec![]),
+                    })
+                    .collect()
+            });
+            let w = ScalarImpl::Int64(10);
             match_is_final(
                 &nfa,
                 &matcher,
@@ -2481,6 +2589,7 @@ mod tests {
                 start,
                 rows.len(),
                 within_final,
+                buffer.as_deref().map(|rows| (rows, &w)),
                 // Always exercise the real probe in these tests, even for linear patterns.
                 false,
                 &mut budget,
@@ -2526,13 +2635,34 @@ mod tests {
             assert!(gate(&pattern, "b", 0, 0, false).await);
         }
 
-        /// A closed WITHIN window decides everything: the gap row's window closed no later than
-        /// the match's own (order keys are ordered), and no future row can satisfy the span bound,
-        /// so within-finality bypasses both the gap and the extension probe.
+        /// A closed WITHIN window decides everything over a buffer in deadline order: the gap
+        /// row's window closed no later than the match's own, and no future row can satisfy the
+        /// span bound, so within-finality bypasses both the gap and the extension probe.
         #[tokio::test]
         async fn within_finality_overrides_alive_gap() {
             let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
             assert!(gate(&pattern, "xn", 0, 1, true).await);
+            // The same with the windows spelled out: both closed at watermark 10.
+            assert!(gate_with_windows(&pattern, "xn", 0, 1, true, Some(&[8, 9])).await);
+        }
+
+        /// Out of deadline order, the match's start row can close while the gap row before it
+        /// is still open: a future `n` inside `x`'s window makes the batch answer (0,3), so the
+        /// alive gap row holds the match until its own window closes.
+        #[tokio::test]
+        async fn open_alive_gap_holds_a_match_whose_own_window_closed() {
+            let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
+            assert!(!gate_with_windows(&pattern, "xn", 0, 1, true, Some(&[12, 9])).await);
+        }
+
+        /// An open gap row that is dead at the boundary holds nothing, and the closed window
+        /// still skips the extension probe: `(z n n | n+)` over rows x,n — `x` starts no match,
+        /// and `n+` could extend but for the closed window.
+        #[tokio::test]
+        async fn open_dead_gap_does_not_hold_a_closed_match() {
+            let pattern = Pattern::Alt(vec![concat("znn"), plus("n")]);
+            assert!(!gate(&pattern, "xn", 0, 1, false).await, "extensible");
+            assert!(gate_with_windows(&pattern, "xn", 0, 1, true, Some(&[12, 9])).await);
         }
     }
 
@@ -2599,7 +2729,7 @@ mod tests {
             let nfa = Nfa::compile(&Pattern::Var("a".to_owned()));
             let mut run = PartitionRun::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
             for (i, d) in deadlines.iter().enumerate() {
-                run.rows.push(row(i as i64, d.clone()));
+                run.push_row(row(i as i64, d.clone()));
             }
             run
         }
@@ -2645,7 +2775,7 @@ mod tests {
             let mut run = run_with(&[at(5), at(9)]);
             idx.sync(&pk(1), &mut run, false);
             // Appending later rows does not move the key.
-            run.rows.push(row(2, at(12)));
+            run.push_row(row(2, at(12)));
             idx.sync(&pk(1), &mut run, false);
             assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(5)));
             // Consuming the head re-keys to 9: not due at 7, due at 10.
@@ -2784,6 +2914,99 @@ mod tests {
             assert!(run.indexed_deadline.is_none() && run.pending);
             idx.check_consistent(&parts).unwrap();
             assert!(idx.pending.contains(&key));
+        }
+
+        /// A buffer whose deadlines are out of order is not safe to file under its first row
+        /// alone: the partition stays pending through every visit until the rows before the last
+        /// out-of-order one are consumed, then returns to deadline-only filing.
+        #[test]
+        fn out_of_order_deadlines_keep_the_partition_pending() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(10), at(5), at(12)]);
+            assert!(run.deadlines_inverted());
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(10)));
+            // The second row's window closes at 6, before the filed deadline: visited anyway.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(6));
+            assert!(due.is_empty());
+            assert_eq!(pending, vec![pk(1)]);
+            // A visit that owes nothing else still leaves it pending.
+            run.pending = false;
+            idx.sync(&pk(1), &mut run, false);
+            assert!(run.pending && idx.pending.contains(&pk(1)));
+
+            // Consuming the head leaves `[5, 12]`, which is in order again.
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(6));
+            assert_eq!(pending, vec![pk(1)]);
+            run.pending = false;
+            run.rows.remove(0);
+            assert!(!run.deadlines_inverted());
+            idx.sync(&pk(1), &mut run, false);
+            assert!(!run.pending && idx.pending.is_empty());
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(5)));
+        }
+
+        /// In-order and equal deadlines are not flagged; a finite deadline after a window that
+        /// never closes is; rows lower than an already consumed one are not; and a buffer is in
+        /// order again as soon as the rows before the last descent are gone.
+        #[test]
+        fn deadline_order_tracking() {
+            assert!(!run_with(&[at(1), at(1), at(2), Deadline::Never]).deadlines_inverted());
+            assert!(run_with(&[Deadline::Never, at(3)]).deadlines_inverted());
+
+            let mut run = run_with(&[at(10)]);
+            run.rows.clear();
+            run.push_row(row(1, at(5)));
+            run.push_row(row(2, at(6)));
+            assert!(!run.deadlines_inverted());
+            // Below a row that is still buffered: flagged.
+            run.push_row(row(3, at(4)));
+            assert!(run.deadlines_inverted());
+
+            // `[10, 5, 7]`: only the 5 is a descent, so `[5, 7]` is in order.
+            let mut run = run_with(&[at(10), at(5), at(7)]);
+            assert!(run.deadlines_inverted());
+            run.rows.remove(0);
+            assert!(!run.deadlines_inverted());
+        }
+
+        /// Against brute force, over random pushes and prefix drains: whenever the buffer is not
+        /// flagged it is sorted by deadline, so its first row carries the earliest one.
+        #[test]
+        fn deadline_order_tracking_matches_brute_force() {
+            // A fixed LCG: reproducible, no dependency.
+            let mut state = 0x2545_f491_4f6c_dd1d_u64;
+            let mut next = |n: u64| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (state >> 33) % n
+            };
+            let mut run = run_with(&[]);
+            let mut seq = 0;
+            for _ in 0..20_000 {
+                if next(3) < 2 {
+                    let deadline = if next(16) == 0 {
+                        Deadline::Never
+                    } else {
+                        at(next(8) as i64)
+                    };
+                    run.push_row(row(seq, deadline));
+                    seq += 1;
+                } else {
+                    let upto = next(run.rows.len() as u64 + 1) as usize;
+                    run.rows.drain(..upto);
+                }
+                let sorted = run
+                    .rows
+                    .is_sorted_by(|a, b| !b.deadline.is_before(&a.deadline));
+                assert_eq!(
+                    run.deadlines_inverted(),
+                    !sorted,
+                    "deadlines: {:?}",
+                    run.rows.iter().map(|r| &r.deadline).collect::<Vec<_>>()
+                );
+            }
         }
 
         /// Many partitions sharing one deadline pop as a bucket; re-keying one of them does not
@@ -2989,7 +3212,7 @@ mod tests {
         }
 
         /// `DEFINE <symbol> AS <symbol>.v = <v>`.
-        fn v_equals(symbol: &str, v: i32) -> CompiledDefine {
+        pub(super) fn v_equals(symbol: &str, v: i32) -> CompiledDefine {
             let condition = ExprNode {
                 function_type: PbExprType::Equal as i32,
                 return_type: Some(DataType::Boolean.to_protobuf()),
@@ -3091,7 +3314,10 @@ mod tests {
             (tx, stream, metrics)
         }
 
-        async fn drain_until_barrier(stream: &mut BoxedMessageStream, epoch: u64) -> usize {
+        pub(super) async fn drain_until_barrier(
+            stream: &mut BoxedMessageStream,
+            epoch: u64,
+        ) -> usize {
             let mut emitted = 0;
             while let Some(msg) = stream.next().await {
                 match msg.unwrap() {
@@ -3157,6 +3383,233 @@ mod tests {
             tx.push_barrier_with_prev_epoch_for_test(test_epoch(5), test_epoch(4), false);
             let emitted = drain_until_barrier(&mut stream, test_epoch(5)).await;
             assert_eq!(emitted, 0, "emitted once");
+        }
+    }
+
+    /// `WITHIN INTERVAL '1 day'` over a `timestamptz` order key is evaluated in the session time
+    /// zone, so across a DST transition a later row can get an earlier deadline. A match starting
+    /// at the later row must then wait for an alive row before it whose window is still open,
+    /// and the wakeup index must not rely on the first row's deadline being the earliest.
+    mod deadline_inversion {
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::types::Timestamptz;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_expr::expr::{LiteralExpression, build_from_pretty};
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::gate_before_prune::{drain_until_barrier, v_equals};
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id, and one per test here: the metrics registry
+        /// is process-global, and tests sharing an id would read each other's gauges.
+        const TABLE_ID: u32 = 27212;
+
+        /// Input: `(partition int8, ts timestamptz, v int4)`; `v` tells `x` (0) from `n` (1).
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Timestamptz, DataType::Int32]
+        }
+
+        fn ts(s: &str) -> ScalarImpl {
+            ScalarImpl::Timestamptz(s.parse::<Timestamptz>().unwrap())
+        }
+
+        /// `PARTITION BY $0 ORDER BY $1 ... PATTERN (x n n | n) WITHIN INTERVAL '1 day'` with
+        /// `TimeZone = 'America/New_York'`, `DEFINE x AS x.v = 0, n AS n.v = 1`. The deadline is
+        /// the expression the frontend emits for this clause. `within` is a placeholder literal,
+        /// as in `gate_before_prune`.
+        async fn build(
+            table_id: u32,
+        ) -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            // State table: `seq` then the input columns; key = partition, ts, seq.
+            let table_columns = [
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Timestamptz,
+                DataType::Int32,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| ColumnDesc::unnamed(ColumnId::new(i as i32), t))
+            .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(table_id),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(table_id),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let var = |s: &str| Pattern::Var(s.to_owned());
+            let nfa = Nfa::compile(&Pattern::Alt(vec![
+                Pattern::Concat(vec![var("x"), var("n"), var("n")]),
+                var("n"),
+            ]));
+            let within = NonStrictExpression::for_test(LiteralExpression::new(
+                DataType::Boolean,
+                Some(ScalarImpl::Bool(true)),
+            ));
+            let within_deadline = NonStrictExpression::new_topmost(
+                build_from_pretty(
+                    "(add_with_time_zone:timestamptz $0:timestamptz 1day:interval \
+                     America/New_York:varchar)",
+                ),
+                DeadlineErrorReport::new(LogReport),
+            );
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![v_equals("x", 0), v_equals("n", 1)],
+                within: Some(within),
+                within_deadline: Some(within_deadline),
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        fn rows(rows: &[(&str, i32)]) -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = rows
+                .iter()
+                .map(|&(t, v)| {
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(0)),
+                            Some(ts(t)),
+                            Some(ScalarImpl::Int32(v)),
+                        ]),
+                    )
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        /// New York leaves DST at 06:00Z on 2026-11-01. `x@05:50Z` is 01:50 EDT and its deadline
+        /// is 01:50 EST the next day, 06:50Z; `n@06:10Z` is 01:10 EST and its deadline is 06:10Z
+        /// the next day — forty minutes BEFORE that of the row ahead of it.
+        const X: &str = "2026-11-01 05:50:00Z";
+        const N: &str = "2026-11-01 06:10:00Z";
+
+        async fn step(
+            tx: &mut MessageSender,
+            stream: &mut BoxedMessageStream,
+            epoch: u64,
+            watermark: Option<&str>,
+        ) -> usize {
+            if let Some(w) = watermark {
+                tx.push_watermark(1, DataType::Timestamptz, ts(w));
+            }
+            tx.push_barrier_with_prev_epoch_for_test(
+                test_epoch(epoch),
+                test_epoch(epoch - 1),
+                false,
+            );
+            drain_until_barrier(stream, test_epoch(epoch)).await
+        }
+
+        /// `n` is held behind the alive start at `x`. A watermark past `n`'s deadline but not
+        /// `x`'s must not emit it: a row inside `x`'s window could still complete `x n n`. Once
+        /// `x`'s window closes too, `n` is the batch answer and is emitted.
+        #[tokio::test]
+        async fn a_match_waits_for_an_earlier_row_whose_window_closes_later() {
+            let (mut tx, mut stream, metrics) = build(TABLE_ID).await;
+            tx.push_chunk(rows(&[(X, 0), (N, 1)]));
+            assert_eq!(step(&mut tx, &mut stream, 2, None).await, 0);
+
+            let emitted = step(&mut tx, &mut stream, 3, Some("2026-11-01 07:00:00Z")).await;
+            assert_eq!(emitted, 0, "no window has closed");
+
+            let emitted = step(&mut tx, &mut stream, 4, Some("2026-11-02 06:20:00Z")).await;
+            assert_eq!(
+                emitted, 0,
+                "`n`'s window closed, `x`'s is open until 06:50Z"
+            );
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 2);
+
+            let emitted = step(&mut tx, &mut stream, 5, Some("2026-11-02 06:51:00Z")).await;
+            assert_eq!(emitted, 1, "both windows closed: `n` alone is the match");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+        }
+
+        /// The row the hold above waits for: `n@06:30Z` the next day is past `n`'s deadline but
+        /// inside `x`'s, and completes `x n n` — one match over all three rows, as in batch, not
+        /// `n` and then `n`.
+        #[tokio::test]
+        async fn a_row_inside_the_earlier_window_completes_the_leftmost_match() {
+            let (mut tx, mut stream, metrics) = build(TABLE_ID + 1).await;
+            tx.push_chunk(rows(&[(X, 0), (N, 1)]));
+            assert_eq!(step(&mut tx, &mut stream, 2, None).await, 0);
+            assert_eq!(
+                step(&mut tx, &mut stream, 3, Some("2026-11-02 06:20:00Z")).await,
+                0
+            );
+
+            tx.push_chunk(rows(&[("2026-11-02 06:30:00Z", 1)]));
+            let emitted = step(&mut tx, &mut stream, 4, None).await;
+            assert_eq!(emitted, 1, "`x n n`");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+
+            let emitted = step(&mut tx, &mut stream, 5, Some("2026-11-03 00:00:00Z")).await;
+            assert_eq!(emitted, 0, "nothing else to emit");
+        }
+
+        /// The other direction inverts too. New York enters DST at 07:00Z on 2026-03-08:
+        /// `07:50Z` the day before is 02:50 EST and `08:10Z` is 03:10 EST; a day later 03:10 is
+        /// EDT (07:10Z), which is before whatever the nonexistent 02:50 resolves to.
+        #[tokio::test]
+        async fn spring_forward_also_puts_deadlines_out_of_order() {
+            let expr = Some(NonStrictExpression::new_topmost(
+                build_from_pretty(
+                    "(add_with_time_zone:timestamptz $0:timestamptz 1day:interval \
+                     America/New_York:varchar)",
+                ),
+                DeadlineErrorReport::new(LogReport),
+            ));
+            let earlier = eval_deadline(&expr, &Some(ts("2026-03-07 07:50:00Z"))).await;
+            let later = eval_deadline(&expr, &Some(ts("2026-03-07 08:10:00Z"))).await;
+            assert_eq!(later, Deadline::At(ts("2026-03-08 07:10:00Z")));
+            assert!(later.is_before(&earlier), "{later:?} vs {earlier:?}");
         }
     }
 }
