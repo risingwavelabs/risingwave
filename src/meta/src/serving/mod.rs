@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
@@ -45,6 +45,10 @@ pub struct ServingVnodeMapping {
 }
 
 impl ServingVnodeMapping {
+    pub fn read_guard(&self) -> RwLockReadGuard<'_, HashMap<FragmentId, WorkerSlotMapping>> {
+        self.serving_vnode_mappings.read()
+    }
+
     pub fn all(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
         self.serving_vnode_mappings.read().clone()
     }
@@ -54,31 +58,7 @@ impl ServingVnodeMapping {
         worker_ids: impl IntoIterator<Item = WorkerId>,
         fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
     ) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
-        let mut result = worker_ids
-            .into_iter()
-            .map(|worker_id| (worker_id, HashMap::new()))
-            .collect::<HashMap<_, _>>();
-        let serving_vnode_mappings = self.all();
-
-        for (fragment_id, info) in fragment_serving_infos {
-            let Some(table_id) = info.result_table_id else {
-                continue;
-            };
-            let Some(mapping) = serving_vnode_mappings.get(fragment_id) else {
-                continue;
-            };
-
-            for (worker_slot_id, bitmap) in mapping.to_bitmaps() {
-                let Some(table_mappings) = result.get_mut(&worker_slot_id.worker_id()) else {
-                    continue;
-                };
-                table_mappings
-                    .entry(table_id)
-                    .and_modify(|current| *current |= &bitmap)
-                    .or_insert(bitmap);
-            }
-        }
-        result
+        table_vnode_mappings_by_worker(&self.read_guard(), worker_ids, fragment_serving_infos)
     }
 
     /// Upsert mapping for given fragments according to the latest `workers`.
@@ -157,6 +137,37 @@ impl ServingVnodeMapping {
             mappings.remove(fragment_id);
         }
     }
+}
+
+pub(crate) fn table_vnode_mappings_by_worker(
+    serving_vnode_mappings: &HashMap<FragmentId, WorkerSlotMapping>,
+    worker_ids: impl IntoIterator<Item = WorkerId>,
+    fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
+) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
+    let mut result = worker_ids
+        .into_iter()
+        .map(|worker_id| (worker_id, HashMap::new()))
+        .collect::<HashMap<_, _>>();
+
+    for (fragment_id, info) in fragment_serving_infos {
+        let Some(table_id) = info.result_table_id else {
+            continue;
+        };
+        let Some(mapping) = serving_vnode_mappings.get(fragment_id) else {
+            continue;
+        };
+
+        for (worker_slot_id, bitmap) in mapping.to_bitmaps() {
+            let Some(table_mappings) = result.get_mut(&worker_slot_id.worker_id()) else {
+                continue;
+            };
+            table_mappings
+                .entry(table_id)
+                .and_modify(|current| *current |= &bitmap)
+                .or_insert(bitmap);
+        }
+    }
+    result
 }
 
 pub(crate) fn to_fragment_worker_slot_mapping(
@@ -543,8 +554,8 @@ mod tests {
         )
         .await;
 
-        let response1 = rx1.recv().await.unwrap().unwrap();
-        let response2 = rx2.recv().await.unwrap().unwrap();
+        let response1 = rx1.recv().await.unwrap().into_notification().unwrap();
+        let response2 = rx2.recv().await.unwrap().into_notification().unwrap();
         assert!(rx1.try_recv().is_err());
         assert!(rx2.try_recv().is_err());
 

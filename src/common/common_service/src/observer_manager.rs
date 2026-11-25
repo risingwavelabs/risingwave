@@ -83,6 +83,10 @@ where
 
     /// `wait_init_notification` is used to wait for the initial notification from meta
     /// and process the buffered notifications before the initial notification if needed.
+    #[expect(
+        deprecated,
+        reason = "retain pre-snapshot filtering for older meta servers"
+    )]
     async fn wait_init_notification(&mut self) -> Result<(), ObserverError> {
         let mut notification_vec = Vec::new();
         let init_notification = loop {
@@ -345,6 +349,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[expect(deprecated, reason = "exercise legacy pre-snapshot filtering")]
     async fn test_filter_stale_table_refill_runtime_config_before_snapshot() {
         let snapshot = SubscribeResponse {
             info: Some(Info::Snapshot(MetaSnapshot {

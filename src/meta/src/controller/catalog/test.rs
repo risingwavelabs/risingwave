@@ -1109,6 +1109,7 @@ mod tests {
                 .recv()
                 .await
                 .expect("frontend should receive a creating notification")
+                .into_notification()
                 .expect("creating notification should be valid");
             assert_eq!(notification.operation(), NotificationOperation::Add);
             let object_group = match notification.info {
@@ -1230,6 +1231,7 @@ mod tests {
             .recv()
             .await
             .expect("should receive hummock notification")
+            .into_notification()
             .expect("notification should be ok");
         assert_eq!(response.operation(), NotificationOperation::Update);
         let info = response.info;
@@ -1352,6 +1354,7 @@ mod tests {
             .recv()
             .await
             .expect("should receive hummock notification")
+            .into_notification()
             .expect("notification should be ok");
         assert_eq!(response.operation(), NotificationOperation::Update);
         let info = response.info;
@@ -2589,6 +2592,7 @@ mod tests {
             .recv()
             .await
             .expect("frontend should receive an abort notification")
+            .into_notification()
             .expect("abort notification should be valid");
         assert_eq!(notification.operation(), NotificationOperation::Delete);
         let object_group = match notification.info {

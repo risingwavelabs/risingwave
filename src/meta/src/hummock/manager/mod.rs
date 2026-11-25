@@ -62,6 +62,7 @@ mod gc;
 mod tests;
 mod versioning;
 pub use context::HummockVersionSafePoint;
+pub use versioning::HummockWriteLimitsReadGuard;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod commit_epoch;
@@ -159,6 +160,8 @@ pub struct HummockManager {
     /// Lock order: `compaction`, `versioning`, `compaction_group_manager`, `context_info`
     /// - Lock `compaction` first, then `versioning`, then `compaction_group_manager` and finally `context_info`.
     /// - This order should be strictly followed to prevent deadlock.
+    /// - Acquire the catalog controller lock after Hummock locks: `commit_epoch` reads the
+    ///   catalog for time travel while holding versioning and possibly compaction group locks.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
     /// `CompactionGroupManager` manages compaction configs for compaction groups.

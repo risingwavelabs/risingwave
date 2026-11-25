@@ -31,7 +31,6 @@ sea-orm = { workspace = true }
 serde_json = "1"
 thiserror-ext = { workspace = true }
 tokio = { workspace = true }
-tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

@@ -28,7 +28,9 @@ use risingwave_hummock_trace::{
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp, TracedTryWaitEpochOptions,
 };
-use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
+use risingwave_meta::manager::{
+    MessageStatus, MetaSrvEnv, NotificationManagerRef, SubscriptionEvent, WorkerKey,
+};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
@@ -310,7 +312,7 @@ impl ReplayNotificationClient {
 
 #[async_trait::async_trait]
 impl NotificationClient for ReplayNotificationClient {
-    type Channel = ReplayChannel<SubscribeResponse>;
+    type Channel = ReplayChannel;
 
     async fn subscribe(
         &self,
@@ -324,17 +326,12 @@ impl NotificationClient for ReplayNotificationClient {
             tx,
         );
 
-        // send the first snapshot message
-        let op = self.first_resp.0.operation();
-        let info = self.first_resp.0.info.clone();
-
-        self.notification_manager.notify_hummock_with_version(
-            op,
-            info.unwrap(),
-            Some(self.first_resp.0.version),
-        );
-
-        Ok(ReplayChannel(rx))
+        // The trace already contains the complete initial snapshot. Return it on this
+        // subscription only, before consuming deltas from the notification manager.
+        Ok(ReplayChannel {
+            initial_snapshot: Some(self.first_resp.0.clone()),
+            deltas: rx,
+        })
     }
 }
 
@@ -350,16 +347,87 @@ pub fn get_replay_notification_client(
     )
 }
 
-pub struct ReplayChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
+pub struct ReplayChannel {
+    initial_snapshot: Option<SubscribeResponse>,
+    deltas: UnboundedReceiver<SubscriptionEvent>,
+}
 
 #[async_trait::async_trait]
-impl<T: Send + 'static> Channel for ReplayChannel<T> {
-    type Item = T;
+impl Channel for ReplayChannel {
+    type Item = SubscribeResponse;
 
-    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
-        match self.0.recv().await {
-            None => Ok(None),
-            Some(result) => result.map(|r| Some(r)),
+    async fn message(&mut self) -> std::result::Result<Option<SubscribeResponse>, MessageStatus> {
+        if let Some(snapshot) = self.initial_snapshot.take() {
+            return Ok(Some(snapshot));
         }
+        match self.deltas.recv().await {
+            None => Ok(None),
+            Some(event) => event.into_notification().map(Some),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_meta::controller::SqlMetaStore;
+    use risingwave_meta::manager::NotificationManager;
+    use risingwave_pb::meta::MetaSnapshot;
+    use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_replay_snapshot_precedes_deltas_and_is_subscription_local() {
+        let manager = Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let snapshot = SubscribeResponse {
+            operation: RespOperation::Snapshot as i32,
+            info: Some(Info::Snapshot(MetaSnapshot {
+                version: Some(SnapshotVersion {
+                    catalog_version: 100,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+            version: 100,
+            ..Default::default()
+        };
+        let client = ReplayNotificationClient::new(
+            HostAddr {
+                host: "127.0.0.1".to_owned(),
+                port: 8080,
+            },
+            manager.clone(),
+            Box::new(TracedSubResp(snapshot.clone())),
+        );
+        let mut channel = client.subscribe(SubscribeType::Hummock).await.unwrap();
+        assert_eq!(channel.message().await.unwrap(), Some(snapshot.clone()));
+
+        let other_client = ReplayNotificationClient::new(
+            HostAddr {
+                host: "127.0.0.1".to_owned(),
+                port: 8081,
+            },
+            manager.clone(),
+            Box::new(TracedSubResp(snapshot.clone())),
+        );
+        let mut other_channel = other_client
+            .subscribe(SubscribeType::Hummock)
+            .await
+            .unwrap();
+        // Queue a delta before the second subscriber reads its initial snapshot.
+        let info = Info::ClusterResource(Default::default());
+        manager.notify_hummock_with_version(RespOperation::Update, info.clone(), Some(101));
+        let delta = SubscribeResponse {
+            operation: RespOperation::Update as i32,
+            info: Some(info),
+            version: 101,
+            ..Default::default()
+        };
+        assert_eq!(other_channel.message().await.unwrap(), Some(snapshot));
+        assert_eq!(other_channel.message().await.unwrap(), Some(delta.clone()));
+        // Opening another subscription must not inject its snapshot into this channel.
+        assert_eq!(channel.message().await.unwrap(), Some(delta));
     }
 }

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub use connection::{EndpointExt, RouterExt, TcpConfig, monitor_connector};
-pub use rwlock::MonitoredRwLock;
+pub use rwlock::{MonitoredRwLock, MonitoredRwLockGuard};
 
 mod connection;
 pub mod in_mem;
