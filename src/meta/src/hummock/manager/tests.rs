@@ -1516,11 +1516,12 @@ async fn test_cancel_compaction_between_assignment_and_heartbeat() {
         task_id
     };
 
-    let (selected, cancelled_task_id) = tokio::time::timeout(Duration::from_secs(10), async {
-        tokio::join!(select, cancel)
-    })
-    .await
-    .expect("selection and cancellation did not finish");
+    let (selected, cancelled_task_id) =
+        Box::pin(tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(select, cancel)
+        }))
+        .await
+        .expect("selection and cancellation did not finish");
     assert_eq!(selected.unwrap().unwrap().task_id, cancelled_task_id);
     assert_eq!(manager.get_assigned_compact_task_num().await, 0);
     assert!(
