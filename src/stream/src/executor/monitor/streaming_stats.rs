@@ -167,6 +167,7 @@ pub struct StreamingMetrics {
     match_recognize_scan_budget_exhausted_count: RelabeledGuardedIntCounterVec,
     match_recognize_within_deadline_overflow_count: RelabeledGuardedIntCounterVec,
     match_recognize_retained_rows: RelabeledAggregatedIntGaugeVec,
+    match_recognize_stuck_visit_count: RelabeledGuardedIntCounterVec,
 
     /// The duration from receipt of barrier to all actors collection.
     /// The max of all nodes' `barrier_inflight_latency` for a partial graph is the latency for a
@@ -1064,6 +1065,15 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1_with_aggregation(level, GaugeAggregation::Sum);
 
+        let match_recognize_stuck_visit_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_match_recognize_stuck_visit_count",
+            "Match recognize partition visits that exhausted the scan budget and moved nothing: no scan or freeze cursor advanced, nothing emitted, nothing evicted, no gate verdict cached. Such a visit repeats the same work until new rows change the partition. Sustained on a query without WITHIN it is a partition that will not decide unless rows or the query change; with WITHIN, window closure drains only the matches the truncated scan reached, and a scan starved before finding any sheds nothing",
+            &["actor_id", "table_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
         let barrier_inflight_latency = register_guarded_histogram_vec_with_registry!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -1592,6 +1602,7 @@ impl StreamingMetrics {
             match_recognize_scan_budget_exhausted_count,
             match_recognize_within_deadline_overflow_count,
             match_recognize_retained_rows,
+            match_recognize_stuck_visit_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_batch_size,
@@ -2001,6 +2012,9 @@ impl StreamingMetrics {
             match_recognize_retained_rows: self
                 .match_recognize_retained_rows
                 .with_guarded_label_values(label_list),
+            match_recognize_stuck_visit_count: self
+                .match_recognize_stuck_visit_count
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -2179,6 +2193,14 @@ pub struct MatchRecognizeMetrics {
     /// by match liveness and `WITHIN`, so this gauge is the one signal of a partition set growing
     /// toward memory exhaustion (a pattern whose closer never arrives retains its rows forever).
     pub match_recognize_retained_rows: RelabeledAggregatedIntGauge,
+    /// Visits that exhausted the scan budget and moved nothing. Exhaustion alone is self-healing
+    /// when each visit advances a cursor, emits, evicts or caches a gate verdict
+    /// (`scan_budget_exhausted_count` counts those too); this counts the visits that did none of
+    /// it. Such a visit repeats the same work until new rows change the partition. Without
+    /// `WITHIN` the partition will not decide unless rows or the query change; with `WITHIN`,
+    /// window closure drains only the matches the truncated scan reached — a scan starved before
+    /// finding any sheds nothing.
+    pub match_recognize_stuck_visit_count: LabelGuardedIntCounter,
 }
 
 #[derive(Clone)]
