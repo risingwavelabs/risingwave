@@ -654,7 +654,12 @@ not on Flink, whose window is exclusive.
   flat in the partition count. The case where every partition expires at once (the `WITHIN`
   cliff) costs 0.76 / 0.82 / 1.33 µs per expired partition before and 0.79 / 0.89 / 1.46 µs
   after (+4 % / +7 % / +10 %): each popped partition now costs a hash probe into the partition
-  map, a cache miss once the map outgrows the caches, instead of an in-order iteration step. A
+  map, a cache miss once the map outgrows the caches, instead of an in-order iteration step.
+  The pending set keeps the capacity of the largest burst it held (a load, a recovery), and
+  draining it resets that whole allocation, so the set hands its allocation back once it is
+  mostly empty: with one partition pending per watermark after all of them had been pending at
+  once (`sparse_arrivals`, one row and one watermark per step), a step cost 3.2 / 3.6 / 4.4 µs
+  over 1k / 10k / 50k partitions before that and 3.0 / 3.1 / 3.1 µs after. A
   slab-indexed partition map (the index storing a slot number, the key stored once) would remove
   the probe and the key clones in the index; follow-up.
 - **A row is persisted twice across the fragment** — once in the sort's buffer, once in the

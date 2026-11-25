@@ -1842,7 +1842,18 @@ impl WakeupIndex {
         for pk in &due {
             self.pending.remove(pk);
         }
-        let pending: Vec<OwnedRow> = self.pending.drain().collect();
+        // `drain` keeps the allocation and resets its whole control array, sized for the largest
+        // burst the set ever held: fine while the set is about that full, but `O(peak)` per
+        // watermark once only a few partitions are pending after a large burst (a load, a
+        // recovery). When the set is mostly empty, hand the allocation back instead: one last
+        // `O(capacity)` pass, after which the set is sized for what is actually pending. The
+        // factor keeps a set that is steadily small, or steadily full, on the `drain` path, so
+        // neither reallocates per watermark.
+        let pending: Vec<OwnedRow> = if self.pending.len() * 4 < self.pending.capacity() {
+            std::mem::take(&mut self.pending).into_iter().collect()
+        } else {
+            self.pending.drain().collect()
+        };
         (due, pending)
     }
 
@@ -2823,6 +2834,38 @@ mod tests {
             assert_eq!(due, vec![pk(2)]);
             assert_eq!(pending, vec![pk(1)]);
             assert!(idx.pending.is_empty());
+        }
+
+        /// After a burst, a mostly empty pending set gives its allocation back, so the next
+        /// watermarks do not pay for the burst's capacity; a full set keeps it.
+        #[test]
+        fn pending_capacity_is_released_once_the_set_is_sparse() {
+            let mut idx = WakeupIndex::default();
+            let mut runs: Vec<PartitionRun> =
+                (0..1000).map(|_| run_with(&[Deadline::Never])).collect();
+            for (i, run) in runs.iter_mut().enumerate() {
+                idx.sync(&pk(i as i64), run, true);
+            }
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert_eq!(pending.len(), 1000);
+            assert!(
+                idx.pending.capacity() >= 1000,
+                "a full set keeps its capacity"
+            );
+
+            runs[0].pending = false;
+            idx.sync(&pk(0), &mut runs[0], true);
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert_eq!(pending, vec![pk(0)]);
+            assert!(idx.pending.capacity() < 16, "{}", idx.pending.capacity());
+
+            // A steadily small set stays on the `drain` path and keeps its small allocation.
+            runs[0].pending = false;
+            idx.sync(&pk(0), &mut runs[0], true);
+            let small = idx.pending.capacity();
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert_eq!(pending, vec![pk(0)]);
+            assert_eq!(idx.pending.capacity(), small);
         }
 
         /// A due-and-pending partition whose visit ends owing another one (the arm re-syncs with

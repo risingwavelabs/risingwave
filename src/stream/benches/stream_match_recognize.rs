@@ -17,7 +17,7 @@
 //!
 //! Every partition holds ONE open partial (`PATTERN (a b) WITHIN bound`, no `DEFINE`, a single
 //! row per partition), so a watermark that closes nothing has nothing to emit and nothing to
-//! evict — the visit is pure overhead. Two shapes:
+//! evict — the visit is pure overhead. The shapes:
 //!
 //! - `idle_watermarks`: `IDLE_WATERMARKS` watermarks that stay below every deadline, reported per
 //!   watermark. Before the wakeup frontier (#27205) each one visits all `N` partitions: `O(N)` per
@@ -26,6 +26,12 @@
 //! - `within_cliff`: one watermark past every deadline, so all `N` partitions expire at once and
 //!   every row is evicted, reported per expired partition. The frontier must not regress this: it
 //!   is the case where every partition genuinely needs the visit.
+//! - `sparse_arrivals`: over the same `N` settled partitions, `IDLE_WATERMARKS` steps of one
+//!   arriving row followed by one watermark, reported per step. Exactly one partition is pending
+//!   at each watermark, while the index's pending set has held all `N` at once (the load). The
+//!   step's own work — one row ingested, one partition visited — does not depend on `N`, so a
+//!   per-step time that grows with `N` is the cost of the pending set's retained capacity. The
+//!   fence still grows with `N`; subtract `barrier_only / IDLE_WATERMARKS` before comparing.
 //!
 //! The executor forwards no watermark downstream (its output carries no watermark column), so the
 //! only observable signal that a round's watermarks were processed is the barrier that follows
@@ -239,6 +245,45 @@ async fn idle_rounds(
     total
 }
 
+/// `iters` rounds of `IDLE_WATERMARKS` steps on ONE loaded executor, each step one row and then
+/// one watermark. Every row goes to the same partition, one that `load` did not create: under
+/// `PATTERN (a b)` its first row opens a partial and its second completes the match and empties
+/// the partition, which the following watermark sweeps. So the retained state is the same after
+/// every two steps, and each watermark finds exactly one pending partition and none due. Returns
+/// the summed time of the rounds.
+async fn sparse_rounds(
+    mut tx: MessageSender,
+    mut stream: BoxedMessageStream,
+    iters: u64,
+    n: usize,
+) -> Duration {
+    let mut total = Duration::ZERO;
+    let mut w = 1i64;
+    for epoch in (LOADED_EPOCH + 1..).take(iters as usize) {
+        assert!(
+            w + IDLE_WATERMARKS < BOUND,
+            "too many sparse rounds: the watermark would reach the deadline"
+        );
+        let start = Instant::now();
+        for _ in 0..IDLE_WATERMARKS {
+            let row = OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(n as i64)),
+                Some(ScalarImpl::Int64(w)),
+                Some(ScalarImpl::Int64(1)),
+            ]);
+            tx.push_chunk(StreamChunk::from_rows(&[(Op::Insert, row)], &input_types()));
+            tx.push_int64_watermark(1, w);
+            w += 1;
+        }
+        tx.push_barrier_with_prev_epoch_for_test(test_epoch(epoch), test_epoch(epoch - 1), false);
+        drain_until_barrier(&mut stream, test_epoch(epoch)).await;
+        total += start.elapsed();
+    }
+    drop(tx);
+    drop(stream);
+    total
+}
+
 /// One watermark past every deadline: all `n` partitions expire and every row is evicted. This
 /// consumes the loaded state, so the caller reloads before every call.
 async fn within_cliff(mut tx: MessageSender, mut stream: BoxedMessageStream) {
@@ -277,6 +322,14 @@ fn bench_watermark_pass(c: &mut Criterion) {
             b.to_async(&rt).iter_custom(|iters| async move {
                 let (tx, stream) = load(n).await;
                 idle_rounds(tx, stream, iters, 0).await
+            })
+        });
+        // Reported per step (one row, one watermark); see the module doc for how to read it.
+        group.throughput(Throughput::Elements(IDLE_WATERMARKS as u64));
+        group.bench_with_input(BenchmarkId::new("sparse_arrivals", n), &n, |b, &n| {
+            b.to_async(&rt).iter_custom(|iters| async move {
+                let (tx, stream) = load(n).await;
+                sparse_rounds(tx, stream, iters, n).await
             })
         });
         // Reported per expired partition, which is what the cliff scales with.
