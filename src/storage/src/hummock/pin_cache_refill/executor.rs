@@ -1,0 +1,298 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::collections::{HashMap, HashSet};
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+
+use anyhow::Context;
+use futures::StreamExt;
+use futures::future::{Either, ready};
+use futures::stream::FuturesUnordered;
+use parking_lot::Mutex;
+use risingwave_common::util::panic::FutureCatchUnwindExt;
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_pb::id::TableId;
+use thiserror_ext::AsReport;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+
+use self::PinCacheRefillAttemptOutcome::{CapacityRejected, Obsolete, PathBusy, Published};
+use super::PinCacheRefillObject;
+use crate::hummock::SstableStoreRef;
+use crate::hummock::pin_cache::PinCacheDownloadError;
+use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
+
+enum PinCacheRefillAttemptOutcome {
+    Published,
+    Obsolete,
+    CapacityRejected,
+    PathBusy,
+}
+
+async fn refill_pin_cache_object(
+    store: &SstableStoreRef,
+    object_size: u64,
+    object: HummockSstableObjectId,
+    permit: OwnedSemaphorePermit,
+    work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
+) -> anyhow::Result<PinCacheRefillAttemptOutcome> {
+    let cache = store
+        .pin_cache()
+        .expect("pin refill requires a local backend");
+    // Admission may have been revoked while waiting for the data permit.
+    {
+        let work = work.lock();
+        if !work
+            .get(&object)
+            .is_some_and(|work| work.completion.is_some())
+            || !cache.is_registered(object)
+        {
+            return Ok(Obsolete);
+        }
+    }
+    let prepared = match cache.prepare_download(object, object_size).await {
+        Ok(prepared) => prepared,
+        Err(PinCacheDownloadError::CapacityRejected) => return Ok(CapacityRejected),
+        Err(PinCacheDownloadError::PathBusy) => return Ok(PathBusy),
+        Err(PinCacheDownloadError::Io(error)) => {
+            return Err(error).context("pin refill byte admission");
+        }
+    };
+    let store = store.clone();
+    let task = tokio::spawn(async move {
+        let _permit = permit;
+        let cache = store
+            .pin_cache()
+            .expect("pin refill requires a local backend");
+        {
+            let work = work.lock();
+            if !work
+                .get(&object)
+                .is_some_and(|work| work.completion.is_some())
+                || !cache.is_registered(object)
+            {
+                return Ok(Obsolete);
+            }
+        }
+        let download = prepared
+            .run(store.store(), store.get_sst_data_path(object))
+            .await
+            .map_err(|error| anyhow::anyhow!(error).context("pin refill object copy"))?;
+        let work = work.lock();
+        // Shutdown/withdrawal and publication linearize under the existing executor lock.
+        // A closed receiver alone retains the baseline detach-on-waiter-drop behavior.
+        if !work
+            .get(&object)
+            .is_some_and(|work| work.completion.is_some())
+        {
+            drop(work);
+            drop(download);
+            return Ok(Obsolete);
+        }
+        Ok(if cache.publish(object, download) {
+            Published
+        } else {
+            Obsolete
+        })
+    });
+    match task.await {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(error).context("owned pin copy stopped"),
+    }
+}
+
+struct Work {
+    object_size: u64,
+    admitted_tables: HashSet<TableId>,
+    completion: Option<oneshot::Sender<bool>>,
+}
+
+/// Downloads each admitted object once under the shared data concurrency limit.
+/// The Pin refiller checks policy and ownership before submitting a download.
+/// Dropping a waiter leaves its copy running; errors finish without background retries.
+pub(crate) struct PinCacheRefillExecutor {
+    // Lock order: executor work -> PinCache shard. Never hold work across await.
+    // Object/table cancellation closes the waiter but keeps its entry until physical exit.
+    // Driver shutdown clears entries, forbidding publication while physical copies drain.
+    work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
+    // IDs waiting for dispatch; the driver consumes each once and reads its inputs from work.
+    // Driver exit on the drained channel cancels preparation and publication authority.
+    // Submitted physical copies retain their data permits and byte leases until I/O exits.
+    jobs: mpsc::UnboundedSender<HummockSstableObjectId>,
+    store: SstableStoreRef,
+}
+
+impl PinCacheRefillExecutor {
+    pub(crate) fn new(store: SstableStoreRef, concurrency: Arc<Semaphore>) -> Self {
+        let work = Arc::new(Mutex::new(HashMap::new()));
+        let (jobs, receiver) = mpsc::unbounded_channel();
+        // Capture cleanup before spawning, so even an unpolled driver cancels its waiters.
+        let cleanup_work = work.clone();
+        let mut receiver = scopeguard::guard(receiver, move |mut receiver| {
+            receiver.close();
+            cleanup_work.lock().clear();
+        });
+        let worker_store = store.clone();
+        let worker_work = work.clone();
+        tokio::spawn(async move {
+            Self::run(worker_store, worker_work, &mut receiver, concurrency).await;
+        });
+        Self { work, jobs, store }
+    }
+
+    /// Submits an object after policy and ownership admission, deduplicating active copies.
+    /// Submission is synchronous; the owned future only waits for its result.
+    /// True includes published/cached and obsolete work, not a cache-hit guarantee.
+    /// False means failure or cancellation, including a duplicate whose previous physical
+    /// attempt has not exited. Duplicates never replace or restart work.
+    /// Dropping the future does not cancel the copy; failures are not retried automatically.
+    pub(crate) fn submit(
+        &self,
+        candidate: &PinCacheRefillObject,
+    ) -> impl Future<Output = bool> + Send + 'static + use<> {
+        let cache = self
+            .store
+            .pin_cache()
+            .expect("pin refill requires a local backend");
+        debug_assert!(!candidate.admitted_tables.is_empty());
+        let object = candidate.source_sst.object_id;
+        let mut work = self.work.lock();
+        if self.jobs.is_closed() || work.contains_key(&object) {
+            return Either::Left(ready(false));
+        }
+        if !cache.is_registered(object) {
+            return Either::Left(ready(true));
+        }
+        // The Pin refiller filters cached objects too; defensively avoid duplicate publication.
+        if cache.get(object).is_some() {
+            return Either::Left(ready(true));
+        }
+        let (sender, receiver) = oneshot::channel();
+        work.insert(
+            object,
+            Work {
+                object_size: candidate.source_sst.file_size,
+                admitted_tables: candidate.admitted_tables.clone(),
+                completion: Some(sender),
+            },
+        );
+        if self.jobs.send(object).is_err() {
+            work.remove(&object);
+        }
+        Either::Right(async move { matches!(receiver.await, Ok(true)) })
+    }
+
+    /// Completes waiters after the CN withdraws backend membership. Physical attempts retain
+    /// their entries until they exit. The handler cancels removed objects before it can
+    /// register them again, and publication checks membership under the index lock.
+    pub(crate) fn cancel_objects(&self, objects: impl IntoIterator<Item = HummockSstableObjectId>) {
+        let mut work = self.work.lock();
+        for object in objects {
+            if let Some(work) = work.get_mut(&object) {
+                work.completion.take();
+            }
+        }
+    }
+
+    /// CN metadata identifies changed tables from its authoritative policy/ownership maps.
+    /// Cancel only dependent downloads; updates never submit jobs or sweep published files.
+    pub(crate) fn cancel_tables(&self, changed_tables: &HashSet<TableId>) {
+        let mut work = self.work.lock();
+        for work in work.values_mut() {
+            if !work.admitted_tables.is_disjoint(changed_tables) {
+                work.completion.take();
+            }
+        }
+    }
+
+    async fn run(
+        store: SstableStoreRef,
+        work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
+        receiver: &mut mpsc::UnboundedReceiver<HummockSstableObjectId>,
+        concurrency: Arc<Semaphore>,
+    ) {
+        let mut tasks = FuturesUnordered::new();
+        loop {
+            tokio::select! {
+                job = receiver.recv() => {
+                    let Some(object) = job else {
+                        break;
+                    };
+                    let object_size = work.lock()[&object].object_size;
+                    let store = store.clone();
+                    let concurrency = concurrency.clone();
+                    let work = work.clone();
+                    tasks.push(async move {
+                        let result = AssertUnwindSafe(async {
+                            let permit = concurrency
+                                .acquire_owned()
+                                .await
+                                .expect("refill concurrency stays open");
+                            refill_pin_cache_object(&store, object_size, object, permit, work).await
+                        })
+                        .rw_catch_unwind()
+                        .await;
+                        (object, result)
+                    });
+                }
+                Some((object, result)) = tasks.next(), if !tasks.is_empty() => {
+                    let label = match &result {
+                        Ok(Ok(Published)) => "published",
+                        Ok(Ok(CapacityRejected)) => "capacity_rejected",
+                        Ok(Ok(PathBusy)) => "path_busy",
+                        Ok(Ok(Obsolete)) => "obsolete",
+                        Ok(Err(_)) => "error",
+                        Err(_) => "panic",
+                    };
+                    GLOBAL_PIN_CACHE_METRICS.refill_outcomes
+                        .with_label_values(&[label])
+                        .inc();
+                    let work = work.lock().remove(&object).unwrap();
+                    let Some(completion) = work.completion else {
+                        continue;
+                    };
+                    let ready = match result {
+                        Ok(Ok(Published | Obsolete)) => true,
+                        Ok(Ok(CapacityRejected | PathBusy)) => false,
+                        Ok(Err(error)) => {
+                            tracing::warn!(
+                                object_id = object.as_raw_id(),
+                                error = %error.as_report(),
+                                "pin refill failed; using remote fallback"
+                            );
+                            false
+                        },
+                        Err(_) => {
+                            tracing::warn!(
+                                object_id = object.as_raw_id(),
+                                "pin refill panicked; using remote fallback"
+                            );
+                            false
+                        }
+                    };
+                    let _ = completion.send(ready);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::hummock) fn has_pending_for_test(&self, object: HummockSstableObjectId) -> bool {
+        self.work.lock().contains_key(&object)
+    }
+}
+
+#[cfg(test)]
+mod tests;
