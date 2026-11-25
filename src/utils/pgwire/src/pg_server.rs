@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -31,6 +31,7 @@ use serde::Deserialize;
 use thiserror_ext::AsReport;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::jwks_cache::{JwksCache, http_jwks_fetcher};
 use crate::ldap_auth::LdapAuthenticator;
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
@@ -191,19 +192,19 @@ pub enum UserAuthenticator {
 /// The JSON object MUST have a "keys" member, with its value being an array of JWKs.
 /// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-5> for more details.
 #[derive(Debug, Deserialize)]
-struct Jwks {
-    keys: Vec<Jwk>,
+pub(crate) struct Jwks {
+    pub(crate) keys: Vec<Jwk>,
 }
 
 /// A JSON Web Key (JWK) is a JSON object that represents a cryptographic key.
 /// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-4> for more details.
 #[derive(Debug, Deserialize)]
-struct Jwk {
-    kty: Option<String>, // Key Type
-    kid: Option<String>, // Key ID (OPTIONAL per RFC 7517 section 4.5)
-    alg: Option<String>, // Algorithm (OPTIONAL per RFC 7517 section 4.4)
-    n: Option<String>,   // RSA modulus
-    e: Option<String>,   // RSA exponent
+pub(crate) struct Jwk {
+    pub(crate) kty: Option<String>, // Key Type
+    pub(crate) kid: Option<String>, // Key ID (OPTIONAL per RFC 7517 section 4.5)
+    pub(crate) alg: Option<String>, // Algorithm (OPTIONAL per RFC 7517 section 4.4)
+    pub(crate) n: Option<String>,   // RSA modulus
+    pub(crate) e: Option<String>,   // RSA exponent
 }
 
 /// Algorithms we accept for JWT signature verification.
@@ -226,6 +227,9 @@ const RSA_JWK_KEY_TYPE: &str = "RSA";
 /// Optional OAuth user option overriding the expected JWT `aud`.
 const OAUTH_AUDIENCE_KEY: &str = "audience";
 
+/// The JWK Sets fetched for OAuth login, shared by every connection of this frontend.
+static JWKS_CACHE: LazyLock<JwksCache> = LazyLock::new(|| JwksCache::new(http_jwks_fetcher()));
+
 async fn validate_jwt(
     jwt: &str,
     jwks_url: &str,
@@ -233,8 +237,51 @@ async fn validate_jwt(
     audience: &str,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
-    let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
+    validate_jwt_with_cache(&JWKS_CACHE, jwt, jwks_url, issuer, audience, metadata).await
+}
+
+async fn validate_jwt_with_cache(
+    cache: &JwksCache,
+    jwt: &str,
+    jwks_url: &str,
+    issuer: &str,
+    audience: &str,
+    metadata: &HashMap<String, String>,
+) -> Result<bool, BoxedError> {
+    let header = decode_header(jwt)?;
+    let mut jwks = cache.get(jwks_url).await?;
+    // A signing-key rotation shows up as a token whose `kid` the cached set does not have.
+    // Refetch then, rate-limited by the cache, rather than reject logins until the TTL ends.
+    // Only for an allowed algorithm, so a token that would be rejected anyway never causes a
+    // fetch.
+    if let Some(kid) = header.kid.as_deref()
+        && ALLOWED_JWT_ALGORITHMS.contains(&header.alg)
+        && find_compatible_jwk(&jwks, kid, header.alg).is_none()
+    {
+        jwks = cache.refetch_for_unknown_kid(jwks_url).await?;
+    }
     validate_jwt_with_jwks(jwt, &jwks, issuer, audience, metadata)
+}
+
+/// The first key in the set with this `kid` that can verify `alg`: an RSA key with its
+/// modulus and exponent, whose own `alg`, when it pins one, matches.
+///
+/// A JWK Set can contain unrelated key types, keys without an optional `kid`, and equivalent
+/// keys of different types that share a `kid`. Scan all candidates instead of letting the
+/// first same-`kid` key shadow a usable RSA key later in the set.
+fn find_compatible_jwk<'a>(jwks: &'a Jwks, kid: &str, alg: Algorithm) -> Option<&'a Jwk> {
+    jwks.keys
+        .iter()
+        .filter(|jwk| jwk.kid.as_deref() == Some(kid))
+        .find(|jwk| {
+            jwk.kty.as_deref() == Some(RSA_JWK_KEY_TYPE)
+                && jwk.n.is_some()
+                && jwk.e.is_some()
+                && match jwk.alg.as_deref() {
+                    Some(jwk_alg) => Algorithm::from_str(jwk_alg).is_ok_and(|a| a == alg),
+                    None => true,
+                }
+        })
 }
 
 fn audience_from_cluster_id(cluster_id: &str) -> String {
@@ -280,23 +327,7 @@ fn validate_jwt_with_jwks(
         return Err(format!("JWT alg {:?} is not allowed", header.alg).into());
     }
 
-    // A JWK Set can contain unrelated key types, keys without an optional `kid`,
-    // and equivalent keys of different types that share a `kid`. Scan all
-    // candidates instead of letting the first same-`kid` key shadow a usable
-    // RSA key later in the set.
-    let jwk = jwks
-        .keys
-        .iter()
-        .filter(|jwk| jwk.kid.as_deref() == Some(kid.as_str()))
-        .find(|jwk| {
-            jwk.kty.as_deref() == Some(RSA_JWK_KEY_TYPE)
-                && jwk.n.is_some()
-                && jwk.e.is_some()
-                && match jwk.alg.as_deref() {
-                    Some(alg) => Algorithm::from_str(alg).is_ok_and(|alg| alg == header.alg),
-                    None => true,
-                }
-        })
+    let jwk = find_compatible_jwk(jwks, &kid, header.alg)
         .ok_or_else(|| format!("No compatible RSA key found in JWKS for kid: '{}'", kid))?;
 
     // 3. Decode the JWT and validate the claims.
@@ -835,8 +866,10 @@ mod tests {
     }
 
     mod jwt_validation_tests {
-        use std::collections::HashMap;
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use std::collections::{HashMap, VecDeque};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
         use base64::Engine;
         use jsonwebtoken::{Algorithm, EncodingKey, Header};
@@ -844,7 +877,10 @@ mod tests {
         use openssl::rsa::Rsa;
         use serde_json::json;
 
-        use crate::pg_server::{Jwk, Jwks, resolve_oauth_audience, validate_jwt_with_jwks};
+        use crate::jwks_cache::{JwksCache, JwksFetcher};
+        use crate::pg_server::{
+            Jwk, Jwks, resolve_oauth_audience, validate_jwt_with_cache, validate_jwt_with_jwks,
+        };
 
         fn create_test_rsa_keys() -> (Rsa<Private>, Rsa<Public>) {
             let private_key = Rsa::generate(2048).expect("failed to generate a key");
@@ -1436,6 +1472,110 @@ mod tests {
                 error.to_string(),
                 "No compatible RSA key found in JWKS for kid: 'test-kid'"
             );
+        }
+
+        /// A cache whose fetches return `sets` in order, with no refetch rate limit, and the
+        /// number of fetches made.
+        fn cache_serving(sets: Vec<Jwks>) -> (JwksCache, Arc<AtomicUsize>) {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let counter = calls.clone();
+            let sets = Arc::new(parking_lot::Mutex::new(VecDeque::from(sets)));
+            let fetcher: JwksFetcher = Box::new(move |_url| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let next = sets.lock().pop_front().expect("unexpected JWKS fetch");
+                Box::pin(async move { Ok(next) })
+            });
+            let cache = JwksCache::with_durations(
+                fetcher,
+                Box::new(Instant::now),
+                Duration::from_secs(300),
+                Duration::ZERO,
+                Duration::from_secs(3600),
+            );
+            (cache, calls)
+        }
+
+        #[tokio::test]
+        async fn test_rotated_signing_key_is_fetched_on_unknown_kid() {
+            let (_, old_public) = create_test_rsa_keys();
+            let (new_private, new_public) = create_test_rsa_keys();
+            let mut rotated = create_test_jwks(&old_public, "old-kid", Some("RS256"));
+            rotated
+                .keys
+                .extend(create_test_jwks(&new_public, "new-kid", Some("RS256")).keys);
+            let (cache, calls) = cache_serving(vec![
+                create_test_jwks(&old_public, "old-kid", Some("RS256")),
+                rotated,
+            ]);
+            let audience = "urn:risingwave:cluster:test-cluster-id";
+            let issuer = "https://test-issuer.com";
+            let url = "https://test-issuer.com/jwks";
+            let token = |kid: &str| {
+                create_jwt_token(
+                    &new_private,
+                    kid,
+                    Algorithm::RS256,
+                    issuer,
+                    Some(audience),
+                    get_future_timestamp(),
+                    HashMap::new(),
+                )
+            };
+
+            let result = validate_jwt_with_cache(
+                &cache,
+                &token("new-kid"),
+                url,
+                issuer,
+                audience,
+                &HashMap::new(),
+            )
+            .await;
+            assert!(result.unwrap(), "the rotated key should verify the token");
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+            // The rotated set is now cached: the next login fetches nothing.
+            validate_jwt_with_cache(
+                &cache,
+                &token("new-kid"),
+                url,
+                issuer,
+                audience,
+                &HashMap::new(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+        }
+
+        #[tokio::test]
+        async fn test_disallowed_algorithm_never_triggers_a_refetch() {
+            let (_, public_key) = create_test_rsa_keys();
+            let (cache, calls) = cache_serving(vec![create_test_jwks(
+                &public_key,
+                "test-kid",
+                Some("RS256"),
+            )]);
+            let mut header = Header::new(Algorithm::HS256);
+            header.kid = Some("unknown-kid".to_owned());
+            let jwt = jsonwebtoken::encode(
+                &header,
+                &json!({ "iss": "https://test-issuer.com", "exp": get_future_timestamp() }),
+                &EncodingKey::from_secret(b"secret"),
+            )
+            .unwrap();
+
+            let result = validate_jwt_with_cache(
+                &cache,
+                &jwt,
+                "https://test-issuer.com/jwks",
+                "https://test-issuer.com",
+                "urn:risingwave:cluster:test-cluster-id",
+                &HashMap::new(),
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
     }
 }
