@@ -15,8 +15,8 @@
 use std::sync::LazyLock;
 
 use prometheus::{
-    IntCounter, IntGauge, Registry, register_int_counter_with_registry,
-    register_int_gauge_with_registry,
+    IntCounter, IntCounterVec, IntGauge, Registry, register_int_counter_vec_with_registry,
+    register_int_counter_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -25,14 +25,23 @@ pub(crate) static GLOBAL_PIN_CACHE_METRICS: LazyLock<PinCacheMetrics> =
 
 /// Metrics for the Hummock-local Pin Cache lifecycle and physical reclamation.
 pub(crate) struct PinCacheMetrics {
+    pub io_failures: IntCounterVec,
     pub published_objects: IntGauge,
     pub published_bytes: IntGauge,
     pub recovery_ready: IntGauge,
     pub recovery_failures: IntCounter,
+    pub gc_failures: IntCounter,
 }
 
 impl PinCacheMetrics {
     fn new(registry: &Registry) -> Self {
+        let io_failures = register_int_counter_vec_with_registry!(
+            "pin_cache_io_failure_total",
+            "Pin Cache refill I/O failures by phase",
+            &["phase"],
+            registry
+        )
+        .unwrap();
         let published_objects = register_int_gauge_with_registry!(
             "pin_cache_published_objects",
             "SST objects currently routed to the local Pin Cache",
@@ -57,12 +66,20 @@ impl PinCacheMetrics {
             registry
         )
         .unwrap();
+        let gc_failures = register_int_counter_with_registry!(
+            "pin_cache_gc_failure_total",
+            "Failed Pin Cache reclaim batches",
+            registry
+        )
+        .unwrap();
 
         Self {
+            io_failures,
             published_objects,
             published_bytes,
             recovery_ready,
             recovery_failures,
+            gc_failures,
         }
     }
 }
