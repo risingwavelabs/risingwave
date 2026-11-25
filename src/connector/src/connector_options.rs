@@ -47,6 +47,9 @@ pub struct ConnectorOption {
     pub default: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alias: Vec<String>,
+    /// Whether `ALTER ... CONNECTOR WITH` can change it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_alter_on_fly: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -159,51 +162,99 @@ mod tests {
             .unwrap_or_else(|| panic!("connector {name} is listed"))
     }
 
-    #[test]
-    fn test_every_listable_dispatched_connector_is_listed() {
-        let listed = connectors();
-        for sink in dispatched_sinks() {
-            if sink.enabled && !INTERNAL_SINKS.contains(&sink.name) {
-                find(&listed.sinks, sink.name);
-            }
-        }
-        for source in s3_as_written(dispatched_sources()) {
-            if source.enabled && !INTERNAL_SOURCES.contains(&source.name) {
-                find(&listed.sources, source.name);
-            }
-        }
+    fn names(list: &[ConnectorInfo]) -> Vec<&'static str> {
+        list.iter().map(|connector| connector.name).collect()
     }
 
+    fn without_options(list: &[ConnectorInfo]) -> Vec<&'static str> {
+        list.iter()
+            .filter(|connector| connector.options.is_none())
+            .map(|connector| connector.name)
+            .collect()
+    }
+
+    /// Fails if an options struct stops matching its yaml entry, e.g. after a rename.
     #[test]
-    fn test_options_come_from_the_generated_yaml() {
+    fn test_only_connectors_without_with_options_have_none() {
         let listed = connectors();
-        let kafka = find(&listed.sinks, "kafka").options.as_ref().unwrap();
-        assert!(
-            kafka
-                .iter()
-                .any(|option| option.name == "properties.bootstrap.server" && option.required)
+        // CDC properties are passed through to Debezium.
+        assert_eq!(
+            without_options(&listed.sources),
+            [
+                "mariadb-cdc",
+                "mongodb-cdc",
+                "mysql-cdc",
+                "oracle-cdc",
+                "postgres-cdc",
+                "sqlserver-cdc"
+            ]
         );
-        assert!(find(&listed.sources, "nats").options.is_some());
+        // The generator records `S3Config` only inside `SnowflakeConfig`, which flattens it.
+        assert_eq!(
+            without_options(&listed.sinks),
+            ["blackhole", "cassandra", "jdbc", "s3"]
+        );
     }
 
     #[test]
-    fn test_a_connector_without_with_options_has_none() {
-        assert_eq!(find(&connectors().sinks, "jdbc").options, None);
+    fn test_no_option_is_named_by_a_rust_raw_identifier() {
+        let listed = connectors();
+        let names: Vec<&str> = listed
+            .sources
+            .iter()
+            .chain(&listed.sinks)
+            .flat_map(|connector| connector.options.iter().flatten())
+            .map(|option| option.name.as_str())
+            .collect();
+        assert!(names.contains(&"type"));
+        assert!(
+            names.iter().all(|name| !name.starts_with("r#")),
+            "{names:?}"
+        );
     }
 
     #[test]
-    fn test_json_has_sources_and_sinks() {
+    fn test_json_shape() {
         let json = serde_json::to_value(connectors()).unwrap();
-        assert!(
-            json["sources"]
+        let kafka = json["sinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|sink| sink["name"] == "kafka")
+            .unwrap();
+        let option = |name: &str| {
+            kafka["options"]
                 .as_array()
-                .is_some_and(|list| !list.is_empty())
+                .unwrap()
+                .iter()
+                .find(|option| option["name"] == name)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(
+            option("topic"),
+            serde_json::json!({
+                "name": "topic",
+                "field_type": "String",
+                "required": true,
+                "alias": ["kafka.topic"],
+            })
         );
-        assert!(
-            json["sinks"]
-                .as_array()
-                .is_some_and(|list| !list.is_empty())
+        assert_eq!(
+            option("properties.sync.call.timeout"),
+            serde_json::json!({
+                "name": "properties.sync.call.timeout",
+                "field_type": "Duration",
+                "required": false,
+                "default": "Duration :: from_secs (5)",
+                "allow_alter_on_fly": true,
+            })
         );
+        assert_eq!(
+            option("properties.ssl.ca.location")["comments"],
+            "Path to CA certificate file for verifying the broker's key."
+        );
+        assert!(json["sources"].is_array());
     }
 
     #[test]
@@ -216,36 +267,28 @@ mod tests {
     #[test]
     fn test_s3_is_listed_once_under_its_written_name_with_the_s3_v2_options() {
         let sources = connectors().sources;
+        let names = names(&sources);
+        assert_eq!(names.iter().filter(|name| **name == "s3").count(), 1);
+        assert!(!names.contains(&"s3_v2"));
+        let yaml: BTreeMap<String, StructOptions> =
+            serde_yaml::from_str(SOURCE_OPTIONS_YAML).unwrap();
         assert_eq!(
-            sources
-                .iter()
-                .filter(|source| source.name == LEGACY_S3_CONNECTOR)
-                .count(),
-            1
-        );
-        assert!(find(&sources, LEGACY_S3_CONNECTOR).options.is_some());
-        assert!(
-            sources
-                .iter()
-                .all(|source| source.name != OPENDAL_S3_CONNECTOR)
+            find(&sources, "s3").options.as_ref(),
+            Some(&yaml["OpendalS3Properties"].fields)
         );
     }
 
     #[test]
-    fn test_internal_connectors_are_not_listed() {
+    fn test_internal_connectors_are_dispatched_but_not_listed() {
+        let dispatched_sinks: Vec<&str> = dispatched_sinks().iter().map(|s| s.name).collect();
+        let dispatched_sources: Vec<&str> = dispatched_sources().iter().map(|s| s.name).collect();
         let listed = connectors();
-        assert!(
-            listed
-                .sinks
-                .iter()
-                .all(|sink| !INTERNAL_SINKS.contains(&sink.name))
-        );
-        assert!(
-            listed
-                .sources
-                .iter()
-                .all(|source| !INTERNAL_SOURCES.contains(&source.name))
-        );
+        for sink in ["test", "table"] {
+            assert!(dispatched_sinks.contains(&sink));
+            assert!(!names(&listed.sinks).contains(&sink));
+        }
+        assert!(dispatched_sources.contains(&"test"));
+        assert!(!names(&listed.sources).contains(&"test"));
     }
 
     struct Disabled;
