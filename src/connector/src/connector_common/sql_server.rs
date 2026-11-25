@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
 use risingwave_common::types::DataType;
@@ -44,6 +46,49 @@ pub struct MssqlConnectionConfig {
     pub trust_cert: bool,
 }
 
+/// How long a SQL Server client waits. `None` waits without a limit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MssqlTimeouts {
+    /// Establishing a connection: TCP connect, TLS and login, including a routing redirect.
+    pub connect: Option<Duration>,
+    /// Each response of the server while a statement runs, including the first one. This does not
+    /// limit the total time of a statement.
+    pub command: Option<Duration>,
+}
+
+impl MssqlTimeouts {
+    /// Builds the limits from option values in milliseconds, where unset or `0` means no limit.
+    pub fn from_millis(connect_ms: Option<u64>, command_ms: Option<u64>) -> Self {
+        let limit = |ms: Option<u64>| ms.filter(|&ms| ms > 0).map(Duration::from_millis);
+        Self {
+            connect: limit(connect_ms),
+            command: limit(command_ms),
+        }
+    }
+}
+
+/// Start of the message of tiberius' command timeout error. An operating system timeout is also an
+/// `Io` error of kind `TimedOut`, so only the message tells them apart.
+const COMMAND_TIMEOUT_MESSAGE: &str = "the server did not send the next part of the command result";
+
+/// Converts a tiberius error. A command timeout error suggests tiberius' own
+/// `Config::command_timeout`, so also name `option`, the setting users have.
+pub fn hint_command_timeout(error: tiberius::error::Error, option: &str) -> anyhow::Error {
+    let is_command_timeout = matches!(
+        &error,
+        tiberius::error::Error::Io { kind: std::io::ErrorKind::TimedOut, message }
+            if message.starts_with(COMMAND_TIMEOUT_MESSAGE)
+    );
+    let error = anyhow::Error::from(error);
+    if is_command_timeout {
+        error.context(format!(
+            "the wait exceeded `{option}`; raise it, or set it to 0 to wait without a limit"
+        ))
+    } else {
+        error
+    }
+}
+
 /// Create an authenticated `tiberius::Client` connected to a SQL Server
 /// instance. Uses tokio's TCP stream wrapped with `TokioAsyncWriteCompatExt`
 /// to bridge between tokio's async I/O and tiberius's `futures-io` traits.
@@ -68,7 +113,7 @@ pub async fn create_mssql_client(config: &MssqlConnectionConfig) -> anyhow::Resu
     }
     tiberius_config.authentication(AuthMethod::sql_server(&config.user, &config.password));
 
-    create_mssql_client_with_config(tiberius_config)
+    create_mssql_client_with_config(tiberius_config, MssqlTimeouts::default())
         .await
         .with_context(|| {
             format!(
@@ -94,9 +139,28 @@ async fn connect_mssql_tcp(config: &Config, after_routing: bool) -> anyhow::Resu
 /// SQL Server gateways, notably Azure SQL, can return one routing redirect
 /// during login. Follow that redirect here so query, CDC, and sink callers all
 /// use identical connection behavior.
-pub async fn create_mssql_client_with_config(mut config: Config) -> anyhow::Result<MssqlClient> {
+pub async fn create_mssql_client_with_config(
+    mut config: Config,
+    timeouts: MssqlTimeouts,
+) -> anyhow::Result<MssqlClient> {
+    // SQL Server does not enforce well-formed UTF-16 in nvarchar/nchar/ntext values. Decode a
+    // lone surrogate as U+FFFD instead of failing the row, which would stall CDC backfill on it.
+    config.lossy_utf16_decoding(true);
+    // `timeouts.connect` bounds the whole connection below, including the login.
+    config.handshake_timeout(None);
+    config.command_timeout(timeouts.command);
+    match timeouts.connect {
+        Some(limit) => tokio::time::timeout(limit, connect_mssql(config))
+            .await
+            .map_err(|_| anyhow!("timed out after {limit:?} while connecting to sql server"))?,
+        None => connect_mssql(config).await,
+    }
+}
+
+async fn connect_mssql(mut config: Config) -> anyhow::Result<MssqlClient> {
     let tcp = connect_mssql_tcp(&config, false).await?;
-    let connect_result = Client::connect(config.clone(), tcp.compat_write()).await;
+    // Box the login futures; they are large (see `clippy::large_futures`).
+    let connect_result = Box::pin(Client::connect(config.clone(), tcp.compat_write())).await;
 
     match connect_result {
         Ok(client) => Ok(client),
@@ -104,7 +168,7 @@ pub async fn create_mssql_client_with_config(mut config: Config) -> anyhow::Resu
             config.host(&host);
             config.port(port);
             let tcp = connect_mssql_tcp(&config, true).await?;
-            Client::connect(config, tcp.compat_write())
+            Box::pin(Client::connect(config, tcp.compat_write()))
                 .await
                 .context("failed to authenticate with sql server after routing")
         }
@@ -222,9 +286,15 @@ pub fn mssql_type_to_rw_type(type_name: &str) -> anyhow::Result<DataType> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::DataType;
+    use std::time::Duration;
 
-    use super::mssql_type_to_rw_type;
+    use risingwave_common::types::DataType;
+    use tiberius::{AuthMethod, Config};
+
+    use super::{
+        COMMAND_TIMEOUT_MESSAGE, MssqlTimeouts, create_mssql_client_with_config,
+        hint_command_timeout, mssql_type_to_rw_type,
+    };
 
     /// Verify that the common base SQL Server types map to the expected
     /// RisingWave `DataType`s: int/bigint/bit/float/date/datetime2/datetimeoffset/uniqueidentifier.
@@ -280,5 +350,70 @@ mod tests {
         assert!(mssql_type_to_rw_type("geometry").is_err());
         assert!(mssql_type_to_rw_type("hierarchyid").is_err());
         assert!(mssql_type_to_rw_type("sql_variant").is_err());
+    }
+
+    #[test]
+    fn timeout_options_zero_means_no_limit() {
+        assert_eq!(
+            MssqlTimeouts::from_millis(None, Some(0)),
+            MssqlTimeouts::default()
+        );
+        assert_eq!(
+            MssqlTimeouts::from_millis(Some(1500), Some(30000)),
+            MssqlTimeouts {
+                connect: Some(Duration::from_millis(1500)),
+                command: Some(Duration::from_secs(30)),
+            }
+        );
+    }
+
+    #[test]
+    fn command_timeout_error_names_the_option() {
+        let command_timeout = tiberius::error::Error::Io {
+            kind: std::io::ErrorKind::TimedOut,
+            message: format!("{COMMAND_TIMEOUT_MESSAGE} within 1s"),
+        };
+        let error = format!(
+            "{:#}",
+            hint_command_timeout(command_timeout, "sqlserver.command_timeout_ms")
+        );
+        assert!(error.contains("`sqlserver.command_timeout_ms`"), "{error}");
+
+        let os_timeout =
+            tiberius::error::Error::from(std::io::Error::from(std::io::ErrorKind::TimedOut));
+        let error = format!(
+            "{:#}",
+            hint_command_timeout(os_timeout, "sqlserver.command_timeout_ms")
+        );
+        assert!(!error.contains("sqlserver.command_timeout_ms"), "{error}");
+    }
+
+    /// The connect timeout also covers the login, not only the TCP connect.
+    #[tokio::test]
+    async fn connect_timeout_bounds_the_login() {
+        // Accepts the TCP connection but never answers the login.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _server = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        let mut config = Config::new();
+        config.host("127.0.0.1");
+        config.port(port);
+        config.authentication(AuthMethod::sql_server("sa", "unused"));
+        let timeouts = MssqlTimeouts {
+            connect: Some(Duration::from_millis(200)),
+            command: None,
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            create_mssql_client_with_config(config, timeouts),
+        )
+        .await
+        .expect("the connect timeout did not fire");
+        let error = result.expect_err("connecting must fail");
+        assert!(error.to_string().contains("timed out"), "{error:#}");
     }
 }

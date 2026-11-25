@@ -31,16 +31,18 @@ use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, Valida
 use tiberius::Config;
 use tokio_postgres::types::PgLsn;
 
+use crate::connector_common::sql_server::MssqlTimeouts;
 use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_from_properties};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::{
     build_mariadb_connection_pool, build_mysql_connection_pool,
 };
+use crate::source::cdc::external::sql_server::SqlServerCdcTimeouts;
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, DebeziumCdcSplit, Mariadb, Mongodb, Mysql, Oracle, Postgres,
-    SqlServer, table_schema_exclude_additional_columns,
+    CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit, Mariadb, Mongodb, Mysql,
+    Oracle, Postgres, SqlServer, table_schema_exclude_additional_columns,
 };
 use crate::source::monitor::metrics::EnumeratorMetrics;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
@@ -58,6 +60,7 @@ pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     mariadb_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_min_lsn: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
+    sqlserver_cdc_timeouts: MssqlTimeouts,
     /// Properties specified in the WITH clause by user for database connection
     properties: Arc<BTreeMap<String, String>>,
     _phantom: PhantomData<T>,
@@ -96,6 +99,12 @@ where
 
         // Create Arc once and share it
         let properties_arc = Arc::new(props.properties);
+        let sqlserver_cdc_timeouts = match T::source_type() {
+            CdcSourceType::SqlServer => {
+                SqlServerCdcTimeouts::from_properties(&properties_arc)?.timeouts()
+            }
+            _ => MssqlTimeouts::default(),
+        };
         let properties_arc_for_validation = properties_arc.clone();
         let table_schema_for_validation = props.table_schema;
 
@@ -149,6 +158,7 @@ where
             mariadb_cdc_binlog_file_seq_max: None,
             sqlserver_cdc_upstream_min_lsn: None,
             sqlserver_cdc_upstream_max_lsn: None,
+            sqlserver_cdc_timeouts,
             properties: properties_arc,
             _phantom: PhantomData,
         })
@@ -292,7 +302,8 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
         config.authentication(tiberius::AuthMethod::sql_server(username, password));
         config.trust_cert();
 
-        let mut client = SqlServerClient::new_with_config(config).await?;
+        let mut client =
+            SqlServerClient::new_with_config(config, self.sqlserver_cdc_timeouts).await?;
         let row = client
             .inner_client
             .simple_query(
