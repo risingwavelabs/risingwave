@@ -30,7 +30,8 @@ impl PinCache {
         }
     }
 
-    /// Unregisters objects and withdraws their publications.
+    /// Unregisters objects and withdraws their publications. The caller cancels their refills
+    /// before processing a membership update that could register the objects again.
     /// Existing read handles retain their files. The refiller decides when to apply delta
     /// deletions relative to version publication; this method does not wait for a version.
     pub(crate) fn unregister_objects(
@@ -38,10 +39,12 @@ impl PinCache {
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
         for id in objects {
-            // Release the shard before dropping the removed publication.
+            // Release the shard before handing the removed publication to GC.
             let object = self.shard(id).write().objects.remove(&id);
-            if let Some(mut object) = object {
-                object.unpublish();
+            if let Some(mut object) = object
+                && let Some(file) = object.unpublish()
+            {
+                self.enqueue_delete(file);
             }
         }
     }
