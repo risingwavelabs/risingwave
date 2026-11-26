@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::license::Feature;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
@@ -162,8 +163,10 @@ impl CacheRefiller {
             // Raw structural deltas can supply insertions absent from the summary. Bound
             // their table admission too, before Pin constructs per-object intent.
             let admitted_pin_tables = metadata
-                .pinned_tables()
-                .iter()
+                .streaming_table_vnode_mapping
+                .keys()
+                .chain(metadata.serving_table_vnode_mapping.keys())
+                .filter(|table| metadata.is_pinned(table))
                 .copied()
                 .filter(|table| metadata.has_vnodes(table))
                 .collect();
@@ -203,13 +206,13 @@ impl CacheRefiller {
         .boxed()
     }
 
-    pub(super) fn on_pinned_tables_changed(
+    pub(super) fn on_policies_changed(
         &self,
-        previous: &HashSet<TableId>,
+        previous: &HashMap<TableId, CacheRefillPolicy>,
         metadata: &TableCacheMetadata,
     ) {
         if let Some(refiller) = &self.pin_cache_refill {
-            refiller.on_pinned_tables_changed(previous, metadata);
+            refiller.on_policies_changed(previous, metadata);
         }
     }
 
