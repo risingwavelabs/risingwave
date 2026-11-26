@@ -32,7 +32,7 @@ use with_options::WithOptions;
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
-use crate::connector_common::sql_server::create_mssql_client_with_config;
+use crate::connector_common::sql_server::{MssqlTimeouts, create_mssql_client_with_config};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
@@ -67,6 +67,16 @@ pub struct SqlServerConfig {
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
+    /// Milliseconds allowed to establish a connection: TCP connect, TLS and login. Unset or 0
+    /// means no limit.
+    #[serde(rename = "sqlserver.connect_timeout_ms", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub connect_timeout_ms: Option<u64>,
+    /// Milliseconds to wait for each response of SQL Server while a statement runs, including the
+    /// first one. This does not limit the total time of a statement. Unset or 0 means no limit.
+    #[serde(rename = "sqlserver.command_timeout_ms", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub command_timeout_ms: Option<u64>,
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(flatten)]
@@ -80,6 +90,10 @@ pub fn sql_server_default_schema() -> String {
 }
 
 impl SqlServerConfig {
+    pub fn timeouts(&self) -> MssqlTimeouts {
+        MssqlTimeouts::from_millis(self.connect_timeout_ms, self.command_timeout_ms)
+    }
+
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<SqlServerConfig>(serde_json::to_value(properties).unwrap())
@@ -543,11 +557,11 @@ impl SqlServerClient {
         config.authentication(AuthMethod::sql_server(&msconfig.user, &msconfig.password));
         config.database(&msconfig.database);
         config.trust_cert();
-        Self::new_with_config(config).await
+        Self::new_with_config(config, msconfig.timeouts()).await
     }
 
-    pub async fn new_with_config(config: Config) -> Result<Self> {
-        let inner_client = create_mssql_client_with_config(config)
+    pub async fn new_with_config(config: Config, timeouts: MssqlTimeouts) -> Result<Self> {
+        let inner_client = create_mssql_client_with_config(config, timeouts)
             .await
             .map_err(SinkError::SqlServer)?;
         Ok(Self { inner_client })

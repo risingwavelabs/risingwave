@@ -650,6 +650,26 @@ select count(*) from shared_single_type_schema_table;
 ----
 2
 
+# SQL Server does not enforce well-formed UTF-16 in nvarchar/ntext. A lone surrogate is read as
+# U+FFFD instead of failing the backfill. The rows are inserted before CDC is enabled, so they reach
+# RisingWave only through the backfill.
+system ok
+sqlcmd -C -Q "CREATE TABLE ill_formed_utf16 (id INT PRIMARY KEY, c_nvarchar NVARCHAR(10), c_ntext NTEXT); INSERT INTO ill_formed_utf16 VALUES (1, N'a' + NCHAR(0xD83D) + N'b', CAST(N'c' + NCHAR(0xDC00) AS NTEXT)), (2, N'ok', N'ok'); EXEC sys.sp_cdc_enable_table @source_schema = 'dbo', @source_name = 'ill_formed_utf16', @role_name = NULL;" -b
+
+statement ok
+CREATE TABLE shared_ill_formed_utf16 (
+    id INT,
+    c_nvarchar VARCHAR,
+    c_ntext VARCHAR,
+    PRIMARY KEY (id)
+) from mssql_source table 'mydb.dbo.ill_formed_utf16';
+
+query ITT retry 20 backoff 1s
+SELECT id, c_nvarchar, c_ntext FROM shared_ill_formed_utf16 ORDER BY id;
+----
+1 a�b c�
+2 ok ok
+
 # ------------ drop stage ------------
 statement ok
 drop source upper_mssql_source cascade;

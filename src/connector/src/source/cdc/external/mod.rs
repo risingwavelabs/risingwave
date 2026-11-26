@@ -47,7 +47,7 @@ use crate::source::cdc::external::oracle::{
 };
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
-    SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
+    SqlServerCdcTimeouts, SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -340,6 +340,10 @@ pub struct ExternalTableConfig {
     /// Only "true" means using SSL. All other values are treated as "false".
     #[serde(rename = "database.encrypt", default = "Default::default")]
     pub encrypt: String,
+
+    /// Only used by the SQL Server CDC connector.
+    #[serde(flatten)]
+    pub sql_server_timeouts: SqlServerCdcTimeouts,
 }
 
 fn postgres_ssl_mode_default() -> SslMode {

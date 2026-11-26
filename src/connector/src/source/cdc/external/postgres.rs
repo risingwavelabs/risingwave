@@ -1028,6 +1028,7 @@ mod tests {
             ssl_mode: Default::default(),
             ssl_root_cert: None,
             encrypt: "false".to_owned(),
+            sql_server_timeouts: Default::default(),
         };
 
         let table = PostgresExternalTable::connect(
