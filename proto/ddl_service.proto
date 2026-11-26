@@ -16,6 +16,23 @@ message WaitVersion {
   uint64 hummock_version_id = 2;
 }
 
+message CascadeObject {
+  common.ObjectType object_type = 1;
+  optional string schema_name = 2;
+  string object_name = 3;
+}
+
+message TypeCount {
+  common.ObjectType object_type = 1;
+  uint64 count = 2;
+}
+
+message DropResult {
+  repeated CascadeObject cascade_objects = 1;
+  uint64 total_count = 2;
+  repeated TypeCount counts_by_type = 3;
+}
+
 message CreateDatabaseRequest {
   catalog.Database db = 1;
 }
@@ -441,6 +458,7 @@ message DropTableRequest {
 message DropTableResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  DropResult drop_result = 3;
 }
 
 // Used by risectl (and in the future, dashboard)
