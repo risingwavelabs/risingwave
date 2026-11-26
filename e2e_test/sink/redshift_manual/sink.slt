@@ -1,0 +1,89 @@
+# Manual live AWS tests; run through run.py --run-live.
+# Every executable record requires the redshift-live label.
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py setup
+
+onlyif redshift-live
+statement ok
+SET search_path TO redshift_e2e_schema;
+
+onlyif redshift-live
+statement ok
+SET streaming_parallelism = 4;
+
+onlyif redshift-live
+statement ok
+CREATE TABLE upsert_source (id INT PRIMARY KEY, payload VARCHAR);
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py create-upsert
+
+onlyif redshift-live
+statement ok
+INSERT INTO upsert_source SELECT i, 'initial' FROM generate_series(1,256) AS g(i);
+
+onlyif redshift-live
+statement ok
+FLUSH;
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py check-initial
+
+onlyif redshift-live
+statement ok
+UPDATE upsert_source SET payload = 'updated';
+
+onlyif redshift-live
+statement ok
+DELETE FROM upsert_source WHERE id % 3 = 0;
+
+onlyif redshift-live
+statement ok
+INSERT INTO upsert_source VALUES (3, 'revived');
+
+onlyif redshift-live
+statement ok
+FLUSH;
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py check-changed
+
+onlyif redshift-live
+statement ok
+CREATE TABLE append_source (id INT PRIMARY KEY, payload VARCHAR);
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py create-append
+
+onlyif redshift-live
+statement ok
+INSERT INTO append_source SELECT i, 'append' FROM generate_series(1,128) AS g(i);
+
+onlyif redshift-live
+statement ok
+FLUSH;
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py check-append
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py check-s3
+
+onlyif redshift-live
+skipif madsim
+system ok
+python3 e2e_test/sink/redshift_manual/helper.py cleanup
