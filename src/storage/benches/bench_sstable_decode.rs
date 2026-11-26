@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Criterion for native metadata and Block restore; same final owned objects.
+//! Criterion for native SSTable metadata, block restoration, and hot in-block seeks.
 
 #[path = "sstable_decode_fixture/resources.rs"]
 mod resources;
@@ -30,8 +30,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_storage::hummock::sstable::{
     Block, BlockBuilder, BlockBuilderOptions, BlockedXor8FilterBuilder, BlockedXor16FilterBuilder,
-    CompressionAlgorithm, Sstable, SstableMeta, Xor16FilterBuilder,
+    CompressionAlgorithm, RestartPoint, Sstable, SstableMeta, Xor16FilterBuilder,
 };
+use risingwave_storage::hummock::{BlockHolder, BlockIterator};
 use serde::{Deserialize, Deserializer};
 
 struct LegacyBlock(Block);
@@ -54,17 +55,40 @@ fn assert_block(a: &Block, b: &Block) {
 }
 fn block_cases(c: &mut Criterion, label: &str, raw: Bytes) {
     let old = Block::decode_from_raw_legacy_for_bench(raw.clone());
-    let new = Block::decode_from_raw(raw.clone());
-    assert_block(&old, &new);
+    let owned = Block::decode_from_raw_owned_for_bench(raw.clone());
+    assert_block(&old, &owned);
+    let borrowed = Block::decode_from_raw(raw.clone());
+    assert_block(&owned, &borrowed);
+    let transition_count =
+        u32::from_le_bytes(raw[raw.len() - 8..raw.len() - 4].try_into().unwrap());
+    let index_bytes = if transition_count == 1 {
+        owned.restart_point_len() * std::mem::size_of::<RestartPoint>()
+    } else {
+        0
+    };
+    assert_eq!(
+        owned.estimated_memory_weight() - borrowed.estimated_memory_weight(),
+        index_bytes
+    );
+    let cloned = borrowed.clone();
+    assert_block(&borrowed, &cloned);
     let wire = bincode::serialize(&old).unwrap();
+    assert_eq!(bincode::serialize(&borrowed).unwrap(), wire);
+    assert_eq!(bincode::serialize(&cloned).unwrap(), wire);
+    let restored = <Block as Code>::decode(&mut &wire[..]).unwrap();
+    assert_block(&borrowed, &restored);
+    assert_eq!(
+        borrowed.estimated_memory_weight(),
+        restored.estimated_memory_weight()
+    );
     assert_block(
-        &new,
+        &owned,
         &bincode::deserialize_from::<_, LegacyBlock>(&mut &wire[..])
             .unwrap()
             .0,
     );
     eprintln!(
-        "FIXTURE name={label} raw_bytes={} restarts={} xxh64={:016x}",
+        "FIXTURE name={label} raw_bytes={} restarts={} transitions={transition_count} xxh64={:016x}",
         raw.len(),
         old.restart_point_len(),
         xxhash_rust::xxh64::xxh64(&raw, 0)
@@ -73,15 +97,62 @@ fn block_cases(c: &mut Criterion, label: &str, raw: Bytes) {
     measure(&mut group, &format!("{label}_raw_old"), || {
         Block::decode_from_raw_legacy_for_bench(black_box(raw.clone()))
     });
+    // Keep the previous one-pass owned decoder as the comparison control.
     measure(&mut group, &format!("{label}_raw_new"), || {
+        Block::decode_from_raw_owned_for_bench(black_box(raw.clone()))
+    });
+    measure(&mut group, &format!("{label}_raw_uniform"), || {
         Block::decode_from_raw(black_box(raw.clone()))
     });
     measure(&mut group, &format!("{label}_code_old"), || {
         bincode::deserialize_from::<_, LegacyBlock>(&mut black_box(&wire[..])).unwrap()
     });
+    // Code::decode exercises the actual Foyer/Serde restore path.
     measure(&mut group, &format!("{label}_code_new"), || {
         <Block as Code>::decode(&mut black_box(&wire[..])).unwrap()
     });
+    group.finish();
+
+    // Reuse hot Blocks and iterators so this measures full in-block seeks,
+    // including restart search, prefix decode, scan and hitmap bookkeeping.
+    let mut owned_iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(owned)));
+    let mut borrowed_iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(borrowed)));
+    let mut keys = Vec::new();
+    owned_iter.seek_to_first();
+    while owned_iter.is_valid() {
+        keys.push(owned_iter.key().to_vec());
+        owned_iter.next();
+    }
+    assert!(!keys.is_empty());
+    let mut rand = 0x5321_8121_0922_612f_u64;
+    let picks: Vec<_> = (0..2048)
+        .map(|_| {
+            rand ^= rand << 13;
+            rand ^= rand >> 7;
+            rand ^= rand << 17;
+            (rand as usize) % keys.len()
+        })
+        .collect();
+    for &pick in &picks {
+        let key = keys[pick].to_ref();
+        owned_iter.seek(key);
+        borrowed_iter.seek(key);
+        assert_eq!(owned_iter.key(), key);
+        assert_eq!(owned_iter.key(), borrowed_iter.key());
+        assert_eq!(owned_iter.value(), borrowed_iter.value());
+    }
+    let mut group = c.benchmark_group("rw_block_seek");
+    for (layout, iter) in [("owned", &mut owned_iter), ("uniform", &mut borrowed_iter)] {
+        let mut idx = 0;
+        group.bench_function(format!("{label}_{layout}"), |b| {
+            b.iter(|| {
+                iter.seek(black_box(keys[picks[idx]].to_ref()));
+                idx = (idx + 1) & (picks.len() - 1);
+                black_box(iter.key());
+                black_box(iter.value());
+            });
+        });
+    }
     group.finish();
 }
 fn producer_block(target: usize, mixed: bool) -> Bytes {
