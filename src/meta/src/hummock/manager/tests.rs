@@ -1461,6 +1461,75 @@ async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
     }
 }
 
+#[cfg(feature = "sync_point")]
+#[tokio::test]
+async fn test_cancel_compaction_between_assignment_and_heartbeat() {
+    let (_, manager, _, worker_id) = setup_compute_env(80).await;
+    let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
+    let group_id = StaticCompactionGroupId::StateDefault;
+    register_table_ids_to_compaction_group(&manager, &[1], group_id).await;
+
+    let sst_id = get_sst_ids(&manager, 1).await[0];
+    let epoch = test_epoch(1);
+    let sst = SstableInfoInner {
+        min_epoch: epoch,
+        max_epoch: epoch,
+        ..gen_sstable_info_impl(sst_id, vec![1], epoch)
+    };
+    client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: vec![LocalSstableInfo::for_test(sst.into())],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let (pause, reached, resume) = sync_point::Pause::at("COMPACTION_ASSIGNMENT_PUBLISHED");
+    let select = pause.scope(manager.manual_get_compact_task(
+        worker_id,
+        group_id,
+        ManualCompactionOption {
+            level: 0,
+            sst_ids: vec![sst_id.into()],
+            ..Default::default()
+        },
+    ));
+    let cancel = async {
+        reached
+            .await
+            .expect("selection did not publish an assignment");
+        let (_, assignments) = manager.list_compaction_status().await;
+        let [assignment] = assignments.as_slice() else {
+            panic!("expected one published assignment");
+        };
+        let task_id = assignment.compact_task.as_ref().unwrap().task_id;
+        assert!(
+            manager
+                .cancel_compact_task(task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+        resume.send(()).unwrap();
+        task_id
+    };
+
+    let (selected, cancelled_task_id) =
+        Box::pin(tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(select, cancel)
+        }))
+        .await
+        .expect("selection and cancellation did not finish");
+    assert_eq!(selected.unwrap().unwrap().task_id, cancelled_task_id);
+    assert_eq!(manager.get_assigned_compact_task_num().await, 0);
+    assert!(
+        manager.compactor_manager.get_progress().is_empty(),
+        "cancelled task regained a heartbeat"
+    );
+}
+
 #[tokio::test]
 async fn test_trigger_manual_compaction() {
     let (_, hummock_manager, _, worker_id) = setup_compute_env(80).await;

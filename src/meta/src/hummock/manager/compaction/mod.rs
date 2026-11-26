@@ -618,8 +618,15 @@ impl HummockManager {
                 compact_task_assignment
             )?;
         }
+        // Publish heartbeat tracking before cancellation can observe the committed assignments.
+        // Register only after commit succeeds, using the same lock order as task reporting.
+        for compact_task in &pick_tasks {
+            self.compactor_manager
+                .initiate_task_heartbeat(compact_task.clone());
+        }
         drop(compaction_guard);
         if !pick_tasks.is_empty() {
+            sync_point::sync_point!("COMPACTION_ASSIGNMENT_PUBLISHED");
             self.metrics
                 .compact_task_batch_count
                 .with_label_values(&["batch_get_compact_task"])
@@ -628,10 +635,6 @@ impl HummockManager {
 
         for compact_task in &mut pick_tasks {
             let compaction_group_id = compact_task.compaction_group_id;
-
-            // Initiate heartbeat for the task to track its progress.
-            self.compactor_manager
-                .initiate_task_heartbeat(compact_task.clone());
 
             // this task has been finished.
             compact_task.task_status = TaskStatus::Pending;
