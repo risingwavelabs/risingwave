@@ -14,7 +14,10 @@
 
 use std::sync::LazyLock;
 
-use prometheus::{IntGauge, Registry, register_int_gauge_with_registry};
+use prometheus::{
+    IntCounter, IntGauge, Registry, register_int_counter_with_registry,
+    register_int_gauge_with_registry,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 pub(crate) static GLOBAL_PIN_CACHE_METRICS: LazyLock<PinCacheMetrics> =
@@ -24,25 +27,42 @@ pub(crate) static GLOBAL_PIN_CACHE_METRICS: LazyLock<PinCacheMetrics> =
 pub(crate) struct PinCacheMetrics {
     pub published_objects: IntGauge,
     pub published_bytes: IntGauge,
+    pub recovery_ready: IntGauge,
+    pub recovery_failures: IntCounter,
 }
 
 impl PinCacheMetrics {
     fn new(registry: &Registry) -> Self {
         let published_objects = register_int_gauge_with_registry!(
             "pin_cache_published_objects",
-            "Complete SST objects currently routed to the local Pin Cache",
+            "SST objects currently routed to the local Pin Cache",
             registry
         )
         .unwrap();
         let published_bytes = register_int_gauge_with_registry!(
             "pin_cache_published_bytes",
-            "Complete SST bytes currently routed to the local Pin Cache",
+            "Bytes in files currently routed to the local Pin Cache",
             registry
         )
         .unwrap();
+        let recovery_ready = register_int_gauge_with_registry!(
+            "pin_cache_recovery_ready",
+            "Whether the local Pin Cache inventory scan completed successfully",
+            registry
+        )
+        .unwrap();
+        let recovery_failures = register_int_counter_with_registry!(
+            "pin_cache_recovery_failure_total",
+            "Pin Cache inventory scan failures",
+            registry
+        )
+        .unwrap();
+
         Self {
             published_objects,
             published_bytes,
+            recovery_ready,
+            recovery_failures,
         }
     }
 }
