@@ -226,17 +226,17 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                         ));
                     }
 
-                    if let Some(expr) = watermark_filter_expr {
+                    let output = if let Some(expr) = watermark_filter_expr {
                         let pred_output = expr.eval_infallible(chunk.data_chunk()).await;
-
-                        if let Some(output_chunk) =
-                            FilterExecutorInner::<UPSERT>::filter(chunk, pred_output)?
-                        {
-                            yield Message::Chunk(output_chunk);
-                        };
+                        FilterExecutorInner::<UPSERT>::filter(chunk, pred_output)?
                     } else {
-                        // No watermark
-                        yield Message::Chunk(chunk);
+                        // `event_time >= watermark` drops NULL event times once a watermark
+                        // exists. Drop them before that too, so that this does not depend on
+                        // timing.
+                        FilterExecutorInner::<UPSERT>::filter_not_null(chunk, event_time_col_idx)?
+                    };
+                    if let Some(output_chunk) = output {
+                        yield Message::Chunk(output_chunk);
                     }
 
                     if let Some(watermark) = current_watermark.clone() {
@@ -514,7 +514,7 @@ mod tests {
         (storage_table, state_table)
     }
 
-    async fn create_watermark_filter_executor(
+    async fn create_watermark_filter_executor<const UPSERT: bool>(
         mem_state: MemoryStateStore,
     ) -> (Box<dyn Execute>, MessageSender) {
         let schema = Schema {
@@ -552,7 +552,7 @@ mod tests {
         };
 
         (
-            WatermarkFilterExecutor::new(
+            WatermarkFilterExecutorInner::<_, UPSERT>::new(
                 ctx,
                 source,
                 watermark_expr,
@@ -589,7 +589,7 @@ mod tests {
 
         let mem_state = MemoryStateStore::new();
 
-        let (executor, mut tx) = create_watermark_filter_executor(mem_state.clone()).await;
+        let (executor, mut tx) = create_watermark_filter_executor::<false>(mem_state.clone()).await;
         let mut executor = executor.execute();
 
         // push the init barrier
@@ -653,7 +653,7 @@ mod tests {
         drop(executor);
 
         // Build new executor
-        let (executor, mut tx) = create_watermark_filter_executor(mem_state.clone()).await;
+        let (executor, mut tx) = create_watermark_filter_executor::<false>(mem_state.clone()).await;
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
@@ -687,5 +687,60 @@ mod tests {
                 Date::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
             ))
         );
+    }
+
+    /// Returns the output and the watermark for a chunk that arrives before any watermark exists.
+    async fn filter_first_chunk<const UPSERT: bool>(
+        chunk: StreamChunk,
+    ) -> (StreamChunk, Watermark) {
+        let (executor, mut tx) =
+            create_watermark_filter_executor::<UPSERT>(MemoryStateStore::new()).await;
+        let mut executor = executor.execute();
+        tx.push_barrier(test_epoch(1), false);
+        executor.next().await.unwrap().unwrap();
+
+        tx.push_chunk(chunk);
+        let output = executor.next().await.unwrap().unwrap();
+        let watermark = executor.next().await.unwrap().unwrap();
+        (
+            output.into_chunk().unwrap().compact_vis(),
+            watermark.into_watermark().unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_null_event_time_before_first_watermark() {
+        let chunk = StreamChunk::from_pretty(
+            "  I TS
+             + 1 .
+             + 2 2022-11-07T00:00:00",
+        );
+        let watermark = Watermark::new(
+            1,
+            WATERMARK_TYPE,
+            ScalarImpl::Timestamp(Date::from_ymd_uncheck(2022, 11, 6).and_hms_uncheck(0, 0, 0)),
+        );
+
+        let (output, output_watermark) = filter_first_chunk::<false>(chunk.clone()).await;
+        assert_eq!(
+            output,
+            StreamChunk::from_pretty(
+                "  I TS
+                 + 2 2022-11-07T00:00:00",
+            )
+        );
+        assert_eq!(output_watermark, watermark);
+
+        // In upsert mode, the Insert of the NULL row becomes a Delete.
+        let (output, output_watermark) = filter_first_chunk::<true>(chunk).await;
+        assert_eq!(
+            output,
+            StreamChunk::from_pretty(
+                "  I TS
+                 - 1 .
+                 + 2 2022-11-07T00:00:00",
+            )
+        );
+        assert_eq!(output_watermark, watermark);
     }
 }

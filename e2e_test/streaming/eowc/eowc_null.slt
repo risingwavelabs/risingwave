@@ -1,0 +1,108 @@
+# A watermark only bounds non-NULL values. The watermark filter drops rows with a NULL event time,
+# and EOWC executors skip rows that are NULL in their watermark column.
+
+control substitution on
+
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table t (
+    ts timestamp,
+    x int,
+    watermark for ts as ts - interval '5 minutes'
+) append only;
+
+# `d` has a watermark derived from `ts`, and is NULL where the addition overflows: near the largest
+# timestamps.
+statement ok
+create materialized view mv_select as
+select ts + interval '93000000 days' as d, x
+from t
+emit on window close;
+
+statement ok
+create materialized view mv_agg as
+select ts + interval '93000000 days' as d, count(*) as cnt, count(distinct x) as distinct_x
+from t
+group by 1
+emit on window close;
+
+# The table has no watermark yet.
+statement ok
+insert into t values ('2023-05-06 16:51:00', 1), (null, 2);
+
+query TI
+select ts, x from t order by x;
+----
+2023-05-06 16:51:00 1
+
+statement ok
+insert into t values ('2023-05-06 16:52:00', 1), ('2023-05-06 16:52:00', 1), ('2023-05-06 16:52:00', 3);
+
+# Close the windows above.
+statement ok
+insert into t values ('2023-05-06 17:00:00', 4);
+
+query TI
+select d - interval '93000000 days', x from mv_select order by 1, 2;
+----
+2023-05-06 16:51:00 1
+2023-05-06 16:52:00 1
+2023-05-06 16:52:00 1
+2023-05-06 16:52:00 3
+
+query TII
+select d - interval '93000000 days', cnt, distinct_x from mv_agg order by 1;
+----
+2023-05-06 16:51:00 1 1
+2023-05-06 16:52:00 3 2
+
+# `d` overflows to NULL. So does its derived watermark, which is then not emitted.
+statement ok
+insert into t values ('9999-01-01 00:00:00', 5);
+
+query TI
+select d - interval '93000000 days', x from mv_select order by 1, 2;
+----
+2023-05-06 16:51:00 1
+2023-05-06 16:52:00 1
+2023-05-06 16:52:00 1
+2023-05-06 16:52:00 3
+
+query TII
+select d - interval '93000000 days', cnt, distinct_x from mv_agg order by 1;
+----
+2023-05-06 16:51:00 1 1
+2023-05-06 16:52:00 3 2
+
+# No watermark would ever close the row with NULL `d` (x = 5), so it must not stay in any state.
+let sort_table
+select name from rw_catalog.rw_internal_table_info
+where job_name = 'mv_select' and name like '%sort%'
+
+let dedup_table
+select name from rw_catalog.rw_internal_table_info
+where job_name = 'mv_agg' and name like '%hashaggdedup%'
+
+query I
+select count(*) from ${sort_table} where t_x = 5;
+----
+0
+
+query I
+select count(*) from ${dedup_table} where t_x = 5;
+----
+0
+
+statement ok
+drop materialized view mv_select;
+
+statement ok
+drop materialized view mv_agg;
+
+statement ok
+drop table t;
