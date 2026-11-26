@@ -140,6 +140,59 @@ fn parse_update() {
 }
 
 #[test]
+fn parse_insert_parenthesized_query() {
+    // A parenthesized query is a valid INSERT source. It must not be parsed as a column list.
+    let sql = "INSERT INTO dst2 (SELECT * FROM src2)";
+    match verified_stmt(sql) {
+        Statement::Insert {
+            table_name,
+            columns,
+            source,
+            ..
+        } => {
+            assert_eq!(table_name.to_string(), "dst2");
+            assert!(columns.is_empty());
+            assert!(matches!(source.body, SetExpr::Query(_)));
+        }
+        _ => unreachable!(),
+    }
+
+    // A real column list must still parse, and must not be mistaken for a query.
+    let sql = "INSERT INTO dst2 (d) SELECT 1";
+    match verified_stmt(sql) {
+        Statement::Insert {
+            columns, source, ..
+        } => {
+            assert_eq!(columns, vec![Ident::new_unchecked("d")]);
+            assert!(matches!(source.body, SetExpr::Select(_)));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "INSERT INTO dst2 (VALUES (1, 2))";
+    match verified_stmt(sql) {
+        Statement::Insert {
+            columns, source, ..
+        } => {
+            assert!(columns.is_empty());
+            assert!(matches!(source.body, SetExpr::Query(_)));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "INSERT INTO dst2 (WITH s AS (SELECT 1 AS a) SELECT a FROM s)";
+    match verified_stmt(sql) {
+        Statement::Insert {
+            columns, source, ..
+        } => {
+            assert!(columns.is_empty());
+            assert!(matches!(source.body, SetExpr::Query(_)));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_invalid_table_name() {
     let ast = run_parser_method("db.public..customer", |parser| parser.parse_object_name());
     assert!(ast.is_err());
