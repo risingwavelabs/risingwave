@@ -686,6 +686,7 @@
   - batch_plan
 - name: index on a TopN mv whose order key exceeds its stream key can not be used for index lookup (issue 27125)
   sql: |
+    set streaming_use_snapshot_backfill = false;
     create table t (id int, tag varchar, j jsonb);
     create materialized view mv as select * from t order by tag limit 1000;
     create index idxb on mv((j->>'k1')) include (id);
@@ -694,6 +695,7 @@
   - batch_plan
 - name: index on a TopN mv whose order key exceeds its stream key can not be used for index merge (issue 27125)
   sql: |
+    set streaming_use_snapshot_backfill = false;
     create table t (id int, tag varchar, j jsonb);
     create materialized view mv as select * from t order by tag limit 1000;
     create index idxb on mv((j->>'k1')) include (id);
@@ -702,6 +704,7 @@
   - batch_plan
 - name: plain-column index on a TopN mv with an INCLUDE list that leaves out the order key can not be used for index lookup (issue 27125)
   sql: |
+    set streaming_use_snapshot_backfill = false;
     create table t (id int, tag varchar, k int);
     create materialized view mv as select * from t order by tag limit 1000;
     create index i_plain on mv(k) include (id);
@@ -714,6 +717,15 @@
     create materialized view mv as select * from t order by tag limit 1000;
     create index i_plain on mv(k) include (id);
     select id from mv where k = 10;
+  expected_outputs:
+  - batch_plan
+- name: index on a TopN mv stores the full primary key under snapshot backfill and can be used for index lookup
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select tag from mv where j->>'k1' = 'v';
   expected_outputs:
   - batch_plan
 - name: index on a single-row mv is never selected for a predicate scan (issue 27125)

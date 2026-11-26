@@ -1140,6 +1140,7 @@
         └─BatchScan { table: mv, columns: [mv.j, mv.id], distribution: Single }
 - name: index on a TopN mv whose order key exceeds its stream key can not be used for index lookup (issue 27125)
   sql: |
+    set streaming_use_snapshot_backfill = false;
     create table t (id int, tag varchar, j jsonb);
     create materialized view mv as select * from t order by tag limit 1000;
     create index idxb on mv((j->>'k1')) include (id);
@@ -1151,6 +1152,7 @@
         └─BatchScan { table: mv, columns: [mv.tag, mv.j], distribution: Single }
 - name: index on a TopN mv whose order key exceeds its stream key can not be used for index merge (issue 27125)
   sql: |
+    set streaming_use_snapshot_backfill = false;
     create table t (id int, tag varchar, j jsonb);
     create materialized view mv as select * from t order by tag limit 1000;
     create index idxb on mv((j->>'k1')) include (id);
@@ -1162,6 +1164,7 @@
         └─BatchScan { table: mv, columns: [mv.id, mv.j], distribution: Single }
 - name: plain-column index on a TopN mv with an INCLUDE list that leaves out the order key can not be used for index lookup (issue 27125)
   sql: |
+    set streaming_use_snapshot_backfill = false;
     create table t (id int, tag varchar, k int);
     create materialized view mv as select * from t order by tag limit 1000;
     create index i_plain on mv(k) include (id);
@@ -1180,6 +1183,18 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: i_plain, columns: [i_plain.id], scan_ranges: [i_plain.k = Int32(10)], distribution: SomeShard }
+- name: index on a TopN mv stores the full primary key under snapshot backfill and can be used for index lookup
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select tag from mv where j->>'k1' = 'v';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: Inner, predicate: idxb.mv.tag IS NOT DISTINCT FROM mv.tag AND idxb.mv.t._row_id IS NOT DISTINCT FROM mv.t._row_id, output: [mv.tag], lookup table: mv }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: idxb, columns: [idxb.mv.t._row_id, idxb.mv.tag], scan_ranges: [idxb.JSONB_ACCESS_STR = Utf8("v")], distribution: SomeShard }
 - name: index on a single-row mv is never selected for a predicate scan (issue 27125)
   sql: |
     create table t (a int, b int);
