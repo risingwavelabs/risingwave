@@ -700,6 +700,11 @@ message HashJoinWatermarkHandleDesc {
   repeated InequalityPairV2 inequality_pairs = 2;
 }
 
+// The output columns of a join that carry a watermark.
+message OutputWatermarkColumns {
+  repeated uint32 indices = 1;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
@@ -743,6 +748,11 @@ message HashJoinNode {
 
   // Description of watermark-based and other state cleaning strategies.
   HashJoinWatermarkHandleDesc watermark_handle_desc = 17;
+
+  // The output columns on which the join emits watermarks, as the planner derived them. Absent in
+  // plans created before this field, whose joins emit on every output column of a join key and of
+  // the larger side of an inequality.
+  OutputWatermarkColumns output_watermark_columns = 18;
 }
 
 message AsOfJoinNode {
@@ -772,6 +782,9 @@ message AsOfJoinNode {
   // Controlled by session variable `streaming_asof_join_use_cache`.
   // Optional so that legacy plans (without this field) default to true (cache-based).
   optional bool use_cache = 12;
+  // The output columns on which the join emits watermarks, as the planner derived them. Absent in
+  // plans created before this field, whose joins emit on every output column of a join key.
+  OutputWatermarkColumns output_watermark_columns = 13;
 }
 
 message TemporalJoinNode {

@@ -18,7 +18,7 @@ use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{AsOfJoinNode, PbJoinEncodingType};
+use risingwave_pb::stream_plan::{AsOfJoinNode, OutputWatermarkColumns, PbJoinEncodingType};
 
 use super::stream::prelude::*;
 use super::utils::{
@@ -92,7 +92,10 @@ impl StreamAsOfJoin {
                             }),
                         );
                     }
-                    if let Some(internal) = r2i.try_map(right_idx) {
+                    // A left outer join pads the right side with NULL, which no watermark closes.
+                    if core.join_type != JoinType::AsofLeftOuter
+                        && let Some(internal) = r2i.try_map(right_idx)
+                    {
                         watermark_columns.insert(
                             internal,
                             l_wtmk_group.same_or_else(r_wtmk_group, || {
@@ -322,6 +325,11 @@ impl StreamNode for StreamAsOfJoin {
             #[expect(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
             use_cache: Some(use_cache),
+            output_watermark_columns: Some(OutputWatermarkColumns {
+                indices: (self.base.watermark_columns().indices())
+                    .map(|idx| idx as u32)
+                    .collect(),
+            }),
         }))
     }
 }

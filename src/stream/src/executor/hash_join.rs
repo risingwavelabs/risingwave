@@ -182,6 +182,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Join-key positions and cleaning flags for watermark handling.
     /// Each entry: (join-key position, `do_state_cleaning`).
     watermark_indices_in_jk: Vec<(usize, bool)>,
+    /// The output columns on which to emit watermarks, as the plan lists them. `None` for plans
+    /// created before the list, which emit on every column computed below.
+    output_watermark_columns: Option<HashSet<usize>>,
 
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
@@ -275,6 +278,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         chunk_size: usize,
         high_join_amplification_threshold: usize,
         watermark_indices_in_jk: Vec<(usize, bool)>,
+        output_watermark_columns: Option<HashSet<usize>>,
     ) -> Self {
         Self::new_with_cache_size(
             ctx,
@@ -298,6 +302,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             high_join_amplification_threshold,
             None,
             watermark_indices_in_jk,
+            output_watermark_columns,
         )
     }
 
@@ -324,6 +329,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         high_join_amplification_threshold: usize,
         entry_state_max_rows: Option<usize>,
         watermark_indices_in_jk: Vec<(usize, bool)>,
+        output_watermark_columns: Option<HashSet<usize>>,
     ) -> Self {
         let entry_state_max_rows = match entry_state_max_rows {
             None => ctx.config.developer.hash_join_entry_state_max_rows,
@@ -569,6 +575,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             inequality_pairs,
             inequality_watermarks,
             watermark_indices_in_jk,
+            output_watermark_columns,
             append_only_optimize,
             metrics,
             chunk_size,
@@ -910,6 +917,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             if let Some(val) = update_right_watermark {
                 self.side_r.ht.update_watermark(val);
             }
+        }
+        if let Some(cols) = &self.output_watermark_columns {
+            watermarks_to_emit.retain(|watermark| cols.contains(&watermark.col_idx));
         }
         Ok(watermarks_to_emit)
     }
@@ -1540,6 +1550,7 @@ mod tests {
         null_safe: bool,
         condition_text: Option<String>,
         inequality_pairs: Vec<InequalityPairInfo>,
+        output_watermark_columns: Option<HashSet<usize>>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
@@ -1642,6 +1653,7 @@ mod tests {
             1024,
             2048,
             vec![(0, true)],
+            output_watermark_columns,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1651,7 +1663,7 @@ mod tests {
         null_safe: bool,
         condition_text: Option<String>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        create_executor::<T>(with_condition, null_safe, condition_text, vec![]).await
+        create_executor::<T>(with_condition, null_safe, condition_text, vec![], None).await
     }
 
     async fn create_append_only_executor<const T: JoinTypePrimitive>(
@@ -1732,6 +1744,7 @@ mod tests {
             1024,
             2048,
             vec![(0, true)],
+            None,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1769,6 +1782,7 @@ mod tests {
                 clean_right_state: false,
                 op: InequalityType::GreaterThanOrEqual,
             }],
+            None,
         )
         .await;
 
@@ -3736,6 +3750,92 @@ mod tests {
         Ok(())
     }
 
+    /// The columns of the next `n` watermarks, sorted, each of value `val`.
+    fn next_watermark_cols(
+        join: &mut BoxedMessageStream,
+        n: usize,
+        val: i64,
+    ) -> StreamExecutorResult<Vec<usize>> {
+        let mut cols = vec![];
+        for _ in 0..n {
+            let watermark = join.next_unwrap_ready_watermark()?;
+            assert_eq!(watermark.val, ScalarImpl::Int64(val));
+            cols.push(watermark.col_idx);
+        }
+        cols.sort_unstable();
+        Ok(cols)
+    }
+
+    /// Checks the output columns that get the watermark of the join key, and of the inequality
+    /// `left.1 >= right.1`, whose larger side is the left one.
+    async fn check_join_watermarks<const T: JoinTypePrimitive>(
+        output_watermark_columns: Option<&[usize]>,
+        key_watermark_cols: &[usize],
+        inequality_watermark_cols: &[usize],
+    ) -> StreamExecutorResult<()> {
+        let listed = || -> Option<HashSet<usize>> {
+            output_watermark_columns.map(|cols| cols.iter().copied().collect())
+        };
+        // Join key watermarks: left 100, right 50.
+        let (mut tx_l, mut tx_r, mut join) =
+            create_executor::<T>(false, false, None, vec![], listed()).await;
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        join.next_unwrap_ready_barrier()?;
+        tx_l.push_int64_watermark(0, 100);
+        tx_r.push_int64_watermark(0, 50);
+        assert_eq!(
+            next_watermark_cols(&mut join, key_watermark_cols.len(), 50)?,
+            key_watermark_cols
+        );
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
+        join.next_unwrap_ready_barrier()?;
+
+        // Inequality watermarks: left 10, right 6.
+        let (mut tx_l, mut tx_r, mut join) = create_executor::<T>(
+            true,
+            false,
+            Some(String::from(
+                "(greater_than_or_equal:boolean $1:int8 $3:int8)",
+            )),
+            vec![InequalityPairInfo {
+                left_idx: 1,
+                right_idx: 1,
+                clean_left_state: true,
+                clean_right_state: false,
+                op: InequalityType::GreaterThanOrEqual,
+            }],
+            listed(),
+        )
+        .await;
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        join.next_unwrap_ready_barrier()?;
+        tx_l.push_int64_watermark(1, 10);
+        tx_r.push_int64_watermark(1, 6);
+        assert_eq!(
+            next_watermark_cols(&mut join, inequality_watermark_cols.len(), 6)?,
+            inequality_watermark_cols
+        );
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
+        join.next_unwrap_ready_barrier()?;
+        Ok(())
+    }
+
+    /// The join emits watermarks only on the output columns that the plan lists. A plan created
+    /// before the list emits on every output column of the join key and of the larger side of the
+    /// inequality.
+    #[tokio::test]
+    async fn test_output_watermark_columns() -> StreamExecutorResult<()> {
+        // A left outer join lists only its left side, which it does not pad with NULL.
+        check_join_watermarks::<{ JoinType::LeftOuter }>(Some(&[0, 1]), &[0], &[1]).await?;
+        // A full outer join pads both sides, so it lists no column.
+        check_join_watermarks::<{ JoinType::FullOuter }>(Some(&[]), &[], &[]).await?;
+        check_join_watermarks::<{ JoinType::FullOuter }>(None, &[0, 2], &[1]).await
+    }
+
     async fn create_executor_with_evict_interval<const T: JoinTypePrimitive>(
         evict_interval: u32,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
@@ -3807,6 +3907,7 @@ mod tests {
             1024,
             2048,
             vec![(0, true)],
+            None,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }

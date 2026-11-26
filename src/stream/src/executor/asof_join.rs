@@ -19,7 +19,7 @@
 //! Controlled by the session variable `streaming_asof_join_use_cache`.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Bound;
 use std::time::Duration;
 
@@ -124,6 +124,9 @@ pub struct AsOfJoinExecutor<S: StateStore, const T: AsOfJoinTypePrimitive, E: As
     join_cache_evict_interval_rows: u32,
     /// Threshold for logging high join amplification warnings.
     high_join_amplification_threshold: usize,
+    /// The output columns on which to emit watermarks, as the plan lists them. `None` for plans
+    /// created before the list, which emit on every output column of a join key.
+    output_watermark_columns: Option<HashSet<usize>>,
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> std::fmt::Debug
@@ -186,6 +189,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         asof_desc: AsOfDesc,
         use_cache: bool,
         high_join_amplification_threshold: usize,
+        output_watermark_columns: Option<HashSet<usize>>,
     ) -> Self {
         let join_cache_evict_interval_rows = ctx
             .config
@@ -301,6 +305,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received: 0,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold,
+            output_watermark_columns,
         }
     }
 
@@ -571,6 +576,9 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         if let Some(watermark) = clean_watermark {
             self.side_l.ht.update_watermark(watermark.clone());
             self.side_r.ht.update_watermark(watermark);
+        }
+        if let Some(cols) = &self.output_watermark_columns {
+            watermarks_to_emit.retain(|watermark| cols.contains(&watermark.col_idx));
         }
         Ok(watermarks_to_emit)
     }
@@ -1072,8 +1080,14 @@ mod tests {
         use_cache: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        create_executor_with_store::<T>(asof_desc, use_cache, metrics, MemoryStateStore::new())
-            .await
+        create_executor_with_store::<T>(
+            asof_desc,
+            use_cache,
+            metrics,
+            MemoryStateStore::new(),
+            None,
+        )
+        .await
     }
 
     /// The state table of a side, with pk (join key, inequality column, stream key).
@@ -1101,6 +1115,7 @@ mod tests {
         use_cache: bool,
         metrics: Arc<StreamingMetrics>,
         mem_state: MemoryStateStore,
+        output_watermark_columns: Option<HashSet<usize>>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
@@ -1143,6 +1158,7 @@ mod tests {
             asof_desc,
             use_cache,
             2048, // high_join_amplification_threshold
+            output_watermark_columns,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1497,6 +1513,47 @@ mod tests {
         Ok(())
     }
 
+    /// The join emits watermarks only on the output columns that the plan lists. A plan created
+    /// before the list emits on both output columns of the join key.
+    #[tokio::test]
+    async fn test_asof_join_output_watermark_columns() -> StreamExecutorResult<()> {
+        // A left outer join lists only its left join key, as it pads the right side with NULL.
+        for (output_watermark_columns, expected_cols) in
+            [(Some(HashSet::from([0])), vec![0]), (None, vec![0, 3])]
+        {
+            let (mut tx_l, mut tx_r, mut join) =
+                create_executor_with_store::<{ AsOfJoinType::LeftOuter }>(
+                    AsOfDesc {
+                        left_idx: 1,
+                        right_idx: 2,
+                        inequality_type: AsOfInequalityType::Ge,
+                    },
+                    false,
+                    Arc::new(StreamingMetrics::unused()),
+                    MemoryStateStore::new(),
+                    output_watermark_columns,
+                )
+                .await;
+            tx_l.push_barrier(test_epoch(1), false);
+            tx_r.push_barrier(test_epoch(1), false);
+            join.next_unwrap_ready_barrier()?;
+            tx_l.push_int64_watermark(0, 10);
+            tx_r.push_int64_watermark(0, 20);
+            let mut cols = vec![];
+            for _ in &expected_cols {
+                let watermark = join.next_unwrap_ready_watermark()?;
+                assert_eq!(watermark.val, ScalarImpl::Int64(10));
+                cols.push(watermark.col_idx);
+            }
+            cols.sort_unstable();
+            assert_eq!(cols, expected_cols);
+            tx_l.push_barrier(test_epoch(2), false);
+            tx_r.push_barrier(test_epoch(2), false);
+            join.next_unwrap_ready_barrier()?;
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_asof_join_state_cleaning() -> StreamExecutorResult<()> {
         for use_cache in [false, true] {
@@ -1512,6 +1569,7 @@ mod tests {
                     use_cache,
                     Arc::new(StreamingMetrics::unused()),
                     store.clone(),
+                    None,
                 )
             };
             let (mut tx_l, mut tx_r, mut join) = create_executor().await;

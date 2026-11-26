@@ -23,7 +23,8 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     HashJoinNode, HashJoinWatermarkHandleDesc, InequalityPairV2 as PbInequalityPairV2,
-    InequalityType as PbInequalityType, JoinKeyWatermarkIndex, PbJoinEncodingType,
+    InequalityType as PbInequalityType, JoinKeyWatermarkIndex, OutputWatermarkColumns,
+    PbJoinEncodingType,
 };
 
 use super::generic::GenericPlanNode;
@@ -96,6 +97,11 @@ fn derive_watermark_for_hash_join(
     let mut watermark_indices_in_jk = vec![];
     let mut inequality_pairs = vec![];
 
+    // No watermark ever closes a row that the join pads with NULL, so the padded side's columns
+    // carry no output watermark.
+    let left_padded = matches!(core.join_type, JoinType::RightOuter | JoinType::FullOuter);
+    let right_padded = matches!(core.join_type, JoinType::LeftOuter | JoinType::FullOuter);
+
     // Track if we've already found a column for state cleaning.
     // Join key state cleaning cleans both sides, so we track it separately.
     let mut found_jk_state_clean = false;
@@ -118,13 +124,13 @@ fn derive_watermark_for_hash_join(
             }
             watermark_indices_in_jk.push((idx, do_state_cleaning));
 
-            if let Some(internal) = l2i.try_map(*left_key) {
+            if !left_padded && let Some(internal) = l2i.try_map(*left_key) {
                 watermark_columns.insert(
                     internal,
                     l_wtmk_group.same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
                 );
             }
-            if let Some(internal) = r2i.try_map(*right_key) {
+            if !right_padded && let Some(internal) = r2i.try_map(*right_key) {
                 watermark_columns.insert(
                     internal,
                     l_wtmk_group.same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
@@ -180,13 +186,15 @@ fn derive_watermark_for_hash_join(
         // For `left >= right`: left is larger, yield left watermark
         // For `left <= right`: right is larger, yield right watermark
         if left_is_larger {
-            if let Some(internal) = l2i.try_map(left_idx)
+            if !left_padded
+                && let Some(internal) = l2i.try_map(left_idx)
                 && !watermark_columns.contains(internal)
             {
                 watermark_columns.insert(internal, ctx.next_watermark_group_id());
                 is_valuable_inequality = true;
             }
-        } else if let Some(internal) = r2i.try_map(right_idx)
+        } else if !right_padded
+            && let Some(internal) = r2i.try_map(right_idx)
             && !watermark_columns.contains(internal)
         {
             watermark_columns.insert(internal, ctx.next_watermark_group_id());
@@ -718,6 +726,11 @@ impl TryToStreamPb for StreamHashJoin {
             // Join encoding type should now be read from per-job config override.
             #[expect(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
+            output_watermark_columns: Some(OutputWatermarkColumns {
+                indices: (self.base.watermark_columns().indices())
+                    .map(|idx| idx as u32)
+                    .collect(),
+            }),
         })))
     }
 }
