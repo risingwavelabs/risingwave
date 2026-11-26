@@ -28,11 +28,13 @@ use crate::{ExprError, Result};
 
 // aggregate definition
 mod def;
+mod list_state;
 mod scalar_wrapper;
 // user defined aggregate function
 mod user_defined;
 
 pub use self::def::*;
+pub use self::list_state::{build_list_state, list_state_type};
 
 /// A trait over all aggregate functions.
 #[async_trait::async_trait]

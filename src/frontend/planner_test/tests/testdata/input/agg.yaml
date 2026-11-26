@@ -1192,3 +1192,16 @@
     - optimized_logical_plan_for_stream
     - batch_plan
     - stream_plan
+- name: array_agg/string_agg use materialized input state by default
+  sql: |
+    create table t (k int, x int, y varchar);
+    select k, array_agg(x order by y), string_agg(y, ',') from t group by k;
+  expected_outputs:
+    - stream_dist_plan # one state table per agg call
+- name: array_agg/string_agg use value state under streaming_enable_value_state_array_agg
+  sql: |
+    set streaming_enable_value_state_array_agg = true;
+    create table t (k int, x int, y varchar);
+    select k, array_agg(x order by y), string_agg(y, ',') from t group by k;
+  expected_outputs:
+    - stream_dist_plan # no state table per agg call, list state in the intermediate table

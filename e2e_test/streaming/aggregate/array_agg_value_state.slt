@@ -1,0 +1,138 @@
+# Same as array_agg.slt, but with `array_agg`/`string_agg` running on a value state.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_enable_value_state_array_agg TO true;
+
+statement ok
+create table t (id int primary key, a varchar, b int, c int);
+
+statement ok
+insert into t values (1, 'aaa', 1, 1), (2, 'bbb', 0, 2), (3, 'ccc', 0, 5), (4, 'ddd', 1, 4);
+
+statement ok
+create materialized view mv1 as select array_agg(c) as res from t;
+
+statement ok
+create materialized view mv2 as select array_agg(a order by b asc, a desc) as res from t;
+
+statement ok
+create materialized view mv3 as select array_agg(a order by b nulls first, a nulls last) as res from t;
+
+statement ok
+create materialized view mv4 as select b, string_agg(a, ',' order by c desc) as res from t group by b;
+
+query T
+select u from (select unnest(res) from mv1) p(u) order by u;
+----
+1
+2
+4
+5
+
+query T
+select * from mv2;
+----
+{ccc,bbb,ddd,aaa}
+
+query IT rowsort
+select * from mv4;
+----
+0 ccc,bbb
+1 ddd,aaa
+
+statement ok
+insert into t values (5, 'x', 1, 2), (6, 'y', 3, 6);
+
+query T
+select u from (select unnest(res) from mv1) p(u) order by u;
+----
+1
+2
+2
+4
+5
+6
+
+query T
+select * from mv2;
+----
+{ccc,bbb,x,ddd,aaa,y}
+
+statement ok
+insert into t values (7, NULL, NULL, 2), (8, 'z', NULL, 6);
+
+query T
+select * from mv3;
+----
+{z,NULL,bbb,ccc,aaa,ddd,x,y}
+
+# deletes and updates retract from the value state
+statement ok
+delete from t where id in (2, 7);
+
+statement ok
+update t set b = 0, a = 'w' where id = 5;
+
+query T
+select u from (select unnest(res) from mv1) p(u) order by u;
+----
+1
+2
+4
+5
+6
+6
+
+query T
+select * from mv2;
+----
+{w,ccc,ddd,aaa,y,z}
+
+query T
+select * from mv3;
+----
+{z,ccc,w,aaa,ddd,y}
+
+query IT rowsort
+select * from mv4;
+----
+0 ccc,w
+1 ddd,aaa
+3 y
+NULL z
+
+statement ok
+delete from t;
+
+query T
+select * from mv1;
+----
+NULL
+
+query T
+select * from mv2;
+----
+NULL
+
+query I
+select count(*) from mv4;
+----
+0
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop materialized view mv4;
+
+statement ok
+drop table t;

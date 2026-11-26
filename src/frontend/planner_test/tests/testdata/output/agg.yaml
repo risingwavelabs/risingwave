@@ -2381,3 +2381,90 @@
       └─StreamExchange { dist: HashShard(m7.a) }
         └─StreamFilter { predicate: (m7.a > 0:Int32) }
           └─StreamTableScan { table: m7, columns: [m7.a, m7.b], stream_scan_type: SnapshotBackfill, stream_key: [], pk: [], dist: Single }
+- name: array_agg/string_agg use materialized input state by default
+  sql: |
+    create table t (k int, x int, y varchar);
+    select k, array_agg(x order by y), string_agg(y, ',') from t group by k;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [k, array_agg, string_agg], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [t.k, array_agg(t.x order_by(t.y ASC)), string_agg(t.y, ',':Varchar)] }
+        └── StreamHashAgg { group_key: [t.k], aggs: [array_agg(t.x order_by(t.y ASC)), string_agg(t.y, ',':Varchar), count] }
+            ├── tables: [ HashAggState: 2, HashAggCall0: 0, HashAggCall1: 1 ]
+            └── StreamExchange Hash([0]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [t.k, t.x, t.y, ',':Varchar, t._row_id] }
+    └── StreamTableScan { table: t, columns: [t.k, t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        ├── tables: [ StreamScan: 3 ]
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_k, t_y, t__row_id, t_x, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 1
+    ├── columns: [ t_k, t__row_id, t_y, ',':Varchar, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 2
+    ├── columns: [ t_k, array_agg(t_x order_by(t_y ASC)), string_agg(t_y, ',':Varchar), count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 3
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294 { columns: [ k, array_agg, string_agg, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+- name: array_agg/string_agg use value state under streaming_enable_value_state_array_agg
+  sql: |
+    set streaming_enable_value_state_array_agg = true;
+    create table t (k int, x int, y varchar);
+    select k, array_agg(x order by y), string_agg(y, ',') from t group by k;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [k, array_agg, string_agg], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [t.k, array_agg(t.x order_by(t.y ASC)), string_agg(t.y, ',':Varchar)] }
+        └── StreamHashAgg { group_key: [t.k], aggs: [array_agg(t.x order_by(t.y ASC)), string_agg(t.y, ',':Varchar), count] }
+            ├── tables: [ HashAggState: 0 ]
+            └── StreamExchange Hash([0]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [t.k, t.x, t.y, ',':Varchar, t._row_id] }
+    └── StreamTableScan { table: t, columns: [t.k, t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        ├── tables: [ StreamScan: 1 ]
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_k, array_agg(t_x order_by(t_y ASC)), string_agg(t_y, ',':Varchar), count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 1
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294 { columns: [ k, array_agg, string_agg, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
