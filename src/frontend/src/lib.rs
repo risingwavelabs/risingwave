@@ -17,7 +17,6 @@
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(box_patterns)]
 #![feature(min_specialization)]
 #![feature(extend_one)]
 #![feature(impl_trait_in_assoc_type)]

@@ -287,6 +287,16 @@ impl<const N: usize, P: Step> Step for TypedId<N, P> {
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
         P::backward_checked(start.0, count).map(Self)
     }
+
+    fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let (id, overflowed) = P::forward_overflowing(start.0, count);
+        (Self(id), overflowed)
+    }
+
+    fn backward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let (id, overflowed) = P::backward_overflowing(start.0, count);
+        (Self(id), overflowed)
+    }
 }
 
 macro_rules! impl_add {
@@ -625,3 +635,28 @@ macro_rules! impl_hummock_object_id {
 impl_hummock_object_id!(HummockSstableObjectId);
 impl_hummock_object_id!(HummockVectorFileId);
 impl_hummock_object_id!(HummockHnswGraphFileId);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_typed_id_step_overflow() {
+        assert_eq!(
+            TableId::forward_overflowing(TableId::new(7), 2),
+            (TableId::new(9), false)
+        );
+        assert_eq!(
+            TableId::backward_overflowing(TableId::new(7), 2),
+            (TableId::new(5), false)
+        );
+        assert_eq!(
+            TableId::forward_overflowing(TableId::new(u32::MAX), 1),
+            (TableId::new(0), true)
+        );
+        assert_eq!(
+            TableId::backward_overflowing(TableId::new(0), 1),
+            (TableId::new(u32::MAX), true)
+        );
+    }
+}
