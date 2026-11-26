@@ -201,6 +201,15 @@ impl SessionImpl {
         })
     }
 
+    /// Whether the current transaction has already acquired the snapshot it reads. `false` if
+    /// no transaction is in progress.
+    pub fn has_pinned_snapshot(&self) -> bool {
+        match &*self.txn.lock() {
+            State::Initial => false,
+            State::Implicit(ctx) | State::Explicit(ctx) => ctx.snapshot.is_some(),
+        }
+    }
+
     pub fn get_pinned_snapshot(&self) -> Option<ReadSnapshot> {
         self.txn_ctx().snapshot.clone()
     }

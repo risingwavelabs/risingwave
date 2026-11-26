@@ -26,6 +26,8 @@ pub struct SessionTimezone {
     timezone: String,
     /// Whether or not the session timezone was used
     used: bool,
+    /// Whether to tell the user when the session timezone is used.
+    notify: bool,
 }
 
 impl ExprRewriter for SessionTimezone {
@@ -49,6 +51,17 @@ impl SessionTimezone {
         Self {
             timezone,
             used: false,
+            notify: true,
+        }
+    }
+
+    /// Same as [`Self::new`], but never sends a notice to the user. For rewrites that only
+    /// inspect a plan, where the notice would be duplicated or misleading.
+    pub fn new_silent(timezone: String) -> Self {
+        Self {
+            timezone,
+            used: false,
+            notify: false,
         }
     }
 
@@ -63,6 +76,9 @@ impl SessionTimezone {
     fn mark_used(&mut self) {
         if !self.used {
             self.used = true;
+            if !self.notify {
+                return;
+            }
             current::notice_to_user(format!(
                 "Your session timezone is {}. It was used in the interpretation of timestamps and dates in your query. If this is unintended, \
                 change your timezone to match that of your data's with `set timezone = [timezone]` or \

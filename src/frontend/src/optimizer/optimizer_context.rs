@@ -23,6 +23,7 @@ use risingwave_common::id::SourceId;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
+use crate::Explain;
 use crate::error::Result;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
@@ -30,7 +31,6 @@ use crate::optimizer::plan_node::generic::Share;
 use crate::optimizer::plan_node::{LogicalPlanRef, PlanNodeId, StreamPlanRef};
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
-use crate::{Explain, TableCatalog};
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -105,8 +105,6 @@ pub struct OptimizerContext {
     /// Mapping from Iceberg table identifier to the current snapshot and its RisingWave commit
     /// boundary. Used to keep multiple scans of the same table consistent within one query.
     iceberg_snapshot_info_map: RefCell<HashMap<SourceId, Option<IcebergSnapshotInfo>>>,
-    /// Batch materialized view candidates for exact-match rewriting.
-    batch_mview_candidates: RefCell<Vec<MaterializedViewCandidate>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
@@ -124,12 +122,6 @@ pub struct OptimizerContext {
     stream_share_table: RefCell<ShareTable<StreamPlanRef>>,
 
     _phantom: PhantomUnsend,
-}
-
-#[derive(Clone, Debug)]
-pub struct MaterializedViewCandidate {
-    pub plan: LogicalPlanRef,
-    pub table: Arc<TableCatalog>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,7 +164,6 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options,
             iceberg_snapshot_info_map: RefCell::new(HashMap::new()),
-            batch_mview_candidates: RefCell::new(Vec::new()),
 
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_share_id: Cell::new(0),
@@ -201,7 +192,6 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
             iceberg_snapshot_info_map: RefCell::new(HashMap::new()),
-            batch_mview_candidates: RefCell::new(Vec::new()),
 
             last_plan_node_id: Cell::new(0),
             last_share_id: Cell::new(0),
@@ -417,16 +407,6 @@ impl OptimizerContext {
 
     pub fn overwrite_options(&self) -> &OverwriteOptions {
         &self.overwrite_options
-    }
-
-    pub fn add_batch_mview_candidate(&self, table: Arc<TableCatalog>, plan: LogicalPlanRef) {
-        self.batch_mview_candidates
-            .borrow_mut()
-            .push(MaterializedViewCandidate { plan, table });
-    }
-
-    pub fn batch_mview_candidates(&self) -> std::cell::Ref<'_, Vec<MaterializedViewCandidate>> {
-        self.batch_mview_candidates.borrow()
     }
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {

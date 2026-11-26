@@ -123,6 +123,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
+use crate::optimizer::mv_selection::CandidateCache;
 use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
@@ -205,6 +206,9 @@ pub(crate) struct FrontendEnv {
 
     /// The additional selector used when querying Prometheus.
     prometheus_selector: String,
+
+    /// The definitions of materialized views that batch queries may be answered from.
+    mv_selection_cache: Arc<CandidateCache>,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -293,6 +297,7 @@ impl FrontendEnv {
             df_spillable_budget_ctx: MemoryContext::none(),
             prometheus_client: None,
             prometheus_selector: String::new(),
+            mv_selection_cache: Default::default(),
         }
     }
 
@@ -585,6 +590,7 @@ impl FrontendEnv {
                 df_spillable_budget_ctx,
                 prometheus_client,
                 prometheus_selector,
+                mv_selection_cache: Default::default(),
             },
             join_handles,
             shutdown_senders,
@@ -653,6 +659,10 @@ impl FrontendEnv {
     /// Get the Prometheus selector string.
     pub fn prometheus_selector(&self) -> &str {
         &self.prometheus_selector
+    }
+
+    pub fn mv_selection_cache(&self) -> &CandidateCache {
+        &self.mv_selection_cache
     }
 
     pub fn server_address(&self) -> &HostAddr {

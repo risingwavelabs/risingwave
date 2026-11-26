@@ -1,0 +1,280 @@
+# Materialized views whose content is not what their definition computes for the query must
+# not be used to answer it, and views that changed must not be used as they were before.
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+set enable_mv_selection = true;
+
+# A view that emits on window close has the closed windows only.
+statement ok
+create table mvs_tw (ts timestamp, v int, watermark for ts as ts - interval '1' minute) append only;
+
+statement ok
+create materialized view mvs_eowc as
+select window_start, count(*) as n from tumble(mvs_tw, ts, interval '1' minute)
+group by window_start emit on window close;
+
+statement ok
+insert into mvs_tw values
+  ('2026-01-01 00:00:10', 1), ('2026-01-01 00:00:20', 2), ('2026-01-01 00:05:00', 3);
+
+query TI rowsort
+select window_start, count(*) as n from tumble(mvs_tw, ts, interval '1' minute) group by window_start;
+----
+2026-01-01 00:00:00 2
+2026-01-01 00:05:00 1
+
+# A view whose definition reads the session timezone was computed in the timezone of the
+# session that created it.
+statement ok
+set timezone = 'UTC';
+
+statement ok
+create table mvs_tz (ts timestamptz, v int);
+
+statement ok
+create materialized view mvs_tz_view as select ts, v from mvs_tz where ts >= '2026-01-01 08:00:00';
+
+statement ok
+insert into mvs_tz values ('2026-01-01 01:00:00+00:00', 1), ('2026-01-01 09:00:00+00:00', 2);
+
+statement ok
+set timezone = 'Asia/Singapore';
+
+query I rowsort
+select v from mvs_tz where ts >= '2026-01-01 08:00:00';
+----
+1
+2
+
+statement ok
+set timezone = 'UTC';
+
+query I rowsort
+select v from mvs_tz where ts >= '2026-01-01 08:00:00';
+----
+2
+
+# A name in a definition belongs to the search path of the session that created the view.
+statement ok
+create schema mvs_s1;
+
+statement ok
+create schema mvs_s2;
+
+statement ok
+create table mvs_s1.p (a int);
+
+statement ok
+create table mvs_s2.p (a int);
+
+statement ok
+insert into mvs_s1.p values (1);
+
+statement ok
+insert into mvs_s2.p values (2);
+
+statement ok
+set search_path = mvs_s1;
+
+statement ok
+create materialized view public.mvs_sp as select a from p;
+
+statement ok
+create materialized view mvs_sp_local as select a from p where a > 0;
+
+statement ok
+set search_path = mvs_s2;
+
+query I
+select a from p;
+----
+2
+
+query I
+select a from p where a > 0;
+----
+2
+
+statement ok
+set search_path = mvs_s1;
+
+query I
+select a from p where a > 0;
+----
+1
+
+statement ok
+set search_path = "$user", public;
+
+# `SELECT *` means other columns once the table has more of them.
+statement ok
+create table mvs_star (a int, b int);
+
+statement ok
+create materialized view mvs_star_view as select * from mvs_star;
+
+statement ok
+insert into mvs_star values (1, 2);
+
+query II
+select * from mvs_star;
+----
+1 2
+
+statement ok
+alter table mvs_star add column c int;
+
+statement ok
+insert into mvs_star values (3, 4, 5);
+
+query III rowsort
+select * from mvs_star;
+----
+1 2 NULL
+3 4 5
+
+# A name in a definition can resolve to another column once a table has more of them: `x` is
+# a column of the outer table until the inner table gets a column of that name.
+statement ok
+create table mvs_outer (a int, x int);
+
+statement ok
+create table mvs_inner (k int);
+
+statement ok
+create materialized view mvs_rebind as
+select a from mvs_outer where exists (select 1 from mvs_inner where mvs_inner.k = x);
+
+statement ok
+insert into mvs_outer values (1, 10), (2, 99);
+
+statement ok
+insert into mvs_inner values (10);
+
+query I rowsort
+select a from mvs_outer where exists (select 1 from mvs_inner where mvs_inner.k = x);
+----
+1
+
+statement ok
+alter table mvs_inner add column x int;
+
+statement ok
+insert into mvs_inner values (5, 5);
+
+query I rowsort
+select a from mvs_outer where exists (select 1 from mvs_inner where mvs_inner.k = x);
+----
+1
+2
+
+# An altered view keeps the rows that its old definition computed.
+statement ok
+create table mvs_people (n varchar, a int);
+
+statement ok
+create materialized view mvs_adults as select n, a from mvs_people where a >= 18;
+
+statement ok
+insert into mvs_people values ('Alice', 18), ('Bob', 19), ('Charlie', 17);
+
+query TI rowsort
+select n, a from mvs_people where a >= 18;
+----
+Alice 18
+Bob 19
+
+statement ok
+alter materialized view mvs_adults as select n, a from mvs_people where a >= 16;
+
+query TI rowsort
+select n, a from mvs_people where a >= 16;
+----
+Alice 18
+Bob 19
+Charlie 17
+
+# A dropped view is not used anymore.
+statement ok
+create table mvs_dropped (a int, b int);
+
+statement ok
+create materialized view mvs_dropped_view as select a, sum(b) as s from mvs_dropped group by a;
+
+statement ok
+insert into mvs_dropped values (1, 1), (1, 2), (2, 3);
+
+query II rowsort
+select a, sum(b) from mvs_dropped group by a;
+----
+1 3
+2 3
+
+statement ok
+drop materialized view mvs_dropped_view;
+
+query II rowsort
+select a, sum(b) from mvs_dropped group by a;
+----
+1 3
+2 3
+
+statement ok
+set enable_mv_selection = false;
+
+statement ok
+drop table mvs_dropped;
+
+statement ok
+drop materialized view mvs_adults;
+
+statement ok
+drop table mvs_people;
+
+statement ok
+drop materialized view mvs_rebind;
+
+statement ok
+drop table mvs_inner;
+
+statement ok
+drop table mvs_outer;
+
+statement ok
+drop materialized view mvs_star_view;
+
+statement ok
+drop table mvs_star;
+
+statement ok
+drop materialized view mvs_s1.mvs_sp_local;
+
+statement ok
+drop materialized view public.mvs_sp;
+
+statement ok
+drop table mvs_s2.p;
+
+statement ok
+drop table mvs_s1.p;
+
+statement ok
+drop schema mvs_s2;
+
+statement ok
+drop schema mvs_s1;
+
+statement ok
+drop materialized view mvs_tz_view;
+
+statement ok
+drop table mvs_tz;
+
+statement ok
+drop materialized view mvs_eowc;
+
+statement ok
+drop table mvs_tw;
