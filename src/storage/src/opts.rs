@@ -70,6 +70,7 @@ pub struct StorageOpts {
     pub max_cached_recent_versions_number: usize,
 
     pub max_prefetch_block_number: usize,
+    pub read_batch: risingwave_common::config::storage::ReadBatchConfig,
 
     pub sstable_meta_fetch_concurrency: usize,
 
@@ -255,6 +256,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
+            read_batch: c.storage.read_batch,
             sstable_meta_fetch_concurrency: c.storage.sstable_meta_fetch_concurrency,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,

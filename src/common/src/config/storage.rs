@@ -79,6 +79,11 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_cached_recent_versions_number")]
     pub max_cached_recent_versions_number: usize,
 
+    /// Batch-local SST metadata reuse. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub read_batch: ReadBatchConfig,
+
     /// max prefetch block number
     #[serde(
         default = "default::storage::max_prefetch_block_number",
@@ -616,6 +621,21 @@ pub struct ObjectStoreConfig {
     pub upload_part_size: usize,
 }
 
+/// Settings for bounded SST metadata retention.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ReadBatchConfig {
+    /// Share SST metadata within `HashJoin` chunk iterator initialization.
+    #[serde(default)]
+    pub meta_reuse: bool,
+    /// Maximum retained regular metadata entries per `HashJoin` chunk.
+    #[serde(default = "default_read_meta_entries")]
+    pub meta_max_entries: NonZeroUsize,
+    /// Retained regular metadata bytes; one oversized SST may additionally be retained.
+    #[serde(default = "default_read_meta_bytes")]
+    pub meta_max_bytes: NonZeroUsize,
+}
+
 fn deserialize_sstable_meta_fetch_concurrency<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -627,6 +647,13 @@ where
         ));
     }
     Ok(value)
+}
+
+fn default_read_meta_entries() -> NonZeroUsize {
+    NonZeroUsize::new(16).unwrap()
+}
+fn default_read_meta_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(1024 * 1024).unwrap()
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>

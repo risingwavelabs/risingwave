@@ -33,6 +33,7 @@ mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
 pub mod shared_buffer;
+mod sst_meta_batch;
 pub mod sstable_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
@@ -68,6 +69,7 @@ pub use validator::*;
 use value::*;
 
 use self::iterator::HummockIterator;
+pub use self::sst_meta_batch::SstMetaBatch;
 pub use self::sstable_store::*;
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::StoreLocalStatistic;

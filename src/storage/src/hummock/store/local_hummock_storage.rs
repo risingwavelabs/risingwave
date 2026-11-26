@@ -317,6 +317,10 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockStorage {
+    fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.hummock_version_reader.read_batch_config()
+    }
+
     async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,

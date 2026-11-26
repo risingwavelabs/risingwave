@@ -234,6 +234,7 @@ pub struct SstableStoreConfig {
 
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
+    pub read_batch: risingwave_common::config::storage::ReadBatchConfig,
     pub recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub use_new_object_prefix_strategy: bool,
@@ -262,6 +263,7 @@ pub struct SstableStore {
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
+    pub(crate) read_batch: risingwave_common::config::storage::ReadBatchConfig,
     /// Whether the object store is divided into prefixes depends on two factors:
     ///   1. The specific object store type.
     ///   2. Whether the existing cluster is a new cluster.
@@ -296,6 +298,7 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
+            read_batch: config.read_batch,
             use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
             skip_bloom_filter_in_serde: config.skip_bloom_filter_in_serde,
         }
@@ -343,6 +346,7 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
+            read_batch: Default::default(),
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             use_new_object_prefix_strategy,
             skip_bloom_filter_in_serde: false,

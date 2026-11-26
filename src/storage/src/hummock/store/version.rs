@@ -62,8 +62,8 @@ use crate::hummock::vector::monitor::{VectorStoreCacheStats, report_hnsw_stat};
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
-    ReadVersionTuple, Sstable, SstableIterator, get_from_batch, get_from_sstable_info,
-    hit_sstable_filter,
+    ReadVersionTuple, SstMetaBatch, Sstable, SstableIterator, get_from_batch,
+    get_from_sstable_info, hit_sstable_filter,
 };
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
@@ -596,6 +596,10 @@ pub struct HummockVersionReader {
 /// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
 /// `streaming_query`
 impl HummockVersionReader {
+    pub(super) fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+        self.sstable_store.read_batch
+    }
+
     pub fn new(
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -1087,15 +1091,20 @@ impl HummockVersionReader {
         };
         // The default path fetches directly into the scan's statistics. It allocates no
         // request buffer and avoids futures buffering and per-SST statistics merging.
+        let metadata = SstMetaBatch::current();
+        let metadata = metadata.as_deref();
         let sequential = self.sstable_meta_fetch_concurrency == 1;
         let mut fetch_meta_req = Vec::new();
         let timer = Instant::now();
         for sstable_info in &uncommitted_ssts {
             if sequential {
-                let sstable = self
-                    .sstable_store
-                    .sstable(sstable_info, local_stats)
-                    .await?;
+                let sstable = SstMetaBatch::sstable_for_iter(
+                    metadata,
+                    &self.sstable_store,
+                    sstable_info,
+                    local_stats,
+                )
+                .await?;
                 add_sst_iter(
                     sstable_info,
                     SstKind::Staging,
@@ -1121,10 +1130,13 @@ impl HummockVersionReader {
                     [] => {}
                     [sstable_info] => {
                         if sequential {
-                            let sstable = self
-                                .sstable_store
-                                .sstable(sstable_info, local_stats)
-                                .await?;
+                            let sstable = SstMetaBatch::sstable_for_iter(
+                                metadata,
+                                &self.sstable_store,
+                                sstable_info,
+                                local_stats,
+                            )
+                            .await?;
                             add_sst_iter(
                                 sstable_info,
                                 SstKind::Nonoverlapping,
@@ -1151,10 +1163,13 @@ impl HummockVersionReader {
                     prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range).rev()
                 {
                     if sequential {
-                        let sstable = self
-                            .sstable_store
-                            .sstable(sstable_info, local_stats)
-                            .await?;
+                        let sstable = SstMetaBatch::sstable_for_iter(
+                            metadata,
+                            &self.sstable_store,
+                            sstable_info,
+                            local_stats,
+                        )
+                        .await?;
                         add_sst_iter(
                             sstable_info,
                             SstKind::Overlapping,
@@ -1181,7 +1196,13 @@ impl HummockVersionReader {
                         StoreLocalStatistic::default(),
                         StoreLocalStatistic::discard,
                     );
-                    let result = self.sstable_store.sstable(sstable_info, &mut stats).await;
+                    let result = SstMetaBatch::sstable_for_iter(
+                        metadata,
+                        &self.sstable_store,
+                        sstable_info,
+                        &mut stats,
+                    )
+                    .await;
                     (sstable_info, kind, result, stats)
                 },
             ))
@@ -1635,6 +1656,86 @@ mod tests {
                     assert_eq!(rows, expected.into_iter().rev().collect::<Vec<_>>());
                 }
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_prefix_iters_reuse_chunk_metadata() {
+        use std::ops::Bound::Included;
+
+        use risingwave_common::config::storage::ReadBatchConfig;
+
+        use crate::hummock::SstMetaBatch;
+        use crate::store::StateStoreIter;
+
+        let table_id = TableId::new(43);
+        let key = gen_key_from_bytes(VirtualNode::ZERO, b"prefix");
+        let store = mock_sstable_store().await;
+        let mut ssts = Vec::new();
+        let mut meta_bytes = 0;
+        for (id, value) in [(1, b"old"), (2, b"new")] {
+            let (table, info) = gen_test_sstable_with_table_ids(
+                default_builder_opt_for_test(),
+                id,
+                std::iter::once((
+                    FullKey::new_with_gap_epoch(
+                        table_id,
+                        key.clone(),
+                        EpochWithGap::new_from_epoch(test_epoch(id)),
+                    ),
+                    HummockValue::put(Bytes::from_static(value)),
+                )),
+                store.clone(),
+                vec![table_id.as_raw_id()],
+            )
+            .await;
+            meta_bytes += table.weight();
+            ssts.push(info);
+        }
+        let committed = build_version_from_sstables(table_id, ssts, PbLevelType::Overlapping);
+        let metrics = Arc::new(HummockStateStoreMetrics::new(
+            &Registry::new(),
+            MetricLevel::Info,
+        ));
+        let reader = HummockVersionReader::new(store, metrics.clone(), 2);
+        let batch = Arc::new(SstMetaBatch::new(ReadBatchConfig {
+            meta_reuse: true,
+            meta_max_bytes: meta_bytes.try_into().unwrap(),
+            ..Default::default()
+        }));
+        let table_label = table_id.to_string();
+        let meta_total = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_label.as_str(), "meta_total"]);
+        let meta_ready = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_label.as_str(), "meta_batch_ready"]);
+
+        for expected_reuses in [0, 2] {
+            let mut iter = SstMetaBatch::scope(
+                Some(&batch),
+                reader.iter(
+                    (Included(key.clone()), Included(key.clone())),
+                    test_epoch(2),
+                    table_id,
+                    TableOption::default(),
+                    ReadOptions {
+                        prefix_hint: Some(UserKey::new(table_id, key.clone()).encode().into()),
+                        ..Default::default()
+                    },
+                    (vec![], vec![], committed.clone()),
+                ),
+            )
+            .await
+            .unwrap();
+            let (actual_key, value) = iter.try_next().await.unwrap().unwrap();
+            assert_eq!(actual_key.user_key.table_key, key.to_ref());
+            assert_eq!(value, b"new");
+            assert!(iter.try_next().await.unwrap().is_none());
+            drop(iter);
+            flush_local_metrics_for_test();
+            assert_eq!(meta_total.get(), 2);
+            assert_eq!(meta_ready.get(), expected_reuses);
         }
     }
 

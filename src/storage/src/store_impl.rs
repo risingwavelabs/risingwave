@@ -431,6 +431,14 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+            if self.expected.is_some() {
+                Default::default()
+            } else {
+                self.actual.read_batch_config()
+            }
+        }
+
         async fn on_key_value<'a, O: Send + 'a>(
             &'a self,
             key: TableKey<Bytes>,
@@ -964,6 +972,7 @@ impl StateStoreImpl {
                     path: opts.data_directory.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
+                    read_batch: opts.read_batch,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
                     use_new_object_prefix_strategy,
@@ -1102,6 +1111,8 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     pub trait DynStateStoreGet: StaticSendSync {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig;
+
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
@@ -1143,6 +1154,10 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreGet> DynStateStoreGet for S {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+            StateStoreGet::read_batch_config(self)
+        }
+
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
@@ -1558,6 +1573,10 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
+        fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
+            self.as_ref().read_batch_config()
+        }
+
         async fn on_key_value<'a, O: Send + 'a>(
             &'a self,
             key: TableKey<Bytes>,
