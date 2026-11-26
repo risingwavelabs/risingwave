@@ -33,7 +33,6 @@ use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::config::StreamingConfig;
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
@@ -1823,7 +1822,6 @@ struct BuildInputContext {
     local_barrier_manager: LocalBarrierManager,
     metrics: Arc<StreamingMetrics>,
     fragment_id: FragmentId,
-    actor_config: Arc<StreamingConfig>,
 }
 
 impl BuildInputContext {
@@ -1832,14 +1830,12 @@ impl BuildInputContext {
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
-        actor_config: Arc<StreamingConfig>,
     ) -> Self {
         Self {
             actor_id,
             local_barrier_manager,
             metrics,
             fragment_id,
-            actor_config,
         }
     }
 
@@ -1857,7 +1853,6 @@ impl BuildInputContext {
                 self.fragment_id,
                 upstream_actor,
                 upstream_fragment_id,
-                self.actor_config.clone(),
             )
             .await?;
 
@@ -1887,7 +1882,6 @@ impl DispatchBarrierBuffer {
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
-        actor_config: Arc<StreamingConfig>,
     ) -> Self {
         Self {
             buffer: VecDeque::new(),
@@ -1900,7 +1894,6 @@ impl DispatchBarrierBuffer {
                 local_barrier_manager,
                 metrics,
                 fragment_id,
-                actor_config,
             )),
         }
     }

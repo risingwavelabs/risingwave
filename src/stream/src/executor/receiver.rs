@@ -38,7 +38,7 @@ impl ReceiverExecutor {
             ActorContext::for_test(actor_id),
             514.into(),
             1919.into(),
-            LocalInput::new(input, 0.into()).boxed_input(),
+            LocalInput::for_test(input, 0.into()).boxed_input(),
             local_barrier_manager,
             StreamingMetrics::unused().into(),
             barrier_rx,
@@ -62,7 +62,6 @@ mod tests {
     use crate::executor::{
         ActorContext, Barrier, Execute as _, MessageInner as Message, Mutation, UpdateMutation,
     };
-    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
@@ -112,7 +111,6 @@ mod tests {
             fragment_id,
             &helper_make_local_actor(old),
             upstream_fragment_id,
-            actor_ctx.config.clone(),
         )
         .await
         .unwrap();
@@ -175,11 +173,8 @@ mod tests {
                         .take_pending_new_output_requests(upstream_id.into())
                         .await;
                     assert_eq!(output_requests.len(), 1);
-                    let (downstream_actor_id, request) = output_requests.pop().unwrap();
+                    let (downstream_actor_id, tx) = output_requests.pop().unwrap();
                     assert_eq!(downstream_actor_id, actor_id);
-                    let NewOutputRequest::Local(tx) = request else {
-                        unreachable!()
-                    };
                     txs.insert(upstream_id, tx);
                 }
             };

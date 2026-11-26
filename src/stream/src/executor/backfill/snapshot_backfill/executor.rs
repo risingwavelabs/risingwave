@@ -799,9 +799,9 @@ mod tests {
         ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutor, MergeExecutorInput,
         MergeExecutorUpstream, UpdateMutation,
     };
+    use crate::task::LocalBarrierManager;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
-    use crate::task::{LocalBarrierManager, NewOutputRequest};
 
     const SOURCE_TABLE_ID: TableId = TableId::new(0x233);
     const PROGRESS_TABLE_ID: TableId = TableId::new(0x234);
@@ -970,7 +970,7 @@ mod tests {
         let metrics = Arc::new(StreamingMetrics::unused());
         let upstream = MergeExecutor::new_merge_upstream(
             rx.into_iter()
-                .map(|rx| LocalInput::new(rx, 1001.into()).boxed_input())
+                .map(|rx| LocalInput::for_test(rx, 1001.into()).boxed_input())
                 .collect(),
             &metrics,
             &actor_ctx,
@@ -1178,10 +1178,7 @@ mod tests {
             .take_pending_new_output_requests(upstream_actor_id)
             .await;
         assert_eq!(requests.len(), 1);
-        let (downstream_actor_id, request) = requests.pop().unwrap();
-        let NewOutputRequest::Local(upstream_tx) = request else {
-            unreachable!()
-        };
+        let (downstream_actor_id, upstream_tx) = requests.pop().unwrap();
         assert_eq!(downstream_actor_id, actor_id);
         upstream_tx
             .send(DispatcherMessage::Barrier(transition_barrier.clone().into_dispatcher()).into())

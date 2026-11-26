@@ -98,7 +98,6 @@ impl MergeExecutorBuilder {
                         actor_context.fragment_id,
                         upstream_actor,
                         upstream_fragment_id,
-                        actor_context.config.clone(),
                     )
                 }),
         )

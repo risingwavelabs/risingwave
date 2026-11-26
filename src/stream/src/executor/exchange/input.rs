@@ -18,10 +18,11 @@ use std::task::{Context, Poll};
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
-use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
+use tokio::sync::oneshot;
 
 use super::permit::Receiver;
+use crate::error::StreamResult;
 use crate::executor::prelude::*;
 use crate::executor::{
     BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStreamItem,
@@ -78,18 +79,31 @@ pub(crate) fn assert_equal_dispatcher_barrier<M1, M2>(
 }
 
 impl LocalInput {
-    pub fn new(channel: Receiver, upstream_actor_id: ActorId) -> Self {
+    pub fn new(
+        channel: oneshot::Receiver<StreamResult<Receiver>>,
+        upstream_actor_id: ActorId,
+    ) -> Self {
         Self {
             inner: local_input::run(channel, upstream_actor_id),
             actor_id: upstream_actor_id,
         }
     }
+
+    #[cfg(test)]
+    pub fn for_test(channel: Receiver, upstream_actor_id: ActorId) -> Self {
+        let (tx, rx) = oneshot::channel();
+        assert!(tx.send(Ok(channel)).is_ok());
+        Self::new(rx, upstream_actor_id)
+    }
 }
 
 mod local_input {
+    use anyhow::anyhow;
     use await_tree::InstrumentAwait;
     use either::Either;
+    use tokio::sync::oneshot;
 
+    use crate::error::StreamResult;
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::exchange::permit::Receiver;
     use crate::executor::prelude::try_stream;
@@ -99,13 +113,24 @@ mod local_input {
     pub(super) type LocalInputStreamInner = impl crate::executor::DispatcherMessageStream;
 
     #[define_opaque(LocalInputStreamInner)]
-    pub(super) fn run(channel: Receiver, upstream_actor_id: ActorId) -> LocalInputStreamInner {
+    pub(super) fn run(
+        channel: oneshot::Receiver<StreamResult<Receiver>>,
+        upstream_actor_id: ActorId,
+    ) -> LocalInputStreamInner {
         run_inner(channel, upstream_actor_id)
     }
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
-    async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
+    async fn run_inner(
+        channel: oneshot::Receiver<StreamResult<Receiver>>,
+        upstream_actor_id: ActorId,
+    ) {
         let span = await_tree::span!("LocalInput (actor {upstream_actor_id})").verbose();
+        let mut channel = channel
+            .instrument_await(span.clone())
+            .await
+            .map_err(|_| ExchangeChannelClosed::local_input(upstream_actor_id))?
+            .map_err(|err| anyhow!(err))?;
         while let Some(msg) = channel.recv().instrument_await(span.clone()).await {
             match msg.into_messages() {
                 Either::Left(barriers) => {
@@ -164,7 +189,6 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
-        actor_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
@@ -186,14 +210,7 @@ impl RemoteInput {
 
         Ok(Self {
             actor_id,
-            inner: remote_input::run(
-                stream,
-                permits_tx,
-                up_down_ids,
-                up_down_frag,
-                metrics,
-                actor_config.developer.exchange_batched_permits,
-            ),
+            inner: remote_input::run(stream, permits_tx, up_down_ids, up_down_frag, metrics),
         })
     }
 }
@@ -223,16 +240,8 @@ mod remote_input {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
-        batched_permits_limit: usize,
     ) -> RemoteInputStreamInner {
-        run_inner(
-            stream,
-            permits_tx,
-            up_down_ids,
-            up_down_frag,
-            metrics,
-            batched_permits_limit,
-        )
+        run_inner(stream, permits_tx, up_down_ids, up_down_frag, metrics)
     }
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
@@ -242,7 +251,6 @@ mod remote_input {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
-        batched_permits_limit: usize,
     ) {
         let up_actor_id = up_down_ids.0.to_string();
         let up_fragment_id = up_down_frag.0.to_string();
@@ -252,8 +260,6 @@ mod remote_input {
             .with_guarded_label_values(&[&up_fragment_id, &down_fragment_id]);
 
         let span = await_tree::span!("RemoteInput (actor {up_actor_id})").verbose();
-
-        let mut batched_permits_accumulated = 0;
 
         pin_mut!(stream);
         while let Some(data_res) = stream.next().instrument_await(span.clone()).await {
@@ -266,22 +272,8 @@ mod remote_input {
                     exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
                     let msg_res = DispatcherMessageBatch::from_protobuf(&msg);
-                    if let Some(add_back_permits) = match permits.unwrap().value {
-                        // For records, batch the permits we received to reduce the backward
-                        // `AddPermits` messages.
-                        Some(permits::Value::Record(p)) => {
-                            batched_permits_accumulated += p;
-                            if batched_permits_accumulated >= batched_permits_limit as u32 {
-                                let permits = std::mem::take(&mut batched_permits_accumulated);
-                                Some(permits::Value::Record(permits))
-                            } else {
-                                None
-                            }
-                        }
-                        // For barriers, always send it back immediately.
-                        Some(permits::Value::Barrier(p)) => Some(permits::Value::Barrier(p)),
-                        None => None,
-                    } {
+                    // The upstream determines when and how many permits to return.
+                    if let Some(add_back_permits) = permits.and_then(|permits| permits.value) {
                         permits_tx
                             .send(add_back_permits)
                             .context("RemoteInput backward permits channel closed.")?;
@@ -335,7 +327,6 @@ pub(crate) async fn new_input(
     fragment_id: FragmentId,
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
-    actor_config: Arc<StreamingConfig>,
 ) -> StreamExecutorResult<BoxedActorInput> {
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
@@ -344,9 +335,7 @@ pub(crate) async fn new_input(
         let rx = local_barrier_manager.register_local_upstream_output(
             actor_id,
             upstream_actor_id,
-            upstream_fragment_id,
             upstream_actor_info.partial_graph_id,
-            metrics,
         );
         LocalInput::new(rx, upstream_actor_id).boxed_input()
     } else {
@@ -357,7 +346,6 @@ pub(crate) async fn new_input(
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
-            actor_config,
         )
         .await?
         .boxed_input()
@@ -374,6 +362,67 @@ impl DispatcherMessageBatch {
             }
             DispatcherMessageBatch::Chunk(c) => Either::Right(DispatcherMessage::Chunk(c)),
             DispatcherMessageBatch::Watermark(w) => Either::Right(DispatcherMessage::Watermark(w)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::{FutureExt, StreamExt, pin_mut};
+
+    use super::*;
+    use crate::executor::DispatcherBarrier;
+    use crate::executor::exchange::permit::channel_for_test;
+
+    #[tokio::test]
+    async fn test_local_subscription_waits_for_upstream() {
+        let (reply, receiver) = oneshot::channel();
+        let input = LocalInput::new(receiver, 1.into());
+        pin_mut!(input);
+        assert!(input.next().now_or_never().is_none());
+
+        let (tx, rx) = channel_for_test();
+        assert!(reply.send(Ok(rx)).is_ok());
+        let barrier = DispatcherBarrier::with_prev_epoch_for_test(2, 1);
+        let epoch = barrier.epoch;
+        tx.send(DispatcherMessageBatch::BarrierBatch(vec![barrier]))
+            .await
+            .unwrap();
+        assert_eq!(
+            input
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .as_barrier()
+                .unwrap()
+                .epoch,
+            epoch
+        );
+    }
+
+    #[tokio::test]
+    async fn test_local_subscription_failure() {
+        for rejected in [false, true] {
+            let (reply, receiver) = oneshot::channel();
+            let input = LocalInput::new(receiver, 1.into());
+            pin_mut!(input);
+            assert!(input.next().now_or_never().is_none());
+            if rejected {
+                assert!(
+                    reply
+                        .send(Err(anyhow::anyhow!("subscription rejected").into()))
+                        .is_ok()
+                );
+            } else {
+                drop(reply);
+            }
+            let error = input.next().await.unwrap().unwrap_err().to_string();
+            assert!(error.contains(if rejected {
+                "subscription rejected"
+            } else {
+                "local upstream actor 1 closed"
+            }));
         }
     }
 }

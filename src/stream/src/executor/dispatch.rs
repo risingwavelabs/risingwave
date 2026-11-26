@@ -39,6 +39,7 @@ use tokio_stream::adapters::Peekable;
 use tracing::{Instrument, event};
 
 use super::exchange::output::Output;
+use super::exchange::permit::{ChannelMetrics, channel_from_config_with_metrics};
 use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
@@ -118,45 +119,66 @@ pub struct DispatchExecutorInner {
     actor_config: Arc<StreamingConfig>,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
-    pending_new_output_requests: HashMap<ActorId, NewOutputRequest>,
+    pending_outputs: HashMap<ActorId, Output>,
 }
 
 impl DispatchExecutorInner {
+    fn resolve_output(&self, downstream_actor: ActorId, request: NewOutputRequest) -> Output {
+        let buffered_bytes = self
+            .metrics
+            .metrics
+            .fragment_channel_buffered_bytes
+            .with_guarded_label_values(&[&self.metrics.fragment_id_str]);
+        let (tx, rx) = channel_from_config_with_metrics(
+            &self.actor_config,
+            ChannelMetrics {
+                sender_actor_channel_buffered_bytes: buffered_bytes.clone(),
+                receiver_actor_channel_buffered_bytes: buffered_bytes,
+            },
+        );
+        // A cancelled subscription drops the receiver and closes the output's permits.
+        match request {
+            NewOutputRequest::Local(sender) => {
+                let _ = sender.send(Ok(rx));
+            }
+            NewOutputRequest::Remote(sender) => {
+                let batch_size = self.actor_config.developer.exchange_batched_permits;
+                let _ = sender.send(Ok((rx, batch_size)));
+            }
+        }
+        Output::new(downstream_actor, tx)
+    }
+
     async fn collect_outputs(
         &mut self,
         downstream_actors: &[ActorId],
     ) -> StreamResult<Vec<Output>> {
-        fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
-            let tx = match request {
-                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
-            };
-            Output::new(downstream_actor, tx)
-        }
         let mut outputs = Vec::with_capacity(downstream_actors.len());
         for &downstream_actor in downstream_actors {
-            let output =
-                if let Some(request) = self.pending_new_output_requests.remove(&downstream_actor) {
-                    resolve_output(downstream_actor, request)
-                } else {
-                    loop {
-                        let (requested_actor, request) = self
-                            .new_output_request_rx
-                            .recv()
-                            .await
-                            .ok_or_else(|| anyhow!("end of new output request"))?;
-                        if requested_actor == downstream_actor {
-                            break resolve_output(requested_actor, request);
-                        } else {
-                            assert!(
-                                self.pending_new_output_requests
-                                    .insert(requested_actor, request)
-                                    .is_none(),
-                                "duplicated inflight new output requests from actor {}",
-                                requested_actor
-                            );
-                        }
+            let output = if let Some(output) = self.pending_outputs.remove(&downstream_actor) {
+                output
+            } else {
+                loop {
+                    let (requested_actor, request) = self
+                        .new_output_request_rx
+                        .recv()
+                        .await
+                        .ok_or_else(|| anyhow!("end of new output request"))?;
+                    // Reply even if this output will only be installed by a later dispatcher.
+                    let output = self.resolve_output(requested_actor, request);
+                    if requested_actor == downstream_actor {
+                        break output;
+                    } else {
+                        assert!(
+                            self.pending_outputs
+                                .insert(requested_actor, output)
+                                .is_none(),
+                            "duplicated inflight new output requests from actor {}",
+                            requested_actor
+                        );
                     }
-                };
+                }
+            };
             outputs.push(output);
         }
         Ok(outputs)
@@ -498,7 +520,7 @@ impl DispatchExecutor {
                 actor_config,
                 metrics,
                 new_output_request_rx,
-                pending_new_output_requests: Default::default(),
+                pending_outputs: Default::default(),
             },
         }
     }
@@ -1279,8 +1301,83 @@ mod tests {
     use crate::executor::project::ProjectExecutor;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BarrierInner as Barrier, MessageInner as Message};
+    use crate::executor::{
+        ActorContext, BarrierInner as Barrier, DispatcherBarrier, MessageInner as Message,
+    };
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+
+    #[tokio::test]
+    async fn test_out_of_order_subscriptions() {
+        let (_, source) = MockSource::channel();
+        let mut config = StreamingConfig::default();
+        config.developer.exchange_initial_permits = 1024;
+        config.developer.exchange_batched_permits = 64;
+        config.developer.exchange_concurrent_barriers = 2;
+        let (executor, requests) = DispatchExecutor::for_test(
+            source.into_executor(Schema::empty().clone(), vec![]),
+            vec![],
+            1.into(),
+            10.into(),
+            Arc::new(config),
+            Arc::new(StreamingMetrics::unused()),
+        );
+        let mut inner = executor.inner;
+        let (expected, other) = (2.into(), 3.into());
+        let (result_sender, mut other_receiver) = tokio::sync::oneshot::channel();
+        requests
+            .send((other, NewOutputRequest::Remote(result_sender)))
+            .unwrap();
+
+        let downstream = [expected];
+        let mut collect = Box::pin(inner.collect_outputs(&downstream));
+        assert!(collect.as_mut().now_or_never().is_none());
+        // Reply to the other subscriber even while waiting for the expected one.
+        let (mut other_receiver, batch_size) = other_receiver.try_recv().unwrap().unwrap();
+        assert_eq!(batch_size, 64);
+
+        let (result_sender, receiver) = tokio::sync::oneshot::channel();
+        requests
+            .send((expected, NewOutputRequest::Local(result_sender)))
+            .unwrap();
+        assert_eq!(collect.await.unwrap().len(), 1);
+        let _receiver = receiver.await.unwrap().unwrap();
+
+        let mut output = inner
+            .collect_outputs(&[other])
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        let barrier = DispatcherMessageBatch::BarrierBatch(vec![
+            DispatcherBarrier::with_prev_epoch_for_test(2, 1),
+        ]);
+        for _ in 0..2 {
+            output
+                .send(barrier.clone())
+                .now_or_never()
+                .unwrap()
+                .unwrap();
+        }
+        let mut third = Box::pin(output.send(barrier));
+        assert!(third.as_mut().now_or_never().is_none());
+        let message = other_receiver.recv_raw().await.unwrap();
+        other_receiver
+            .permits()
+            .add_permits(message.permits.unwrap());
+        third.await.unwrap();
+
+        let (result_sender, receiver) = tokio::sync::oneshot::channel();
+        drop(receiver);
+        let mut cancelled = inner.resolve_output(4.into(), NewOutputRequest::Remote(result_sender));
+        assert!(
+            cancelled
+                .send(DispatcherMessageBatch::BarrierBatch(vec![
+                    DispatcherBarrier::with_prev_epoch_for_test(2, 1),
+                ]))
+                .await
+                .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn test_hash_dispatcher_complex() {
@@ -1413,30 +1510,40 @@ mod tests {
         );
 
         let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
-        let mut rxs = [untouched, old, new, old_simple, new_simple]
+        let mut subscriptions = [untouched, old, new, old_simple, new_simple]
             .into_iter()
             .map(|id| {
                 (id, {
-                    let (tx, rx) = channel_for_test();
+                    let (result_sender, rx) = tokio::sync::oneshot::channel();
                     new_output_request_tx
-                        .send((id, NewOutputRequest::Local(tx)))
+                        .send((id, NewOutputRequest::Remote(result_sender)))
                         .unwrap();
                     rx
                 })
             })
             .collect::<HashMap<_, _>>();
+        let mut config = StreamingConfig::default();
+        config.developer.exchange_initial_permits = 1024;
+        config.developer.exchange_batched_permits = 64;
+        config.developer.exchange_concurrent_barriers = 2;
         let executor = Box::new(
             DispatchExecutor::new(
                 input,
                 new_output_request_rx,
                 vec![broadcast_dispatcher, simple_dispatcher],
-                &ActorContext::for_test(actor_id),
+                &ActorContext::for_test_with_config(actor_id, config),
             )
             .await
             .unwrap(),
         )
         .execute();
 
+        let mut rxs = HashMap::new();
+        for id in [untouched, old, old_simple] {
+            let (rx, batch_size) = subscriptions.remove(&id).unwrap().await.unwrap().unwrap();
+            assert_eq!(batch_size, 64);
+            rxs.insert(id, rx);
+        }
         pin_mut!(executor);
 
         macro_rules! try_recv {
@@ -1456,6 +1563,9 @@ mod tests {
         executor.next().await.unwrap().unwrap();
 
         // 5. Check downstream.
+        let (rx, batch_size) = subscriptions.remove(&new).unwrap().await.unwrap().unwrap();
+        assert_eq!(batch_size, 64);
+        rxs.insert(new, rx);
         try_recv!(untouched).unwrap().as_chunk().unwrap();
         try_recv!(untouched).unwrap().as_barrier_batch().unwrap();
 
@@ -1481,7 +1591,10 @@ mod tests {
         try_recv!(new).unwrap().as_barrier_batch().unwrap();
 
         try_recv!(old_simple).unwrap().as_barrier_batch().unwrap(); // Untouched.
-        try_recv!(new_simple).unwrap_err(); // Untouched.
+        assert!(matches!(
+            subscriptions.get_mut(&new_simple).unwrap().try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        )); // Not installed yet.
 
         // 8. Send another chunk.
         tx.send(Message::Chunk(StreamChunk::default()).into())
@@ -1511,6 +1624,14 @@ mod tests {
         executor.next().await.unwrap().unwrap();
 
         // 10. Check downstream.
+        let (rx, batch_size) = subscriptions
+            .remove(&new_simple)
+            .unwrap()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(batch_size, 64);
+        rxs.insert(new_simple, rx);
         try_recv!(old_simple).unwrap().as_chunk().unwrap();
         try_recv!(old_simple).unwrap().as_barrier_batch().unwrap(); // It should still receive the barrier even if it's to be removed.
 
