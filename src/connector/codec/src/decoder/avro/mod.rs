@@ -183,7 +183,7 @@ impl<'a> AvroParseOptionsInner<'a> {
                 };
                 let decimal = scaled_bigint_to_rust_decimal(avro_decimal.clone().into(), scale)
                     .map_err(|_| create_error())?;
-                ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
+                ScalarImpl::Decimal(risingwave_common::types::Decimal::from(decimal))
             }
             (DataType::Decimal, Value::Record(fields)) => {
                 // VariableScaleDecimal has fixed fields, scale(int) and value(bytes)
@@ -213,7 +213,7 @@ impl<'a> AvroParseOptionsInner<'a> {
                 };
 
                 let decimal = scaled_bigint_to_rust_decimal(value, scale as _)?;
-                ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
+                ScalarImpl::Decimal(risingwave_common::types::Decimal::from(decimal))
             }
             // ---- Time -----
             (DataType::Time, Value::TimeMillis(ms)) => Time::with_milli(*ms as u32)
@@ -986,7 +986,7 @@ mod tests {
         let resp = from_avro_value(value, &schema, &DataType::Decimal).unwrap();
         assert_eq!(
             resp,
-            Some(ScalarImpl::Decimal(Decimal::Normalized(
+            Some(ScalarImpl::Decimal(Decimal::from(
                 rust_decimal::Decimal::from_str("0.017802464409370431").unwrap()
             )))
         );

@@ -527,9 +527,9 @@ mod tests {
 
         test_estimate_serialize_scalar_size(ScalarImpl::Utf8("abc".into()));
         test_estimate_serialize_scalar_size(ScalarImpl::Utf8("".into()));
-        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NegativeInf));
-        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::PositiveInf));
-        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NaN));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NEGATIVE_INF));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::POSITIVE_INF));
+        test_estimate_serialize_scalar_size(ScalarImpl::Decimal(Decimal::NAN));
         test_estimate_serialize_scalar_size(ScalarImpl::Decimal(123123.into()));
         test_estimate_serialize_scalar_size(ScalarImpl::Interval(Interval::from_month_day_usec(
             7, 8, 9,

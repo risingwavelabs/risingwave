@@ -1592,11 +1592,11 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
             const NAN: i128 = i128::MIN + 1;
             let res = match value {
                 // Check for special values using Arrow Decimal's max value, not i128::MAX
-                NAN => Decimal::NaN,
-                v if v == max_value => Decimal::PositiveInf,
-                v if v == -max_value => Decimal::NegativeInf,
-                i128::MAX => Decimal::PositiveInf, // Fallback for old data
-                i128::MIN => Decimal::NegativeInf, // Fallback for old data
+                NAN => Decimal::NAN,
+                v if v == max_value => Decimal::POSITIVE_INF,
+                v if v == -max_value => Decimal::NEGATIVE_INF,
+                i128::MAX => Decimal::POSITIVE_INF, // Fallback for old data
+                i128::MIN => Decimal::NEGATIVE_INF, // Fallback for old data
                 _ => Decimal::truncated_i128_and_scale(value, array.scale() as u32)
                     .ok_or_else(|| ArrayError::from_arrow("decimal overflow"))?,
             };
@@ -2953,8 +2953,8 @@ mod tests {
     fn uint64() {
         let array: PrimitiveArray<Decimal> = DecimalArray::from_iter([
             None,
-            Some(Decimal::Normalized("7".parse().unwrap())),
-            Some(Decimal::Normalized("18446744073709551615".parse().unwrap())),
+            Some("7".parse::<Decimal>().unwrap()),
+            Some("18446744073709551615".parse::<Decimal>().unwrap()),
         ]);
         let arr = arrow_array::UInt64Array::from(vec![None, Some(7), Some(18446744073709551615)]);
         let converted: PrimitiveArray<Decimal> = (&arr).try_into().unwrap();
@@ -3382,11 +3382,11 @@ mod tests {
     fn decimal() {
         let array = DecimalArray::from_iter([
             None,
-            Some(Decimal::NaN),
-            Some(Decimal::PositiveInf),
-            Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("123.4".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::NAN),
+            Some(Decimal::POSITIVE_INF),
+            Some(Decimal::NEGATIVE_INF),
+            Some("123.4".parse::<Decimal>().unwrap()),
+            Some("123.456".parse::<Decimal>().unwrap()),
         ]);
         let arrow = arrow_array::LargeBinaryArray::from(&array);
         assert_eq!(DecimalArray::try_from(&arrow).unwrap(), array);
