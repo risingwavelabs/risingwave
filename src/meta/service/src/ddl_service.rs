@@ -187,6 +187,7 @@ impl DdlServiceImpl {
                         database_id: table.database_id,
                         table_id: table.id,
                         cdc_table_change: None,
+                        catalog_version: 0,
                     };
                     let resp = client
                         .get_table_replace_plan(req)
@@ -1525,6 +1526,8 @@ impl DdlService for DdlServiceImpl {
                         database_id: table.database_id,
                         table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
+                        // A preceding replacement may still be queued in the frontend observer.
+                        catalog_version: self.env.notification_manager().current_version().await,
                     })
                     .await;
 
