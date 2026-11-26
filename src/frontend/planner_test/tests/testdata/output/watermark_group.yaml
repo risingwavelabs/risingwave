@@ -76,8 +76,8 @@
     on win1 = win2;
   stream_plan: |-
     StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
-    └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1], [$expr3]] }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
+    └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1, $expr3]] }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard($expr1) }
         │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
         │   └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -87,8 +87,8 @@
   eowc_stream_plan: |-
     StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1] }
     └─StreamEowcSort { sort_column: $expr1 }
-      └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1], [$expr3]] }
-        └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
+      └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1, $expr3]] }
+        └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, conditions_to_clean_state_in_join_key: [($expr1 = $expr3)], output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
           ├─StreamExchange { dist: HashShard($expr1) }
           │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
           │   └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -167,3 +167,39 @@
           └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
             └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
               └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: eowc agg grouped by columns derived from both keys of a join, whose keys share a column
+  sql: |
+    create table t (
+      foo int,
+      ts timestamp,
+      watermark for ts as ts - interval '5 minutes'
+    ) append only;
+    select
+      date_trunc('minute', t1.ts) as m1, date_trunc('minute', t2.ts) as m2, count(*) as cnt
+    from t as t1 join (select ts, ts + interval '1 minute' as ts2 from t) as t2
+      on t1.ts = t2.ts and t1.ts = t2.ts2
+    group by 1, 2;
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [m1, m2, cnt], stream_key: [m1, m2], pk_columns: [m1, m2], pk_conflict: NoCheck, watermark_columns: [m1] }
+    └─StreamHashAgg [append_only, eowc] { group_key: [$expr2, $expr3], aggs: [count], output_watermarks: [[$expr2]] }
+      └─StreamExchange { dist: HashShard($expr2, $expr3) }
+        └─StreamProject { exprs: [DateTrunc('minute':Varchar, t.ts) as $expr2, DateTrunc('minute':Varchar, t.ts) as $expr3, t._row_id, t._row_id, t.ts], output_watermarks: [[$expr2, $expr3, t.ts]] }
+          └─StreamHashJoin [window, append_only] { type: Inner, predicate: t.ts = t.ts AND t.ts = $expr1, conditions_to_clean_state_in_join_key: [(t.ts = t.ts)], output_watermarks: [[t.ts, t.ts]], output: [t.ts, t.ts, t._row_id, t._row_id] }
+            ├─StreamExchange { dist: HashShard(t.ts, t.ts) }
+            │ └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamExchange { dist: HashShard(t.ts, $expr1) }
+              └─StreamProject { exprs: [t.ts, (t.ts + '00:01:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
+                └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: as-of join on an equal key with watermarks, also used by the inequality
+  sql: |
+    create table t1 (v1 int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+    create table t2 (v1 int, ts timestamp, watermark for ts as ts - interval '5 minutes') append only;
+    select t1.ts as ts1, t2.ts as ts2, t1.v1 as v1, t2.v1 as v2
+    from t1 asof join t2 on t1.ts = t2.ts and t1.ts <= t2.ts;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts1, ts2, v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, ts1], pk_columns: [t1._row_id, t2._row_id, ts1], pk_conflict: NoCheck, watermark_columns: [ts1, ts2] }
+    └─StreamAsOfJoin [window, append_only] { type: AsofInner, predicate: t1.ts = t2.ts AND (t1.ts <= t2.ts), output_watermarks: [[t1.ts, t2.ts]], output: [t1.ts, t2.ts, t1.v1, t2.v1, t1._row_id, t2._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.ts) }
+      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t2.ts) }
+        └─StreamTableScan { table: t2, columns: [t2.v1, t2.ts, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }

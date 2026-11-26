@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
@@ -45,6 +45,31 @@ impl WatermarkColumns {
     /// Insert a column index with a watermark group ID.
     pub fn insert(&mut self, col_idx: usize, group: WatermarkGroupId) {
         self.col_idx_to_wtmk_group_id.insert(col_idx, group);
+    }
+
+    /// Put columns that are equal in every row into one group, together with every column that
+    /// already shares a group with one of them. The group is one they already have, or else
+    /// `new_group`.
+    pub fn insert_equal(
+        &mut self,
+        cols: impl IntoIterator<Item = usize>,
+        new_group: impl FnOnce() -> WatermarkGroupId,
+    ) {
+        let cols: Vec<usize> = cols.into_iter().collect();
+        if cols.is_empty() {
+            return;
+        }
+        let merged: BTreeSet<WatermarkGroupId> =
+            cols.iter().filter_map(|&col| self.get_group(col)).collect();
+        let group = merged.first().copied().unwrap_or_else(new_group);
+        for col_group in self.col_idx_to_wtmk_group_id.values_mut() {
+            if merged.contains(col_group) {
+                *col_group = group;
+            }
+        }
+        for col in cols {
+            self.insert(col, group);
+        }
     }
 
     /// Check if the `WatermarkColumns` contains a column index.

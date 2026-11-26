@@ -71,37 +71,39 @@ impl StreamAsOfJoin {
         let watermark_columns = {
             let l2i = core.l2i_col_mapping();
             let r2i = core.r2i_col_mapping();
+            // A left outer join pads the right side with NULL, which no watermark closes.
+            let right_padded = core.join_type == JoinType::AsofLeftOuter;
             let mut watermark_columns = WatermarkColumns::new();
-            for (left_idx, right_idx) in
-                eq_join_predicate
-                    .eq_indexes()
-                    .into_iter()
-                    .chain(std::iter::once((
-                        inequality_desc.left_idx as usize,
-                        inequality_desc.right_idx as usize,
-                    )))
+            // The third field tells an equal key from the inequality, which comes last.
+            for (left_idx, right_idx, equal) in eq_join_predicate
+                .eq_indexes()
+                .into_iter()
+                .map(|(left_idx, right_idx)| (left_idx, right_idx, true))
+                .chain(std::iter::once((
+                    inequality_desc.left_idx as usize,
+                    inequality_desc.right_idx as usize,
+                    false,
+                )))
             {
                 if let Some(l_wtmk_group) = core.left.watermark_columns().get_group(left_idx)
                     && let Some(r_wtmk_group) = core.right.watermark_columns().get_group(right_idx)
                 {
-                    if let Some(internal) = l2i.try_map(left_idx) {
-                        watermark_columns.insert(
-                            internal,
-                            l_wtmk_group.same_or_else(r_wtmk_group, || {
-                                core.ctx().next_watermark_group_id()
-                            }),
-                        );
-                    }
-                    // A left outer join pads the right side with NULL, which no watermark closes.
-                    if core.join_type != JoinType::AsofLeftOuter
-                        && let Some(internal) = r2i.try_map(right_idx)
-                    {
-                        watermark_columns.insert(
-                            internal,
-                            l_wtmk_group.same_or_else(r_wtmk_group, || {
-                                core.ctx().next_watermark_group_id()
-                            }),
-                        );
+                    let new_group = || {
+                        l_wtmk_group
+                            .same_or_else(r_wtmk_group, || core.ctx().next_watermark_group_id())
+                    };
+                    let left = l2i.try_map(left_idx);
+                    let right = r2i.try_map(right_idx).filter(|_| !right_padded);
+                    if equal {
+                        watermark_columns.insert_equal(left.into_iter().chain(right), new_group);
+                    } else {
+                        // The inequality's columns differ, so each gets its own group, unless it is
+                        // also an equal key.
+                        for col in left.into_iter().chain(right) {
+                            if !watermark_columns.contains(col) {
+                                watermark_columns.insert(col, new_group());
+                            }
+                        }
                     }
                 }
             }

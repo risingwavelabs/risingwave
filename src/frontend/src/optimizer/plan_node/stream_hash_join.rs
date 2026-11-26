@@ -124,18 +124,11 @@ fn derive_watermark_for_hash_join(
             }
             watermark_indices_in_jk.push((idx, do_state_cleaning));
 
-            if !left_padded && let Some(internal) = l2i.try_map(*left_key) {
-                watermark_columns.insert(
-                    internal,
-                    l_wtmk_group.same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
-                );
-            }
-            if !right_padded && let Some(internal) = r2i.try_map(*right_key) {
-                watermark_columns.insert(
-                    internal,
-                    l_wtmk_group.same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
-                );
-            }
+            let left = l2i.try_map(*left_key).filter(|_| !left_padded);
+            let right = r2i.try_map(*right_key).filter(|_| !right_padded);
+            watermark_columns.insert_equal(left.into_iter().chain(right), || {
+                l_wtmk_group.same_or_else(r_wtmk_group, || ctx.next_watermark_group_id())
+            });
         }
     }
 
