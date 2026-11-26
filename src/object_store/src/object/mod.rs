@@ -46,9 +46,10 @@ pub mod error;
 pub mod object_metrics;
 
 pub mod prefix;
-
+mod read_scheduler;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use read_scheduler::ReadScheduler;
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, ReadBuf};
@@ -61,6 +62,39 @@ pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = StreamingUploaderImpl;
 
 pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
+
+/// Checked half-open byte bounds for backends that do arithmetic on a read range.
+struct ObjectReadBounds {
+    start: usize,
+    end: Option<usize>,
+}
+
+impl ObjectReadBounds {
+    fn new(range: &impl ObjectRangeBounds) -> ObjectResult<Self> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+
+        let invalid =
+            || ObjectError::read_length_mismatch(format!("invalid object read range {range:?}"));
+        let start = match range.start_bound() {
+            Included(&n) => n,
+            Excluded(&n) => n.checked_add(1).ok_or_else(invalid)?,
+            Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Included(&n) => Some(n.checked_add(1).ok_or_else(invalid)?),
+            Excluded(&n) => Some(n),
+            Unbounded => None,
+        };
+        if end.is_some_and(|end| start > end) {
+            return Err(invalid());
+        }
+        Ok(Self { start, end })
+    }
+
+    fn len(&self) -> Option<usize> {
+        self.end.map(|end| end - self.start)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
@@ -289,6 +323,22 @@ impl StreamingUploaderImpl {
 }
 
 impl ObjectStoreImpl {
+    /// Enable coalescing for a store whose objects are immutable after publication.
+    pub fn with_read_coalescing(mut self) -> Self {
+        match &mut self {
+            Self::S3(store) => store.enable_read_coalescing(),
+            Self::InMem(store) => store.enable_read_coalescing(),
+            Self::Opendal(store)
+                if store.media_type() == MediaType::S3.as_str()
+                    || store.media_type() == MediaType::Minio.as_str() =>
+            {
+                store.enable_read_coalescing();
+            }
+            _ => {}
+        }
+        self
+    }
+
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload(path, obj).await)
     }
@@ -533,6 +583,8 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     config: Arc<ObjectStoreConfig>,
+    // Keep optional scheduling state out of every backend variant and its callers' futures.
+    read_scheduler: Option<Arc<ReadScheduler>>,
 }
 
 /// Manually dispatch trait methods.
@@ -561,7 +613,30 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             object_store_metrics,
             inner: store,
             config,
+            read_scheduler: None,
         }
+    }
+
+    fn enable_read_coalescing(&mut self)
+    where
+        OS: Clone + 'static,
+    {
+        tracing::info!(config = ?self.config.read_scheduler, "Hummock read scheduler enabled");
+        // The worker owns a direct reader and cannot enqueue into its own channel.
+        let direct = Arc::new(Self::new(
+            self.inner.clone(),
+            self.object_store_metrics.clone(),
+            self.config.clone(),
+        ));
+        self.read_scheduler = Some(Arc::new(ReadScheduler::new(
+            &self.object_store_metrics,
+            self.media_type(),
+            self.config.read_scheduler,
+            move |path, range| {
+                let direct = direct.clone();
+                async move { direct.read_direct(&path, range.into_bounds()).await }
+            },
+        )));
     }
 
     fn media_type(&self) -> &'static str {
@@ -642,51 +717,105 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        let operation_type = OperationType::Read;
-        let operation_type_str = operation_type.as_str();
-        let media_type = self.media_type();
+        use std::ops::Bound::{Excluded, Included};
 
+        let media_type = self.media_type();
+        let mut read_guard = self.object_store_metrics.begin_read(media_type, "logical");
+        let (route, scheduled) = match &self.read_scheduler {
+            None => ("direct", None),
+            Some(scheduler) => {
+                let (route, read_range) = scheduler.plan(&range);
+                (route, Some((scheduler, read_range)))
+            }
+        };
+        let labels = &[media_type, route];
+        self.object_store_metrics
+            .read_requests
+            .with_label_values(labels)
+            .inc();
         let _timer = self
             .object_store_metrics
-            .operation_latency
-            .with_label_values(&[media_type, operation_type_str])
+            .read_request_duration
+            .with_label_values(labels)
             .start_timer();
-
-        let builder = || async {
-            self.inner
-                .read(path, range.clone())
-                .instrument_await(operation_type_str.verbose())
-                .await
-        };
-
-        let res = retry_request(
-            builder,
-            &self.config,
-            operation_type,
-            self.object_store_metrics.clone(),
-            media_type,
-        )
-        .await;
-
-        if let Err(e) = &res
-            && e.is_object_not_found_error()
-            && !path.ends_with(".data")
-        {
-            // Some not_found_error is expected, e.g. metadata backup's manifest.json.
-            // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
-        } else {
-            try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+        if let (Included(&start), Excluded(&end)) = (range.start_bound(), range.end_bound()) {
+            self.object_store_metrics
+                .read_request_bytes
+                .with_label_values(labels)
+                .observe(end.saturating_sub(start) as f64);
         }
+        let result = match scheduled {
+            Some((scheduler, range)) => match scheduler.submit_plan(path, range).await {
+                Ok(response) => response.await.unwrap_or_else(|error| Err(error.into())),
+                Err(error) => Err(error),
+            },
+            None => self.read_direct(path, range).await,
+        };
+        read_guard.finish(&result);
+        result
+    }
 
-        let data = res?;
-        self.object_store_metrics
-            .read_bytes
-            .inc_by(data.len() as u64);
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type_str])
-            .observe(data.len() as f64);
-        Ok(data)
+    // Isolate retry/IO state from cache-facing read futures. Callers reach this factory
+    // only while executing an object read, so cache hits and shared fetch followers do
+    // not allocate here. The timer and retry loop still start when the future is polled.
+    fn read_direct<'a>(
+        &'a self,
+        path: &'a str,
+        range: impl ObjectRangeBounds,
+    ) -> impl Future<Output = ObjectResult<Bytes>> + Send + 'a {
+        Box::pin(async move {
+            let operation_type = OperationType::Read;
+            let operation_type_str = operation_type.as_str();
+            let media_type = self.media_type();
+
+            let mut read_guard = self.object_store_metrics.begin_read(media_type, "physical");
+            let _timer = self
+                .object_store_metrics
+                .operation_latency
+                .with_label_values(&[media_type, operation_type_str])
+                .start_timer();
+
+            let builder = || async {
+                let mut attempt = self.object_store_metrics.begin_read(media_type, "attempt");
+                let result = self
+                    .inner
+                    .read(path, range.clone())
+                    .instrument_await(operation_type_str.verbose())
+                    .await;
+                attempt.finish(&result);
+                result
+            };
+
+            let res = retry_request(
+                builder,
+                &self.config,
+                operation_type,
+                self.object_store_metrics.clone(),
+                media_type,
+            )
+            .await;
+
+            read_guard.finish(&res);
+            if let Err(e) = &res
+                && e.is_object_not_found_error()
+                && !path.ends_with(".data")
+            {
+                // Some not_found_error is expected, e.g. metadata backup's manifest.json.
+                // This is a quick fix that'll only log error in `try_update_failure_metric` in state store usage.
+            } else {
+                try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+            }
+
+            let data = res?;
+            self.object_store_metrics
+                .read_bytes
+                .inc_by(data.len() as u64);
+            self.object_store_metrics
+                .operation_size
+                .with_label_values(&[operation_type_str])
+                .observe(data.len() as f64);
+            Ok(data)
+        })
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -1029,7 +1158,7 @@ pub async fn build_remote_object_store(
             }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
         }
-        #[cfg(debug_assertions)]
+        #[cfg(any(debug_assertions, test, feature = "test"))]
         "memory-isolated-for-test" /* isolated memory is only available for tests */ => {
             ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(metrics, config))
         }

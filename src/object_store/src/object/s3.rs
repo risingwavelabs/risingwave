@@ -54,14 +54,13 @@ use futures::future::{BoxFuture, FutureExt, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    Bytes, ObjectError, ObjectErrorInner, ObjectMetadata, ObjectRangeBounds, ObjectResult,
-    ObjectStore, StreamingUploader, prefix, retry_request,
+    Bytes, ObjectError, ObjectErrorInner, ObjectMetadata, ObjectRangeBounds, ObjectReadBounds,
+    ObjectResult, ObjectStore, StreamingUploader, prefix, retry_request,
 };
 use crate::object::{
     ObjectDataStream, ObjectMetadataIter, OperationType, try_update_failure_metric,
@@ -476,7 +475,8 @@ impl ObjectStore for S3ObjectStore {
             "s3 read error"
         )));
 
-        let val = match self.obj_store_request(path, range.clone()).send().await {
+        let bounds = ObjectReadBounds::new(&range)?;
+        let val = match self.obj_store_request(path, &bounds)?.send().await {
             Ok(resp) => resp
                 .body
                 .collect()
@@ -493,10 +493,10 @@ impl ObjectStore for S3ObjectStore {
             }
         };
 
-        if let Some(len) = range.len()
+        if let Some(len) = bounds.len()
             && len != val.len()
         {
-            return Err(ObjectError::internal(format!(
+            return Err(ObjectError::read_length_mismatch(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 len,
                 val.len(),
@@ -544,7 +544,8 @@ impl ObjectStore for S3ObjectStore {
             ObjectError::internal("s3 streaming read init error")
         ));
 
-        let resp = match self.obj_store_request(path, range.clone()).send().await {
+        let bounds = ObjectReadBounds::new(&range)?;
+        let resp = match self.obj_store_request(path, &bounds)?.send().await {
             Ok(resp) => resp,
             Err(sdk_err) => {
                 return Err(set_error_should_retry::<GetObjectError>(
@@ -637,6 +638,19 @@ impl ObjectStore for S3ObjectStore {
 
     fn store_media_type(&self) -> &'static str {
         "s3"
+    }
+}
+
+impl ObjectReadBounds {
+    fn s3_range_header(&self) -> ObjectResult<Option<String>> {
+        let start = self.start;
+        match self.end {
+            None if start == 0 => Ok(None),
+            None => Ok(Some(format!("bytes={start}-"))),
+            Some(end) if start < end => Ok(Some(format!("bytes={start}-{}", end - 1))),
+            // HTTP byte ranges use inclusive endpoints and cannot express an empty range.
+            Some(_) => Err(ObjectError::read_length_mismatch("empty S3 read range")),
+        }
     }
 }
 
@@ -804,24 +818,17 @@ impl S3ObjectStore {
         }
     }
 
-    /// Generates an HTTP GET request to download the object specified in `path`. If given,
-    /// `start_pos` and `end_pos` specify the first and last byte to download, respectively. Both
-    /// are inclusive and 0-based. For example, set `start_pos = 0` and `end_pos = 7` to download
-    /// the first 8 bytes. If neither is given, the request will download the whole object.
     fn obj_store_request(
         &self,
         path: &str,
-        range: impl ObjectRangeBounds,
-    ) -> GetObjectFluentBuilder {
-        let req = self.client.get_object().bucket(&self.bucket).key(path);
-        if range.is_full() {
-            return req;
-        }
-
-        let start = range.start().map(|v| v.to_string()).unwrap_or_default();
-        let end = range.end().map(|v| (v - 1).to_string()).unwrap_or_default(); // included
-
-        req.range(format!("bytes={}-{}", start, end))
+        bounds: &ObjectReadBounds,
+    ) -> ObjectResult<GetObjectFluentBuilder> {
+        Ok(self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(path)
+            .set_range(bounds.s3_range_header()?))
     }
 
     // When multipart upload is aborted, if any part uploads are in progress, those part uploads
@@ -1121,6 +1128,33 @@ where
 #[cfg(not(madsim))]
 mod tests {
     use crate::object::prefix::s3::{NUM_BUCKET_PREFIXES, get_object_prefix};
+
+    #[test]
+    fn s3_read_range_headers_preserve_rust_bounds() {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+
+        use super::{ObjectRangeBounds, ObjectReadBounds};
+        fn header(range: impl ObjectRangeBounds) -> super::ObjectResult<Option<String>> {
+            ObjectReadBounds::new(&range)?.s3_range_header()
+        }
+        assert_eq!(header(..).unwrap(), None);
+        assert_eq!(header(..4).unwrap().as_deref(), Some("bytes=0-3"));
+        assert_eq!(header(0..4).unwrap(), header(..4).unwrap());
+        assert_eq!(header(4..).unwrap().as_deref(), Some("bytes=4-"));
+        assert_eq!(header(..=0).unwrap().as_deref(), Some("bytes=0-0"));
+        assert_eq!(
+            header((Excluded(0), Included(3))).unwrap().as_deref(),
+            Some("bytes=1-3")
+        );
+        for invalid in [
+            (Included(0), Excluded(0)),
+            (Included(3), Excluded(2)),
+            (Excluded(usize::MAX), Unbounded),
+            (Unbounded, Included(usize::MAX)),
+        ] {
+            assert!(header(invalid).unwrap_err().is_read_range_error());
+        }
+    }
 
     fn get_hash_of_object(obj_id: u64) -> u32 {
         let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());

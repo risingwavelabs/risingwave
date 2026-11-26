@@ -371,7 +371,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 .iter_with_vnode(
                     vnode,
                     &range_bounds,
-                    PrefetchOptions::prefetch_for_small_range_scan(),
+                    PrefetchOptions::prefetch_for_locality_backfill(),
                 )
                 .await?;
             pin_mut!(iter);

@@ -49,6 +49,7 @@
     - [Shared Buffer](./design/shared-buffer.md)
     - [Relational Table](./design/relational-table.md)
     - [Multiple Object Storage Backends](./design/multi-object-store.md)
+    - [Hummock read scheduling](./design/hummock-read-scheduling.md)
 - [Meta Service](./design/meta-service.md)
 - [Data Model and Encoding](./design/data-model-and-encoding.md)
 - [Batch Local Execution Mode](./design/batch-local-execution-mode.md)
