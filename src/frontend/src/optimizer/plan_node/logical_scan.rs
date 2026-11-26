@@ -89,13 +89,18 @@ impl GenericPlanRef for LogicalScan {
 }
 
 impl LogicalScan {
-    /// Create a [`LogicalScan`] node. Used by planner.
+    /// Create a fresh logical scan using the catalog's initial stream key.
+    /// Do not use this to recreate an existing scan during rewrites or cloning:
+    /// use the clone helpers instead to preserve its possibly rewritten stream key.
     pub fn create(
         table_catalog: Arc<TableCatalog>,
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
     ) -> Self {
         let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
+        let table_scan_stream_key = table_catalog
+            .supports_streaming_scan()
+            .then(|| table_catalog.stream_key());
         generic::TableScan::new(
             output_col_idx,
             table_catalog,
@@ -104,6 +109,7 @@ impl LogicalScan {
             ctx,
             Condition::true_cond(),
             as_of,
+            table_scan_stream_key,
         )
         .into()
     }
@@ -123,6 +129,9 @@ impl LogicalScan {
                 IndexType::Vector(index) => vector_indexes.push(index.clone()),
             }
         }
+        let table_scan_stream_key = table_catalog
+            .supports_streaming_scan()
+            .then(|| table_catalog.stream_key());
         generic::TableScan::new(
             output_col_idx,
             table_catalog,
@@ -131,12 +140,27 @@ impl LogicalScan {
             ctx,
             Condition::true_cond(),
             as_of,
+            table_scan_stream_key,
         )
         .into()
     }
 
     pub fn table_name(&self) -> &str {
         &self.core.table_catalog.name
+    }
+
+    fn check_streaming_scan(&self) -> Result<()> {
+        if !self.table().supports_streaming_scan() {
+            return Err(ErrorCode::NotSupported(
+                format!(
+                    "table \"{}\" cannot be read by a streaming scan",
+                    self.table_name()
+                ),
+                "Read from the upstream table or materialized view instead.".to_owned(),
+            )
+            .into());
+        }
+        Ok(())
     }
 
     pub fn as_of(&self) -> Option<AsOf> {
@@ -326,6 +350,8 @@ impl LogicalScan {
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
+        // Preserve the scan key established by stream rewriting, which can include
+        // physical primary-key columns needed by snapshot or cross-database backfill.
         let scan_without_predicate = generic::TableScan::new(
             self.required_col_idx().clone(),
             self.core.table_catalog.clone(),
@@ -334,6 +360,7 @@ impl LogicalScan {
             self.ctx(),
             Condition::true_cond(),
             self.as_of(),
+            self.core.table_scan_stream_key().map(ToOwned::to_owned),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -344,7 +371,7 @@ impl LogicalScan {
     }
 
     pub(crate) fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::TableScan::new_inner(
+        generic::TableScan::new(
             self.output_col_idx().clone(),
             self.table().clone(),
             self.table_indexes().to_vec(),
@@ -358,7 +385,7 @@ impl LogicalScan {
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::TableScan::new_inner(
+        generic::TableScan::new(
             output_col_idx,
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
@@ -622,6 +649,7 @@ impl ToStream for LogicalScan {
         &self,
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
+        self.check_streaming_scan()?;
         if self.predicate().always_true() {
             if self.core.cross_database()
                 && (ctx.backfill_type() == BackfillType::Replicated
@@ -678,6 +706,7 @@ impl ToStream for LogicalScan {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
+        self.check_streaming_scan()?;
         // For snapshot backfill, apply streaming index selection rule which handles:
         // 1. Covering index selection (picks lowest-cost covering index)
         // 2. IN expansion (splits IN predicates into LogicalUnion of LogicalScans)

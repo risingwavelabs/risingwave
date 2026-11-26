@@ -335,6 +335,8 @@ test_snapshot_backfill() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/distinct_on_join_double_insert.slt'
 
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/filtered_union.slt'
+
   kill_cluster
 }
 

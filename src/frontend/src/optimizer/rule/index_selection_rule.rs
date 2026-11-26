@@ -594,7 +594,7 @@ impl IndexSelectionRule {
             }
         }
 
-        let primary_access = generic::TableScan::new(
+        let primary_access = generic::TableScan::new_for_batch(
             primary_table
                 .pk
                 .iter()
@@ -639,7 +639,7 @@ impl IndexSelectionRule {
         let primary_table_pk_ref = index.primary_table_pk_ref_to_index_table()?;
 
         Some(
-            generic::TableScan::new(
+            generic::TableScan::new_for_batch(
                 primary_table_pk_ref
                     .iter()
                     .map(|x| x.column_index)

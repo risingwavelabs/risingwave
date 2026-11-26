@@ -1039,7 +1039,7 @@ impl SubscriptionCursor {
             let out_names = batch_log_seq_scan.core().column_names();
             (batch_log_seq_scan.into(), out_fields, out_names)
         } else {
-            let core = generic::TableScan::new(
+            let core = generic::TableScan::new_for_batch(
                 output_col_idx,
                 table_catalog.clone(),
                 vec![],

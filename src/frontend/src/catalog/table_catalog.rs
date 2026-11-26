@@ -388,6 +388,16 @@ impl TableCatalog {
         self.table_type == TableType::Internal
     }
 
+    /// Whether an ordinary streaming table scan can consume this relation.
+    /// Executor state tables are not exposed as upstream streaming relations, and
+    /// vector indexes use specialized storage and search operators instead of table scans.
+    pub fn supports_streaming_scan(&self) -> bool {
+        matches!(
+            self.table_type,
+            TableType::Table | TableType::MaterializedView | TableType::Index
+        )
+    }
+
     pub fn is_mview(&self) -> bool {
         self.table_type == TableType::MaterializedView
     }

@@ -1,0 +1,52 @@
+# ORDER BY v puts v before the logical stream key id in the storage primary key.
+- id: setup
+  sql: |
+    create table t (id int primary key, k int, v int);
+    create materialized view ordered_mv as select * from t order by v;
+    create materialized view plain_mv as select * from t;
+  expected_outputs: []
+
+- name: snapshot backfill preserves expanded key when pulling up a residual predicate
+  before:
+    - setup
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    explain (verbose) create materialized view downstream as
+    select id from ordered_mv where k > 0
+    union all
+    select id from plain_mv;
+  expected_outputs:
+    - explain_output
+
+- name: snapshot backfill preserves expanded key when pushing down a scan range
+  before:
+    - setup
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    select id, k from ordered_mv where v > 0
+    union all
+    select id, k from plain_mv;
+  expected_outputs:
+    - stream_plan
+
+- name: arrangement backfill keeps the logical key when pulling up a residual predicate
+  before:
+    - setup
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    select id, k from ordered_mv where k > 0
+    union all
+    select id, k from plain_mv;
+  expected_outputs:
+    - stream_plan
+
+- name: arrangement backfill keeps the logical key when pulling up a primary key predicate
+  before:
+    - setup
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    select id, k from ordered_mv where v > 0
+    union all
+    select id, k from plain_mv;
+  expected_outputs:
+    - stream_plan
