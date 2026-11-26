@@ -5919,15 +5919,15 @@ dependencies = [
 
 [[package]]
 name = "gcloud-auth"
-version = "1.3.0"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b43924e3df02cb3b846ca66a7ee58e8c13eb2556d0308c71f6154083f6980365"
+checksum = "ffeca1176eb41384cf310231e604e724d261da85a48867e563158f099fffd785"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "gcloud-metadata",
  "home",
- "jsonwebtoken 10.4.0",
+ "jsonwebtoken 11.1.0",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -5970,9 +5970,9 @@ dependencies = [
 
 [[package]]
 name = "gcloud-gax"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "558634081d1cf458d1bc0166f69475a80f445b5b991f162028b293a38307059d"
+checksum = "15d6ff7df39457f93fa32a798a63c98a278ee73c6e72da8212b22f4b9dee4175"
 dependencies = [
  "http",
  "thiserror 2.0.21",
@@ -6009,9 +6009,9 @@ dependencies = [
 
 [[package]]
 name = "gcloud-pubsub"
-version = "1.7.1"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61e5cf71d2c2531fbae1d000dc05fa161272c7407c539157598fc9dee234c285"
+checksum = "b8050e73c460ed1655eddeffab5a0cc3e47cb180c6c158f4693c4d6450129635"
 dependencies = [
  "async-channel 2.5.0",
  "async-stream",
