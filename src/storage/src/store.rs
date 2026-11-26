@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::array::{Op, VectorRef};
@@ -264,10 +264,39 @@ pub trait StateStoreReadLog: StaticSendSync {
 pub trait KeyValueFn<'a, O> =
     for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
+pub trait BatchKeyValueFn<'a, O> =
+    for<'kv> Fn(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + Sync + 'a;
+
 pub trait StateStoreGet: StaticSendSync {
-    /// Immutable startup controls for batch-local SST metadata reuse.
+    /// Immutable startup controls shared by callers and the backend's rolling batch reader.
     fn read_batch_config(&self) -> risingwave_common::config::storage::ReadBatchConfig {
         Default::default()
+    }
+
+    /// Read independent keys, retaining input order (including duplicates and missing keys).
+    /// Backends may share immutable read preparation; key visibility remains the scalar contract.
+    fn on_key_values<'a, O: Send + 'a>(
+        &'a self,
+        requests: Vec<(TableKey<Bytes>, ReadOptions)>,
+        project: impl BatchKeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<Option<O>>> {
+        async move {
+            let mut output: Vec<_> = (0..requests.len()).map(|_| None).collect();
+            let mut reads = futures::stream::iter(requests.into_iter().enumerate().map(
+                |(index, (key, options))| {
+                    let project = &project;
+                    async move {
+                        let row = self.on_key_value(key, options, project).await?;
+                        Ok::<_, crate::error::StorageError>((index, row))
+                    }
+                },
+            ))
+            .buffer_unordered(self.read_batch_config().concurrency.get());
+            while let Some((index, row)) = reads.try_next().await? {
+                output[index] = row;
+            }
+            Ok(output)
+        }
     }
 
     fn on_key_value<'a, O: Send + 'a>(

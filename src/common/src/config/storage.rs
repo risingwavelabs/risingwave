@@ -79,7 +79,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_cached_recent_versions_number")]
     pub max_cached_recent_versions_number: usize,
 
-    /// Batch-local SST metadata reuse. Changes require restart.
+    /// Concurrent point reads and batch-local SST metadata reuse. Changes require restart.
     #[serde(default)]
     #[config_doc(nested)]
     pub read_batch: ReadBatchConfig,
@@ -621,14 +621,20 @@ pub struct ObjectStoreConfig {
     pub upload_part_size: usize,
 }
 
-/// Settings for bounded SST metadata retention.
+/// Settings for `MultiGet` and bounded SST metadata retention.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
 pub struct ReadBatchConfig {
-    /// Share SST metadata within `HashJoin` chunk iterator initialization.
+    /// `HashAgg` and Materialize use `MultiGet` when enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum keys executing concurrently in each `MultiGet`, not a node-wide limit.
+    #[serde(default = "default_read_batch_concurrency")]
+    pub concurrency: NonZeroUsize,
+    /// Share SST metadata within `MultiGet` and within `HashJoin` chunk iterator initialization.
     #[serde(default)]
     pub meta_reuse: bool,
-    /// Maximum retained regular metadata entries per `HashJoin` chunk.
+    /// Maximum retained regular metadata entries per `MultiGet` or `HashJoin` chunk.
     #[serde(default = "default_read_meta_entries")]
     pub meta_max_entries: NonZeroUsize,
     /// Retained regular metadata bytes; one oversized SST may additionally be retained.
@@ -647,6 +653,10 @@ where
         ));
     }
     Ok(value)
+}
+
+fn default_read_batch_concurrency() -> NonZeroUsize {
+    NonZeroUsize::new(10).unwrap()
 }
 
 fn default_read_meta_entries() -> NonZeroUsize {
