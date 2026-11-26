@@ -45,13 +45,15 @@
 //! the MV or replaying the topic may interleave equal-ORDER-BY rows differently and legitimately
 //! produce different matches (the standard leaves tie order implementation-defined).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt, once};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{
+    DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl, ToOwnedDatum,
+};
 use risingwave_expr::ExprError;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
@@ -563,9 +565,9 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     /// Compiled `DEFINE` predicates keyed by their pattern variable.
     defines: HashMap<String, CompiledDefine>,
     within: Option<NonStrictExpression>,
-    /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); consulted on every watermark
-    /// pass — which visits every partition, so an idle partition's timed-out partial is emitted or
-    /// evicted without new input in that partition.
+    /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); the per-row deadline it
+    /// yields is what [`WakeupIndex`] files partitions under, so a watermark pass visits exactly
+    /// the idle partitions whose timed-out partial it can emit or evict — without new input there.
     within_deadline: Option<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
@@ -617,6 +619,16 @@ impl Deadline {
         match self {
             Deadline::At(d) => last.default_cmp(d).is_le(),
             Deadline::Never => true,
+        }
+    }
+
+    /// Whether this window closes strictly before `other`'s. A window that never closes is
+    /// before nothing and after every finite deadline.
+    fn is_before(&self, other: &Deadline) -> bool {
+        match (self, other) {
+            (Deadline::At(a), Deadline::At(b)) => a.default_cmp(b).is_lt(),
+            (Deadline::At(_), Deadline::Never) => true,
+            (Deadline::Never, _) => false,
         }
     }
 }
@@ -803,10 +815,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             } else {
                 false
             };
+            // Over a buffer in deadline order, a closed start row means every gap row before it
+            // has closed too. Otherwise the gate must look at each gap row's own window.
+            let gap_windows = match watermark {
+                Some(w) if within_final && run.deadlines_inverted() => Some(w),
+                _ => None,
+            };
             // A spent budget cannot decide a STRUCTURAL hold: every walk short-circuits to
             // "undecided", which the gate must read as hold. A WITHIN-final match is different —
             // its window has closed, so `match_is_final` returns FINAL for it before spending
-            // anything, and it needs no walk at all. Those MUST still be drained: leaving one
+            // anything, and it needs no walk at all (unless a gap row's window is still open,
+            // which holds it like any structural hold; the prune below never passes an open,
+            // undecided row, so the match is not lost). Those MUST still be drained: leaving one
             // withheld while `prune_dead_prefix` treats its window-closed start row as dead is how
             // a starved visit loses a match outright. It is also the ONLY way a starved partition
             // sheds anything — `prune_dead_prefix` returns early while the matcher is incomplete —
@@ -837,6 +857,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     start,
                     run.rows.len(),
                     within_final,
+                    gap_windows.map(|w| (run.rows.as_slice(), w)),
                     statically_terminal,
                     budget,
                     memoizable,
@@ -969,7 +990,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         //
         // This is NOT about a spent budget — do not gate it on `budget.hit`. With the budget spent
         // this function has already returned above, and even reaching here the loop stops at the
-        // first window-open position, which is at or before any held match's start. The case it
+        // first window-open position it cannot prove dead. The case it
         // guards has budget to spare: the loop skips a window-closed row on `deadline < w` WITHOUT
         // consulting the matcher, while the emission gate holds a match because a *gap* position
         // before its start is still alive at the boundary. The held match's own start row can then
@@ -1076,6 +1097,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     async fn rebuild_partitions(
         parts: &mut hashbrown::HashMap<OwnedRow, PartitionRun>,
+        wakeups: &mut WakeupIndex,
         state_table: &StateTable<S>,
         partition_key_indices: &[usize],
         time_col: usize,
@@ -1089,6 +1111,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         metrics: &MatchRecognizeMetrics,
     ) -> StreamExecutorResult<i64> {
         parts.clear();
+        *wakeups = WakeupIndex::default();
         let mut max_seq: i64 = -1;
         let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
         for vnode in vnodes {
@@ -1129,19 +1152,11 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 // Not counted here: the ingest path counted this row once already, and a rebuild
                 // re-evaluates every retained row on each recovery.
                 let deadline = eval_deadline(within_deadline, &order_key).await;
-                let run = parts.entry(pk).or_insert_with(|| PartitionRun {
-                    rows: Vec::new(),
-                    matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
-                    held: None,
-                });
-                // The emit path and the dead-prefix prune binary-search `rows` by `seq`; pin the
-                // invariant where it is produced: state-table key order must feed each partition's
-                // seqs in strictly increasing order (the ordered-input contract).
-                debug_assert!(
-                    run.rows.last().is_none_or(|last| last.seq < seq),
-                    "state-table iteration fed a non-increasing seq into a partition buffer"
-                );
-                run.rows.push(BufferedRow {
+                let run = parts
+                    .entry(pk)
+                    .or_insert_with(|| PartitionRun::new(nfa.clone(), skip.clone()));
+                // State-table key order feeds each partition in buffer order; `push_row` pins it.
+                run.push_row(BufferedRow {
                     seq,
                     order_key,
                     deadline,
@@ -1155,7 +1170,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // safe on the data path — no emission happens during rebuild, the freeze loop holds on
         // exhaustion, and the next visit rescans the suffix with a fresh budget.
         let mut reported_budget = false;
-        for run in parts.values_mut() {
+        for (pk, run) in parts.iter_mut() {
             let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
             let fed: Vec<Seq> = run.rows.iter().map(|r| Seq(r.seq)).collect();
             let matcher = DefineMatcher {
@@ -1166,6 +1181,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             run.matcher
                 .advance(&fed, &matcher, &mut budget, memoizable)
                 .await?;
+            // Every rebuilt partition is owed a first visit: rows that arrived after the last
+            // watermark before the restart were never structurally pruned.
+            wakeups.sync(pk, run, true);
             if budget.hit {
                 metrics.match_recognize_scan_budget_exhausted_count.inc();
                 report_scan_budget_once(eval_error_report, &mut reported_budget);
@@ -1222,10 +1240,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // `hashbrown` rather than std for `entry_ref` (see the ingest path below); std's raw
         // entry API never stabilized.
         let mut parts: hashbrown::HashMap<OwnedRow, PartitionRun> = hashbrown::HashMap::new();
+        let mut wakeups = WakeupIndex::default();
 
         // Recovery / rescale rebuild: see `rebuild_partitions`.
         let max_seq = Self::rebuild_partitions(
             &mut parts,
+            &mut wakeups,
             &state_table,
             &partition_key_indices,
             time_col,
@@ -1266,10 +1286,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // exhaustion (a pattern whose closer never arrives keeps its rows forever) is invisible
         // until the OOM. The chunk arm maintains it incrementally (an increment beside the push,
         // a decrement beside its eviction counter) because it never iterates the whole partition
-        // map; the watermark arm and the rebuild sites recount exactly, which self-heals any
-        // accounting slip within one watermark.
+        // map, and so does the watermark arm now that it visits only the partitions the
+        // watermark can change; the rebuild site recounts exactly, and a debug assertion in the
+        // watermark arm checks the incremental count against a recount.
         let mut retained_rows: i64 = parts.values().map(|r| r.rows.len() as i64).sum();
         metrics.match_recognize_retained_rows.set(retained_rows);
+        metrics
+            .match_recognize_retained_partitions
+            .set(parts.len() as i64);
 
         #[for_await]
         for msg in input {
@@ -1332,12 +1356,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // `entry_ref` hashes and probes once, materializing the key only on a
                         // vacant insert — one probe fewer than the contains_key/get_mut pair it
                         // replaced. (The `pk` allocation above is per-row either way.)
-                        let run = parts.entry_ref(&pk).or_insert_with(|| PartitionRun {
-                            rows: Vec::new(),
-                            matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
-                            held: None,
-                        });
-                        run.rows.push(BufferedRow {
+                        let run = parts
+                            .entry_ref(&pk)
+                            .or_insert_with(|| PartitionRun::new(nfa.clone(), skip.clone()));
+                        // Rows arrive order-key sorted (the ordered-input contract). The deadline
+                        // usually follows the order key, but need not: `push_row` tracks the
+                        // exception (see `PartitionRun::deadlines_inverted`).
+                        run.push_row(BufferedRow {
                             seq,
                             order_key,
                             deadline,
@@ -1384,6 +1409,19 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // borrow released.
                         let partition_emptied = run.rows.is_empty();
                         let emptied_capacity = run.rows.capacity();
+                        const DROP_EMPTY_PARTITION_CAPACITY: usize = 1024;
+                        let drop_now =
+                            partition_emptied && emptied_capacity >= DROP_EMPTY_PARTITION_CAPACITY;
+                        if !drop_now {
+                            // An arrival changed this partition's buffer: it is owed one watermark
+                            // visit (the structural prune runs only there), and its filed deadline
+                            // may have moved if the emission above consumed its first rows. An
+                            // emptied entry kept below is synced too — unfiled and pending — so the
+                            // next watermark sweeps it, as the full pass used to; without that it
+                            // would be reachable by nothing and live forever. The key is cloned
+                            // only on the first touch since the last visit.
+                            wakeups.sync(&pk, run, true);
+                        }
                         for c in filled {
                             yield Message::Chunk(c);
                         }
@@ -1397,13 +1435,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // exists to avoid. Above the threshold the retained capacity is worth more
                         // than the reconstruction: a partition that peaked at tens of thousands of
                         // rows holds a large allocation for an entry with nothing in it. Below it,
-                        // the next watermark pass sweeps the entry anyway.
-                        const DROP_EMPTY_PARTITION_CAPACITY: usize = 1024;
-                        if partition_emptied && emptied_capacity >= DROP_EMPTY_PARTITION_CAPACITY {
+                        // the entry was marked pending above and the next watermark pass sweeps it.
+                        if drop_now {
                             // Safe for the same reason as the watermark arm: `consume_prefix` resets
                             // the matcher when it consumes the whole buffer, so an empty-rows
                             // partition carries no state a later row would need.
-                            parts.remove(&pk);
+                            if let Some(mut run) = parts.remove(&pk) {
+                                wakeups.remove(&pk, &mut run);
+                            }
                         }
                     }
                     // Once per chunk, not once per row: the budget is now shared across the chunk, so
@@ -1414,6 +1453,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         report_scan_budget_once(&eval_error_report, &mut reported_budget);
                     }
                     metrics.match_recognize_retained_rows.set(retained_rows);
+                    metrics
+                        .match_recognize_retained_partitions
+                        .set(parts.len() as i64);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1427,11 +1469,35 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     if w.col_idx != time_col {
                         continue;
                     }
+                    // Only the partitions this watermark can change: those whose earliest
+                    // deadline has passed, and those touched since their last visit. See
+                    // `WakeupIndex` for why skipping the rest is exact, not approximate.
+                    let (due, pending) = wakeups.take_due(&w.val);
+                    if due.is_empty() && pending.is_empty() {
+                        // The idle watermark: nothing to visit, so no builder, no budget, no
+                        // pass — the common case for a watermark tick over many quiet partitions.
+                        debug_check_accounting(&parts, &wakeups, retained_rows);
+                        continue;
+                    }
+                    let due_len = due.len();
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     let mut reported_budget = false;
                     let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
                     let mut emptied: Vec<OwnedRow> = Vec::new();
-                    for (pk, run) in &mut parts {
+                    for (i, pk) in due.into_iter().chain(pending).enumerate() {
+                        let Some(run) = parts.get_mut(&pk) else {
+                            // Both removal sites unfile before dropping, and this arm defers its
+                            // removals to after the loop, so a filed key is always in the map.
+                            debug_assert!(false, "wakeup index holds a key that is not in `parts`");
+                            continue;
+                        };
+                        if i < due_len {
+                            // Popped from `due`: no longer filed until `sync` re-files it below.
+                            run.indexed_deadline = None;
+                        }
+                        // Drained from the pending set by `take_due` (deduplicated against `due`),
+                        // so a visit that ends owing another one re-files it from scratch.
+                        run.pending = false;
                         // One budget per partition VISIT: a shared pass-wide budget would let a
                         // single pathological partition starve emission and eviction for every
                         // partition iterated after it, pass after pass (map order is stable).
@@ -1456,7 +1522,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         let rows_before = run.rows.len();
                         let filled = Self::emit_ready(
                             run,
-                            pk,
+                            &pk,
                             &nfa,
                             &skip,
                             &defines,
@@ -1476,6 +1542,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         for c in filled {
                             yield Message::Chunk(c);
                         }
+                        // The gate above read the gap rows as the buffer held them, and its gap
+                        // check is structural — it ignores the watermark. So a gap row whose
+                        // window has closed but which is still structurally alive holds back a
+                        // match the prune below is about to free, by evicting that row. The full
+                        // pass re-asked the gate at the next watermark; the index must owe that
+                        // visit too, or the partition sits under its new first deadline (not
+                        // pending) and the match waits for that deadline or an arrival.
+                        let rows_before_prune = run.rows.len();
                         Self::prune_dead_prefix(
                             run,
                             &nfa,
@@ -1487,27 +1561,36 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             memoizable,
                         )
                         .await?;
-                        metrics
-                            .match_recognize_evicted_rows_count
-                            .inc_by(rows_before.saturating_sub(run.rows.len()) as u64);
-                        if run.rows.is_empty() {
-                            emptied.push(pk.clone());
-                        }
+                        let pruned = run.rows.len() < rows_before_prune;
+                        let evicted = rows_before.saturating_sub(run.rows.len()) as u64;
+                        metrics.match_recognize_evicted_rows_count.inc_by(evicted);
+                        retained_rows -= evicted as i64;
                         if budget.hit {
                             metrics.match_recognize_scan_budget_exhausted_count.inc();
                             report_scan_budget_once(&eval_error_report, &mut reported_budget);
+                        }
+                        if run.rows.is_empty() {
+                            wakeups.remove(&pk, run);
+                            emptied.push(pk);
+                        } else {
+                            // Re-file under the (possibly new) first deadline. A visit that ended on
+                            // a spent budget or with a refresh outstanding decided nothing final,
+                            // and one whose prune evicted rows ran its gate over a buffer the
+                            // prune has since shortened; each is owed the next visit too.
+                            let revisit = budget.hit || run.matcher.needs_refresh() || pruned;
+                            wakeups.sync(&pk, run, revisit);
                         }
                     }
                     for pk in emptied {
                         parts.remove(&pk);
                     }
-                    // Exact recount, not the incremental counter: this arm just iterated every
-                    // partition, so the recount costs what the pass already paid — and it bounds
-                    // the lifetime of any future accounting slip to one watermark instead of
-                    // forever. (The chunk arm keeps the incremental counter: a recount there
-                    // would add a whole-map walk per chunk.)
-                    retained_rows = parts.values().map(|r| r.rows.len() as i64).sum();
+                    // The pass no longer iterates every partition, so the gauge is maintained
+                    // incrementally here as on the chunk arm; the exact recount is a debug check.
+                    debug_check_accounting(&parts, &wakeups, retained_rows);
                     metrics.match_recognize_retained_rows.set(retained_rows);
+                    metrics
+                        .match_recognize_retained_partitions
+                        .set(parts.len() as i64);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1550,6 +1633,309 @@ struct PartitionRun {
     /// this on every rebase: after a prune, the same `(resume_pos, len)` can recur over a different
     /// set of rows and a stale hit would withhold a now-decidable match.
     held: Option<(Seq, usize, usize)>,
+    /// The deadline this partition is filed under in [`WakeupIndex::due`] (`None` = not filed:
+    /// empty buffer, `Deadline::Never`, or popped for the current visit). Owned by the index; the
+    /// executor only reads it through [`WakeupIndex::sync`].
+    indexed_deadline: Option<ScalarImpl>,
+    /// Whether the partition is in [`WakeupIndex::pending`]: touched since its last watermark visit
+    /// (an arrival, a spent budget, a truncated scan) and therefore owed one visit regardless of
+    /// its deadline. Kept here so the hot path sets it with a byte store and clones the key only
+    /// on the `false → true` transition.
+    pending: bool,
+    /// `seq` of the latest row pushed with a deadline below that of the row before it. See
+    /// [`Self::deadlines_inverted`].
+    last_inverted_seq: Option<i64>,
+}
+
+impl PartitionRun {
+    fn new(nfa: std::sync::Arc<Nfa>, skip: SkipMode) -> Self {
+        Self {
+            rows: Vec::new(),
+            matcher: IncrementalMatcher::new(nfa, skip),
+            held: None,
+            indexed_deadline: None,
+            pending: false,
+            last_inverted_seq: None,
+        }
+    }
+
+    /// Append a row to the buffer. Every push goes through here: it pins the order the buffer
+    /// relies on and tracks where the deadlines fall out of it.
+    fn push_row(&mut self, row: BufferedRow) {
+        if let Some(last) = self.rows.last() {
+            // The emit path and the dead-prefix prune binary-search `rows` by `seq`, and
+            // `deadlines_inverted` compares against it: both the ordered input and the
+            // state-table key order must feed a partition strictly increasing seqs and
+            // non-decreasing order keys.
+            debug_assert!(
+                last.seq < row.seq,
+                "a non-increasing seq was fed into a partition buffer"
+            );
+            debug_assert!(
+                last.order_key.default_cmp(&row.order_key).is_le(),
+                "a decreasing order key was fed into a partition buffer"
+            );
+            if row.deadline.is_before(&last.deadline) {
+                self.last_inverted_seq = Some(row.seq);
+            }
+        }
+        self.rows.push(row);
+    }
+
+    /// Whether the buffer holds a row whose deadline is earlier than that of a row before it.
+    ///
+    /// Order keys are non-decreasing along the buffer, but `deadline = order_key + bound` is not
+    /// always monotone in the order key: a `timestamptz` key with a calendar-day bound is
+    /// evaluated in the session time zone, and across a DST transition (in either direction) a
+    /// later row can get an earlier deadline. The first row's deadline is then not the earliest
+    /// one in the buffer, and a closed window no longer implies that every earlier one closed.
+    ///
+    /// `last_inverted_seq` is the last row that fell below its predecessor. Rows leave the buffer
+    /// only as a prefix ([`MatchRecognizeExecutor::consume_prefix`]) and seqs only grow, so once
+    /// the first buffered row is that row or a later one, the buffer is in deadline order.
+    fn deadlines_inverted(&self) -> bool {
+        match (self.last_inverted_seq, self.rows.first()) {
+            (Some(inverted), Some(first)) => first.seq < inverted,
+            _ => false,
+        }
+    }
+}
+
+/// Debug-build checks the watermark arm runs on every watermark: the incremental `retained_rows`
+/// against an exact recount, and the wakeup index against the partition map (every filed key is a
+/// live partition filed under its first row's deadline, so the index cannot outgrow the map).
+/// Compiled out in release, where both are `O(partitions)`.
+#[inline]
+fn debug_check_accounting(
+    parts: &hashbrown::HashMap<OwnedRow, PartitionRun>,
+    wakeups: &WakeupIndex,
+    retained_rows: i64,
+) {
+    debug_assert_eq!(
+        retained_rows,
+        parts.values().map(|r| r.rows.len() as i64).sum::<i64>(),
+        "retained_rows accounting drifted"
+    );
+    debug_assert!(
+        wakeups.check_consistent(parts).is_ok(),
+        "wakeup index inconsistent: {:?}",
+        wakeups.check_consistent(parts)
+    );
+    // Release builds: the parameters are unused.
+    let _ = (parts, wakeups, retained_rows);
+}
+
+/// Which partitions a watermark visit can change — so the watermark arm visits only those.
+///
+/// A watermark `w` changes a partition's state in exactly three ways, each with a known lower
+/// bound on `w`: the deadline prune skips rows with `deadline < w`; `WITHIN` finality decides the
+/// first provisional match once its start row's `deadline < w`; and a budget-truncated scan or
+/// freeze resumes. While the buffer is in deadline order (an overflow is `Deadline::Never`, which
+/// sorts last), the first two happen no earlier than `rows[0].deadline`, and the third is not
+/// watermark-dependent at all.
+/// Everything else a visit does — the emission gate's gap and extension verdicts, the structural
+/// liveness prune — is a pure function of the buffer and cannot change without the buffer
+/// changing. An arrival changes it; so does the visit's own deadline prune, which runs AFTER the
+/// gate: a gap row the prune evicts may have been what held the gate's first match.
+///
+/// Hence a partition needs the visit at `w` iff `rows[0].deadline < w` **or** it is *pending*:
+/// touched since its last watermark visit. Pending covers the structural prune of rows that
+/// arrived since (that prune runs only on watermark visits), a gate that held on a spent budget
+/// rather than a verdict, a matcher asking for a refresh, and a visit whose deadline prune evicted
+/// rows (its gate ran over the buffer before them). A partition that is neither has nothing a
+/// watermark could change, and skipping it yields exactly the output the full pass did.
+///
+/// The buffer is in deadline order whenever the deadline is monotone in the order key, which is
+/// not guaranteed: see [`PartitionRun::deadlines_inverted`]. A partition whose buffer may be out
+/// of deadline order is kept pending, so it is visited at every watermark as the full pass did,
+/// until the out-of-order rows are consumed.
+///
+/// `due` buckets partitions by deadline so a whole expired bucket pops at once and a re-key is
+/// two `O(log n)` map operations; `Deadline::Never` partitions are never filed and wake only via
+/// `pending` or an arrival — the only ways their state can change. An emptied partition the chunk
+/// arm keeps for its capacity is synced like any other (unfiled, pending), so the watermark sweep
+/// of empty entries the full pass performed is preserved.
+///
+/// Size: a key is filed only while its partition is in the map with a non-empty buffer and a
+/// finite first deadline, under exactly that deadline; both removal sites unfile before dropping,
+/// every buffer mutation re-syncs, and an emptied bucket is dropped with its last key. So the index
+/// holds at most one entry per retained partition and is bounded by whatever bounds the partition
+/// map itself (`match_recognize_retained_partitions`); [`WakeupIndex::check_consistent`] pins this
+/// in debug builds.
+#[derive(Default)]
+struct WakeupIndex {
+    due: BTreeMap<DefaultOrdered<ScalarImpl>, hashbrown::HashSet<OwnedRow>>,
+    pending: hashbrown::HashSet<OwnedRow>,
+}
+
+impl WakeupIndex {
+    /// Bring the index in line with the partition's current buffer, and file it as pending if
+    /// asked. Call after anything that may have changed `rows[0]` or the matcher's refresh state.
+    fn sync(&mut self, pk: &OwnedRow, run: &mut PartitionRun, pending: bool) {
+        // Compared by reference: on the per-row common path (first row unchanged) this is a tag
+        // and value comparison with no clone.
+        let desired = run.rows.first().and_then(|r| match &r.deadline {
+            Deadline::At(d) => Some(d),
+            Deadline::Never => None,
+        });
+        if run.indexed_deadline.as_ref() != desired {
+            if let Some(old) = run.indexed_deadline.take() {
+                self.unfile(&old, pk);
+            }
+            if let Some(d) = desired {
+                self.due
+                    .entry(DefaultOrdered(d.clone()))
+                    .or_default()
+                    .insert(pk.clone());
+            }
+            run.indexed_deadline = desired.cloned();
+        }
+        // The first row's deadline is the earliest only over a buffer in deadline order. Without
+        // that, fall back to visiting at every watermark.
+        let pending = pending || run.deadlines_inverted();
+        if pending && !run.pending {
+            run.pending = true;
+            self.pending.insert(pk.clone());
+        }
+    }
+
+    /// Forget a partition that is being dropped from the map.
+    fn remove(&mut self, pk: &OwnedRow, run: &mut PartitionRun) {
+        if let Some(old) = run.indexed_deadline.take() {
+            self.unfile(&old, pk);
+        }
+        if run.pending {
+            run.pending = false;
+            self.pending.remove(pk);
+        }
+    }
+
+    fn unfile(&mut self, deadline: &ScalarImpl, pk: &OwnedRow) {
+        let key = DefaultOrdered(deadline.clone());
+        if let Some(bucket) = self.due.get_mut(&key) {
+            bucket.remove(pk);
+            if bucket.is_empty() {
+                self.due.remove(&key);
+            }
+        }
+    }
+
+    /// Partitions to visit at watermark `w`: every bucket with `deadline < w` (the strict
+    /// `Deadline::closed_at` boundary) plus every pending partition. Popped partitions are no
+    /// longer filed and the pending set is drained; the caller clears `run.pending` on every
+    /// visit and re-files through [`WakeupIndex::sync`] afterwards. Returns `(due, pending)` with
+    /// no partition in both: a due partition is visited once, so a visit that ends owing another
+    /// (spent budget, refresh) gets exactly one more, not a second one in the same pass.
+    fn take_due(&mut self, w: &ScalarImpl) -> (Vec<OwnedRow>, Vec<OwnedRow>) {
+        // `split_off` keeps `< w` in `self.due` and returns `>= w`; swap so the retained map is
+        // the unexpired part and the split-off one is what expired.
+        let mut expired = self.due.split_off(&DefaultOrdered(w.clone()));
+        std::mem::swap(&mut self.due, &mut expired);
+        let due: Vec<OwnedRow> = expired.into_values().flatten().collect();
+        if self.pending.is_empty() {
+            // Nothing to dedupe against and nothing to drain. The `is_empty` test matters:
+            // draining an empty `hashbrown` set still resets its whole control array, which keeps
+            // the capacity of the largest burst it ever held — an `O(capacity)` memset on every
+            // idle watermark, not `O(1)`.
+            return (due, Vec::new());
+        }
+        for pk in &due {
+            self.pending.remove(pk);
+        }
+        // `drain` keeps the allocation and resets its whole control array, sized for the largest
+        // burst the set ever held: fine while the set is about that full, but `O(peak)` per
+        // watermark once only a few partitions are pending after a large burst (a load, a
+        // recovery). When the set is mostly empty, hand the allocation back instead: one last
+        // `O(capacity)` pass, after which the set is sized for what is actually pending. The
+        // factor keeps a set that is steadily small, or steadily full, on the `drain` path, so
+        // neither reallocates per watermark.
+        let pending: Vec<OwnedRow> = if self.pending.len() * 4 < self.pending.capacity() {
+            std::mem::take(&mut self.pending).into_iter().collect()
+        } else {
+            self.pending.drain().collect()
+        };
+        (due, pending)
+    }
+
+    /// The index invariant, checked in debug builds and tests: every filed key names a partition
+    /// in `parts` whose `indexed_deadline` is the bucket key and whose first row carries that
+    /// deadline (so a filed partition is non-empty), no bucket is empty, every pending key names a
+    /// partition with `pending` set, no partition is filed or pending without the index knowing,
+    /// and a partition whose deadlines may be out of order is pending.
+    /// Together these bound the index by the partition map.
+    fn check_consistent(
+        &self,
+        parts: &hashbrown::HashMap<OwnedRow, PartitionRun>,
+    ) -> Result<(), String> {
+        let mut filed = 0usize;
+        for (deadline, bucket) in &self.due {
+            if bucket.is_empty() {
+                return Err(format!("empty bucket at {deadline:?}"));
+            }
+            for pk in bucket {
+                let run = parts
+                    .get(pk)
+                    .ok_or_else(|| format!("filed key {pk:?} not in the partition map"))?;
+                if run.indexed_deadline.as_ref() != Some(&deadline.0) {
+                    return Err(format!(
+                        "{pk:?} filed at {deadline:?} but records {:?}",
+                        run.indexed_deadline
+                    ));
+                }
+                match run.rows.first().map(|r| &r.deadline) {
+                    Some(Deadline::At(d)) if d == &deadline.0 => {}
+                    first => {
+                        return Err(format!(
+                            "{pk:?} filed at {deadline:?} but its first row has {first:?}"
+                        ));
+                    }
+                }
+                filed += 1;
+            }
+        }
+        for pk in &self.pending {
+            match parts.get(pk) {
+                Some(run) if run.pending => {}
+                Some(_) => return Err(format!("pending key {pk:?} not marked on its partition")),
+                None => return Err(format!("pending key {pk:?} not in the partition map")),
+            }
+        }
+        let recorded = parts
+            .values()
+            .filter(|r| r.indexed_deadline.is_some())
+            .count();
+        if recorded != filed {
+            return Err(format!(
+                "{recorded} partitions record a filing, {filed} are filed"
+            ));
+        }
+        if let Some((pk, _)) = parts
+            .iter()
+            .find(|(_, r)| r.deadlines_inverted() && !r.pending)
+        {
+            return Err(format!(
+                "{pk:?} holds out-of-order deadlines but is not pending"
+            ));
+        }
+        if let Some((pk, _)) = parts.iter().find(|(_, r)| {
+            !r.deadlines_inverted()
+                && !r
+                    .rows
+                    .is_sorted_by(|a, b| !b.deadline.is_before(&a.deadline))
+        }) {
+            return Err(format!(
+                "{pk:?} holds out-of-order deadlines that were not tracked"
+            ));
+        }
+        let marked = parts.values().filter(|r| r.pending).count();
+        if marked != self.pending.len() {
+            return Err(format!(
+                "{marked} partitions marked pending, {} in the pending set",
+                self.pending.len()
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl<S: StateStore> Execute for MatchRecognizeExecutor<S> {
@@ -1569,10 +1955,14 @@ impl<S: StateStore> Execute for MatchRecognizeExecutor<S> {
 /// plus a future `n` yields the leftmost-preferred match). The matcher's freeze gate proves region
 /// deadness before retiring its cursor; this is the same discipline anchored at emission:
 ///
-/// - a closed `WITHIN` window (`within_final`) decides everything: every gap row's window closed
-///   no later than this match's (order keys are non-decreasing), a gap match over the existing
-///   rows would have been the finder's leftmost result already, and any future row violates the
-///   inclusive span bound for every start at or before this one;
+/// - a closed `WITHIN` window (`within_final`) decides everything, provided every gap row's
+///   window has closed as well: a gap match over the existing rows would have been the finder's
+///   leftmost result already, and any future row violates the inclusive span bound for this
+///   start and for every gap start. Over a buffer in deadline order the gap rows closed no later
+///   than this match's start row. Otherwise (`gap_windows`, see
+///   [`PartitionRun::deadlines_inverted`]) each gap row is checked: one whose window is still
+///   open can still start a leftmost-preferred match with a future row, so it must be provably
+///   dead at the boundary like any other gap position;
 /// - otherwise every gap position must be provably dead at the boundary — on a spent budget the
 ///   answer is HOLD, since a fabricated "dead" is precisely the lost-match bug class — and the
 ///   finder's preferred result from `start` must be un-improvable by future rows
@@ -1590,6 +1980,7 @@ async fn match_is_final(
     start: usize,
     n_rows: usize,
     within_final: bool,
+    gap_windows: Option<(&[BufferedRow], &ScalarImpl)>,
     statically_terminal: bool,
     budget: &mut ScanBudget,
     memoize: bool,
@@ -1604,10 +1995,16 @@ async fn match_is_final(
         start <= n_rows,
         "match_is_final start out of range: start={start} n={n_rows}"
     );
-    if within_final {
+    if within_final && gap_windows.is_none() {
         return Ok(true);
     }
     for p in resume_pos..start {
+        if within_final
+            && let Some((rows, w)) = gap_windows
+            && rows[p].deadline.closed_at(w)
+        {
+            continue;
+        }
         let alive = nfa
             .reaches_boundary_alive(p, n_rows, matcher, budget, memoize)
             .await?;
@@ -1617,7 +2014,8 @@ async fn match_is_final(
     }
     // A fixed-length linear pattern has exactly one path: an accepted match can never be
     // superseded from its own start, so the probe is statically decided (see [`Nfa::is_linear`]).
-    if statically_terminal {
+    // A closed window decides it too: no future row can satisfy the span bound from `start`.
+    if within_final || statically_terminal {
         return Ok(true);
     }
     let extend = nfa
@@ -2168,9 +2566,33 @@ mod tests {
             start: usize,
             within_final: bool,
         ) -> bool {
+            gate_with_windows(pattern, rows, resume_pos, start, within_final, None).await
+        }
+
+        /// `deadlines`, when given, are the rows' `WITHIN` deadlines, read at watermark 10.
+        async fn gate_with_windows(
+            pattern: &Pattern,
+            rows: &str,
+            resume_pos: usize,
+            start: usize,
+            within_final: bool,
+            deadlines: Option<&[i64]>,
+        ) -> bool {
             let nfa = Nfa::compile(pattern);
             let matcher = SetMatcher::new(sets(rows));
             let mut budget = ScanBudget::unlimited();
+            let buffer: Option<Vec<BufferedRow>> = deadlines.map(|ds| {
+                ds.iter()
+                    .enumerate()
+                    .map(|(i, &d)| BufferedRow {
+                        seq: i as i64,
+                        order_key: Some(ScalarImpl::Int64(0)),
+                        deadline: Deadline::At(ScalarImpl::Int64(d)),
+                        row: OwnedRow::new(vec![]),
+                    })
+                    .collect()
+            });
+            let w = ScalarImpl::Int64(10);
             match_is_final(
                 &nfa,
                 &matcher,
@@ -2178,6 +2600,7 @@ mod tests {
                 start,
                 rows.len(),
                 within_final,
+                buffer.as_deref().map(|rows| (rows, &w)),
                 // Always exercise the real probe in these tests, even for linear patterns.
                 false,
                 &mut budget,
@@ -2223,13 +2646,34 @@ mod tests {
             assert!(gate(&pattern, "b", 0, 0, false).await);
         }
 
-        /// A closed WITHIN window decides everything: the gap row's window closed no later than
-        /// the match's own (order keys are ordered), and no future row can satisfy the span bound,
-        /// so within-finality bypasses both the gap and the extension probe.
+        /// A closed WITHIN window decides everything over a buffer in deadline order: the gap
+        /// row's window closed no later than the match's own, and no future row can satisfy the
+        /// span bound, so within-finality bypasses both the gap and the extension probe.
         #[tokio::test]
         async fn within_finality_overrides_alive_gap() {
             let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
             assert!(gate(&pattern, "xn", 0, 1, true).await);
+            // The same with the windows spelled out: both closed at watermark 10.
+            assert!(gate_with_windows(&pattern, "xn", 0, 1, true, Some(&[8, 9])).await);
+        }
+
+        /// Out of deadline order, the match's start row can close while the gap row before it
+        /// is still open: a future `n` inside `x`'s window makes the batch answer (0,3), so the
+        /// alive gap row holds the match until its own window closes.
+        #[tokio::test]
+        async fn open_alive_gap_holds_a_match_whose_own_window_closed() {
+            let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
+            assert!(!gate_with_windows(&pattern, "xn", 0, 1, true, Some(&[12, 9])).await);
+        }
+
+        /// An open gap row that is dead at the boundary holds nothing, and the closed window
+        /// still skips the extension probe: `(z n n | n+)` over rows x,n — `x` starts no match,
+        /// and `n+` could extend but for the closed window.
+        #[tokio::test]
+        async fn open_dead_gap_does_not_hold_a_closed_match() {
+            let pattern = Pattern::Alt(vec![concat("znn"), plus("n")]);
+            assert!(!gate(&pattern, "xn", 0, 1, false).await, "extensible");
+            assert!(gate_with_windows(&pattern, "xn", 0, 1, true, Some(&[12, 9])).await);
         }
     }
 
@@ -2270,5 +2714,945 @@ mod tests {
                 assert!(matcher.matches("a", 1, &labels("a")).await.unwrap());
             })
             .await;
+    }
+
+    mod wakeup_index {
+        use super::*;
+
+        fn pk(i: i64) -> OwnedRow {
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(i))])
+        }
+
+        fn row(seq: i64, deadline: Deadline) -> BufferedRow {
+            BufferedRow {
+                seq,
+                order_key: Some(ScalarImpl::Int64(0)),
+                deadline,
+                row: OwnedRow::new(vec![]),
+            }
+        }
+
+        fn at(d: i64) -> Deadline {
+            Deadline::At(ScalarImpl::Int64(d))
+        }
+
+        fn run_with(deadlines: &[Deadline]) -> PartitionRun {
+            let nfa = Nfa::compile(&Pattern::Var("a".to_owned()));
+            let mut run = PartitionRun::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
+            for (i, d) in deadlines.iter().enumerate() {
+                run.push_row(row(i as i64, d.clone()));
+            }
+            run
+        }
+
+        fn sorted(mut v: Vec<OwnedRow>) -> Vec<OwnedRow> {
+            v.sort_by(|a, b| a.datum_at(0).default_cmp(&b.datum_at(0)));
+            v
+        }
+
+        /// A partition is due once the watermark passes its FIRST row's deadline — the strict
+        /// `closed_at` boundary — and never before; `Deadline::Never` is never filed.
+        #[test]
+        fn files_by_first_deadline_and_pops_strictly_before_the_watermark() {
+            let mut idx = WakeupIndex::default();
+            let mut early = run_with(&[at(5), at(9)]);
+            let mut late = run_with(&[at(10)]);
+            let mut never = run_with(&[Deadline::Never]);
+            idx.sync(&pk(1), &mut early, false);
+            idx.sync(&pk(2), &mut late, false);
+            idx.sync(&pk(3), &mut never, false);
+            assert_eq!(early.indexed_deadline, Some(ScalarImpl::Int64(5)));
+            assert_eq!(never.indexed_deadline, None, "Never is not filed");
+
+            // w == 5: the boundary is strict (`deadline < w`), nothing is due yet.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(5));
+            assert!(due.is_empty() && pending.is_empty());
+            // w == 6: only the partition whose first deadline is 5.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(6));
+            assert_eq!(due, vec![pk(1)]);
+            assert!(pending.is_empty());
+            // Popped means unfiled until the caller re-syncs; `late` is still filed.
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(6));
+            assert!(due.is_empty());
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(11));
+            assert_eq!(due, vec![pk(2)]);
+        }
+
+        /// Consuming the first rows re-files the partition under the new first deadline; an
+        /// unchanged first row is a no-op; an emptied buffer unfiles it.
+        #[test]
+        fn resync_follows_the_first_row() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(5), at(9)]);
+            idx.sync(&pk(1), &mut run, false);
+            // Appending later rows does not move the key.
+            run.push_row(row(2, at(12)));
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(5)));
+            // Consuming the head re-keys to 9: not due at 7, due at 10.
+            run.rows.remove(0);
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(9)));
+            assert!(idx.take_due(&ScalarImpl::Int64(7)).0.is_empty());
+            assert_eq!(idx.take_due(&ScalarImpl::Int64(10)).0, vec![pk(1)]);
+            // Empty buffer: unfiled, and `remove` is a clean no-op afterwards.
+            run.indexed_deadline = None;
+            idx.sync(&pk(1), &mut run, false);
+            run.rows.clear();
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, None);
+            assert!(idx.due.is_empty());
+            idx.remove(&pk(1), &mut run);
+            assert!(idx.due.is_empty() && idx.pending.is_empty());
+        }
+
+        /// Pending is filed once per touch-window regardless of how many rows arrive, drained by
+        /// the next `take_due` independent of the watermark, and can coexist with being due.
+        #[test]
+        fn pending_is_filed_once_and_drained_by_the_next_visit() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[Deadline::Never]);
+            idx.sync(&pk(1), &mut run, true);
+            idx.sync(&pk(1), &mut run, true);
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!(idx.pending.len(), 1);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert!(due.is_empty());
+            assert_eq!(pending, vec![pk(1)]);
+            assert!(idx.pending.is_empty(), "drained");
+            // The caller clears `run.pending` on visit; until then a re-sync must not re-file it.
+            idx.sync(&pk(1), &mut run, true);
+            assert!(idx.pending.is_empty());
+            run.pending = false;
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!(idx.pending.len(), 1);
+
+            // Due and pending at once: reported once, as due.
+            let mut both = run_with(&[at(1)]);
+            idx.sync(&pk(2), &mut both, true);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert_eq!(due, vec![pk(2)]);
+            assert_eq!(pending, vec![pk(1)]);
+            assert!(idx.pending.is_empty());
+        }
+
+        /// After a burst, a mostly empty pending set gives its allocation back, so the next
+        /// watermarks do not pay for the burst's capacity; a full set keeps it.
+        #[test]
+        fn pending_capacity_is_released_once_the_set_is_sparse() {
+            let mut idx = WakeupIndex::default();
+            let mut runs: Vec<PartitionRun> =
+                (0..1000).map(|_| run_with(&[Deadline::Never])).collect();
+            for (i, run) in runs.iter_mut().enumerate() {
+                idx.sync(&pk(i as i64), run, true);
+            }
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert_eq!(pending.len(), 1000);
+            assert!(
+                idx.pending.capacity() >= 1000,
+                "a full set keeps its capacity"
+            );
+
+            runs[0].pending = false;
+            idx.sync(&pk(0), &mut runs[0], true);
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert_eq!(pending, vec![pk(0)]);
+            assert!(idx.pending.capacity() < 16, "{}", idx.pending.capacity());
+
+            // A steadily small set stays on the `drain` path and keeps its small allocation.
+            runs[0].pending = false;
+            idx.sync(&pk(0), &mut runs[0], true);
+            let small = idx.pending.capacity();
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert_eq!(pending, vec![pk(0)]);
+            assert_eq!(idx.pending.capacity(), small);
+        }
+
+        /// A due-and-pending partition whose visit ends owing another one (the arm re-syncs with
+        /// `pending = true`) is filed for exactly one more visit, not visited twice in the same
+        /// pass: the pending copy was removed when the due copy popped.
+        #[test]
+        fn due_and_pending_visit_owed_again_is_filed_once() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(1)]);
+            idx.sync(&pk(1), &mut run, true);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert_eq!((due.len(), pending.len()), (1, 0));
+            // The arm's visit: popped, cleared, then re-synced as owed.
+            run.indexed_deadline = None;
+            run.pending = false;
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!(idx.pending.len(), 1);
+            assert_eq!(idx.due.len(), 1, "still expired, still filed");
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert_eq!((due, pending), (vec![pk(1)], vec![]));
+        }
+
+        /// Removing a partition that is both filed and pending clears both structures.
+        #[test]
+        fn remove_clears_filed_and_pending() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(1)]);
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!((idx.due.len(), idx.pending.len()), (1, 1));
+            idx.remove(&pk(1), &mut run);
+            assert!(idx.due.is_empty() && idx.pending.is_empty());
+            assert!(run.indexed_deadline.is_none() && !run.pending);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert!(due.is_empty() && pending.is_empty());
+        }
+
+        /// The size bound: through arrivals, re-keys, emptying and removal the index never holds
+        /// more filed keys than there are non-empty partitions, and `check_consistent` accepts
+        /// every intermediate state a caller can reach through the public sequence.
+        #[test]
+        fn index_is_bounded_by_the_partition_map() {
+            let mut idx = WakeupIndex::default();
+            let mut parts: hashbrown::HashMap<OwnedRow, PartitionRun> = hashbrown::HashMap::new();
+            for i in 0..64 {
+                let deadlines = [at(i % 7), at(i % 7 + 10)];
+                let mut run = run_with(&deadlines);
+                idx.sync(&pk(i), &mut run, true);
+                parts.insert(pk(i), run);
+            }
+            idx.check_consistent(&parts).unwrap();
+            assert!(idx.due.len() <= parts.len());
+            // A visit at 4 pops deadlines 0..=3; emulate the arm: pop, clear, mutate, re-sync.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(4));
+            let mut emptied = Vec::new();
+            for (i, key) in due.iter().chain(&pending).enumerate() {
+                let run = parts.get_mut(key).unwrap();
+                if i < due.len() {
+                    run.indexed_deadline = None;
+                }
+                run.pending = false;
+                // Consume the head; empty every third partition entirely.
+                run.rows.remove(0);
+                if i % 3 == 0 {
+                    run.rows.clear();
+                }
+                if run.rows.is_empty() {
+                    idx.remove(key, run);
+                    emptied.push(key.clone());
+                } else {
+                    idx.sync(key, run, i % 5 == 0);
+                }
+            }
+            for key in emptied {
+                parts.remove(&key);
+            }
+            idx.check_consistent(&parts).unwrap();
+            let filed: usize = idx.due.values().map(|b| b.len()).sum();
+            assert_eq!(
+                filed,
+                parts.values().filter(|r| !r.rows.is_empty()).count(),
+                "every non-empty partition is filed exactly once"
+            );
+            // An emptied partition kept in the map (the chunk arm's capacity branch) is unfiled
+            // and pending, never orphaned.
+            let key = parts.keys().next().unwrap().clone();
+            let run = parts.get_mut(&key).unwrap();
+            run.rows.clear();
+            idx.sync(&key, run, true);
+            assert!(run.indexed_deadline.is_none() && run.pending);
+            idx.check_consistent(&parts).unwrap();
+            assert!(idx.pending.contains(&key));
+        }
+
+        /// A buffer whose deadlines are out of order is not safe to file under its first row
+        /// alone: the partition stays pending through every visit until the rows before the last
+        /// out-of-order one are consumed, then returns to deadline-only filing.
+        #[test]
+        fn out_of_order_deadlines_keep_the_partition_pending() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(10), at(5), at(12)]);
+            assert!(run.deadlines_inverted());
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(10)));
+            // The second row's window closes at 6, before the filed deadline: visited anyway.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(6));
+            assert!(due.is_empty());
+            assert_eq!(pending, vec![pk(1)]);
+            // A visit that owes nothing else still leaves it pending.
+            run.pending = false;
+            idx.sync(&pk(1), &mut run, false);
+            assert!(run.pending && idx.pending.contains(&pk(1)));
+
+            // Consuming the head leaves `[5, 12]`, which is in order again.
+            let (_, pending) = idx.take_due(&ScalarImpl::Int64(6));
+            assert_eq!(pending, vec![pk(1)]);
+            run.pending = false;
+            run.rows.remove(0);
+            assert!(!run.deadlines_inverted());
+            idx.sync(&pk(1), &mut run, false);
+            assert!(!run.pending && idx.pending.is_empty());
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(5)));
+        }
+
+        /// In-order and equal deadlines are not flagged; a finite deadline after a window that
+        /// never closes is; rows lower than an already consumed one are not; and a buffer is in
+        /// order again as soon as the rows before the last descent are gone.
+        #[test]
+        fn deadline_order_tracking() {
+            assert!(!run_with(&[at(1), at(1), at(2), Deadline::Never]).deadlines_inverted());
+            assert!(run_with(&[Deadline::Never, at(3)]).deadlines_inverted());
+
+            let mut run = run_with(&[at(10)]);
+            run.rows.clear();
+            run.push_row(row(1, at(5)));
+            run.push_row(row(2, at(6)));
+            assert!(!run.deadlines_inverted());
+            // Below a row that is still buffered: flagged.
+            run.push_row(row(3, at(4)));
+            assert!(run.deadlines_inverted());
+
+            // `[10, 5, 7]`: only the 5 is a descent, so `[5, 7]` is in order.
+            let mut run = run_with(&[at(10), at(5), at(7)]);
+            assert!(run.deadlines_inverted());
+            run.rows.remove(0);
+            assert!(!run.deadlines_inverted());
+        }
+
+        /// Against brute force, over random pushes and prefix drains: whenever the buffer is not
+        /// flagged it is sorted by deadline, so its first row carries the earliest one.
+        #[test]
+        fn deadline_order_tracking_matches_brute_force() {
+            // A fixed LCG: reproducible, no dependency.
+            let mut state = 0x2545_f491_4f6c_dd1d_u64;
+            let mut next = |n: u64| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (state >> 33) % n
+            };
+            let mut run = run_with(&[]);
+            let mut seq = 0;
+            for _ in 0..20_000 {
+                if next(3) < 2 {
+                    let deadline = if next(16) == 0 {
+                        Deadline::Never
+                    } else {
+                        at(next(8) as i64)
+                    };
+                    run.push_row(row(seq, deadline));
+                    seq += 1;
+                } else {
+                    let upto = next(run.rows.len() as u64 + 1) as usize;
+                    run.rows.drain(..upto);
+                }
+                let sorted = run
+                    .rows
+                    .is_sorted_by(|a, b| !b.deadline.is_before(&a.deadline));
+                assert_eq!(
+                    run.deadlines_inverted(),
+                    !sorted,
+                    "deadlines: {:?}",
+                    run.rows.iter().map(|r| &r.deadline).collect::<Vec<_>>()
+                );
+            }
+        }
+
+        /// Many partitions sharing one deadline pop as a bucket; re-keying one of them does not
+        /// disturb the others.
+        #[test]
+        fn shared_deadline_bucket() {
+            let mut idx = WakeupIndex::default();
+            let mut runs: Vec<PartitionRun> = (0..5).map(|_| run_with(&[at(3), at(8)])).collect();
+            for (i, run) in runs.iter_mut().enumerate() {
+                idx.sync(&pk(i as i64), run, false);
+            }
+            assert_eq!(idx.due.len(), 1, "one bucket");
+            runs[2].rows.remove(0);
+            idx.sync(&pk(2), &mut runs[2], false);
+            assert_eq!(idx.due.len(), 2);
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(4));
+            assert_eq!(sorted(due), vec![pk(0), pk(1), pk(3), pk(4)]);
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(9));
+            assert_eq!(due, vec![pk(2)]);
+        }
+    }
+
+    /// Executor-level: the watermark arm no longer walks every partition, so the sweep of emptied
+    /// entries the full pass performed must be reproduced through the index.
+    mod executor_sweep {
+        use futures::StreamExt;
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute, Message};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id: the metrics registry is process-global.
+        const TABLE_ID: u32 = 27205;
+
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Int64, DataType::Int64]
+        }
+
+        /// `PARTITION BY $0 ORDER BY $1`, `PATTERN (a b)`, no `DEFINE`, no `WITHIN`: every row
+        /// satisfies every variable, so two rows in a partition complete a match at once and
+        /// leave the partition empty — the shape that exercises the empty-entry sweep.
+        async fn build() -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            let table_columns = (0..4)
+                .map(|i| ColumnDesc::unnamed(ColumnId::new(i), DataType::Int64))
+                .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(TABLE_ID),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(TABLE_ID),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let nfa = Nfa::compile(&Pattern::Concat(vec![
+                Pattern::Var("a".to_owned()),
+                Pattern::Var("b".to_owned()),
+            ]));
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![],
+                within: None,
+                within_deadline: None,
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        async fn drain_until_barrier(stream: &mut BoxedMessageStream, epoch: u64) -> usize {
+            let mut emitted = 0;
+            while let Some(msg) = stream.next().await {
+                match msg.unwrap() {
+                    Message::Barrier(b) if b.epoch.curr == epoch => return emitted,
+                    Message::Chunk(c) => emitted += c.cardinality(),
+                    _ => {}
+                }
+            }
+            panic!("stream ended before barrier {epoch}");
+        }
+
+        fn two_rows_per_partition(n: i64) -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = (0..n)
+                .flat_map(|p| {
+                    [0i64, 1].map(|ts| {
+                        (
+                            Op::Insert,
+                            OwnedRow::new(vec![
+                                Some(ScalarImpl::Int64(p)),
+                                Some(ScalarImpl::Int64(ts)),
+                                Some(ScalarImpl::Int64(1)),
+                            ]),
+                        )
+                    })
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        /// A partition emptied by an arrival (match completed, buffer consumed, capacity below the
+        /// drop threshold) stays in the map until a watermark sweeps it. Without `WITHIN` it is
+        /// never due, so only the pending mark can bring the sweep to it: this pins that it does.
+        #[tokio::test]
+        async fn emptied_partitions_are_swept_by_the_next_watermark() {
+            let (mut tx, mut stream, metrics) = build().await;
+            tx.push_chunk(two_rows_per_partition(3));
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(2)).await;
+            assert_eq!(emitted, 3, "one match per partition");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+            assert_eq!(
+                metrics.match_recognize_retained_partitions.get(),
+                3,
+                "emptied entries below the capacity threshold are kept until a watermark"
+            );
+
+            // No row arrives for any of them; the watermark alone must free the entries.
+            tx.push_int64_watermark(1, 5);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+            drain_until_barrier(&mut stream, test_epoch(3)).await;
+            assert_eq!(
+                metrics.match_recognize_retained_partitions.get(),
+                0,
+                "an emptied partition nothing files must still be reachable by the sweep"
+            );
+        }
+    }
+
+    /// The emission gate runs before the deadline prune and its gap check is structural, so a
+    /// gap row whose `WITHIN` window has closed but which is still structurally alive holds back
+    /// an otherwise final match for one more visit: the prune evicts the row in the same visit,
+    /// and the full pass emitted the match at the next watermark. The wakeup index must owe that
+    /// visit — re-filed under the surviving row's deadline and not pending, the partition would
+    /// otherwise emit only when that deadline passes or a row arrives.
+    mod gate_before_prune {
+        use futures::StreamExt;
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_expr::expr::test_utils::make_i32_literal;
+        use risingwave_expr::expr::{LiteralExpression, build_from_pretty};
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute, Message};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id: the metrics registry is process-global.
+        const TABLE_ID: u32 = 27210;
+        const WITHIN: i64 = 10;
+
+        /// Input: `(partition int8, ts int8, v int4)`; `v` tells `x` (0) from `n` (1).
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Int64, DataType::Int32]
+        }
+
+        /// `DEFINE <symbol> AS <symbol>.v = <v>`.
+        pub(super) fn v_equals(symbol: &str, v: i32) -> CompiledDefine {
+            let condition = ExprNode {
+                function_type: PbExprType::Equal as i32,
+                return_type: Some(DataType::Boolean.to_protobuf()),
+                rex_node: Some(RexNode::FuncCall(PbFunctionCall {
+                    children: vec![input_ref(0), make_i32_literal(v)],
+                })),
+            };
+            let pb = PbMatchRecognizeDefine {
+                symbol: symbol.to_owned(),
+                condition: Some(condition),
+                slots: vec![PbDefineSlot {
+                    kind: KIND_SELF,
+                    vars: vec![],
+                    col_idx: 2,
+                    offset: 0,
+                }],
+            };
+            CompiledDefine::from_protobuf(&pb, LogReport).unwrap()
+        }
+
+        /// `PARTITION BY $0 ORDER BY $1 ... PATTERN (x n n | n) WITHIN 10`, `DEFINE x AS x.v = 0,
+        /// n AS n.v = 1`. `within` is a placeholder literal: the matcher never evaluates it, its
+        /// presence only turns on the span check, which reads the cached deadline (`ts + 10`) —
+        /// the same expression under test here. No candidate spans more than the bound.
+        async fn build() -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            // State table: `seq` then the input columns; key = partition, ts, seq.
+            let table_columns = [
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int32,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| ColumnDesc::unnamed(ColumnId::new(i as i32), t))
+            .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(TABLE_ID),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(TABLE_ID),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let var = |s: &str| Pattern::Var(s.to_owned());
+            let nfa = Nfa::compile(&Pattern::Alt(vec![
+                Pattern::Concat(vec![var("x"), var("n"), var("n")]),
+                var("n"),
+            ]));
+            let within = NonStrictExpression::for_test(LiteralExpression::new(
+                DataType::Boolean,
+                Some(ScalarImpl::Bool(true)),
+            ));
+            let within_deadline = NonStrictExpression::new_topmost(
+                build_from_pretty(format!("(add:int8 $0:int8 {WITHIN}:int8)")),
+                DeadlineErrorReport::new(LogReport),
+            );
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![v_equals("x", 0), v_equals("n", 1)],
+                within: Some(within),
+                within_deadline: Some(within_deadline),
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        pub(super) async fn drain_until_barrier(
+            stream: &mut BoxedMessageStream,
+            epoch: u64,
+        ) -> usize {
+            let mut emitted = 0;
+            while let Some(msg) = stream.next().await {
+                match msg.unwrap() {
+                    Message::Barrier(b) if b.epoch.curr == epoch => return emitted,
+                    Message::Chunk(c) => emitted += c.cardinality(),
+                    _ => {}
+                }
+            }
+            panic!("stream ended before barrier {epoch}");
+        }
+
+        fn rows(rows: &[(i64, i32)]) -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = rows
+                .iter()
+                .map(|&(ts, v)| {
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(0)),
+                            Some(ScalarImpl::Int64(ts)),
+                            Some(ScalarImpl::Int32(v)),
+                        ]),
+                    )
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        /// `x@0 n@9`: the start at `x` has bound `x n` and wants one more `n`, so it is
+        /// structurally alive at the boundary and the gate holds the boundary match `n@9` behind
+        /// it. Watermark 11 closes `x`'s window (deadline 10): the gate still holds (it ran first),
+        /// then the prune evicts `x`. Watermark 12 must emit the match, as the full pass did — not
+        /// watermark 20, when `n`'s own window closes.
+        #[tokio::test]
+        async fn a_match_freed_by_the_prune_is_emitted_at_the_next_watermark() {
+            let (mut tx, mut stream, metrics) = build().await;
+            tx.push_chunk(rows(&[(0, 0), (9, 1)]));
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(2)).await;
+            assert_eq!(emitted, 0, "`n@9` is held behind the alive start at `x@0`");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 2);
+
+            tx.push_int64_watermark(1, 11);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(3)).await;
+            assert_eq!(emitted, 0, "the gate ran before the prune evicted `x`");
+            assert_eq!(
+                metrics.match_recognize_retained_rows.get(),
+                1,
+                "`x`'s window closed at 11; the prune must have evicted it"
+            );
+
+            tx.push_int64_watermark(1, 12);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(4), test_epoch(3), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(4)).await;
+            assert_eq!(
+                emitted, 1,
+                "the visit that evicted the gap row owes the next one; nothing holds `n@9` now"
+            );
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+
+            tx.push_int64_watermark(1, 20);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(5), test_epoch(4), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(5)).await;
+            assert_eq!(emitted, 0, "emitted once");
+        }
+    }
+
+    /// `WITHIN INTERVAL '1 day'` over a `timestamptz` order key is evaluated in the session time
+    /// zone, so across a DST transition a later row can get an earlier deadline. A match starting
+    /// at the later row must then wait for an alive row before it whose window is still open,
+    /// and the wakeup index must not rely on the first row's deadline being the earliest.
+    mod deadline_inversion {
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::types::Timestamptz;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_expr::expr::{LiteralExpression, build_from_pretty};
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::gate_before_prune::{drain_until_barrier, v_equals};
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id, and one per test here: the metrics registry
+        /// is process-global, and tests sharing an id would read each other's gauges.
+        const TABLE_ID: u32 = 27212;
+
+        /// Input: `(partition int8, ts timestamptz, v int4)`; `v` tells `x` (0) from `n` (1).
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Timestamptz, DataType::Int32]
+        }
+
+        fn ts(s: &str) -> ScalarImpl {
+            ScalarImpl::Timestamptz(s.parse::<Timestamptz>().unwrap())
+        }
+
+        /// `PARTITION BY $0 ORDER BY $1 ... PATTERN (x n n | n) WITHIN INTERVAL '1 day'` with
+        /// `TimeZone = 'America/New_York'`, `DEFINE x AS x.v = 0, n AS n.v = 1`. The deadline is
+        /// the expression the frontend emits for this clause. `within` is a placeholder literal,
+        /// as in `gate_before_prune`.
+        async fn build(
+            table_id: u32,
+        ) -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            // State table: `seq` then the input columns; key = partition, ts, seq.
+            let table_columns = [
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Timestamptz,
+                DataType::Int32,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| ColumnDesc::unnamed(ColumnId::new(i as i32), t))
+            .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(table_id),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(table_id),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let var = |s: &str| Pattern::Var(s.to_owned());
+            let nfa = Nfa::compile(&Pattern::Alt(vec![
+                Pattern::Concat(vec![var("x"), var("n"), var("n")]),
+                var("n"),
+            ]));
+            let within = NonStrictExpression::for_test(LiteralExpression::new(
+                DataType::Boolean,
+                Some(ScalarImpl::Bool(true)),
+            ));
+            let within_deadline = NonStrictExpression::new_topmost(
+                build_from_pretty(
+                    "(add_with_time_zone:timestamptz $0:timestamptz 1day:interval \
+                     America/New_York:varchar)",
+                ),
+                DeadlineErrorReport::new(LogReport),
+            );
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![v_equals("x", 0), v_equals("n", 1)],
+                within: Some(within),
+                within_deadline: Some(within_deadline),
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        fn rows(rows: &[(&str, i32)]) -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = rows
+                .iter()
+                .map(|&(t, v)| {
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(0)),
+                            Some(ts(t)),
+                            Some(ScalarImpl::Int32(v)),
+                        ]),
+                    )
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        /// New York leaves DST at 06:00Z on 2026-11-01. `x@05:50Z` is 01:50 EDT and its deadline
+        /// is 01:50 EST the next day, 06:50Z; `n@06:10Z` is 01:10 EST and its deadline is 06:10Z
+        /// the next day — forty minutes BEFORE that of the row ahead of it.
+        const X: &str = "2026-11-01 05:50:00Z";
+        const N: &str = "2026-11-01 06:10:00Z";
+
+        async fn step(
+            tx: &mut MessageSender,
+            stream: &mut BoxedMessageStream,
+            epoch: u64,
+            watermark: Option<&str>,
+        ) -> usize {
+            if let Some(w) = watermark {
+                tx.push_watermark(1, DataType::Timestamptz, ts(w));
+            }
+            tx.push_barrier_with_prev_epoch_for_test(
+                test_epoch(epoch),
+                test_epoch(epoch - 1),
+                false,
+            );
+            drain_until_barrier(stream, test_epoch(epoch)).await
+        }
+
+        /// `n` is held behind the alive start at `x`. A watermark past `n`'s deadline but not
+        /// `x`'s must not emit it: a row inside `x`'s window could still complete `x n n`. Once
+        /// `x`'s window closes too, `n` is the batch answer and is emitted.
+        #[tokio::test]
+        async fn a_match_waits_for_an_earlier_row_whose_window_closes_later() {
+            let (mut tx, mut stream, metrics) = build(TABLE_ID).await;
+            tx.push_chunk(rows(&[(X, 0), (N, 1)]));
+            assert_eq!(step(&mut tx, &mut stream, 2, None).await, 0);
+
+            let emitted = step(&mut tx, &mut stream, 3, Some("2026-11-01 07:00:00Z")).await;
+            assert_eq!(emitted, 0, "no window has closed");
+
+            let emitted = step(&mut tx, &mut stream, 4, Some("2026-11-02 06:20:00Z")).await;
+            assert_eq!(
+                emitted, 0,
+                "`n`'s window closed, `x`'s is open until 06:50Z"
+            );
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 2);
+
+            let emitted = step(&mut tx, &mut stream, 5, Some("2026-11-02 06:51:00Z")).await;
+            assert_eq!(emitted, 1, "both windows closed: `n` alone is the match");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+        }
+
+        /// The row the hold above waits for: `n@06:30Z` the next day is past `n`'s deadline but
+        /// inside `x`'s, and completes `x n n` — one match over all three rows, as in batch, not
+        /// `n` and then `n`.
+        #[tokio::test]
+        async fn a_row_inside_the_earlier_window_completes_the_leftmost_match() {
+            let (mut tx, mut stream, metrics) = build(TABLE_ID + 1).await;
+            tx.push_chunk(rows(&[(X, 0), (N, 1)]));
+            assert_eq!(step(&mut tx, &mut stream, 2, None).await, 0);
+            assert_eq!(
+                step(&mut tx, &mut stream, 3, Some("2026-11-02 06:20:00Z")).await,
+                0
+            );
+
+            tx.push_chunk(rows(&[("2026-11-02 06:30:00Z", 1)]));
+            let emitted = step(&mut tx, &mut stream, 4, None).await;
+            assert_eq!(emitted, 1, "`x n n`");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+
+            let emitted = step(&mut tx, &mut stream, 5, Some("2026-11-03 00:00:00Z")).await;
+            assert_eq!(emitted, 0, "nothing else to emit");
+        }
+
+        /// The other direction inverts too. New York enters DST at 07:00Z on 2026-03-08:
+        /// `07:50Z` the day before is 02:50 EST and `08:10Z` is 03:10 EST; a day later 03:10 is
+        /// EDT (07:10Z), which is before whatever the nonexistent 02:50 resolves to.
+        #[tokio::test]
+        async fn spring_forward_also_puts_deadlines_out_of_order() {
+            let expr = Some(NonStrictExpression::new_topmost(
+                build_from_pretty(
+                    "(add_with_time_zone:timestamptz $0:timestamptz 1day:interval \
+                     America/New_York:varchar)",
+                ),
+                DeadlineErrorReport::new(LogReport),
+            ));
+            let earlier = eval_deadline(&expr, &Some(ts("2026-03-07 07:50:00Z"))).await;
+            let later = eval_deadline(&expr, &Some(ts("2026-03-07 08:10:00Z"))).await;
+            assert_eq!(later, Deadline::At(ts("2026-03-08 07:10:00Z")));
+            assert!(later.is_before(&earlier), "{later:?} vs {earlier:?}");
+        }
     }
 }

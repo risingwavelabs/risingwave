@@ -262,8 +262,10 @@ partial or held match still references) and an `IncrementalMatcher`.
   watermark has strictly passed can no longer be extended or superseded) and **dead-prefix
   pruning** (rows before the first position that is still a live match start — structurally alive
   at the boundary and, under `WITHIN`, its window still open — can never join a match again and are
-  deleted). The watermark pass visits every partition, so an idle partition's timed-out partial is
-  emitted or evicted without new input in that partition.
+  deleted). The watermark pass visits the partitions whose earliest deadline the watermark has
+  passed, plus those touched since their last visit (see the wakeup index below), so an idle
+  partition's timed-out partial is emitted or evicted without new input in that partition — and a
+  partition with nothing a watermark could change is not visited at all.
 
 ### Match finality
 
@@ -282,10 +284,15 @@ The gate (`match_is_final`) therefore asks exactly what batch equivalence requir
 2. no path the finder *prefers* over the current result can be completed by future rows —
    `Nfa::may_extend`, probed at the buffer boundary, walking the finder's own preference order and
    stopping at its first accept; a lower-priority path never holds a match; or
-3. the match's `WITHIN` deadline is strictly below the watermark, which decides both questions at
-   once: every gap row's window closed no later than this match's (order keys are non-decreasing),
-   a gap match over existing rows would already have been the finder's leftmost result, and no
-   future row can satisfy the span bound for any start at or before this one.
+3. the match's `WITHIN` deadline is strictly below the watermark and so is every gap row's, which
+   decides both questions at once: a gap match over existing rows would already have been the
+   finder's leftmost result, and no future row can satisfy the span bound for any start at or
+   before this one. Deadlines normally follow the order key, so the gap rows closed no later than
+   the match's start row and only that row is tested. They do not always: `timestamptz + INTERVAL
+   '1 day'` is taken in the session time zone, and across a DST transition a later row gets an
+   earlier deadline. The executor tracks, per partition, whether the buffer holds such a row;
+   if it does, a gap row whose window is still open must be provably dead (condition 1) before
+   the match is emitted.
 
 On a spent scan budget the two *structural* conditions answer "hold". The `WITHIN`-finality
 condition still answers "emit", because a closed window is a fact the watermark supplies: no future
@@ -617,9 +624,44 @@ not on Flink, whose window is exclusive.
   provisional matches over the unfrozen suffix on every arriving row; incrementalizing the
   provisional tail is the main planned performance follow-up, along with per-row predicate caching,
   `WITHIN` deadline precompute, and label interning.
-- **Watermark passes visit every partition.** A per-partition wakeup frontier (a deadline index)
-  would make the pass proportional to the partitions that actually need attention; the previous
-  design carried one, and reintroducing it on this architecture is future work.
+- **Watermark passes are proportional to the partitions that need attention** (the wakeup
+  index, #27205). A watermark `w` can change a partition only by closing a window (`deadline < w`,
+  no earlier than its first row's deadline while the buffer is in deadline order) or by resuming
+  a budget-truncated scan; the emission gate's
+  structural verdicts and the structural prune depend only on the buffer. The executor files each
+  partition under its first row's deadline (`Deadline::Never` is never filed) and marks it
+  *pending* when an arrival, a spent budget or a refresh request touched it, or when its own
+  visit's deadline prune evicted rows (the gate runs before the prune and its gap check is
+  structural, so an evicted window-closed gap row may have been what held the first match; the
+  full pass re-asked at the next watermark); a watermark visits the expired buckets plus the
+  pending set, each partition at most once per pass. Skipping the rest is exact: their visit
+  would have been a no-op. The buffer is in deadline order whenever the deadline is monotone in
+  the order key, which a `timestamptz` key with a calendar-day bound is not (see the gate
+  above). A partition whose buffer holds a row with an earlier deadline than the row before it
+  is kept pending — visited at every watermark, as before the index — until the rows ahead of
+  the last such row are consumed. This is deliberately conservative: partitions with a buffered
+  row on each side of a DST transition pay the full-pass cost for up to the `WITHIN` span. An
+  emptied
+  partition the chunk arm keeps
+  for its capacity is marked pending too, so the sweep of empty entries the full pass performed
+  is preserved — the `retained_partitions` gauge is where a missed sweep would show, since such
+  an entry holds no rows. The index holds at most one entry per retained partition (a key is
+  filed only while its partition is non-empty and under exactly its first deadline; removal
+  unfiles; empty buckets are dropped), so it is bounded by the partition map; a debug-build check
+  pins that on every watermark. Measured (criterion `stream_match_recognize`, one open partial
+  per partition, quiet partitions, a barrier-only control subtracted): an idle watermark cost
+  234 µs / 2.37 ms / 13.7 ms over 1k / 10k / 50k partitions before and 89 / 91 / 88 ns after —
+  flat in the partition count. The case where every partition expires at once (the `WITHIN`
+  cliff) costs 0.76 / 0.82 / 1.33 µs per expired partition before and 0.79 / 0.89 / 1.46 µs
+  after (+4 % / +7 % / +10 %): each popped partition now costs a hash probe into the partition
+  map, a cache miss once the map outgrows the caches, instead of an in-order iteration step.
+  The pending set keeps the capacity of the largest burst it held (a load, a recovery), and
+  draining it resets that whole allocation, so the set hands its allocation back once it is
+  mostly empty: with one partition pending per watermark after all of them had been pending at
+  once (`sparse_arrivals`, one row and one watermark per step), a step cost 3.2 / 3.6 / 4.4 µs
+  over 1k / 10k / 50k partitions before that and 3.0 / 3.1 / 3.1 µs after. A
+  slab-indexed partition map (the index storing a slot number, the key stored once) would remove
+  the probe and the key clones in the index; follow-up.
 - **A row is persisted twice across the fragment** — once in the sort's buffer, once in the
   matcher's retained rows — the storage cost of the ordering/matching split.
 - `ALL ROWS PER MATCH`, `MATCH_NUMBER()`, anchors (`^`, `$`), exclusions (`{- … -}`), batch
