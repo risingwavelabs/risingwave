@@ -20,13 +20,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
-use url::Url;
 use with_options::WithOptions;
 
 use super::super::SinkError;
-use super::elasticsearch::ES_SINK;
-use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
-use super::opensearch::OPENSEARCH_SINK;
 use crate::connector_common::ElasticsearchConnection;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
@@ -187,63 +183,13 @@ impl ElasticSearchOpenSearchConfig {
         Ok(config)
     }
 
-    pub fn build_client(&self, connector: &str) -> Result<ElasticSearchOpenSearchClient> {
-        let check_username_password = || -> Result<()> {
-            if self.username.is_some() && self.password.is_none() {
-                return Err(SinkError::Config(anyhow!(
-                    "please set the password when the username is set."
-                )));
-            }
-            if self.username.is_none() && self.password.is_some() {
-                return Err(SinkError::Config(anyhow!(
-                    "please set the username when the password is set."
-                )));
-            }
-            Ok(())
-        };
-        let url =
-            Url::parse(&self.url).map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
-        if connector.eq(ES_SINK) {
-            let mut transport_builder = elasticsearch::http::transport::TransportBuilder::new(
-                elasticsearch::http::transport::SingleNodeConnectionPool::new(url),
-            );
-            if let Some(username) = &self.username
-                && let Some(password) = &self.password
-            {
-                transport_builder = transport_builder.auth(
-                    elasticsearch::auth::Credentials::Basic(username.clone(), password.clone()),
-                );
-            }
-            check_username_password()?;
-            let transport = transport_builder
-                .build()
-                .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
-            let client = elasticsearch::Elasticsearch::new(transport);
-            Ok(ElasticSearchOpenSearchClient::ElasticSearch(client))
-        } else if connector.eq(OPENSEARCH_SINK) {
-            let mut transport_builder = opensearch::http::transport::TransportBuilder::new(
-                opensearch::http::transport::SingleNodeConnectionPool::new(url),
-            );
-            if let Some(username) = &self.username
-                && let Some(password) = &self.password
-            {
-                transport_builder = transport_builder.auth(opensearch::auth::Credentials::Basic(
-                    username.clone(),
-                    password.clone(),
-                ));
-            }
-            check_username_password()?;
-            let transport = transport_builder
-                .build()
-                .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
-            let client = opensearch::OpenSearch::new(transport);
-            Ok(ElasticSearchOpenSearchClient::OpenSearch(client))
-        } else {
-            panic!(
-                "connector type must be {} or {}, but get {}",
-                ES_SINK, OPENSEARCH_SINK, connector
-            );
+    pub(super) fn validate_credentials(&self) -> Result<()> {
+        if self.username.is_some() != self.password.is_some() {
+            return Err(SinkError::Config(anyhow!(
+                "username and password must be set together."
+            )));
         }
+        Ok(())
     }
 
     pub fn validate_config(&self, schema: &Schema) -> Result<()> {
