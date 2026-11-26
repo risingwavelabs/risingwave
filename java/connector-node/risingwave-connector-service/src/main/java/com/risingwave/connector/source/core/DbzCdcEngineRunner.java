@@ -23,7 +23,6 @@ import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +32,15 @@ public class DbzCdcEngineRunner {
     static final Logger LOG = LoggerFactory.getLogger(DbzCdcEngineRunner.class);
 
     private final ExecutorService executor;
-    private final AtomicBoolean running = new AtomicBoolean(false);
+
+    private enum State {
+        NEW,
+        RUNNING,
+        STOPPED
+    }
+
+    private volatile State state = State.NEW;
+    private volatile Exception stopFailure;
     private DbzCdcEngine engine;
     private final DbzConnectorConfig config;
 
@@ -100,12 +107,8 @@ public class DbzCdcEngineRunner {
                                             sourceId,
                                             errorMsg);
                                 }
-                                // We need to stop the engine runner on debezium engine failure
-                                try {
-                                    runner.stop();
-                                } catch (Exception e) {
-                                    LOG.warn("failed to stop the engine#{}", sourceId, e);
-                                }
+                                // onCompletion ends the run loop. The JNI handler requests cleanup,
+                                // so this callback only reports the failure.
                             } else {
                                 LOG.info("engine#{} stopped normally. {}", sourceId, message);
                             }
@@ -125,11 +128,16 @@ public class DbzCdcEngineRunner {
 
     private void withEngine(DbzCdcEngine engine) {
         this.engine = engine;
+        engine.onCompletion(
+                () -> {
+                    state = State.STOPPED;
+                    executor.shutdown();
+                });
     }
 
     DbzCdcEngineRunner(DbzConnectorConfig config, DbzCdcEngine engine) {
         this(config);
-        this.engine = engine;
+        withEngine(engine);
     }
 
     /** Start to run the cdc engine */
@@ -138,14 +146,22 @@ public class DbzCdcEngineRunner {
     }
 
     public boolean start(BooleanSupplier shouldContinue) throws InterruptedException {
-        // The engine must be stoppable as soon as it is submitted, including while waiting
-        // for streaming readiness. A completion callback may also stop it during startup.
-        if (!running.compareAndSet(false, true)) {
-            LOG.info("engine#{} already started", engine.getId());
-            return true;
+        // Submission and stop share a lock: shutdown cannot strand an engine before run starts.
+        synchronized (this) {
+            if (state == State.STOPPED) {
+                throw new IllegalStateException("A stopped CDC engine cannot be restarted");
+            }
+            if (state == State.RUNNING) {
+                return true;
+            }
+            state = State.RUNNING;
+            try {
+                executor.execute(engine);
+            } catch (RuntimeException e) {
+                state = State.STOPPED;
+                throw e;
+            }
         }
-
-        executor.execute(engine);
 
         boolean startOk = true;
         // For backfill source, we need to wait for the streaming source to start before proceeding
@@ -160,16 +176,38 @@ public class DbzCdcEngineRunner {
         return startOk;
     }
 
-    public void stop() throws Exception {
-        if (running.compareAndSet(true, false)) {
-            try {
+    public synchronized void stop() throws Exception {
+        State previous = state;
+        state = State.STOPPED;
+        try {
+            // Request cleanup only once; completion can outlive this bounded call.
+            if (previous != State.STOPPED) {
                 engine.stop();
-                LOG.info("engine#{} terminated", engine.getId());
-            } finally {
-                // Interrupt the runner thread even if closing the engine fails.
-                executor.shutdownNow();
+                stopFailure = null;
             }
+        } catch (Exception e) {
+            stopFailure = e;
+            LOG.error("engine#{} shutdown failed", engine.getId(), e);
+            throw e;
+        } finally {
+            executor.shutdownNow();
         }
+    }
+
+    /** A stopped running loop does not imply successful resource cleanup. */
+    public Exception getStopFailure() {
+        // Completion callbacks can report failures after stop() returned. Consult the engine's
+        // live task-cleanup state rather than treating the return from close() as success.
+        Exception cleanupFailure = engine.getCleanupFailure();
+        return cleanupFailure != null ? cleanupFailure : (hasPendingCleanup() ? stopFailure : null);
+    }
+
+    void onCleanupComplete(Runnable callback) {
+        engine.onCleanupComplete(callback);
+    }
+
+    public boolean hasPendingCleanup() {
+        return engine.hasPendingCleanup();
     }
 
     public DbzCdcEngine getEngine() {
@@ -177,7 +215,7 @@ public class DbzCdcEngineRunner {
     }
 
     public boolean isRunning() {
-        return running.get();
+        return state == State.RUNNING;
     }
 
     public DbzChangeEventConsumer getChangeEventConsumer() {

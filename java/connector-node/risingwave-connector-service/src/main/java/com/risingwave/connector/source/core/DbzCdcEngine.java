@@ -23,6 +23,7 @@ import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
+import io.debezium.embedded.async.AsyncEmbeddedEngine;
 import io.debezium.engine.DebeziumEngine;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -33,6 +34,7 @@ public class DbzCdcEngine implements Runnable {
     private final DebeziumEngine<?> engine;
     private final DbzChangeEventConsumer changeEventConsumer;
     private final long id;
+    private Runnable onCompletion = () -> {};
 
     /** If config is not valid will throw exceptions */
     public DbzCdcEngine(
@@ -58,7 +60,11 @@ public class DbzCdcEngine implements Runnable {
         this.engine =
                 DebeziumEngine.create(Connect.class)
                         .using(dbzProps)
-                        .using(completionCallback)
+                        .using(
+                                (success, message, error) -> {
+                                    onCompletion.run();
+                                    completionCallback.handle(success, message, error);
+                                })
                         .notifying(consumer)
                         .build();
     }
@@ -74,7 +80,46 @@ public class DbzCdcEngine implements Runnable {
     }
 
     public void stop() throws Exception {
-        engine.close();
+        if (!(engine instanceof AsyncEmbeddedEngine<?> asyncEngine)
+                || !asyncEngine.isShutdownRequested()) {
+            engine.close();
+        }
+        // close() may return normally even when task cleanup failed. Its callback and this
+        // accessor use the same retained cleanup state, including failures arriving later.
+        Exception failure = getCleanupFailure();
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    public Exception getCleanupFailure() {
+        if (engine instanceof AsyncEmbeddedEngine<?> asyncEngine) {
+            Throwable failure = asyncEngine.getShutdownFailure();
+            if (failure != null) {
+                return failure instanceof Exception exception
+                        ? exception
+                        : new RuntimeException(failure);
+            }
+        }
+        return null;
+    }
+
+    /** Pending cleanup is independent of historical errors from completed shutdown operations. */
+    public boolean hasPendingCleanup() {
+        return engine instanceof AsyncEmbeddedEngine<?> asyncEngine
+                && asyncEngine.hasPendingCleanup();
+    }
+
+    void onCleanupComplete(Runnable callback) {
+        if (engine instanceof AsyncEmbeddedEngine<?> asyncEngine) {
+            asyncEngine.cleanupCompletion().thenRun(callback);
+        } else {
+            callback.run();
+        }
+    }
+
+    void onCompletion(Runnable callback) {
+        this.onCompletion = callback;
     }
 
     public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {

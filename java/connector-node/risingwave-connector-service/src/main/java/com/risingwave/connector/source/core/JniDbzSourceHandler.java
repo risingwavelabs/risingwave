@@ -158,15 +158,27 @@ public class JniDbzSourceHandler {
             channel.sendError(t.getMessage());
 
         } finally {
-            try {
-                runner.stop();
-            } catch (Exception e) {
-                LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
-            } finally {
-                // remove the handler from registry
-                JniDbzSourceRegistry.unregister(this);
-            }
+            stop();
         }
+    }
+
+    /** Request cleanup once and retain ownership only while that attempt is unfinished. */
+    public synchronized void stop() {
+        try {
+            runner.stop();
+        } catch (Exception e) {
+            LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+        } finally {
+            JniDbzSourceRegistry.finishCleanup(this, runner.hasPendingCleanup());
+        }
+    }
+
+    void onCleanupComplete(Runnable callback) {
+        runner.onCleanupComplete(callback);
+    }
+
+    public Exception getStopFailure() {
+        return runner.getStopFailure();
     }
 
     private boolean sendHandshakeMessage(CdcSourceChannel channel, boolean startOk) {

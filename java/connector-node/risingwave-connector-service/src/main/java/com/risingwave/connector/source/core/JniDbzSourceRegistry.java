@@ -16,6 +16,7 @@
 
 package com.risingwave.connector.source.core;
 
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,33 @@ public class JniDbzSourceRegistry {
 
     private static final ConcurrentHashMap<Long, JniDbzSourceHandler> sourceHandlers =
             new ConcurrentHashMap<>();
+    // Recovery may create another handler with the same source ID while cleanup is unfinished.
+    private static final Set<JniDbzSourceHandler> pendingCleanupHandlers =
+            ConcurrentHashMap.newKeySet();
+
+    public static Set<JniDbzSourceHandler> getPendingCleanupHandlers() {
+        return Set.copyOf(pendingCleanupHandlers);
+    }
+
+    static void finishCleanup(JniDbzSourceHandler handler, boolean cleanupPending) {
+        unregister(handler);
+        if (cleanupPending && pendingCleanupHandlers.add(handler)) {
+            // Completion also notifies late subscribers, closing the check/register race.
+            handler.onCleanupComplete(
+                    () -> {
+                        pendingCleanupHandlers.remove(handler);
+                        Exception failure = handler.getStopFailure();
+                        if (failure != null) {
+                            LOG.warn(
+                                    "Cleanup completed with a failure for Engine#{}",
+                                    handler.getSourceId(),
+                                    failure);
+                        }
+                    });
+        } else if (!cleanupPending) {
+            pendingCleanupHandlers.remove(handler);
+        }
+    }
 
     public static void register(JniDbzSourceHandler handler) {
         var sourceId = handler.getSourceId();

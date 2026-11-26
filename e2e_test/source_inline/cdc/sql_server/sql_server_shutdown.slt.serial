@@ -1,0 +1,56 @@
+control substitution on
+
+# Keep the upstream database and application names private to this test. SQL Server DMV
+# assertions observe the engine's sessions, independently of RisingWave's stopped flag.
+statement ok
+DROP SOURCE IF EXISTS mssql_shutdown_streaming CASCADE;
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('rw_shutdown_test') IS NOT NULL BEGIN ALTER DATABASE rw_shutdown_test SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE rw_shutdown_test; END; CREATE DATABASE rw_shutdown_test;" -b
+
+system ok
+sqlcmd -C -d rw_shutdown_test -Q "EXEC sys.sp_cdc_enable_db; CREATE TABLE dbo.items (id INT PRIMARY KEY); EXEC sys.sp_cdc_enable_table @source_schema = 'dbo', @source_name = 'items', @role_name = NULL; INSERT INTO dbo.items VALUES (1);" -b
+
+statement ok
+CREATE SOURCE mssql_shutdown_streaming WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'rw_shutdown_test',
+    database.encrypt = 'true',
+    'debezium.driver.applicationName' = 'rw_shutdown_streaming',
+    'debezium.executor.shutdown.timeout.ms' = '1000'
+);
+
+statement ok
+CREATE TABLE mssql_shutdown_items (id INT PRIMARY KEY)
+FROM mssql_shutdown_streaming TABLE 'rw_shutdown_test.dbo.items';
+
+query I retry 60 backoff 1s
+SELECT id FROM mssql_shutdown_items;
+----
+1
+
+# A new row proves the source has reached streaming, beyond the initial backfill.
+system ok
+sqlcmd -C -d rw_shutdown_test -Q "INSERT INTO dbo.items VALUES (2);" -b
+
+query I retry 60 backoff 1s
+SELECT id FROM mssql_shutdown_items ORDER BY id;
+----
+1
+2
+
+system ok
+sqlcmd -C -d master -Q "IF (SELECT COUNT(*) FROM sys.dm_exec_sessions s JOIN sys.dm_exec_connections c ON s.session_id = c.session_id WHERE s.program_name = 'rw_shutdown_streaming' AND c.encrypt_option = 'TRUE') < 2 THROW 50000, 'expected encrypted data and metadata sessions', 1;" -b
+
+statement ok
+DROP SOURCE mssql_shutdown_streaming CASCADE;
+
+system ok
+sqlcmd -C -d master -Q "SET NOCOUNT ON; DECLARE @waited INT = 0; WHILE EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE program_name = 'rw_shutdown_streaming') BEGIN IF @waited >= 30 THROW 50000, 'streaming sessions survived source drop', 1; WAITFOR DELAY '00:00:01'; SET @waited += 1; END;" -b -t 40
+
+system ok
+sqlcmd -C -d master -Q "DROP DATABASE rw_shutdown_test;" -b
