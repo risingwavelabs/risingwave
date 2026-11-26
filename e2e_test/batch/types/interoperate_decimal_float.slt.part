@@ -94,12 +94,17 @@ select null::decimal is distinct from null::float4;
 ----
 f
 
+query RR
+select '1e29'::float4::decimal, '1e29'::jsonb::decimal;
+----
+100000000000000000000000000000 100000000000000000000000000000
+
 # Out of range
 statement error
-select '1e29'::float4::decimal;
+select '1e38'::float4::decimal;
 
 statement error
-select '1e29'::jsonb::decimal;
+select '1e38'::jsonb::decimal;
 
 statement error
 select '1e309'::decimal > '1'::float4;

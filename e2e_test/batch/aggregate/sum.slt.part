@@ -74,8 +74,17 @@ select sum(d) from t;
 ----
 72000000000000000000000000000
 
+# The sum continues beyond the 28-digit legacy range.
 statement ok
 insert into t values (9000000000000000000000000000);
+
+query T
+select sum(d) from t;
+----
+81000000000000000000000000000
+
+statement ok
+insert into t values (99999999999999999999999999999999999999);
 
 statement error Numeric out of range
 select sum(d) from t;
