@@ -117,7 +117,8 @@
     │   ├── t1_v3: character varying
     │   ├── t1_v5: numeric
     │   ├── t1_v4: bigint
-    │   └── _rw_timestamp: timestamp with time zone
+    │   ├── _rw_timestamp: timestamp with time zone
+    │   └── _rw_vnode: smallint
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 4, 5 ]
@@ -125,7 +126,7 @@
     └── vnode column idx: 2
 
     Table 1
-    ├── columns: [ vnode: smallint, epoch: bigint, row_count: bigint, is_epoch_finished: boolean, v3: character varying, v4: bigint, _rw_timestamp: timestamp with time zone ]
+    ├── columns: [ vnode: smallint, epoch: bigint, row_count: bigint, is_epoch_finished: boolean, v3: character varying, v4: bigint, _rw_timestamp: timestamp with time zone, _rw_vnode: smallint ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]
@@ -169,7 +170,8 @@
     │   ├── t1_v2: double precision
     │   ├── t1_v3: character varying
     │   ├── t1_v5: numeric
-    │   └── _rw_timestamp: timestamp with time zone
+    │   ├── _rw_timestamp: timestamp with time zone
+    │   └── _rw_vnode: smallint
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 6, 7 ]
@@ -177,7 +179,15 @@
     └── vnode column idx: 2
 
     Table 1
-    ├── columns: [ vnode: smallint, epoch: bigint, row_count: bigint, is_epoch_finished: boolean, v1: integer, v2: double precision, _rw_timestamp: timestamp with time zone ]
+    ├── columns:
+    │   ┌── vnode: smallint
+    │   ├── epoch: bigint
+    │   ├── row_count: bigint
+    │   ├── is_epoch_finished: boolean
+    │   ├── v1: integer
+    │   ├── v2: double precision
+    │   ├── _rw_timestamp: timestamp with time zone
+    │   └── _rw_vnode: smallint
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 0 ]

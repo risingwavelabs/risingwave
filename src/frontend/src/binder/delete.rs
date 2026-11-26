@@ -95,7 +95,7 @@ impl Binder {
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items, table_catalog)?;
         let returning = !returning_list.is_empty();
         let delete = BoundDelete {
             table_id,

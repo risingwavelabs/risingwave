@@ -51,16 +51,27 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 1 { columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1
+    ├── columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ id1, a1, id2, a2, stream._row_id, _rw_timestamp ], primary key: [ $4 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 4 ], read pk prefix len hint: 2 }
+    Table 4294967294
+    ├── columns: [ id1, a1, id2, a2, stream._row_id, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $4 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 0, 4 ]
+    └── read pk prefix len hint: 2
 
 - name: Broadcast temporal join on a kafka source is not fused into the source fragment
   sql: |
@@ -103,10 +114,15 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ partition_id, backfill_progress, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0
+    ├── columns: [ partition_id, backfill_progress, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -114,7 +130,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ id1, a1, id2, a2, _row_id, _rw_timestamp ]
+    ├── columns: [ id1, a1, id2, a2, _row_id, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $4 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0, 4 ]
@@ -159,14 +175,14 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ version_id2, version_a2, stream_a1, stream_id1, _rw_timestamp ]
+    ├── columns: [ version_id2, version_a2, stream_a1, stream_id1, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $2 ASC, $3 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 2
 
     Table 1
-    ├── columns: [ vnode, id1, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, id1, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -174,7 +190,7 @@
     └── vnode column idx: 0
 
     Table 2
-    ├── columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp ]
+    ├── columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -182,7 +198,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ id1, a1, id2, a2, _rw_timestamp ]
+    ├── columns: [ id1, a1, id2, a2, _rw_timestamp, _rw_vnode ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1 ]
@@ -228,21 +244,33 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ version_id, version_name, max(max(stream_id)), _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ version_id, version_name, max(max(stream_id)), _rw_timestamp, _rw_vnode ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ max(stream_id), _vnode, _rw_timestamp ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ max(stream_id), _vnode, _rw_timestamp, _rw_vnode ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2 { columns: [ max(max(stream_id)), sum0(count), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 2 { columns: [ max(max(stream_id)), sum0(count), count, _rw_timestamp, _rw_vnode ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 3 { columns: [ _vnode, stream_id, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 1 ], distribution key: [ 1 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ _vnode, stream_id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 1 ], distribution key: [ 1 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4 { columns: [ _vnode, max(stream_id), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ _vnode, max(stream_id), count, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 5 { columns: [ vnode, id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 5
+    ├── columns: [ vnode, id, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 6 { columns: [ vnode, id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 6
+    ├── columns: [ vnode, id, backfill_finished, row_count, _rw_timestamp, _rw_vnode ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ k, c, name, version.id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ k, c, name, version.id, _rw_timestamp, _rw_vnode ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
 - name: Inner join type for temporal join
   sql: |

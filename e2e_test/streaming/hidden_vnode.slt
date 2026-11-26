@@ -1,0 +1,136 @@
+# The hidden vnode is read from the named relation's storage key.
+statement ok
+SET streaming_max_parallelism = 32;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE hidden_vnode_t (tenant INT, id INT, v VARCHAR, PRIMARY KEY (tenant, id));
+
+statement ok
+INSERT INTO hidden_vnode_t VALUES (1, 10, 'a'), (1, 11, 'b'), (2, 20, 'c'), (3, 30, 'd');
+
+statement ok
+FLUSH;
+
+query IIT rowsort
+SELECT * FROM hidden_vnode_t;
+----
+1 10 a
+1 11 b
+2 20 c
+3 30 d
+
+statement ok
+SET query_mode = local;
+
+query IB
+SELECT COUNT(*), BOOL_AND(_rw_vnode = rw_vnode(32, tenant, id)) FROM hidden_vnode_t;
+----
+4 t
+
+statement ok
+SET query_mode = distributed;
+
+query IB
+SELECT COUNT(*), BOOL_AND(t._rw_vnode = rw_vnode(32, t.tenant, t.id)) FROM hidden_vnode_t t;
+----
+4 t
+
+# The index has a different vnode count and distribution key from its source table.
+statement ok
+SET streaming_max_parallelism = 64;
+
+statement ok
+CREATE INDEX hidden_vnode_idx ON hidden_vnode_t(id) INCLUDE (tenant, v);
+
+query IB
+SELECT COUNT(*), BOOL_AND(_rw_vnode = rw_vnode(32, tenant, id)) FROM hidden_vnode_t WHERE id = 10;
+----
+1 t
+
+query IB
+SELECT COUNT(*), BOOL_AND(_rw_vnode = rw_vnode(64, id)) FROM hidden_vnode_idx;
+----
+4 t
+
+# A singleton materialized view always stores its rows on vnode 0.
+statement ok
+CREATE MATERIALIZED VIEW hidden_vnode_total AS SELECT COUNT(*) AS n FROM hidden_vnode_t;
+
+statement ok
+FLUSH;
+
+query II
+SELECT n, _rw_vnode FROM hidden_vnode_total;
+----
+4 0
+
+# Preserve Serial's vnode extraction for tables with an implicit row ID.
+statement ok
+CREATE TABLE hidden_vnode_rowid (value INT);
+
+statement ok
+INSERT INTO hidden_vnode_rowid VALUES (10), (20), (30);
+
+statement ok
+FLUSH;
+
+query IB
+SELECT COUNT(*), BOOL_AND(_rw_vnode = rw_vnode(64, _row_id)) FROM hidden_vnode_rowid;
+----
+3 t
+
+# Rebuilding the schema must not persist or duplicate the runtime system columns.
+statement ok
+ALTER TABLE hidden_vnode_t ADD COLUMN extra INT DEFAULT 9;
+
+statement ok
+UPDATE hidden_vnode_t SET v = 'updated' WHERE tenant = 1 AND id = 10 AND _rw_vnode = rw_vnode(32, tenant, id) AND _rw_timestamp IS NOT NULL;
+
+statement ok
+FLUSH;
+
+# A point read can project both system columns alongside ordinary values.
+query TITB
+SELECT v, extra, pg_typeof(_rw_vnode), _rw_vnode = rw_vnode(32, 1, 10) AND _rw_timestamp IS NOT NULL FROM hidden_vnode_t WHERE tenant = 1 AND id = 10;
+----
+updated 9 smallint t
+
+statement error update modifying column `_rw_vnode` is unsupported
+UPDATE hidden_vnode_t SET _rw_vnode = 0;
+
+statement error
+INSERT INTO hidden_vnode_t (tenant, id, _rw_vnode) VALUES (4, 40, 0);
+
+# Each DML binder must reject runtime system columns in RETURNING.
+statement error system columns are not supported in the `RETURNING` list
+INSERT INTO hidden_vnode_t (tenant, id) VALUES (4, 40) RETURNING _rw_vnode;
+
+statement error system columns are not supported in the `RETURNING` list
+UPDATE hidden_vnode_t SET v = 'bad' RETURNING _rw_timestamp IS NOT NULL;
+
+statement error system columns are not supported in the `RETURNING` list
+DELETE FROM hidden_vnode_t RETURNING _rw_vnode;
+
+statement ok
+DROP TABLE hidden_vnode_rowid;
+
+statement ok
+DROP MATERIALIZED VIEW hidden_vnode_total;
+
+statement ok
+DROP INDEX hidden_vnode_idx;
+
+statement ok
+DROP TABLE hidden_vnode_t;
+
+statement ok
+SET query_mode = default;
+
+statement ok
+SET streaming_parallelism = default;
+
+statement ok
+SET streaming_max_parallelism = default;

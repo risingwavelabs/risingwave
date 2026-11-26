@@ -307,16 +307,16 @@
     update t1 set c = 3 where a = 1 and b = 2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchUpdate { table: t1, exprs: [$0, $1, $5, $3] }
+    └─BatchUpdate { table: t1, exprs: [$0, $1, $6, $3] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp, 3:Int64] }
-          └─BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp], lookup table: t1 }
+        └─BatchProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp, t1._rw_vnode, 3:Int64] }
+          └─BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp, t1._rw_vnode], lookup table: t1 }
             └─BatchExchange { order: [], dist: UpstreamHashShard(idx2.t1._row_id) }
               └─BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2)) AND idx2.a = Int32(1)], distribution: SomeShard }
   batch_local_plan: |-
-    BatchUpdate { table: t1, exprs: [$0, $1, $5, $3] }
-    └─BatchProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp, 3:Int64] }
-      └─BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp], lookup table: t1 }
+    BatchUpdate { table: t1, exprs: [$0, $1, $6, $3] }
+    └─BatchProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp, t1._rw_vnode, 3:Int64] }
+      └─BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c, t1._row_id, t1._rw_timestamp, t1._rw_vnode], lookup table: t1 }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2)) AND idx2.a = Int32(1)], distribution: SomeShard }
 - sql: |

@@ -417,10 +417,11 @@ impl TableCatalog {
         &self.columns
     }
 
-    pub fn columns_without_rw_timestamp(&self) -> Vec<ColumnCatalog> {
+    /// Columns in the persisted table schema, excluding runtime-generated system columns.
+    pub fn columns_without_system_columns(&self) -> Vec<ColumnCatalog> {
         self.columns
             .iter()
-            .filter(|c| !c.is_rw_timestamp_column())
+            .filter(|c| !c.is_rw_sys_column())
             .cloned()
             .collect()
     }
@@ -566,9 +567,9 @@ impl TableCatalog {
             schema_id: self.schema_id,
             database_id: self.database_id,
             name: self.name.clone(),
-            // ignore `_rw_timestamp` when serializing
+            // Runtime-generated system columns are not part of the persisted schema.
             columns: self
-                .columns_without_rw_timestamp()
+                .columns_without_system_columns()
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
@@ -815,11 +816,14 @@ impl From<PbTable> for TableCatalog {
             .iter()
             .map(|&idx| idx as usize)
             .collect();
+        let engine = Engine::from_protobuf(&tb_engine);
         let mut columns: Vec<ColumnCatalog> =
             tb.columns.into_iter().map(ColumnCatalog::from).collect();
-        if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
-            // Add system column `_rw_timestamp` to every table, but notice that this column is never persisted.
-            columns.push(ColumnCatalog::rw_timestamp_column());
+        // Add runtime-generated system columns to the frontend catalog. They are
+        // excluded from persistence by `columns_without_system_columns`.
+        columns.push(ColumnCatalog::rw_timestamp_column());
+        if engine == Engine::Hummock {
+            columns.push(ColumnCatalog::rw_vnode_column());
         }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -836,7 +840,6 @@ impl From<PbTable> for TableCatalog {
         for idx in &tb.watermark_indices {
             watermark_columns.insert(*idx as _);
         }
-        let engine = Engine::from_protobuf(&tb_engine);
 
         Self {
             id,
@@ -1029,6 +1032,7 @@ mod tests {
                         is_hidden: false
                     },
                     ColumnCatalog::rw_timestamp_column(),
+                    ColumnCatalog::rw_vnode_column(),
                 ],
                 stream_key: vec![0],
                 pk: vec![ColumnOrder::new(0, OrderType::ascending())],
@@ -1045,7 +1049,7 @@ mod tests {
                 conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
-                watermark_columns: FixedBitSet::with_capacity(3),
+                watermark_columns: FixedBitSet::with_capacity(4),
                 dist_key_in_pk: vec![0],
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
@@ -1069,6 +1073,20 @@ mod tests {
                 cdc_table_type: None,
             }
         );
-        assert_eq!(table, TableCatalog::from(table.to_prost()));
+        let persisted = table.to_prost();
+        assert_eq!(persisted.columns.len(), 2);
+        assert_eq!(table, TableCatalog::from(persisted.clone()));
+
+        // Iceberg has no Hummock vnode; its existing timestamp behavior is unchanged.
+        let iceberg = TableCatalog::from(PbTable {
+            engine: Some(PbEngine::Iceberg as i32),
+            ..persisted.clone()
+        });
+        assert_eq!(iceberg.columns.len(), 3);
+        assert_eq!(
+            iceberg.columns.last(),
+            Some(&ColumnCatalog::rw_timestamp_column())
+        );
+        assert_eq!(iceberg.to_prost().columns, persisted.columns);
     }
 }

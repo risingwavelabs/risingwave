@@ -42,13 +42,13 @@ pub use jsonb_stream_key_checker::*;
 mod distributed_dml_visitor;
 mod locality_backfill_scan_estimator;
 mod locality_provider_counter;
-mod rw_timestamp_validator;
 mod sole_sys_table_visitor;
+mod system_column_validator;
 pub use distributed_dml_visitor::*;
 pub use locality_backfill_scan_estimator::*;
 pub use locality_provider_counter::*;
-pub use rw_timestamp_validator::*;
 pub use sole_sys_table_visitor::*;
+pub use system_column_validator::*;
 
 #[cfg(feature = "datafusion")]
 mod datafusion_execute_checker;

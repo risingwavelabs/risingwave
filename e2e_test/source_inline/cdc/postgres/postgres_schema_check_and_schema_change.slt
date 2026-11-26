@@ -332,6 +332,7 @@ v45 bigint false NULL
 v46 bigint false NULL
 foo jsonb false NULL
 _rw_timestamp timestamp with time zone true NULL
+_rw_vnode smallint true NULL
 primary key v1 NULL NULL
 distribution key v1 NULL NULL
 table description t NULL NULL
