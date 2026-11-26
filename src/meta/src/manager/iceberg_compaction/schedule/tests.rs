@@ -2052,6 +2052,7 @@ fn pk_index_report(status: IcebergReportTaskStatus) -> IcebergReportTask {
         pk_index_result: Some(PkIndexCompactionResult {
             output_files: Some(
                 SinkMetadata::try_from(&IcebergCommitResult {
+                    log_store_schema_version: None,
                     schema_id: 3,
                     partition_spec_id: 4,
                     data_files: vec![

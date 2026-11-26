@@ -981,6 +981,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         KvLogStoreItem::StreamChunk {
                             chunk,
                             progress: chunk_progress,
+                            ..
                         } => {
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
                             progress.apply_per_vnode(epoch, chunk_progress);

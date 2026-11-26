@@ -65,3 +65,6 @@ cd ../..
 
 echo "--- Running PostgreSQL CDC with Iceberg sink schema change test"
 bash ci/scripts/e2e-iceberg-sink-cdc-test.sh
+
+echo "--- Testing CDC schema changes while an isolated Iceberg sink keeps failing"
+python3 e2e_test/iceberg/cdc_schema_change_failure.py

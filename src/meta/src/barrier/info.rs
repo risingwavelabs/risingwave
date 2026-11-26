@@ -305,6 +305,17 @@ impl SharedActorInfos {
     }
 }
 
+#[cfg(test)]
+impl SharedActorInfos {
+    pub(crate) fn upsert_for_test(
+        &self,
+        database_id: DatabaseId,
+        infos: impl IntoIterator<Item = (&InflightFragmentInfo, JobId)>,
+    ) {
+        self.upsert(database_id, infos);
+    }
+}
+
 pub(super) struct SharedActorInfoWriter<'a> {
     database_id: DatabaseId,
     write_guard: parking_lot::RwLockWriteGuard<'a, SharedActorInfosInner>,

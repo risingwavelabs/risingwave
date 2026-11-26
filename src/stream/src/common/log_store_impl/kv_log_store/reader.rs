@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
+use std::future::{Future, pending};
 use std::mem::replace;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::pin::Pin;
@@ -51,7 +51,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
+    Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, LogStoreReadSchemaVersion, SeqId,
 };
 
 pub(crate) const REWIND_INITIAL_DELAY: Duration = Duration::from_secs(1);
@@ -202,6 +202,9 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     /// Shared semaphore to limit concurrent historical reads across the compute node.
     /// `None` means unlimited.
     historical_read_semaphore: Option<Arc<Semaphore>>,
+
+    /// Schema version of the latest returned item.
+    read_schema_version: LogStoreReadSchemaVersion,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
@@ -215,6 +218,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         is_paused: watch::Receiver<bool>,
         identity: String,
         historical_read_semaphore: Option<Arc<Semaphore>>,
+        read_schema_version: LogStoreReadSchemaVersion,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -231,6 +235,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             identity,
             rewind_delay,
             historical_read_semaphore,
+            read_schema_version,
         }
     }
 }
@@ -372,7 +377,12 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                             latest_offset.check_next_item_epoch(epoch)?;
                         }
                         let item = match item {
-                            KvLogStoreItem::StreamChunk { chunk, .. } => {
+                            KvLogStoreItem::StreamChunk {
+                                chunk,
+                                schema_version,
+                                ..
+                            } => {
+                                self.read_schema_version.set(schema_version);
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {
@@ -382,13 +392,19 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     Some(TruncateOffset::Chunk { epoch, chunk_id });
                                 LogStoreReadItem::StreamChunk { chunk, chunk_id }
                             }
-                            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
+                            KvLogStoreItem::Barrier {
+                                is_checkpoint,
+                                schema_version,
+                                schema_change,
+                                ..
+                            } => {
+                                self.read_schema_version.set(schema_version);
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
                                 LogStoreReadItem::Barrier {
                                     is_checkpoint,
                                     new_vnode_bitmap: None,
                                     is_stop: false,
-                                    schema_change: None,
+                                    schema_change,
                                 }
                             }
                         };
@@ -403,6 +419,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             KvLogStoreReaderFutureState::ReadFlushedChunk(future) => {
                 let (chunk_id, chunk, item_epoch) = future.await?;
                 self.future_state = KvLogStoreReaderFutureState::Empty;
+                self.read_schema_version
+                    .set(self.state.serde.schema_version());
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,
                     chunk_id,
@@ -431,6 +449,9 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         if let Some(latest_offset) = &self.latest_offset {
             latest_offset.check_next_item_epoch(item_epoch)?;
         }
+        // Items in the buffer are written by the current writer.
+        self.read_schema_version
+            .set(self.state.serde.schema_version());
         Ok(match item {
             LogStoreBufferItem::StreamChunk {
                 chunk, chunk_id, ..
@@ -500,6 +521,17 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     next_epoch,
                     item_epoch
                 );
+                if schema_change.is_some() {
+                    // The actor is replaced at a schema change. The new actor reads the persisted
+                    // schema change marker and commits the schema change, so this reader stops here
+                    // to avoid committing it twice.
+                    info!(
+                        identity = self.identity,
+                        epoch = item_epoch,
+                        "log reader stops at schema change barrier"
+                    );
+                    return pending().await;
+                }
                 self.latest_offset = Some(TruncateOffset::Barrier { epoch: item_epoch });
                 (
                     item_epoch,
@@ -719,7 +751,7 @@ mod tests {
         TEST_TABLE_ID, check_stream_chunk_eq, gen_stream_chunk_with_info, gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{
-        KV_LOG_STORE_V2_INFO, KvLogStoreMetrics, SeqId,
+        KV_LOG_STORE_V2_INFO, KvLogStoreMetrics, LogStoreReadSchemaVersion, SeqId,
     };
 
     struct ControlledIterPlan {
@@ -858,6 +890,7 @@ mod tests {
                 pause_rx,
                 identity.to_owned(),
                 Some(semaphore),
+                LogStoreReadSchemaVersion::default(),
             ),
             tx,
         )

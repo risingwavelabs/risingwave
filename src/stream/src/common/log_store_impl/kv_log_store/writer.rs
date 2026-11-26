@@ -139,11 +139,24 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
         let epoch = self.state.epoch().curr;
+        let is_schema_change = options.schema_change.is_some();
+        if is_schema_change && !(options.is_checkpoint && options.is_stop) {
+            // Rows after the marker use the new schema, which only a rebuilt actor can write.
+            return Err(anyhow!(
+                "schema change should come with a checkpoint barrier that stops the actor, epoch {}",
+                epoch
+            ));
+        }
         let mut writer = self.state.start_writer(false);
 
-        // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
-        // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
-        if !self.is_paused {
+        if is_schema_change {
+            // Rows after this marker are written by the rebuilt sink under the new schema. The
+            // marker is written even when paused, so that a reader of the persisted log always
+            // sees the schema change before rows of the new schema.
+            writer.write_schema_change_barrier(epoch)?;
+        } else if !self.is_paused {
+            // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
+            // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
             writer.write_barrier(epoch, options.is_checkpoint)?;
         }
         self.tx
@@ -156,14 +169,15 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         let (flush_info, _) = writer.finish().await?;
 
         // No data is expected when the stream is paused.
-        if self.is_paused {
+        if self.is_paused && !is_schema_change {
             assert_eq!(flush_info.flush_count, 0);
             assert_eq!(flush_info.flush_size, 0);
         }
         flush_info.report(&self.metrics);
 
-        let should_wait_log_store_flush =
-            options.schema_change.is_some() || options.wait_log_store_flush;
+        // A schema change does not wait for the reader. Rows of the old schema stay in the log
+        // store, and the rebuilt sink reads them with the old schema before the marker.
+        let should_wait_log_store_flush = options.wait_log_store_flush;
         // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
         // always rebuild sink when update vnode bitmap.
         self.tx.barrier(

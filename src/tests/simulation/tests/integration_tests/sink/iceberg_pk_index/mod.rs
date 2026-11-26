@@ -300,6 +300,7 @@ mod failpoint_limited {
         anyhow::ensure!(!output_files.is_empty(), "mock table has no data files");
         let input_count = input_file_paths.len();
         let output_files = SinkMetadata::try_from(&IcebergCommitResult {
+            log_store_schema_version: None,
             schema_id,
             partition_spec_id,
             data_files: output_files,
