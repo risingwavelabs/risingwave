@@ -372,6 +372,21 @@ impl XorFilterReader {
         BlockBasedXor16Filter { filters }
     }
 
+    /// Exact encoded filter length, including headers, block lengths, and footers.
+    pub(super) fn serialized_len(&self) -> usize {
+        match &self.filter {
+            XorFilter::Xor8(filter) => 13 + filter.fingerprints.len(),
+            XorFilter::Xor16(filter) => 13 + filter.fingerprints.len() * 2,
+            XorFilter::BlockXor16(reader) => {
+                5 + reader
+                    .filters
+                    .iter()
+                    .map(|filter| 4 + 13 + filter.fingerprints.len() * 2)
+                    .sum::<usize>()
+            }
+        }
+    }
+
     pub fn estimate_size(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => filter.fingerprints.len(),
@@ -571,9 +586,34 @@ mod tests {
         }
     }
 
+    fn assert_meta_cache_codec(reader: &XorFilterReader) {
+        use foyer::Code;
+
+        use crate::hummock::{SstableMeta, SstableMetaCacheValue};
+
+        for skip_filter in [false, true] {
+            let sstable = Sstable {
+                id: 42.into(),
+                meta: SstableMeta::default(),
+                filter_reader: reader.clone(),
+                skip_bloom_filter_in_serde: skip_filter,
+            };
+            let legacy_bytes = bincode::serialize(&sstable).unwrap();
+            let value = SstableMetaCacheValue::from(sstable);
+            let mut bytes = Vec::new();
+            value.encode(&mut bytes).unwrap();
+            assert_eq!(bytes, legacy_bytes);
+            assert_eq!(value.estimated_size(), bytes.len());
+        }
+    }
+
     // Test to make sure filter key builder finish produce the same result as the filter reader encode_to_bytes
     #[tokio::test]
     async fn test_xor_filter_builder_and_reader() {
+        let empty_reader = XorFilterReader::new(&[], &[]);
+        assert_eq!(empty_reader.serialized_len(), empty_reader.encode_to_bytes().len());
+        assert_meta_cache_codec(&empty_reader);
+
         // Test Xor8 filter
         let mut xor8_builder = Xor8FilterBuilder::new(100);
         for i in 0..100 {
@@ -582,6 +622,8 @@ mod tests {
         let xor8_bytes = xor8_builder.finish(None);
         let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
         let xor8_encoded = xor8_reader.encode_to_bytes();
+        assert_eq!(xor8_reader.serialized_len(), xor8_encoded.len());
+        assert_meta_cache_codec(&xor8_reader);
         assert_eq!(
             xor8_bytes, xor8_encoded,
             "Xor8 builder and reader should produce identical bytes"
@@ -595,6 +637,8 @@ mod tests {
         let xor16_bytes = xor16_builder.finish(None);
         let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
         let xor16_encoded = xor16_reader.encode_to_bytes();
+        assert_eq!(xor16_reader.serialized_len(), xor16_encoded.len());
+        assert_meta_cache_codec(&xor16_reader);
         assert_eq!(
             xor16_bytes, xor16_encoded,
             "Xor16 builder and reader should produce identical bytes"
@@ -632,6 +676,8 @@ mod tests {
         let blocked_bytes = blocked_builder.finish(None);
         let blocked_reader = XorFilterReader::new(&blocked_bytes, &block_metas);
         let blocked_encoded = blocked_reader.encode_to_bytes();
+        assert_eq!(blocked_reader.serialized_len(), blocked_encoded.len());
+        assert_meta_cache_codec(&blocked_reader);
         assert_eq!(
             blocked_bytes, blocked_encoded,
             "BlockedXor16 builder and reader should produce identical bytes"
