@@ -284,7 +284,7 @@ dependencies = [
  "strum_macros 0.27.2",
  "thiserror 2.0.21",
  "uuid",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -504,7 +504,7 @@ dependencies = [
  "arrow-select",
  "flatbuffers",
  "lz4_flex 0.13.0",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -2733,8 +2733,8 @@ dependencies = [
  "flate2",
  "liblzma",
  "memchr",
- "zstd",
- "zstd-safe",
+ "zstd 0.13.5",
+ "zstd-safe 7.4.1",
 ]
 
 [[package]]
@@ -3709,7 +3709,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -3830,7 +3830,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -5660,7 +5660,7 @@ dependencies = [
  "serde",
  "tracing",
  "twox-hash",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -6884,7 +6884,7 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -7998,7 +7998,7 @@ dependencies = [
  "tokio",
  "tracing",
  "xxhash-rust",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -9515,7 +9515,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "uuid",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -10736,7 +10736,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -12042,7 +12042,7 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -13923,7 +13923,7 @@ dependencies = [
  "url",
  "uuid",
  "workspace-hack",
- "zstd",
+ "zstd 0.14.4",
 ]
 
 [[package]]
@@ -14272,7 +14272,7 @@ dependencies = [
  "twox-hash",
  "uuid",
  "workspace-hack",
- "zstd",
+ "zstd 0.14.4",
 ]
 
 [[package]]
@@ -14764,7 +14764,7 @@ dependencies = [
  "workspace-hack",
  "xorf",
  "xxhash-rust",
- "zstd",
+ "zstd 0.14.4",
 ]
 
 [[package]]
@@ -17763,7 +17763,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "webpki-roots 1.0.4",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -18846,7 +18846,7 @@ dependencies = [
  "sha2 0.10.9",
  "toml 0.8.12",
  "windows-sys 0.60.2",
- "zstd",
+ "zstd 0.13.5",
 ]
 
 [[package]]
@@ -20166,27 +20166,45 @@ source = "git+https://github.com/risingwavelabs/zmij.git?tag=1.0.23-ryu#9ab4edb8
 
 [[package]]
 name = "zstd"
-version = "0.13.3"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+checksum = "50adf04cf3ec914b0b9905c9dde90c80fe74bfd701e331fc80a39c512c525278"
 dependencies = [
- "zstd-safe",
+ "zstd-safe 7.4.1",
+]
+
+[[package]]
+name = "zstd"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad5020ab8f27bfc0024ad0a07aed6bf022a16208f479686fbed4fdd0c85eb0b3"
+dependencies = [
+ "zstd-safe 8.3.0",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "7.2.1"
+version = "7.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54a3ab4db68cea366acc5c897c7b4d4d1b8994a9cd6e6f841f8964566a419059"
+checksum = "498d94ad68720c89b4fbe41b9090850651e68cb2dd9210ce7ffbff3a94653819"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "8.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a9ea9cc2576c2fcc104e9cec04f46e3ede564f4fbc206831e4ef7e859a4140d"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.12+zstd.1.5.6"
+version = "2.1.3+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a4e40c320c3cb459d9a9ff6de98cff88f4751ee9275d140e2be94a2b74e4c13"
+checksum = "f729a06d0257428fd9d997ac8db7e1407bd0262ab016b085b36bc52957c0052d"
 dependencies = [
  "cc",
  "pkg-config",
