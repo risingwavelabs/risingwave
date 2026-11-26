@@ -26,6 +26,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::change_log::{TableChangeLogs, build_table_change_log_delta};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::full_text_index::FullTextIndexDelta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -85,6 +86,23 @@ fn collect_commit_table_ids(
         .chain(sync_result.object_index_adds.keys().copied())
         .chain(table_ids.iter().copied())
         .collect()
+}
+
+#[test]
+fn test_commit_table_ids_include_object_only_tables() {
+    let object_table_id = TableId::new(123);
+    let existing_table_id = TableId::new(456);
+    let sync_result = SyncResult {
+        object_index_adds: HashMap::from([(
+            object_table_id,
+            vec![ObjectIndexAdd::FullText(Default::default())],
+        )]),
+        ..Default::default()
+    };
+    assert_eq!(
+        collect_commit_table_ids(&sync_result, &BTreeSet::from([existing_table_id])),
+        BTreeSet::from([object_table_id, existing_table_id])
+    );
 }
 
 impl MockHummockMetaClient {
@@ -195,11 +213,15 @@ impl HummockMetaClient for MockHummockMetaClient {
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
         let mut vector_index_adds: HashMap<_, Vec<_>> = HashMap::new();
+        let mut full_text_index_adds: HashMap<_, Vec<_>> = HashMap::new();
         for (table_id, adds) in sync_result.object_index_adds {
             for add in adds {
                 match add {
                     ObjectIndexAdd::Vector(add) => {
                         vector_index_adds.entry(table_id).or_default().push(add)
+                    }
+                    ObjectIndexAdd::FullText(add) => {
+                        full_text_index_adds.entry(table_id).or_default().push(add)
                     }
                 }
             }
@@ -230,6 +252,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                 vector_index_delta: vector_index_adds
                     .into_iter()
                     .map(|(table_id, adds)| (table_id, VectorIndexDelta::Adds(adds)))
+                    .collect(),
+                full_text_index_delta: full_text_index_adds
+                    .into_iter()
+                    .map(|(table_id, adds)| (table_id, FullTextIndexDelta::Adds(adds)))
                     .collect(),
                 tables_to_commit: commit_table_ids
                     .iter()

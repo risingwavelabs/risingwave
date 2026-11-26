@@ -13,10 +13,12 @@
 // limitations under the License.
 
 //! Shared part of the writers of object indexes, i.e. the indexes whose data is stored in their
-//! own objects instead of SSTs.
+//! own objects instead of SSTs: vector indexes and full-text indexes.
 //!
 //! [`HummockObjectIndexWriter`] handles epoch control and the registration to the uploader, and
-//! delegates the index-specific work to an [`ObjectIndexWriterImpl`].
+//! delegates the index-specific work to an [`ObjectIndexWriterImpl`]. The writers exposed to
+//! the state store API are [`super::vector_writer::HummockVectorWriter`] and
+//! [`super::full_text_writer::HummockFullTextWriter`].
 
 use std::future::Future;
 use std::sync::Arc;
@@ -100,6 +102,10 @@ impl ObjectIndexFileIdManager for TrackedObjectIndexFileIdManager {
 
 fn added_object_ids(add: &ObjectIndexAdd) -> Vec<HummockRawObjectId> {
     match add {
+        ObjectIndexAdd::FullText(add) => add
+            .newly_added_objects()
+            .map(|(id, _)| id.as_raw())
+            .collect(),
         ObjectIndexAdd::Vector(add) => {
             let (delta, graph_id) = match add {
                 VectorIndexAdd::Flat(add) => (&add.vector_store_info_delta, None),

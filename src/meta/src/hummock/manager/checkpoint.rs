@@ -24,9 +24,9 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
-    CheckpointCompressionAlgorithm, PbHummockVersion, PbHummockVersionArchive,
-    PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope, PbVectorIndexObject,
-    PbVectorIndexObjectType,
+    CheckpointCompressionAlgorithm, PbFullTextIndexObject, PbFullTextIndexObjectType,
+    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
+    PbHummockVersionCheckpointEnvelope, PbVectorIndexObject, PbVectorIndexObjectType,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -478,6 +478,9 @@ impl HummockManager {
                 HummockObjectId::Sstable(_) => {}
                 HummockObjectId::VectorFile(_) => {}
                 HummockObjectId::HnswGraphFile(_) => {}
+                HummockObjectId::FullTextSegment(_) => {}
+                HummockObjectId::FullTextDeleteFile(_) => {}
+                HummockObjectId::FullTextDeletionVector(_) => {}
             };
             for (object_id, file_size) in version_delta
                 .newly_added_sst_infos()
@@ -485,6 +488,12 @@ impl HummockManager {
                 .chain(
                     version_delta
                         .vector_index_delta
+                        .values()
+                        .flat_map(|delta| delta.newly_added_objects()),
+                )
+                .chain(
+                    version_delta
+                        .full_text_index_delta
                         .values()
                         .flat_map(|delta| delta.newly_added_objects()),
                 )
@@ -511,6 +520,7 @@ impl HummockManager {
             let mut total_file_size = 0;
             let mut sst_ids = vec![];
             let mut vector_files = vec![];
+            let mut full_text_files = vec![];
             for (object_id, file_size) in removed_objects {
                 total_file_size += file_size;
                 match object_id {
@@ -527,12 +537,31 @@ impl HummockManager {
                             object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
                         });
                     }
+                    HummockObjectId::FullTextSegment(id) => {
+                        full_text_files.push(PbFullTextIndexObject {
+                            id: id.as_raw(),
+                            object_type: PbFullTextIndexObjectType::Segment as _,
+                        });
+                    }
+                    HummockObjectId::FullTextDeleteFile(id) => {
+                        full_text_files.push(PbFullTextIndexObject {
+                            id: id.as_raw(),
+                            object_type: PbFullTextIndexObjectType::DeleteFile as _,
+                        });
+                    }
+                    HummockObjectId::FullTextDeletionVector(id) => {
+                        full_text_files.push(PbFullTextIndexObject {
+                            id: id.as_raw(),
+                            object_type: PbFullTextIndexObjectType::DeletionVector as _,
+                        });
+                    }
                 }
             }
             StaleObjects {
                 id: sst_ids,
                 total_file_size,
                 vector_files,
+                full_text_files,
             }
         });
         if self.env.opts.enable_hummock_data_archive {
@@ -658,6 +687,7 @@ mod tests {
             table_change_logs: Default::default(),
             state_table_info: Default::default(),
             vector_indexes: Default::default(),
+            full_text_indexes: Default::default(),
         }
     }
 
@@ -666,6 +696,7 @@ mod tests {
             id: vec![1u64.into(), 2u64.into(), 3u64.into()],
             total_file_size: 123,
             vector_files: vec![],
+            full_text_files: vec![],
         };
 
         PbHummockVersionCheckpoint {

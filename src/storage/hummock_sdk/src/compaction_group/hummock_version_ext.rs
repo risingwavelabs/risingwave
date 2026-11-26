@@ -34,6 +34,7 @@ use super::{StateTableId, group_split};
 use crate::change_log::{EpochNewChangeLogCommon, TableChangeLogCommon};
 use crate::compact_task::is_compaction_task_expired;
 use crate::compaction_group::StaticCompactionGroupId;
+use crate::full_text_index::apply_full_text_index_delta;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
@@ -744,6 +745,11 @@ impl HummockVersionCommon<SstableInfo> {
             &version_delta.vector_index_delta,
             &version_delta.removed_table_ids,
         );
+        apply_full_text_index_delta(
+            &mut self.full_text_indexes,
+            &version_delta.full_text_index_delta,
+            &version_delta.removed_table_ids,
+        );
 
         changed_table_info
     }
@@ -1003,11 +1009,19 @@ where
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
             HummockObjectId::HnswGraphFile(_) => {}
+            HummockObjectId::FullTextSegment(_) => {}
+            HummockObjectId::FullTextDeleteFile(_) => {}
+            HummockObjectId::FullTextDeletionVector(_) => {}
         };
         self.get_sst_infos()
             .map(|s| HummockObjectId::Sstable(s.object_id()))
             .chain(
                 self.vector_indexes
+                    .values()
+                    .flat_map(|index| index.get_objects().map(|(object_id, _)| object_id)),
+            )
+            .chain(
+                self.full_text_indexes
                     .values()
                     .flat_map(|index| index.get_objects().map(|(object_id, _)| object_id)),
             )
@@ -1494,6 +1508,9 @@ pub fn version_object_size_map(version: &HummockVersion) -> HashMap<HummockObjec
         HummockObjectId::Sstable(_) => {}
         HummockObjectId::VectorFile(_) => {}
         HummockObjectId::HnswGraphFile(_) => {}
+        HummockObjectId::FullTextSegment(_) => {}
+        HummockObjectId::FullTextDeleteFile(_) => {}
+        HummockObjectId::FullTextDeletionVector(_) => {}
     };
     version
         .levels
@@ -1509,6 +1526,12 @@ pub fn version_object_size_map(version: &HummockVersion) -> HashMap<HummockObjec
         .chain(
             version
                 .vector_indexes
+                .values()
+                .flat_map(|index| index.get_objects()),
+        )
+        .chain(
+            version
+                .full_text_indexes
                 .values()
                 .flat_map(|index| index.get_objects()),
         )

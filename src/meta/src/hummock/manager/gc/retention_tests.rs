@@ -443,6 +443,7 @@ impl RetentionFixture {
             clean_watermark_indices: Set(None),
             refreshable: Set(false),
             vector_index_info: Set(None),
+            full_text_index_info: Set(None),
             cdc_table_type: Set(None),
         }
         .insert(&txn)

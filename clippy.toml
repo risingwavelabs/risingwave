@@ -44,5 +44,7 @@ avoid-breaking-exported-api = false
 upper-case-acronyms-aggressive = true
 too-many-arguments-threshold = 10
 ignore-interior-mutability = [
-    "risingwave_frontend::expr::ExprImpl" # XXX: Where does ExprImpl have interior mutability?
+    "risingwave_frontend::expr::ExprImpl", # Arc inside ExprImpl
+    "bytes::Bytes", # Internally uses Arc
+    "risingwave_hummock_sdk::key::TableKey",
 ]

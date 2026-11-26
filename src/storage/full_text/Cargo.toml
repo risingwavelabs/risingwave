@@ -1,0 +1,22 @@
+[package]
+name = "risingwave_full_text"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+bytes = "1"
+parking_lot = { workspace = true }
+roaring = "0.11"
+rw_loser_tree = { workspace = true }
+tantivy = { version = "0.27", default-features = false }
+tantivy-bitpacker = "0.27"
+thiserror = { workspace = true }
+xxhash-rust = { version = "0.8.7", features = ["xxh64"] }
+zstd = { version = "0.13", default-features = false }
+
+[lints]
+workspace = true

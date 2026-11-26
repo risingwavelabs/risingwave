@@ -478,6 +478,18 @@ pub mod verify {
         }
     }
 
+    impl<A: StateStoreReadFullText, E: StateStoreReadFullText> StateStoreReadFullText
+        for VerifyStateStore<A, E>
+    {
+        fn full_text_search(
+            &self,
+            tokens: Vec<String>,
+            limit: Option<usize>,
+        ) -> impl StorageFuture<'_, Vec<Bytes>> {
+            self.actual.full_text_search(tokens, limit)
+        }
+    }
+
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
@@ -723,6 +735,7 @@ pub mod verify {
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
+        type FullTextWriter = A::FullTextWriter;
         type Local = VerifyStateStore<A::Local, E::Local>;
         type ReadSnapshot = VerifyStateStore<A::ReadSnapshot, E::ReadSnapshot>;
         type VectorWriter = A::VectorWriter;
@@ -770,6 +783,13 @@ pub mod verify {
             options: NewVectorWriterOptions,
         ) -> impl Future<Output = Self::VectorWriter> + Send + '_ {
             self.actual.new_vector_writer(options)
+        }
+
+        fn new_full_text_writer(
+            &self,
+            options: NewFullTextWriterOptions,
+        ) -> impl Future<Output = Self::FullTextWriter> + Send + '_ {
+            self.actual.new_full_text_writer(options)
         }
     }
 
@@ -1399,6 +1419,56 @@ mod dyn_state_store {
         }
     }
 
+    pub trait DynStateStoreWriteFullText: DynStateStoreWriteEpochControl + StaticSendSync {
+        fn set_maintenance_enabled(&mut self, enabled: bool);
+
+        fn insert_document(
+            &mut self,
+            key: Bytes,
+            tokens: &mut FullTextTokenSource<'_>,
+        ) -> StorageResult<()>;
+
+        fn delete_document(&mut self, key: Bytes) -> StorageResult<()>;
+    }
+
+    impl<S: StateStoreWriteFullText> DynStateStoreWriteFullText for S {
+        fn set_maintenance_enabled(&mut self, enabled: bool) {
+            StateStoreWriteFullText::set_maintenance_enabled(self, enabled)
+        }
+
+        fn insert_document(
+            &mut self,
+            key: Bytes,
+            tokens: &mut FullTextTokenSource<'_>,
+        ) -> StorageResult<()> {
+            StateStoreWriteFullText::insert_document(self, key, tokens)
+        }
+
+        fn delete_document(&mut self, key: Bytes) -> StorageResult<()> {
+            StateStoreWriteFullText::delete_document(self, key)
+        }
+    }
+
+    pub type BoxDynStateStoreWriteFullText = StateStorePointer<Box<dyn DynStateStoreWriteFullText>>;
+
+    impl StateStoreWriteFullText for BoxDynStateStoreWriteFullText {
+        fn set_maintenance_enabled(&mut self, enabled: bool) {
+            self.0.set_maintenance_enabled(enabled);
+        }
+
+        fn insert_document(
+            &mut self,
+            key: Bytes,
+            tokens: &mut FullTextTokenSource<'_>,
+        ) -> StorageResult<()> {
+            self.0.insert_document(key, tokens)
+        }
+
+        fn delete_document(&mut self, key: Bytes) -> StorageResult<()> {
+            self.0.delete_document(key)
+        }
+    }
+
     // For global StateStore
 
     #[async_trait::async_trait]
@@ -1449,13 +1519,47 @@ mod dyn_state_store {
         }
     }
 
+    #[async_trait::async_trait]
+    pub trait DynStateStoreReadFullText: StaticSendSync {
+        async fn full_text_search(
+            &self,
+            tokens: Vec<String>,
+            limit: Option<usize>,
+        ) -> StorageResult<Vec<Bytes>>;
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreReadFullText> DynStateStoreReadFullText for S {
+        async fn full_text_search(
+            &self,
+            tokens: Vec<String>,
+            limit: Option<usize>,
+        ) -> StorageResult<Vec<Bytes>> {
+            StateStoreReadFullText::full_text_search(self, tokens, limit).await
+        }
+    }
+
+    impl<P> StateStoreReadFullText for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsRef<dyn DynStateStoreReadFullText> + StaticSendSync,
+    {
+        async fn full_text_search(
+            &self,
+            tokens: Vec<String>,
+            limit: Option<usize>,
+        ) -> StorageResult<Vec<Bytes>> {
+            self.as_ref().full_text_search(tokens, limit).await
+        }
+    }
+
     pub trait DynStateStoreReadSnapshot:
-        DynStateStoreRead + DynStateStoreReadVector + StaticSendSync
+        DynStateStoreRead + DynStateStoreReadVector + DynStateStoreReadFullText + StaticSendSync
     {
     }
 
-    impl<S: DynStateStoreRead + DynStateStoreReadVector + StaticSendSync> DynStateStoreReadSnapshot
-        for S
+    impl<
+        S: DynStateStoreRead + DynStateStoreReadVector + DynStateStoreReadFullText + StaticSendSync,
+    > DynStateStoreReadSnapshot for S
     {
     }
 
@@ -1478,6 +1582,10 @@ mod dyn_state_store {
             &self,
             options: NewVectorWriterOptions,
         ) -> BoxDynStateStoreWriteVector;
+        async fn new_full_text_writer(
+            &self,
+            options: NewFullTextWriterOptions,
+        ) -> BoxDynStateStoreWriteFullText;
     }
 
     #[async_trait::async_trait]
@@ -1510,6 +1618,13 @@ mod dyn_state_store {
         ) -> BoxDynStateStoreWriteVector {
             StateStorePointer(Box::new(self.new_vector_writer(options).await))
         }
+
+        async fn new_full_text_writer(
+            &self,
+            options: NewFullTextWriterOptions,
+        ) -> BoxDynStateStoreWriteFullText {
+            StateStorePointer(Box::new(self.new_full_text_writer(options).await))
+        }
     }
 
     pub type StateStoreDynRef = StateStorePointer<Arc<dyn DynStateStore>>;
@@ -1529,6 +1644,10 @@ mod dyn_state_store {
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreReadSnapshot>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreReadSnapshot>, DynStateStoreGet);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreReadSnapshot>, DynStateStoreReadVector);
+    state_store_pointer_dyn_as_ref!(
+        Arc<dyn DynStateStoreReadSnapshot>,
+        DynStateStoreReadFullText
+    );
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
     state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynStateStoreGet);
@@ -1548,6 +1667,10 @@ mod dyn_state_store {
     state_store_pointer_dyn_as_mut!(Box<dyn DynLocalStateStore>, DynStateStoreWriteEpochControl);
     state_store_pointer_dyn_as_mut!(
         Box<dyn DynStateStoreWriteVector>,
+        DynStateStoreWriteEpochControl
+    );
+    state_store_pointer_dyn_as_mut!(
+        Box<dyn DynStateStoreWriteFullText>,
         DynStateStoreWriteEpochControl
     );
 
@@ -1629,6 +1752,7 @@ mod dyn_state_store {
     impl<S: DynStateStoreReadLog + DynStateStoreExt + AsHummock> DynStateStore for S {}
 
     impl StateStore for StateStoreDynRef {
+        type FullTextWriter = BoxDynStateStoreWriteFullText;
         type Local = BoxDynLocalStateStore;
         type ReadSnapshot = StateStoreReadSnapshotDynRef;
         type VectorWriter = BoxDynStateStoreWriteVector;
@@ -1661,6 +1785,13 @@ mod dyn_state_store {
             options: NewVectorWriterOptions,
         ) -> impl Future<Output = Self::VectorWriter> + Send + '_ {
             (*self.0).new_vector_writer(options)
+        }
+
+        fn new_full_text_writer(
+            &self,
+            options: NewFullTextWriterOptions,
+        ) -> impl Future<Output = Self::FullTextWriter> + Send + '_ {
+            (*self.0).new_full_text_writer(options)
         }
     }
 }

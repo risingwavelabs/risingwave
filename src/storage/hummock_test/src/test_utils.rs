@@ -259,6 +259,7 @@ impl HummockTestEnv {
                     table_id,
                     VectorIndexDelta::Init(init_config),
                 )]),
+                full_text_index_delta: Default::default(),
                 tables_to_commit: HashMap::from_iter([(table_id, init_epoch)]),
                 table_change_log_progress: Default::default(),
                 truncate_tables: HashSet::new(),

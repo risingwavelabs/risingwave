@@ -29,6 +29,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::{Epoch, EpochPair, MAX_EPOCH};
 use risingwave_common::vector::distance::DistanceMeasurement;
+pub use risingwave_full_text::FullTextTokenSource;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
@@ -340,10 +341,16 @@ pub struct NewVectorWriterOptions {
     pub table_id: TableId,
 }
 
+#[derive(Clone)]
+pub struct NewFullTextWriterOptions {
+    pub table_id: TableId,
+}
+
 pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
-    type ReadSnapshot: StateStoreRead + StateStoreReadVector + Clone;
+    type ReadSnapshot: StateStoreRead + StateStoreReadVector + StateStoreReadFullText + Clone;
     type VectorWriter: StateStoreWriteVector;
+    type FullTextWriter: StateStoreWriteFullText;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -370,6 +377,11 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
         &self,
         options: NewVectorWriterOptions,
     ) -> impl Future<Output = Self::VectorWriter> + Send + '_;
+
+    fn new_full_text_writer(
+        &self,
+        options: NewFullTextWriterOptions,
+    ) -> impl Future<Output = Self::FullTextWriter> + Send + '_;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
@@ -442,6 +454,22 @@ pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
     fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()>;
 }
 
+pub trait StateStoreWriteFullText: StateStoreWriteEpochControl + StaticSendSync {
+    /// Only the writer owning vnode zero may maintain the shared index manifest.
+    fn set_maintenance_enabled(&mut self, enabled: bool);
+
+    /// Indexes a document by invoking `tokens` once to feed its analyzed tokens.
+    /// `key` is the encoded stream key of the row.
+    fn insert_document(
+        &mut self,
+        key: Bytes,
+        tokens: &mut FullTextTokenSource<'_>,
+    ) -> StorageResult<()>;
+
+    /// Deletes the document of `key`.
+    fn delete_document(&mut self, key: Bytes) -> StorageResult<()>;
+}
+
 pub struct VectorNearestOptions {
     pub top_n: usize,
     pub measure: DistanceMeasurement,
@@ -457,6 +485,16 @@ pub trait StateStoreReadVector: StaticSendSync {
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> impl StorageFuture<'a, Vec<O>>;
+}
+
+pub trait StateStoreReadFullText: StaticSendSync {
+    /// Returns the de-duplicated stream keys of rows whose document contains all `tokens`, at
+    /// most `limit` of them. The result is exact at the epoch of the snapshot.
+    fn full_text_search(
+        &self,
+        tokens: Vec<String>,
+        limit: Option<usize>,
+    ) -> impl StorageFuture<'_, Vec<Bytes>>;
 }
 
 /// Controls block-stream prefetch for range scans. Prefetching may increase the memory footprint
