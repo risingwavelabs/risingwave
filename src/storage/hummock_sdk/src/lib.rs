@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
-use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
+use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch, batch_query_epoch};
 use sstable_info::SstableInfo;
 
 use crate::key_range::KeyRangeCommon;
@@ -259,8 +259,6 @@ pub enum HummockReadEpoch {
     /// Wait for the table's committed epoch. The version ID is used only when the table is
     /// absent, to distinguish delayed registration from a dropped table.
     BatchQueryCommitted(HummockEpoch, HummockVersionId),
-    /// We don't need to wait epoch, we usually do stream reading with it.
-    NoWait(HummockEpoch),
     /// We don't need to wait epoch.
     Backup(HummockEpoch),
     TimeTravel(HummockEpoch),
@@ -275,7 +273,6 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
             batch_query_epoch::Epoch::Committed(epoch) => {
                 HummockReadEpoch::BatchQueryCommitted(epoch.epoch, epoch.hummock_version_id)
             }
-            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
             batch_query_epoch::Epoch::LatestCommitted(epoch) => {
@@ -285,9 +282,14 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
     }
 }
 
-pub fn test_batch_query_epoch() -> BatchQueryEpoch {
+pub fn test_batch_query_committed_epoch() -> BatchQueryEpoch {
     BatchQueryEpoch {
-        epoch: Some(batch_query_epoch::Epoch::Current(u64::MAX)),
+        epoch: Some(batch_query_epoch::Epoch::Committed(
+            BatchQueryCommittedEpoch {
+                epoch: u64::MAX,
+                hummock_version_id: INVALID_VERSION_ID,
+            },
+        )),
     }
 }
 
@@ -297,7 +299,6 @@ impl HummockReadEpoch {
         match self {
             HummockReadEpoch::Committed(epoch)
             | HummockReadEpoch::BatchQueryCommitted(epoch, _)
-            | HummockReadEpoch::NoWait(epoch)
             | HummockReadEpoch::Backup(epoch)
             | HummockReadEpoch::TimeTravel(epoch) => Some(*epoch),
             HummockReadEpoch::LatestCommitted(_) => None,
@@ -310,7 +311,7 @@ impl HummockReadEpoch {
             | HummockReadEpoch::TimeTravel(_)
             | HummockReadEpoch::BatchQueryCommitted(_, _)
             | HummockReadEpoch::LatestCommitted(_) => true,
-            HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => false,
+            HummockReadEpoch::Backup(_) => false,
         }
     }
 }
@@ -523,6 +524,16 @@ mod tests {
     fn test_object_id_decimal_max_length() {
         let len = u64::MAX.to_string().len();
         assert_eq!(len, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH)
+    }
+
+    #[test]
+    fn test_batch_query_committed_epoch_is_committed() {
+        let batch_query_epoch = test_batch_query_committed_epoch();
+
+        assert!(matches!(
+            batch_query_epoch.epoch,
+            Some(batch_query_epoch::Epoch::Committed(_))
+        ));
     }
 
     #[test]

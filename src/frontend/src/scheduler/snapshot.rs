@@ -39,21 +39,15 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 #[derive(Clone)]
 pub enum ReadSnapshot {
     /// A frontend-pinned snapshot.
-    FrontendPinned {
-        snapshot: PinnedSnapshotRef,
-    },
-
-    ReadUncommitted,
+    FrontendPinned { snapshot: PinnedSnapshotRef },
 
     /// Resolve a committed snapshot for each storage read at the serving node.
     LatestCommitted {
         hummock_version_id: HummockVersionId,
     },
 
-    /// Other arbitrary epoch, e.g. user specified.
-    /// Availability and consistency of underlying data should be guaranteed accordingly.
-    /// Currently it's only used for querying meta snapshot backup.
-    Other(Epoch),
+    /// A user-specified `query_epoch` backed by a meta snapshot backup.
+    Backup(Epoch),
 }
 
 impl ReadSnapshot {
@@ -78,10 +72,7 @@ impl ReadSnapshot {
                     },
                 )),
             },
-            ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
-                epoch: Some(batch_query_epoch::Epoch::Current(Epoch::now().0)),
-            },
-            ReadSnapshot::Other(e) => BatchQueryEpoch {
+            ReadSnapshot::Backup(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
             },
         })
@@ -151,15 +142,10 @@ impl ReadSnapshot {
                 .max_table_committed_epoch()
                 .map(Epoch)
                 .unwrap_or_else(Epoch::now),
-            ReadSnapshot::ReadUncommitted | ReadSnapshot::LatestCommitted { .. } => Epoch::now(),
-            ReadSnapshot::Other(epoch) => *epoch,
+            ReadSnapshot::LatestCommitted { .. } => Epoch::now(),
+            ReadSnapshot::Backup(epoch) => *epoch,
         };
         InlineNowProcTime::new(epoch)
-    }
-
-    /// Returns true if this snapshot is a barrier read.
-    pub fn support_barrier_read(&self) -> bool {
-        matches!(self, ReadSnapshot::ReadUncommitted)
     }
 }
 
@@ -226,13 +212,7 @@ fn invalid_snapshot() -> FrontendHummockVersion {
 pub struct HummockSnapshotManager {
     /// The latest snapshot synced from the meta service.
     ///
-    /// The `max_committed_epoch` and `max_current_epoch` are pushed from meta node to reduce rpc
-    /// number.
-    ///
-    /// We have two epoch(committed and current), We only use `committed_epoch` to pin or unpin,
-    /// because `committed_epoch` always less or equal `current_epoch`, and the data with
-    /// `current_epoch` is always in the shared buffer, so it will never be gc before the data
-    /// of `committed_epoch`.
+    /// The latest committed Hummock version is pushed from the meta node to reduce RPC calls.
     latest_snapshot: watch::Sender<PinnedSnapshotRef>,
 
     version_update_notification_sender: watch::Sender<()>,
@@ -442,7 +422,6 @@ mod tests {
         let snapshot = ReadSnapshot::LatestCommitted {
             hummock_version_id: 123.into(),
         };
-        assert!(!snapshot.support_barrier_read());
         snapshot.fill_batch_query_epoch(&mut query).unwrap();
         let latest = Some(BatchQueryEpoch {
             epoch: Some(batch_query_epoch::Epoch::LatestCommitted(

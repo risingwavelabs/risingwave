@@ -212,10 +212,10 @@ impl TraceSpan {
         epoch: HummockReadEpoch,
         options: TracedTryWaitEpochOptions,
     ) -> MayTraceSpan {
-        Self::new_global_op(
-            Operation::TryWaitEpoch(epoch.into(), options),
-            StorageType::Global,
-        )
+        let Ok(epoch) = epoch.try_into() else {
+            return None.into();
+        };
+        Self::new_global_op(Operation::TryWaitEpoch(epoch, options), StorageType::Global)
     }
 
     pub fn new_get_span(

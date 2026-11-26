@@ -1,4 +1,4 @@
-# Serving nodes choose their local committed epoch, even when barrier reads are enabled.
+# Serving nodes choose their local committed epoch for latest-committed reads.
 query T
 SHOW batch_read_latest_committed;
 ----
@@ -11,9 +11,6 @@ query T
 SHOW batch_read_latest_committed;
 ----
 true
-
-statement ok
-SET visibility_mode = all;
 
 # Table registration must be awaited without relying on query retries or FLUSH.
 statement ok
@@ -243,6 +240,3 @@ DROP TABLE latest_committed_reads;
 
 statement ok
 SET query_mode TO DEFAULT;
-
-statement ok
-SET visibility_mode TO DEFAULT;

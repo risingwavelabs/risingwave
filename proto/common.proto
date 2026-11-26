@@ -135,9 +135,10 @@ message BatchQueryLatestCommittedEpoch {
 }
 
 message BatchQueryEpoch {
+  reserved 2;
+  reserved "current";
   oneof epoch {
     BatchQueryCommittedEpoch committed = 1;
-    uint64 current = 2;
     uint64 backup = 3;
     uint64 time_travel = 4;
     BatchQueryLatestCommittedEpoch latest_committed = 5;

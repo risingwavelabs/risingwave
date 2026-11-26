@@ -10,9 +10,6 @@ snapshot_backfill_barrier_amplification_factor = 10
 stream_exchange_concurrent_barriers = 10
 stream_enable_arrangement_backfill = false
 
-[batch]
-enable_barrier_read = true
-
 [storage]
 share_buffers_sync_parallelism = 4
 imm_merge_threshold = 2

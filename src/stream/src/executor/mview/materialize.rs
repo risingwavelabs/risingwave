@@ -1403,7 +1403,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(3_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1421,7 +1421,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(7_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1507,7 +1507,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(1_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1593,7 +1593,7 @@ mod tests {
             let row = table
                 .get_row(
                     &OwnedRow::new(vec![Some(1_i32.into())]),
-                    HummockReadEpoch::NoWait(u64::MAX),
+                    HummockReadEpoch::Committed(u64::MAX),
                 )
                 .await
                 .unwrap();
@@ -1690,7 +1690,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(3_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1702,7 +1702,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(1_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1714,7 +1714,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(2_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1818,7 +1818,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(8_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1836,7 +1836,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(7_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1849,7 +1849,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(3_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1859,7 +1859,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(5_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1875,7 +1875,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(1_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1888,7 +1888,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(2_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -1901,7 +1901,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(9_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2063,7 +2063,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(3_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2075,7 +2075,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(1_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2087,7 +2087,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(2_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2183,7 +2183,7 @@ mod tests {
         let row = table
             .get_row(
                 &OwnedRow::new(vec![Some(1_i32.into())]),
-                HummockReadEpoch::NoWait(u64::MAX),
+                HummockReadEpoch::Committed(u64::MAX),
             )
             .await
             .unwrap();
@@ -2284,7 +2284,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(8_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2302,7 +2302,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(7_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2315,7 +2315,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(3_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2325,7 +2325,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(5_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2342,7 +2342,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(1_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2355,7 +2355,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(2_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2368,7 +2368,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(9_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2472,7 +2472,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(8_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2484,7 +2484,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(2_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2499,7 +2499,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(7_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2512,7 +2512,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(3_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2522,7 +2522,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(5_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2539,7 +2539,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(7_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2552,7 +2552,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(2_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
@@ -2562,7 +2562,7 @@ mod tests {
                 let row = table
                     .get_row(
                         &OwnedRow::new(vec![Some(9_i32.into())]),
-                        HummockReadEpoch::NoWait(u64::MAX),
+                        HummockReadEpoch::Committed(u64::MAX),
                     )
                     .await
                     .unwrap();
