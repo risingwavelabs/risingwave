@@ -29,6 +29,7 @@ use crate::mem_table::ImmutableMemtable;
 use crate::store::SealCurrentEpochOptions;
 
 pub mod hummock_event_handler;
+mod pin_cache_membership;
 pub mod refiller;
 pub mod uploader;
 mod version_update;
