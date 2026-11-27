@@ -274,7 +274,8 @@ impl StreamMaterialize {
                     // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
                     let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
                         || matches!(input.as_stream_temporal_join(), Some(_join))
-                        || matches!(input.as_stream_delta_join(), Some(_join));
+                        || matches!(input.as_stream_delta_join(), Some(_join))
+                        || matches!(input.as_stream_multiway_delta_join(), Some(_join));
 
                     if is_stream_join {
                         return Ok(required_dist.stream_enforce(input));

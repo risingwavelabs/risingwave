@@ -685,7 +685,13 @@ impl LogicalPlanRoot {
             && ctx.session_ctx().config().enable_index_selection()
         {
             // TODO: make it a logical optimization.
-            // Rewrite joins with index to delta join
+            // Rewrite trees of three or more joins with index to multi-way delta join first, and
+            // then the remaining two-way joins with index to delta join.
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "To MultiwayIndexDeltaJoin",
+                vec![MultiwayIndexDeltaJoinRule::create()],
+                ApplyOrder::TopDown,
+            ))?;
             plan = plan.optimize_by_rules(&OptimizationStage::new(
                 "To IndexDeltaJoin",
                 vec![IndexDeltaJoinRule::create()],

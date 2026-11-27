@@ -1086,6 +1086,7 @@ mod stream_locality_provider;
 mod stream_match_recognize;
 mod stream_materialize;
 mod stream_materialized_exprs;
+mod stream_multiway_delta_join;
 mod stream_now;
 mod stream_over_window;
 mod stream_project;
@@ -1242,6 +1243,9 @@ pub use stream_locality_provider::StreamLocalityProvider;
 pub use stream_match_recognize::StreamMatchRecognize;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
+pub use stream_multiway_delta_join::{
+    MultiwayDeltaJoinLookup, MultiwayDeltaJoinPath, StreamMultiwayDeltaJoin,
+};
 pub use stream_now::StreamNow;
 pub use stream_over_window::StreamOverWindow;
 pub use stream_project::StreamProject;
@@ -1388,6 +1392,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
+            , { Stream, MultiwayDeltaJoin }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }

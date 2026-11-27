@@ -129,6 +129,9 @@ impl_stream_node_body!(
 impl_stream_node_body!(
     DeltaIndexJoin(stream_plan::DeltaIndexJoinNode) => UnreachableExecutorBuilder<stream_plan::DeltaIndexJoinNode>
 );
+impl_stream_node_body!(
+    MultiwayDeltaIndexJoin(stream_plan::MultiwayDeltaIndexJoinNode) => UnreachableExecutorBuilder<stream_plan::MultiwayDeltaIndexJoinNode>
+);
 
 macro_rules! create_executor {
     ($params:expr, $node:expr, $store:expr) => {

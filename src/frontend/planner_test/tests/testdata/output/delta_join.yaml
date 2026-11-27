@@ -74,6 +74,128 @@
         └─StreamDeltaJoin { type: Inner, predicate: a.a1 = b.b1, output: all }
           ├─StreamTableScan { table: a, columns: [a.a1, a.a2], stream_scan_type: ArrangementBackfill, stream_key: [a.a1], pk: [a1], dist: UpstreamHashShard(a.a1) }
           └─StreamTableScan { table: b, columns: [b.b1, b.b2], stream_scan_type: UpstreamOnly, stream_key: [b.b1], pk: [b1], dist: UpstreamHashShard(b.b1) }
+- name: multi-way delta join with different join keys
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create index i_b2 on b(b2);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    /* each path looks up the other inputs, and b is looked up on both join keys */
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a1, a2, b1, b2, c1, c2, i_a1.a._row_id(hidden), i_b1.b._row_id(hidden), i_c1.c._row_id(hidden)], stream_key: [a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id, b2], pk_columns: [a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id, b2], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_a1.a1, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id) }
+      └─StreamMultiwayDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1 AND i_b1.b2 = i_c1.c1, lookups: [i_c1 -> i_b2 -> i_a1, i_b1 -> i_a1 -> i_c1*, i_a1 -> i_b1* -> i_c1*], output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, i_c1.c1, i_c1.c2, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id] }
+        ├─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+        ├─StreamTableScan { table: i_c1, columns: [i_c1.c1, i_c1.c2, i_c1.c._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_c1.c1, i_c1.c._row_id], pk: [c1, c._row_id], dist: UpstreamHashShard(i_c1.c1) }
+        ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        └─StreamTableScan { table: i_b2, columns: [i_b2.b1, i_b2.b2, i_b2.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_b2.b2, i_b2.b._row_id], pk: [b2, b._row_id], dist: UpstreamHashShard(i_b2.b2) }
+- name: multi-way delta join on the same join key
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    select a.a2, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on a.a1 = c.c1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a2, b2, c2, i_a1.a1(hidden), i_a1.a._row_id(hidden), i_b1.b._row_id(hidden), i_c1.c1(hidden), i_c1.c._row_id(hidden)], stream_key: [i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id], pk_columns: [i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id) }
+      └─StreamMultiwayDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1 AND i_a1.a1 = i_c1.c1, lookups: [i_c1 -> i_a1 -> i_b1, i_a1 -> i_b1 -> i_c1*, i_b1 -> i_a1* -> i_c1*], output: [i_a1.a2, i_b1.b2, i_c1.c2, i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c1, i_c1.c._row_id] }
+        ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        ├─StreamTableScan { table: i_c1, columns: [i_c1.c1, i_c1.c2, i_c1.c._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_c1.c1, i_c1.c._row_id], pk: [c1, c._row_id], dist: UpstreamHashShard(i_c1.c1) }
+        └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+- name: four-way delta join with primary keys and indexes
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int primary key, a2 int);
+    create table b (b1 int primary key, b2 int);
+    create index i_b2 on b(b2);
+    create table c (c1 int primary key, c2 int);
+    create table d (d1 int, d2 int);
+    create index i_d1 on d(d1);
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1 join d on c.c1 = d.d1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a1, a2, b1, b2, c1, c2, d1, d2, i_d1.d._row_id(hidden)], stream_key: [a1, i_d1.d._row_id, b2], pk_columns: [a1, i_d1.d._row_id, b2], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(a.a1, b.b2, i_d1.d._row_id) }
+      └─StreamMultiwayDeltaJoin { type: Inner, predicate: a.a1 = b.b1 AND c.c1 = i_d1.d1 AND b.b2 = c.c1 AND b.b2 = i_d1.d1, lookups: [i_d1 -> c -> i_b2 -> a, c -> i_b2 -> a -> i_d1*, b -> a -> c* -> i_d1*, a -> b* -> c* -> i_d1*], output: [a.a1, a.a2, b.b1, b.b2, c.c1, c.c2, i_d1.d1, i_d1.d2, i_d1.d._row_id] }
+        ├─StreamTableScan { table: b, columns: [b.b1, b.b2], stream_scan_type: UpstreamOnly, stream_key: [b.b1], pk: [b1], dist: UpstreamHashShard(b.b1) }
+        ├─StreamTableScan { table: c, columns: [c.c1, c.c2], stream_scan_type: UpstreamOnly, stream_key: [c.c1], pk: [c1], dist: UpstreamHashShard(c.c1) }
+        ├─StreamTableScan { table: i_d1, columns: [i_d1.d1, i_d1.d2, i_d1.d._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_d1.d1, i_d1.d._row_id], pk: [d1, d._row_id], dist: UpstreamHashShard(i_d1.d1) }
+        ├─StreamTableScan { table: a, columns: [a.a1, a.a2], stream_scan_type: ArrangementBackfill, stream_key: [a.a1], pk: [a1], dist: UpstreamHashShard(a.a1) }
+        └─StreamTableScan { table: i_b2, columns: [i_b2.b1, i_b2.b2], stream_scan_type: UpstreamOnly, stream_key: [i_b2.b2, i_b2.b1], pk: [b2, b1], dist: UpstreamHashShard(i_b2.b2) }
+- name: multi-way delta join drops conditions implied by transitivity
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    select * from a join b on a.a1 = b.b1 join c on b.b1 = c.c1 and a.a1 = c.c1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a1, a2, b1, b2, c1, c2, i_a1.a._row_id(hidden), i_b1.b._row_id(hidden), i_c1.c._row_id(hidden)], stream_key: [a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id, b1], pk_columns: [a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id, b1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_a1.a1, i_b1.b1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id) }
+      └─StreamMultiwayDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1 AND i_b1.b1 = i_c1.c1 AND i_a1.a1 = i_c1.c1, lookups: [i_c1 -> i_a1 -> i_b1, i_a1 -> i_b1 -> i_c1*, i_b1 -> i_a1* -> i_c1*], output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, i_c1.c1, i_c1.c2, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id] }
+        ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        ├─StreamTableScan { table: i_c1, columns: [i_c1.c1, i_c1.c2, i_c1.c._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_c1.c1, i_c1.c._row_id], pk: [c1, c._row_id], dist: UpstreamHashShard(i_c1.c1) }
+        └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+- name: multi-way delta join with a cyclic join graph falls back
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create index i_a2 on a(a2);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create index i_b2 on b(b2);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    create index i_c2 on c(c2);
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1 and c.c2 = a.a2;
+  stream_plan: |-
+    StreamMaterialize { columns: [a1, a2, b1, b2, c1, c2, i_a1.a._row_id(hidden), i_b1.b._row_id(hidden), c._row_id(hidden)], stream_key: [a1, i_a1.a._row_id, i_b1.b._row_id, c._row_id, b2, a2], pk_columns: [a1, i_a1.a._row_id, i_b1.b._row_id, c._row_id, b2, a2], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_a1.a1, i_a1.a2, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id, c._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: i_b1.b2 = c.c1 AND i_a1.a2 = c.c2, output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, c.c1, c.c2, i_a1.a._row_id, i_b1.b._row_id, c._row_id] }
+        ├─StreamExchange { dist: HashShard(i_b1.b2, i_a1.a2) }
+        │ └─StreamDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1, output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id] }
+        │   ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        │   └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+        └─StreamExchange { dist: HashShard(c.c1, c.c2) }
+          └─StreamTableScan { table: c, columns: [c.c1, c.c2, c._row_id], stream_scan_type: ArrangementBackfill, stream_key: [c._row_id], pk: [_row_id], dist: UpstreamHashShard(c._row_id) }
+- name: multi-way delta join without the required index falls back
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    create table c (c1 int, c2 int);
+    /* c has no index on c1 */
+    select * from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a1, a2, b1, b2, c1, c2, i_a1.a._row_id(hidden), i_b1.b._row_id(hidden), c._row_id(hidden)], stream_key: [a1, i_a1.a._row_id, i_b1.b._row_id, c._row_id, b2], pk_columns: [a1, i_a1.a._row_id, i_b1.b._row_id, c._row_id, b2], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_a1.a1, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id, c._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: i_b1.b2 = c.c1, output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, c.c1, c.c2, i_a1.a._row_id, i_b1.b._row_id, c._row_id] }
+        ├─StreamExchange { dist: HashShard(i_b1.b2) }
+        │ └─StreamDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1, output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id] }
+        │   ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        │   └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+        └─StreamExchange { dist: HashShard(c.c1) }
+          └─StreamTableScan { table: c, columns: [c.c1, c.c2, c._row_id], stream_scan_type: ArrangementBackfill, stream_key: [c._row_id], pk: [_row_id], dist: UpstreamHashShard(c._row_id) }
 - name: delta join does not use an index that lacks a column of the scan
   sql: |
     set rw_streaming_enable_delta_join = true;
@@ -92,3 +214,75 @@
         │ └─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
         └─StreamExchange { dist: HashShard(c.x) }
           └─StreamTableScan { table: c, columns: [c.x, c.v, c.id], stream_scan_type: ArrangementBackfill, stream_key: [c.id], pk: [id], dist: UpstreamHashShard(c.id) }
+- name: multi-way delta join does not use an index that lacks a column of the scan
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table c (id int primary key, x int, v int);
+    /* `i_c` has as many columns as `c`, but not `v`. */
+    create index i_c on c(x, abs(x)) include (id);
+    create table b (b1 int, b2 int);
+    create index i_b1 on b(b1);
+    select a.a2, c.v, b.b2 from a join c on a.a1 = c.x join b on c.x = b.b1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a2, v, b2, i_a1.a1(hidden), i_a1.a._row_id(hidden), c.id(hidden), c.x(hidden), i_b1.b1(hidden), i_b1.b._row_id(hidden)], stream_key: [i_a1.a1, i_a1.a._row_id, c.id, i_b1.b._row_id, c.x], pk_columns: [i_a1.a1, i_a1.a._row_id, c.id, i_b1.b._row_id, c.x], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_a1.a1, i_a1.a._row_id, c.id, c.x, i_b1.b._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: c.x = i_b1.b1, output: [i_a1.a2, c.v, i_b1.b2, i_a1.a1, i_a1.a._row_id, c.id, c.x, i_b1.b1, i_b1.b._row_id] }
+        ├─StreamExchange { dist: HashShard(c.x) }
+        │ └─StreamHashJoin { type: Inner, predicate: i_a1.a1 = c.x, output: [i_a1.a2, c.x, c.v, i_a1.a1, i_a1.a._row_id, c.id] }
+        │   ├─StreamExchange { dist: HashShard(i_a1.a1) }
+        │   │ └─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        │   └─StreamExchange { dist: HashShard(c.x) }
+        │     └─StreamTableScan { table: c, columns: [c.x, c.v, c.id], stream_scan_type: ArrangementBackfill, stream_key: [c.id], pk: [id], dist: UpstreamHashShard(c.id) }
+        └─StreamExchange { dist: HashShard(i_b1.b1) }
+          └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+- name: multi-way delta join does not use an index whose primary key is not in the scan output
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (a1 int, a2 int);
+    create index i_a1 on a(a1);
+    create table b (b1 int, b2 int, b3 int);
+    create index i_b1 on b(b1);
+    /* the primary key of `i_b2` has `b3`, which the scan of `b` does not read */
+    create index i_b2 on b(b2, b3);
+    create table c (c1 int, c2 int);
+    create index i_c1 on c(c1);
+    select a.a2, b.b2, c.c2 from a join b on a.a1 = b.b1 join c on b.b2 = c.c1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a2, b2, c2, i_a1.a1(hidden), i_a1.a._row_id(hidden), i_b1.b._row_id(hidden), i_c1.c1(hidden), i_c1.c._row_id(hidden)], stream_key: [i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id, b2], pk_columns: [i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id, b2], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i_b1.b2, i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: i_b1.b2 = i_c1.c1, output: [i_a1.a2, i_b1.b2, i_c1.c2, i_a1.a1, i_a1.a._row_id, i_b1.b._row_id, i_c1.c1, i_c1.c._row_id] }
+        ├─StreamExchange { dist: HashShard(i_b1.b2) }
+        │ └─StreamDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1, output: [i_a1.a2, i_b1.b2, i_a1.a1, i_a1.a._row_id, i_b1.b1, i_b1.b._row_id] }
+        │   ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_a1.a1, i_a1.a._row_id], pk: [a1, a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+        │   └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_b1.b1, i_b1.b._row_id], pk: [b1, b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+        └─StreamExchange { dist: HashShard(i_c1.c1) }
+          └─StreamTableScan { table: i_c1, columns: [i_c1.c1, i_c1.c2, i_c1.c._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_c1.c1, i_c1.c._row_id], pk: [c1, c._row_id], dist: UpstreamHashShard(i_c1.c1) }
+- name: multi-way delta join backfills a leaf when the first input is the center of a star
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    set streaming_use_snapshot_backfill = false;
+    create table a (x int, y int, v int);
+    create index i_a_x on a(x);
+    create index i_a_y on a(y);
+    create table b (x int, v int);
+    create index i_b_x on b(x);
+    create table c (y int, v int);
+    create index i_c_y on c(y);
+    /* the plan of `delta_join_multiway_backfill.slt`, where `b` is backfilled */
+    select count(*) as n, sum(a.v) as sa, sum(b.v) as sb, sum(c.v) as sc
+    from a join b on a.x = b.x join c on a.y = c.y;
+  stream_plan: |-
+    StreamMaterialize { columns: [n, sa, sb, sc], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [sum0(count), Case((sum0(count(i_a_x.v)) = 0:Int64), null:Int64, sum(sum(i_a_x.v))) as $expr1, Case((sum0(count(i_b_x.v)) = 0:Int64), null:Int64, sum(sum(i_b_x.v))) as $expr2, Case((sum0(count(i_c_y.v)) = 0:Int64), null:Int64, sum(sum(i_c_y.v))) as $expr3] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count), sum(sum(i_a_x.v)), sum(sum(i_b_x.v)), sum(sum(i_c_y.v)), sum0(count(i_a_x.v)), sum0(count(i_b_x.v)), sum0(count(i_c_y.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [count, sum(i_a_x.v), sum(i_b_x.v), sum(i_c_y.v), count(i_a_x.v), count(i_b_x.v), count(i_c_y.v)] }
+            └─StreamMultiwayDeltaJoin { type: Inner, predicate: i_a_x.x = i_b_x.x AND i_a_x.y = i_c_y.y, lookups: [i_c_y -> i_a_y -> i_b_x, i_a_x -> i_b_x -> i_c_y*, i_b_x -> i_a_x* -> i_c_y*], output: [i_a_x.v, i_b_x.v, i_c_y.v, i_a_x.x, i_a_x.a._row_id, i_b_x.b._row_id, i_a_x.y, i_c_y.y, i_c_y.c._row_id] }
+              ├─StreamTableScan { table: i_a_x, columns: [i_a_x.x, i_a_x.y, i_a_x.v, i_a_x.a._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_a_x.x, i_a_x.a._row_id], pk: [x, a._row_id], dist: UpstreamHashShard(i_a_x.x) }
+              ├─StreamTableScan { table: i_c_y, columns: [i_c_y.y, i_c_y.v, i_c_y.c._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_c_y.y, i_c_y.c._row_id], pk: [y, c._row_id], dist: UpstreamHashShard(i_c_y.y) }
+              ├─StreamTableScan { table: i_b_x, columns: [i_b_x.x, i_b_x.v, i_b_x.b._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i_b_x.x, i_b_x.b._row_id], pk: [x, b._row_id], dist: UpstreamHashShard(i_b_x.x) }
+              └─StreamTableScan { table: i_a_y, columns: [i_a_y.x, i_a_y.y, i_a_y.v, i_a_y.a._row_id], stream_scan_type: UpstreamOnly, stream_key: [i_a_y.y, i_a_y.a._row_id], pk: [y, a._row_id], dist: UpstreamHashShard(i_a_y.y) }
