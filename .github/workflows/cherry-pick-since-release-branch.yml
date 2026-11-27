@@ -48,8 +48,6 @@ jobs:
             echo "Using manually provided base version: $base_version for PR #$pr_number"
             # Get the PR merge commit SHA
             pr_sha=$(gh pr view $pr_number --repo ${{ github.repository }} --json mergeCommit --jq .mergeCommit.oid)
-            echo "PR merge commit SHA: $pr_sha"
-            echo "pr_sha=$pr_sha" >> "$GITHUB_OUTPUT"
           else
             # For automatic trigger from PR events
             if [[ "${{ github.event.action }}" == 'labeled' ]]; then
@@ -60,7 +58,15 @@ jobs:
             fi
             base_version=$(echo "$label" | sed 's/need-cherry-pick-since-release-//')
             pr_number="${{ github.event.number }}"
+            pr_sha="${{ github.event.pull_request.merge_commit_sha }}"
           fi
+
+          if [[ ! "$pr_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::PR #$pr_number has no valid merge commit SHA."
+            exit 1
+          fi
+          echo "PR merge commit SHA: $pr_sha"
+          echo "pr_sha=$pr_sha" >> "$GITHUB_OUTPUT"
 
           # Output the PR number for use in downstream jobs
           echo "PR number: $pr_number"
@@ -112,9 +118,9 @@ jobs:
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
         with:
-          # For automatic trigger from PR events, `pr_sha` is unset,
-          # and it will use the triggering SHA (GITHUB_SHA) instead.
-          commit_sha: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
+          # Always cherry-pick the source PR's merge commit, for both event and manual runs.
+          commit_sha: ${{ needs.get-target-release-branches.outputs.pr_sha }}
+          source_pr_number: ${{ needs.get-target-release-branches.outputs.pr_number }}
           pr_branch: ${{ matrix.branch }}
           pr_labels: "cherry-pick"
           pr_body: |
