@@ -19,6 +19,61 @@ use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_ex
 use crate::prelude::*;
 
 #[tokio::test]
+async fn test_except_dedup_reordered_retractions() {
+    let (mut tx, source) = MockSource::channel();
+    let schema = Schema::new(vec![
+        Field::unnamed(DataType::Int32),
+        Field::unnamed(DataType::Int32),
+    ]);
+    let group_key = vec![0, 1]; // (sku, stock)
+    let mut agg = new_boxed_hash_agg_executor(
+        MemoryStateStore::new(),
+        source.into_executor(schema, group_key.clone()),
+        false,
+        vec![AggCall::from_pretty("(count:int8)")],
+        0,
+        group_key.clone(),
+        group_key,
+        1024,
+        false,
+        1,
+    )
+    .await
+    .execute();
+
+    // After an EXCEPT anti-join, the surviving row can arrive before the old row
+    // is temporarily unmasked and retracted. Either stock value can be NULL.
+    tx.push_barrier(test_epoch(1), false);
+    tx.push_chunk(StreamChunk::from_pretty(
+        " i  i
+        + 42 500
+        + 43 .",
+    ));
+    tx.push_chunk(StreamChunk::from_pretty(
+        " i  i
+        + 42 .
+        + 43 500",
+    ));
+    tx.push_chunk(StreamChunk::from_pretty(
+        " i  i
+        - 42 .
+        - 43 500",
+    ));
+    tx.push_barrier(test_epoch(2), false);
+
+    agg.expect_barrier().await;
+    assert_eq!(
+        agg.expect_chunk().await.sort_rows(),
+        StreamChunk::from_pretty(
+            " i  i   I
+            + 42 500 1
+            + 43 .   1",
+        ),
+    );
+    agg.expect_barrier().await;
+}
+
+#[tokio::test]
 async fn test_hash_agg_count_sum() {
     let store = MemoryStateStore::new();
 
