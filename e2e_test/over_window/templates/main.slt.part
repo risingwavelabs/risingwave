@@ -10,3 +10,4 @@ include ./with_filter/mod.slt.part
 include ./no_effect_updates/mod.slt.part
 include ./odd_frames/mod.slt.part
 include ./ignore_nulls/mod.slt.part
+include ./null_after_retraction/mod.slt.part
