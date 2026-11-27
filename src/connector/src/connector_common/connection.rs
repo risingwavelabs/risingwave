@@ -183,8 +183,14 @@ impl Connection for IcebergConnection {
         let info = match &common.warehouse_path {
             Some(warehouse_path) => {
                 let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
+                // BigQuery catalog federation (bq://) and the Lakehouse runtime catalog
+                // (bl://) use catalog identifiers rather than parseable object-store URLs.
+                let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
+                let is_bl_catalog = warehouse_path.starts_with("bl://");
                 let url = Url::parse(warehouse_path);
-                if (url.is_err() || is_s3_tables) && is_rest_catalog {
+                if (url.is_err() || is_s3_tables || is_bq_catalog_federation || is_bl_catalog)
+                    && is_rest_catalog
+                {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
                     // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                     // so we allow it to pass here.
