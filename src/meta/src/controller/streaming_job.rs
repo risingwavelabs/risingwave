@@ -83,7 +83,8 @@ use super::rename::IndexItemRewriter;
 use crate::barrier::Command;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{
-    CatalogController, DropTableConnectorContext, load_object_models,
+    CatalogController, CrossDbSubscriptionInfo, DropTableConnectorContext, load_object_models,
+    resolve_cross_db_subscriptions,
 };
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
@@ -115,6 +116,8 @@ pub struct AbortCreatingJobResult {
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
     pub cancel_info: Option<CancelStreamingJobInfo>,
+    /// Internal subscriptions to drop from upstream databases after downstream cleanup.
+    pub cross_db_subscriptions: Vec<CrossDbSubscriptionInfo>,
 }
 
 /// Runtime and state cleanup information for canceling a creating streaming job.
@@ -147,7 +150,6 @@ pub struct ProgressTableChangeLogSubscriber {
     pub upstream_table_id: TableId,
     pub progress_table_id: TableId,
 }
-
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
     format!("SERVERLESS_BACKFILL_RESOURCE_GROUP_TBD_FOR_{job_id}")
 }
@@ -277,17 +279,27 @@ impl CatalogController {
     ) -> MetaResult<TableChangeLogTruncateInfo> {
         let inner = self.inner.read().await;
 
-        let subscriptions: Vec<(TableId, i64)> = Subscription::find()
+        let subscriptions: Vec<(SubscriptionId, TableId, Option<i64>)> = Subscription::find()
             .select_only()
             .columns([
+                subscription::Column::SubscriptionId,
                 subscription::Column::DependentTableId,
                 subscription::Column::RetentionSeconds,
             ])
+            .filter(subscription::Column::CrossDbDownstreamJobId.is_null())
             .into_tuple()
             .all(&inner.db)
             .await?;
         let mut subscription_retention_seconds = HashMap::new();
-        for (table_id, retention_seconds) in subscriptions {
+        for (subscription_id, table_id, retention_seconds) in subscriptions {
+            let Some(retention_seconds) = retention_seconds else {
+                return Err(anyhow!(
+                    "user subscription {} on table {} has no retention",
+                    subscription_id,
+                    table_id
+                )
+                .into());
+            };
             let retention_seconds = u64::try_from(retention_seconds).map_err(|_| {
                 anyhow!(
                     "subscription on table {} has invalid retention seconds {}",
@@ -326,6 +338,7 @@ impl CatalogController {
             .filter(FragmentTypeMask::intersects_any([
                 FragmentTypeFlag::IcebergWithPkIndexWriter,
                 FragmentTypeFlag::SnapshotBackfillStreamScan,
+                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
             ]))
             .into_tuple()
             .all(&inner.db)
@@ -353,12 +366,89 @@ impl CatalogController {
             })
             .collect();
         let mut progress_table_subscribers = Vec::new();
+        // Progress-table subscribers come from Iceberg snapshot backfills and cross-database
+        // snapshot backfills. Process cross-database fragments independently because one job may
+        // also participate in the local committed-epoch truncation path.
         for (fragment_id, job_id, fragment_type_mask, stream_node, state_table_ids) in fragments {
             let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
-            if iceberg_job_ids.contains(&job_id) {
-                if !fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
-                    continue;
+            if fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
+                if iceberg_job_ids.contains(&job_id) {
+                    let mut collection_error = None;
+                    visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                        let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type)
+                        {
+                            Ok(scan_type) => scan_type,
+                            Err(err) => {
+                                collection_error = Some(anyhow::Error::new(err).context(format!(
+                                    "invalid persisted stream scan type {} in job {} fragment {}",
+                                    stream_scan.stream_scan_type, job_id, fragment_id
+                                )));
+                                return;
+                            }
+                        };
+                        if scan_type != StreamScanType::SnapshotBackfill {
+                            return;
+                        }
+                        let Some(progress_table) = stream_scan.state_table.as_ref() else {
+                            collection_error = Some(anyhow!(
+                                "snapshot backfill in Iceberg V3 job {} has no progress table",
+                                job_id
+                            ));
+                            return;
+                        };
+                        progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                            subscriber_job_id: job_id,
+                            upstream_table_id: stream_scan.table_id,
+                            progress_table_id: progress_table.id,
+                        });
+                    });
+                    if let Some(err) = collection_error {
+                        return Err(err.into());
+                    }
+                } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
+                    info.state_table_ids
+                        .extend(state_table_ids.inner_ref().iter().copied());
+                    let mut collection_error = None;
+                    visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                        let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type)
+                        {
+                            Ok(scan_type) => scan_type,
+                            Err(err) => {
+                                collection_error = Some(anyhow::Error::new(err).context(format!(
+                                    "invalid persisted stream scan type {} in job {} fragment {}",
+                                    stream_scan.stream_scan_type, job_id, fragment_id
+                                )));
+                                return;
+                            }
+                        };
+                        if scan_type != StreamScanType::SnapshotBackfill {
+                            return;
+                        }
+                        match info
+                            .upstream_table_snapshot_epochs
+                            .entry(stream_scan.table_id)
+                        {
+                            std::collections::hash_map::Entry::Occupied(entry) => {
+                                if entry.get() != &stream_scan.snapshot_backfill_epoch {
+                                    collection_error = Some(anyhow!(
+                                        "job {} has inconsistent snapshot epochs for upstream table {}",
+                                        job_id,
+                                        stream_scan.table_id
+                                    ));
+                                }
+                            }
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(stream_scan.snapshot_backfill_epoch);
+                            }
+                        }
+                    });
+                    if let Some(err) = collection_error {
+                        return Err(err.into());
+                    }
                 }
+            }
+
+            if fragment_type_mask.contains(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan) {
                 let mut collection_error = None;
                 visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
                     let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
@@ -371,12 +461,12 @@ impl CatalogController {
                             return;
                         }
                     };
-                    if scan_type != StreamScanType::SnapshotBackfill {
+                    if scan_type != StreamScanType::CrossDbSnapshotBackfill {
                         return;
                     }
                     let Some(progress_table) = stream_scan.state_table.as_ref() else {
                         collection_error = Some(anyhow!(
-                            "snapshot backfill in Iceberg V3 job {} has no progress table",
+                            "cross-database backfill in job {} has no progress table",
                             job_id
                         ));
                         return;
@@ -386,45 +476,6 @@ impl CatalogController {
                         upstream_table_id: stream_scan.table_id,
                         progress_table_id: progress_table.id,
                     });
-                });
-                if let Some(err) = collection_error {
-                    return Err(err.into());
-                }
-            } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
-                info.state_table_ids
-                    .extend(state_table_ids.inner_ref().iter().copied());
-                let mut collection_error = None;
-                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
-                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
-                        Ok(scan_type) => scan_type,
-                        Err(err) => {
-                            collection_error = Some(anyhow::Error::new(err).context(format!(
-                                "invalid persisted stream scan type {} in job {} fragment {}",
-                                stream_scan.stream_scan_type, job_id, fragment_id
-                            )));
-                            return;
-                        }
-                    };
-                    if scan_type != StreamScanType::SnapshotBackfill {
-                        return;
-                    }
-                    match info
-                        .upstream_table_snapshot_epochs
-                        .entry(stream_scan.table_id)
-                    {
-                        std::collections::hash_map::Entry::Occupied(entry) => {
-                            if entry.get() != &stream_scan.snapshot_backfill_epoch {
-                                collection_error = Some(anyhow!(
-                                    "job {} has inconsistent snapshot epochs for upstream table {}",
-                                    job_id,
-                                    stream_scan.table_id
-                                ));
-                            }
-                        }
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(stream_scan.snapshot_backfill_epoch);
-                        }
-                    }
                 });
                 if let Some(err) = collection_error {
                     return Err(err.into());
@@ -1122,6 +1173,7 @@ impl CatalogController {
                 database_id: None,
                 aborted_sink_ids: vec![],
                 cancel_info: None,
+                cross_db_subscriptions: vec![],
             });
         };
         let database_id = obj
@@ -1137,6 +1189,7 @@ impl CatalogController {
                     database_id: Some(database_id),
                     aborted_sink_ids: vec![],
                     cancel_info: None,
+                    cross_db_subscriptions: vec![],
                 });
             }
 
@@ -1157,6 +1210,7 @@ impl CatalogController {
                         database_id: Some(database_id),
                         aborted_sink_ids: vec![],
                         cancel_info: None,
+                        cross_db_subscriptions: vec![],
                     });
                 }
             }
@@ -1176,6 +1230,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
         let object_models = load_object_models(&txn, &objects_to_abort).await?;
+        let cross_db_subscriptions = resolve_cross_db_subscriptions(&txn, &object_models).await?;
 
         let fragments: Vec<(FragmentId, i32, TableIdArray)> = Fragment::find()
             .select_only()
@@ -1310,6 +1365,7 @@ impl CatalogController {
             database_id: Some(database_id),
             aborted_sink_ids,
             cancel_info,
+            cross_db_subscriptions,
         })
     }
 

@@ -442,7 +442,7 @@ struct ShowCreateObjectRow {
 #[fields(style = "Title Case")]
 struct ShowSubscriptionRow {
     name: ObjectNameField,
-    retention_seconds: i64,
+    retention_seconds: Option<i64>,
 }
 
 #[derive(Fields)]
@@ -619,7 +619,7 @@ pub async fn handle_show_object(
                     .iter_subscription_with_acl(&current_user)
                     .map(|t| ShowSubscriptionRow {
                         name: with_schema_name(&schema.name, &t.name),
-                        retention_seconds: t.retention_seconds as i64,
+                        retention_seconds: t.retention_seconds.map(|v| v as i64),
                     })
                     .collect()
             });
