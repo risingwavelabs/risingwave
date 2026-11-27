@@ -958,6 +958,11 @@ impl StateStoreImpl {
                     Arc::new(opts.object_store_config.clone()),
                 )
                 .await;
+                let object_store = if opts.object_store_config.enable_hummock_read_coalescing {
+                    object_store.with_read_coalescing()
+                } else {
+                    object_store
+                };
 
                 let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
                     store: Arc::new(object_store),

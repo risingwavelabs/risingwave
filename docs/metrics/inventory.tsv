@@ -293,6 +293,24 @@ object_store_failure_count	counter	type	The number of failures of object store o
 object_store_operation_bytes	histogram	type	Size of operation result on object store		src/object_store/src/object/object_metrics.rs
 object_store_operation_latency	histogram	media_type,type	Total latency of operation on object store		src/object_store/src/object/object_metrics.rs
 object_store_read_bytes	counter		Total bytes of requests read from object store		src/object_store/src/object/object_metrics.rs
+object_store_read_in_flight	gauge	media_type,stage	Currently executing reads by layer		src/object_store/src/object/object_metrics.rs
+object_store_read_outcomes	counter	media_type,stage,outcome	Read completions by layer; attempts are backend invocations, not SDK-internal HTTP retries		src/object_store/src/object/object_metrics.rs
+object_store_read_request_bytes	histogram	media_type,route	Requested bytes of bounded logical reads, before coalescing		src/object_store/src/object/object_metrics.rs
+object_store_read_request_duration_seconds	histogram	media_type,route	Time to complete a logical object store read, including scheduling and retries		src/object_store/src/object/object_metrics.rs
+object_store_read_requests	counter	media_type,route	Logical object store read calls by dispatch route		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_admission_duration_seconds	histogram	media_type	Time waiting for admission, including cancelled waits		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_events	counter	media_type,event	Scheduler planning, completion and fallback events		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_group_size	histogram	media_type	Number of logical range reads in each scheduled physical read		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_groups	gauge	media_type,stage	Read groups by stage: admitted through completion, queued until selection, or ready to claim a physical permit (queued minus dispatch reservations)		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_in_flight	gauge	media_type	Scheduled physical reads from first backend future poll through completion or cancellation, including retry loops and range-error fallbacks		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_overread_bytes	counter	media_type	Gap bytes in successful scheduled reads, including holes left by cancelled members		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_partial_overlap_bytes	counter	media_type	Union of byte intersections with older active same-object reads that do not fully cover the new dispatch; observed at flight registration, counts attempted group reads, not successful or unique duplicate bytes		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_pending	gauge	media_type	Admitted logical reads, queued or in flight		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_physical_duration_seconds	histogram	media_type,stage	Scheduled backend read duration (including retries), permit wait for range-error fallback, or reservation-to-backend-start time for dispatched groups		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_queue_duration_seconds	histogram	media_type	Time from admitting a range read to dispatching it		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_queued	gauge	media_type	Admitted logical reads not yet dispatched		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_reserved	gauge	media_type	Scheduled group reads holding a physical permit before starting the backend future		src/object_store/src/object/object_metrics.rs
+object_store_read_scheduler_waiting	gauge	media_type	Logical reads waiting for scheduler admission, including collected window reads		src/object_store/src/object/object_metrics.rs
 object_store_request_retry_count	counter	type	The number of retry times of object store request		src/object_store/src/object/object_metrics.rs
 object_store_write_bytes	counter		Total bytes of requests read from object store		src/object_store/src/object/object_metrics.rs
 recent_filter_items	gauge		Item numbers of the recent filter.		src/storage/src/hummock/recent_filter/mod.rs
