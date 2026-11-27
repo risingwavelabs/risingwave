@@ -56,6 +56,9 @@ use crate::source::cdc::external::{
 /// including SSL settings. Use this function to ensure consistent MySQL connection setup
 /// across the codebase.
 ///
+/// Every session uses `utf8mb4`, also after the pool resets a connection to the server's
+/// default charset, so text values always arrive as UTF-8.
+///
 /// # Arguments
 /// * `host` - MySQL server hostname or IP address
 /// * `port` - MySQL server port
@@ -80,7 +83,8 @@ pub fn build_mysql_connection_pool(
         .ip_or_hostname(host)
         .tcp_port(port)
         .db_name(database)
-        .ssl_opts(mysql_ssl_opts(ssl_mode));
+        .ssl_opts(mysql_ssl_opts(ssl_mode))
+        .setup(vec!["SET NAMES utf8mb4"]);
 
     mysql_async::Pool::new(opts_builder)
 }
