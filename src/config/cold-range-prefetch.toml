@@ -1,0 +1,21 @@
+# Merge these sections into the compute node's existing configuration, then restart.
+# ColdRanges is the only prefetch implementation; use disabled for a demand-read control.
+# Leave all per-path *_mode overrides unset to use the unified mode.
+# Keep cache sizing, disk-cache settings, and the rest of the workload configuration fixed.
+
+[storage]
+max_prefetch_block_number = 16
+
+[storage.scan_prefetch]
+mode = "cold_ranges"
+max_blocks = 16
+max_bytes = 1048576
+
+[storage.object_store]
+enable_hummock_read_coalescing = true
+
+[storage.object_store.read_scheduler]
+use_dedicated_io_runtime = true
+dedicated_io_runtime_workers = 2
+max_read_bytes = 1048576
+max_gap_bytes = 0

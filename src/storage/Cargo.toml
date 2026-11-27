@@ -10,7 +10,7 @@ repository = { workspace = true }
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
-test = ["risingwave_hummock_sdk/test"]
+test = ["risingwave_hummock_sdk/test", "risingwave_object_store/test"]
 failpoints = ["fail/failpoints"]
 hm-trace = []
 sync_point = ["sync-point/sync_point"]
@@ -85,6 +85,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
+risingwave_object_store = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 tikv-jemallocator = { workspace = true }
 uuid = { version = "1", features = ["v4"] }

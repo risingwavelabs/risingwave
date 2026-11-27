@@ -200,10 +200,7 @@ impl MaterializedInputState {
                 .iter_with_prefix(
                     group_key.map(GroupKey::table_pk),
                     sub_range,
-                    PrefetchOptions {
-                        prefetch: cache_filler.capacity().is_none(),
-                        for_large_query: false,
-                    },
+                    PrefetchOptions::new(cache_filler.capacity().is_none(), false),
                 )
                 .await?;
             pin_mut!(all_data_iter);

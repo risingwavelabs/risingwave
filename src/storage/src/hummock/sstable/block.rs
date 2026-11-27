@@ -377,6 +377,18 @@ impl Block {
             + Hitmap::<{ Self::HITMAP_ELEMS }>::bytes()
     }
 
+    /// Conservative decoded weight before reading a valid block's payload.
+    /// Each restart point requires a u32 offset in the raw block, and decoding
+    /// additionally allocates a RestartPoint for it. The metadata does not carry
+    /// the restart count, so bound it by the entire raw block size.
+    pub(crate) fn estimated_decode_memory_weight(raw_size: usize) -> Option<usize> {
+        let restart_bytes = (raw_size / size_of::<u32>()).checked_mul(size_of::<RestartPoint>())?;
+        size_of::<Self>()
+            .checked_add(raw_size)?
+            .checked_add(restart_bytes)?
+            .checked_add(Hitmap::<{ Self::HITMAP_ELEMS }>::bytes())
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
@@ -953,6 +965,37 @@ mod tests {
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
+
+    #[test]
+    fn test_decode_memory_estimate_covers_payload_and_restart_points() {
+        for compression_algorithm in [
+            CompressionAlgorithm::None,
+            CompressionAlgorithm::Lz4,
+            CompressionAlgorithm::Zstd,
+        ] {
+            for restart_interval in [1, 16, 128] {
+                let mut builder = BlockBuilder::new(BlockBuilderOptions {
+                    compression_algorithm,
+                    restart_interval,
+                    ..Default::default()
+                });
+                for idx in 0..128 {
+                    let key = format!("key_{idx:04}");
+                    builder.add_for_test(
+                        construct_full_key_struct_for_test(0, key.as_bytes(), 1),
+                        &[b'x'; 256],
+                    );
+                }
+                let raw_size = builder.uncompressed_block_size();
+                let encoded = Bytes::copy_from_slice(builder.build());
+                let estimate =
+                    Block::estimated_decode_memory_weight(raw_size.max(encoded.len())).unwrap();
+                let decoded = Block::decode_with_copy(encoded, raw_size, true).unwrap();
+                assert!(estimate >= decoded.estimated_memory_weight());
+            }
+        }
+        assert!(Block::estimated_decode_memory_weight(usize::MAX).is_none());
+    }
 
     #[test]
     fn test_block_enc_dec() {

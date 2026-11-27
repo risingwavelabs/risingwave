@@ -79,7 +79,12 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_cached_recent_versions_number")]
     pub max_cached_recent_versions_number: usize,
 
-    /// max prefetch block number
+    /// Per-path prefetch strategies and bounded lookahead budgets. Changes require restart.
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub scan_prefetch: ScanPrefetchConfig,
+
+    /// Default maximum blocks per scan prefetch window; scan_prefetch.max_blocks overrides it.
     #[serde(
         default = "default::storage::max_prefetch_block_number",
         deserialize_with = "deserialize_max_prefetch_block_number"
@@ -625,6 +630,85 @@ pub struct ObjectStoreConfig {
     pub upload_part_size: usize,
 }
 
+/// Iterator prefetch strategy. Point gets never inherit this setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadPrefetchMode {
+    #[default]
+    Disabled,
+    /// Bounded reads of contiguous cache misses, decoded on consumption.
+    ColdRanges,
+}
+
+/// Per-path prefetch selection. Explicit path modes override the unified mode.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+#[serde(deny_unknown_fields)]
+pub struct ScanPrefetchConfig {
+    /// Unified mode: disabled or cold_ranges. Empty preserves each caller's default.
+    #[serde(default)]
+    pub mode: Option<ReadPrefetchMode>,
+    /// Prefix scans default to disabled. Empty inherits mode.
+    #[serde(default)]
+    pub prefix_mode: Option<ReadPrefetchMode>,
+    /// Change-log scans default to disabled. Empty inherits mode.
+    #[serde(default)]
+    pub changelog_mode: Option<ReadPrefetchMode>,
+    /// Ordinary range scans default to cold_ranges. Empty inherits mode.
+    #[serde(default)]
+    pub range_scan_mode: Option<ReadPrefetchMode>,
+    /// Snapshot Backfill defaults to cold_ranges. Empty inherits mode.
+    #[serde(default)]
+    pub snapshot_backfill_mode: Option<ReadPrefetchMode>,
+    /// Locality Backfill defaults to cold_ranges. Empty inherits mode.
+    #[serde(default)]
+    pub locality_backfill_mode: Option<ReadPrefetchMode>,
+    /// Maximum blocks per window, including demand. Empty uses storage.max_prefetch_block_number.
+    /// A value of 1 disables lookahead.
+    #[serde(default)]
+    pub max_blocks: Option<NonZeroUsize>,
+    /// Sum of max(compressed, decoded) block sizes per window. Oversized demand blocks are read alone.
+    /// Retained buffers and decoding are additionally bounded by storage.prefetch_buffer_capacity_mb.
+    #[serde(default = "default_scan_prefetch_bytes")]
+    pub max_bytes: NonZeroUsize,
+}
+
+impl ScanPrefetchConfig {
+    pub fn prefix_mode(&self) -> ReadPrefetchMode {
+        self.prefix_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::Disabled)
+    }
+
+    pub fn changelog_mode(&self) -> ReadPrefetchMode {
+        self.changelog_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::Disabled)
+    }
+
+    pub fn range_scan_mode(&self) -> ReadPrefetchMode {
+        self.range_scan_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
+    }
+
+    pub fn snapshot_backfill_mode(&self) -> ReadPrefetchMode {
+        self.snapshot_backfill_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
+    }
+
+    pub fn locality_backfill_mode(&self) -> ReadPrefetchMode {
+        self.locality_backfill_mode
+            .or(self.mode)
+            .unwrap_or(ReadPrefetchMode::ColdRanges)
+    }
+}
+
+fn default_scan_prefetch_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(1024 * 1024).unwrap()
+}
+
 /// Object-store range coalescing and dispatch.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 #[serde(deny_unknown_fields)]
@@ -1055,7 +1139,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     let prefetch_buffer_capacity_mb =
         s.storage
-            .shared_buffer_capacity_mb
+            .prefetch_buffer_capacity_mb
             .unwrap_or(match &block_cache_eviction_config {
                 EvictionConfig::Lru(lru) => {
                     ((1.0 - lru.high_priority_pool_ratio) * block_cache_capacity_mb as f64) as usize

@@ -969,6 +969,7 @@ impl StateStoreImpl {
                     path: opts.data_directory.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
+                    scan_prefetch: opts.scan_prefetch,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
                     use_new_object_prefix_strategy,
