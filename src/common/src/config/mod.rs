@@ -259,6 +259,10 @@ pub mod default {
             64 << 20 // 64MB
         }
 
+        pub fn stream_hash_agg_group_cache_max_entries() -> usize {
+            0 // unlimited
+        }
+
         pub fn enable_trivial_move() -> bool {
             true
         }
