@@ -684,7 +684,23 @@ message AutoSchemaChangeRequest {
   SchemaChangeEnvelope schema_change = 1;
 }
 
-message AutoSchemaChangeResponse {}
+message AutoSchemaChangeResult {
+  enum Outcome {
+    UNSPECIFIED = 0;
+    NOOP = 1;
+    APPLIED = 2;
+    FAILED = 3;
+  }
+
+  string cdc_table_id = 1;
+  // Absent when no catalog table matches the upstream CDC table.
+  optional uint32 table_id = 2;
+  Outcome outcome = 3;
+}
+
+message AutoSchemaChangeResponse {
+  repeated AutoSchemaChangeResult results = 1;
+}
 
 message AlterDatabaseParamRequest {
   uint32 database_id = 1;

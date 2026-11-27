@@ -41,6 +41,7 @@ use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, OptionalAsso
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::ddl_service::auto_schema_change_result::Outcome as SchemaChangeOutcome;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
@@ -1357,6 +1358,7 @@ impl DdlService for DdlServiceImpl {
             ));
         };
 
+        let mut results = Vec::new();
         for table_change in schema_change.table_changes {
             for c in &table_change.columns {
                 let c = ColumnCatalog::from(c.clone());
@@ -1387,6 +1389,14 @@ impl DdlService for DdlServiceImpl {
                 .metadata_manager
                 .get_table_catalog_by_cdc_table_id(&table_change.cdc_table_id)
                 .await?;
+
+            if tables.is_empty() {
+                results.push(AutoSchemaChangeResult {
+                    cdc_table_id: table_change.cdc_table_id.clone(),
+                    table_id: None,
+                    outcome: SchemaChangeOutcome::Noop as _,
+                });
+            }
 
             for table in tables {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
@@ -1503,16 +1513,24 @@ impl DdlService for DdlServiceImpl {
                 }
                 // skip the schema change if there is no change to original columns
                 if original_columns == new_columns {
-                    tracing::warn!(target: "auto_schema_change",
+                    tracing::debug!(target: "auto_schema_change",
                                    table_id = %table.id,
                                    cdc_table_id = table.cdc_table_id,
                                    upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
                                    "No change to columns, skipping the schema change");
+                    results.push(AutoSchemaChangeResult {
+                        cdc_table_id: table_change.cdc_table_id.clone(),
+                        table_id: Some(table.id),
+                        outcome: SchemaChangeOutcome::Noop as _,
+                    });
                     continue;
                 }
 
+                // Planning/replacement failures are logged below without failing the whole RPC.
+                // Only a completed replacement can be reported as applied.
+                let mut outcome = SchemaChangeOutcome::Failed;
                 let latency_timer = self
                     .meta_metrics
                     .auto_schema_change_latency
@@ -1549,6 +1567,7 @@ impl DdlService for DdlServiceImpl {
 
                             match replace_res {
                                 Ok(_) => {
+                                    outcome = SchemaChangeOutcome::Applied;
                                     tracing::info!(
                                         target: "auto_schema_change",
                                         table_id = %table.id,
@@ -1583,6 +1602,13 @@ impl DdlService for DdlServiceImpl {
                                     );
                                 }
                             };
+                        } else {
+                            tracing::error!(
+                                target: "auto_schema_change",
+                                table_id = %table.id,
+                                cdc_table_id = table_change.cdc_table_id,
+                                "frontend returned no replacement plan",
+                            );
                         }
                     }
                     Err(e) => {
@@ -1606,10 +1632,15 @@ impl DdlService for DdlServiceImpl {
                         );
                     }
                 };
+                results.push(AutoSchemaChangeResult {
+                    cdc_table_id: table_change.cdc_table_id.clone(),
+                    table_id: Some(table.id),
+                    outcome: outcome as _,
+                });
             }
         }
 
-        Ok(Response::new(AutoSchemaChangeResponse {}))
+        Ok(Response::new(AutoSchemaChangeResponse { results }))
     }
 
     async fn wait_iceberg_pk_index_sink_epoch(
