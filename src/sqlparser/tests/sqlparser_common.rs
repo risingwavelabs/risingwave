@@ -916,6 +916,33 @@ fn parse_binary_all() {
 }
 
 #[test]
+fn parse_dangling_any_all_some_is_error() {
+    // `ANY`/`ALL`/`SOME` after a complete expression (not right after a binary
+    // operator) is a syntax error in Postgres. The parser used to accept these
+    // and silently drop the operand before the keyword, so `1 = 5 any(..)` was
+    // parsed as `1 = any(..)`. See issue #27819.
+    for sql in [
+        "SELECT 1 = 5 any(array[1, 2])",
+        "SELECT 1 = 5 all(array[1])",
+        "SELECT 1 = 5 some(array[1])",
+        "SELECT a FROM n WHERE a = 99 any(array[1])",
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(
+            format!("{}", res.unwrap_err()).contains("syntax error at or near"),
+            "expected a syntax error for `{sql}`"
+        );
+    }
+
+    // The valid forms, where the keyword is the right-hand operand of the
+    // binary operator, must keep parsing.
+    verified_only_select("SELECT a = SOME(b)");
+    verified_only_select("SELECT a = ALL(b)");
+    // `ANY` is a synonym for `SOME` and is rendered back as `SOME`.
+    one_statement_parses_to("SELECT a = ANY(b)", "SELECT a = SOME(b)");
+}
+
+#[test]
 fn parse_logical_xor() {
     let sql = "SELECT true XOR true, false XOR false, true XOR false, false XOR true";
     let select = verified_only_select(sql);
