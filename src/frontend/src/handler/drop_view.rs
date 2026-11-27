@@ -17,6 +17,7 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::RelationKind;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
@@ -46,7 +47,15 @@ pub async fn handle_drop_view(
                             .notice(format!("view \"{}\" does not exist, skipping", table_name))
                             .into())
                     } else {
-                        Err(e.into())
+                        Err(reader
+                            .wrong_kind_for_drop(
+                                db_name,
+                                schema_path,
+                                &table_name,
+                                RelationKind::View,
+                            )
+                            .unwrap_or(e)
+                            .into())
                     };
                 }
             };

@@ -14,7 +14,7 @@
 
 use anyhow::{Result, anyhow};
 use regex::Regex;
-use yaml_rust::Yaml;
+use yaml_rust2::Yaml;
 
 /// Expands `x-*` to `x-2333` by finding id in map.
 pub struct IdExpander {
@@ -82,7 +82,7 @@ impl IdExpander {
 
 #[cfg(test)]
 mod tests {
-    use yaml_rust::YamlLoader;
+    use yaml_rust2::YamlLoader;
 
     use super::*;
 

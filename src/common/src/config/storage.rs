@@ -86,6 +86,16 @@ pub struct StorageConfig {
     )]
     pub max_prefetch_block_number: usize,
 
+    /// Maximum number of concurrent `SSTable` metadata fetches per state store scan during
+    /// iterator initialization. Must be greater than 0. The default of 1 fetches sequentially;
+    /// set a larger value to opt in to concurrent fetching. Does not affect point lookups or
+    /// the lazy metadata reads within concatenated `SSTable` iterators.
+    #[serde(
+        default = "default::storage::sstable_meta_fetch_concurrency",
+        deserialize_with = "deserialize_sstable_meta_fetch_concurrency"
+    )]
+    pub sstable_meta_fetch_concurrency: usize,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -238,7 +248,8 @@ pub struct StorageConfig {
     )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
-    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores.
+    /// Capped at `worker_num` * `compactor_max_task_multiplier`, the most a compactor can run.
     #[serde(default = "default::storage::iceberg_compaction_task_parallelism_ratio")]
     pub iceberg_compaction_task_parallelism_ratio: f32,
     /// Whether to enable heuristic output parallelism in iceberg compaction.
@@ -326,6 +337,10 @@ pub struct CacheConfig {
     #[serde(default)]
     #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    /// Number of lifecycle lock shards in the Pin Cache. Must be greater than zero.
+    #[serde(default = "default::storage::pin_cache_shard_num")]
+    pub pin_cache_shard_num: usize,
 
     #[serde(default = "default::storage::vector_block_cache_capacity_mb")]
     pub vector_block_cache_capacity_mb: usize,
@@ -577,6 +592,18 @@ pub struct ObjectStoreConfig {
     #[serde(default = "default::object_store_config::http_concurrent_limit")]
     pub http_concurrent_limit: usize,
 
+    /// Maximum bytes per request for fully buffered `OpenDAL` streaming reads.
+    /// 0 (the default) disables chunking.
+    /// Each chunk uses the existing `OpenDAL` streaming read retry and timeout layers.
+    /// Other object store backends are unaffected.
+    #[serde(default)]
+    pub opendal_streaming_read_chunk_size: usize,
+
+    /// Maximum concurrent range requests when `opendal_streaming_read_chunk_size` is positive.
+    /// Defaults to 1 for sequential reads. `OpenDAL` treats 0 as 1.
+    #[serde(default = "default::object_store_config::opendal_streaming_read_chunk_concurrency")]
+    pub opendal_streaming_read_chunk_concurrency: usize,
+
     // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
@@ -587,6 +614,19 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+fn deserialize_sstable_meta_fetch_concurrency<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.sstable_meta_fetch_concurrency must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
@@ -1145,6 +1185,10 @@ pub mod default {
             2 * 1024 * 1024 * 1024 // 2g
         }
 
+        pub fn sstable_meta_fetch_concurrency() -> usize {
+            1
+        }
+
         pub fn max_prefetch_block_number() -> usize {
             16
         }
@@ -1163,6 +1207,10 @@ pub mod default {
 
         pub fn vector_file_block_size_kb() -> usize {
             1024
+        }
+
+        pub fn pin_cache_shard_num() -> usize {
+            64
         }
 
         pub fn vector_block_cache_capacity_mb() -> usize {
@@ -1408,6 +1456,10 @@ pub mod default {
         const DEFAULT_REQ_BACKOFF_INTERVAL_MS: u64 = 1000; // 1s
         const DEFAULT_REQ_BACKOFF_MAX_DELAY_MS: u64 = 10 * 1000; // 10s
         const DEFAULT_REQ_MAX_RETRY_ATTEMPTS: usize = 3;
+
+        pub fn opendal_streaming_read_chunk_concurrency() -> usize {
+            1
+        }
 
         pub fn set_atomic_write_dir() -> bool {
             false

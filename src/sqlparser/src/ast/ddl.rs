@@ -1088,16 +1088,10 @@ impl ColumnDef {
 
 impl fmt::Display for ColumnDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {}",
-            self.name,
-            if let Some(data_type) = &self.data_type {
-                data_type.to_string()
-            } else {
-                "None".to_owned()
-            }
-        )?;
+        write!(f, "{}", self.name)?;
+        if let Some(data_type) = &self.data_type {
+            write!(f, " {data_type}")?;
+        }
         for option in &self.options {
             write!(f, " {}", option)?;
         }

@@ -43,7 +43,7 @@ use tempfile::tempdir;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
-use yaml_rust::YamlEmitter;
+use yaml_rust2::YamlEmitter;
 
 pub struct ProgressManager {
     pa: MultiProgress,

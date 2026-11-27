@@ -1,0 +1,107 @@
+# `transactional` and `cdc.source.needs.offset.commit.on.checkpoint` are set by RisingWave itself,
+# `auto.schema.change` is accepted only by the connectors that can apply the resulting DDL
+# events, and `heartbeat.table.auto.initialize` only by the connectors that can create the
+# heartbeat table. All checks run before the upstream database is contacted.
+
+statement error 'transactional' cannot be set
+create source mysql_transactional with (
+  connector = 'mysql-cdc',
+  transactional = 'true'
+) format plain encode json;
+
+statement error 'transactional' cannot be set
+create source postgres_transactional with (
+  connector = 'postgres-cdc',
+  transactional = 'false'
+) format plain encode json;
+
+statement error 'transactional' cannot be set
+create table mongodb_transactional (_id jsonb primary key, payload jsonb) with (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'mydb.orders',
+  transactional = 'true'
+) format debezium_mongo encode json;
+
+statement error 'cdc.source.needs.offset.commit.on.checkpoint' cannot be set
+create source postgres_offset_commit with (
+  connector = 'postgres-cdc',
+  cdc.source.needs.offset.commit.on.checkpoint = 'false'
+) format plain encode json;
+
+statement error 'cdc.source.needs.offset.commit.on.checkpoint' cannot be set
+create source mysql_offset_commit with (
+  connector = 'mysql-cdc',
+  cdc.source.needs.offset.commit.on.checkpoint = 'true'
+) format plain encode json;
+
+statement error auto schema change for connector sqlserver-cdc
+create source sqlserver_auto_schema_change with (
+  connector = 'sqlserver-cdc',
+  auto.schema.change = 'true'
+) format plain encode json;
+
+statement error auto schema change for connector mongodb-cdc
+create table mongodb_auto_schema_change (_id jsonb primary key, payload jsonb) with (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'mydb.orders',
+  auto.schema.change = 'true'
+) format debezium_mongo encode json;
+
+statement error 'heartbeat.table.auto.initialize=true' is not supported for connector mysql-cdc
+create source mysql_heartbeat_auto_initialize with (
+  connector = 'mysql-cdc',
+  heartbeat.table.auto.initialize = 'true'
+) format plain encode json;
+
+statement error 'heartbeat.table.auto.initialize' must be 'true' or 'false'
+create source postgres_heartbeat_auto_initialize with (
+  connector = 'postgres-cdc',
+  heartbeat.table.auto.initialize = 'yes'
+) format plain encode json;
+
+# As a SECRET, the keys RisingWave sets and `auto.schema.change` are rejected outright. The other
+# checked options are checked by their resolved value, which the error does not show.
+
+statement ok
+create secret cdc_option_guards_secret with (backend = 'meta') as 'true';
+
+statement ok
+create secret cdc_option_guards_zero_secret with (backend = 'meta') as '0';
+
+statement error 'transactional' cannot be set
+create source mysql_transactional_secret with (
+  connector = 'mysql-cdc',
+  transactional = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement error 'cdc.source.needs.offset.commit.on.checkpoint' cannot be set
+create source postgres_offset_commit_secret with (
+  connector = 'postgres-cdc',
+  cdc.source.needs.offset.commit.on.checkpoint = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement error 'auto.schema.change' cannot be provided as a SECRET
+create source mysql_auto_schema_change_secret with (
+  connector = 'mysql-cdc',
+  auto.schema.change = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement error 'heartbeat.table.auto.initialize=true' is not supported for connector mysql-cdc
+create source mysql_heartbeat_auto_initialize_secret with (
+  connector = 'mysql-cdc',
+  heartbeat.table.auto.initialize = secret cdc_option_guards_secret
+) format plain encode json;
+
+statement error 'debezium.heartbeat.interval.ms' must be a positive integer, got: '<secret>'
+create source postgres_heartbeat_interval_secret with (
+  connector = 'postgres-cdc',
+  debezium.heartbeat.interval.ms = secret cdc_option_guards_zero_secret
+) format plain encode json;
+
+statement ok
+drop secret cdc_option_guards_secret;
+
+statement ok
+drop secret cdc_option_guards_zero_secret;

@@ -60,7 +60,6 @@ def_anyhow_newtype! {
     sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
-    tiberius::error::Error => "Sql Server error",
     apache_avro::Error => "Avro error",
     rdkafka::error::KafkaError => "Kafka error",
     pulsar::Error => "Pulsar error",
@@ -75,7 +74,7 @@ def_anyhow_newtype! {
     risingwave_common::error::IcebergError => "IcebergV2 error",
     redis::RedisError => "Redis error",
     risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
-    google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
+    gcloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT SDK error",
     rumqttc::v5::OptionError => "MQTT Option error",
@@ -98,6 +97,17 @@ pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
 impl From<ConnectorError> for RpcError {
     fn from(value: ConnectorError) -> Self {
         RpcError::Internal(value.0)
+    }
+}
+
+impl From<tiberius::error::Error> for ConnectorError {
+    fn from(error: tiberius::error::Error) -> Self {
+        crate::connector_common::sql_server::hint_command_timeout(
+            error,
+            "database.command.timeout.ms",
+        )
+        .context("Sql Server error")
+        .into()
     }
 }
 

@@ -80,6 +80,9 @@ enum Commands {
     /// Commands for profiling nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
+    /// Inspect, update, or reset runtime stdout/stderr log filters
+    #[clap(subcommand)]
+    Log(cmd_impl::log::LogCommands),
     #[clap(subcommand)]
     Throttle(ThrottleCommands),
     /// Commands for Self-testing
@@ -646,6 +649,22 @@ pub enum ProfileCommands {
 /// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
 /// in an embedded manner.
 pub async fn start(opts: CliOpts, shutdown: CancellationToken) {
+    // Object-store benchmarks own cooperative shutdown, so they can write a
+    // partial report and clean up after Ctrl-C instead of being dropped here.
+    #[cfg(not(madsim))]
+    if matches!(
+        &opts.command,
+        Commands::Bench(BenchCommands::ObjectStore(_))
+    ) {
+        let Commands::Bench(BenchCommands::ObjectStore(args)) = opts.command else {
+            unreachable!()
+        };
+        if let Err(error) = cmd_impl::bench::object_store::run(args, shutdown).await {
+            eprintln!("Error: {}", error.as_report());
+            std::process::exit(1);
+        }
+        return;
+    }
     let context = CtlContext::default();
 
     tokio::select! {
@@ -673,6 +692,7 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
 
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
+        Commands::Log(command) => cmd_impl::log::run(context, command).await?,
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?
         }

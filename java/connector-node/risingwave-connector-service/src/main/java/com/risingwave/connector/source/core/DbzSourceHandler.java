@@ -17,6 +17,7 @@
 package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.SourceHandler;
+import com.risingwave.connector.source.common.CdcSource;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
@@ -30,9 +31,11 @@ import org.slf4j.LoggerFactory;
 public class DbzSourceHandler implements SourceHandler {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
 
+    private final CdcSource source;
     private final DbzConnectorConfig config;
 
-    public DbzSourceHandler(DbzConnectorConfig config) {
+    public DbzSourceHandler(CdcSource source, DbzConnectorConfig config) {
+        this.source = source;
         this.config = config;
     }
 
@@ -88,7 +91,7 @@ public class DbzSourceHandler implements SourceHandler {
 
     @Override
     public void startSource(ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
-        var runner = DbzCdcEngineRunner.newCdcEngineRunner(config, responseObserver);
+        var runner = DbzCdcEngineRunner.newCdcEngineRunner(source, config, responseObserver);
         if (runner == null) {
             responseObserver.onCompleted();
             return;

@@ -271,6 +271,7 @@ steps:
           run: source-cdc-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 45
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end pulsar source test"
@@ -933,7 +934,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 50
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -948,7 +949,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 45
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "end-to-end test for opendal storage backend (parallel)"

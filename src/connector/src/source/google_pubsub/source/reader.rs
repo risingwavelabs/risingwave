@@ -19,8 +19,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use google_cloud_pubsub::subscriber::SubscriberConfig;
-use google_cloud_pubsub::subscription::{MessageStream, SubscribeConfig, Subscription};
+use gcloud_pubsub::subscriber::SubscriberConfig;
+use gcloud_pubsub::subscription::{MessageStream, SubscribeConfig, Subscription};
 use risingwave_common::ensure;
 
 use super::TaggedReceivedMessage;

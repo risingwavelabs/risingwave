@@ -696,6 +696,24 @@ pub mod tests {
     }
 
     #[test]
+    fn test_opendal_chunked_streaming_read_config() {
+        let config: ObjectStoreConfig = toml::from_str("").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 1);
+
+        let config: ObjectStoreConfig = toml::from_str(
+            "opendal_streaming_read_chunk_size = 1024\nopendal_streaming_read_chunk_concurrency = 4",
+        )
+        .unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 1024);
+        assert_eq!(config.opendal_streaming_read_chunk_concurrency, 4);
+
+        let config: ObjectStoreConfig =
+            toml::from_str("opendal_streaming_read_chunk_size = 0").unwrap();
+        assert_eq!(config.opendal_streaming_read_chunk_size, 0);
+    }
+
+    #[test]
     fn test_http_client_rotation_config() {
         for (input, expected) in [
             ("", None),
@@ -971,6 +989,22 @@ pub mod tests {
             duplicate field `compute_client_config`
         "#]]
         .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_storage_sstable_meta_fetch_concurrency() {
+        let default: RwConfig = toml::from_str("").unwrap();
+        assert_eq!(default.storage.sstable_meta_fetch_concurrency, 1);
+        let config: RwConfig =
+            toml::from_str("[storage]\nsstable_meta_fetch_concurrency = 8").unwrap();
+        assert_eq!(config.storage.sstable_meta_fetch_concurrency, 8);
+        let error = toml::from_str::<RwConfig>("[storage]\nsstable_meta_fetch_concurrency = 0")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("storage.sstable_meta_fetch_concurrency must be greater than 0")
+        );
     }
 
     #[test]

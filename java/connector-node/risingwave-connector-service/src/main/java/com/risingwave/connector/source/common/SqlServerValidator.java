@@ -17,7 +17,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
@@ -28,7 +27,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SqlServerValidator extends DatabaseValidator implements AutoCloseable {
+public class SqlServerValidator extends CdcSourceValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(SqlServerValidator.class);
     private static final int CDC_TABLE_TYPE =
             Catalog.Table.CdcTableType.CDC_TABLE_TYPE_SQL_SERVER.getNumber();
@@ -48,29 +47,16 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
     // If true, we will skip validation check for table
     private final boolean isCdcSourceJob;
 
-    public SqlServerValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
+    public SqlServerValidator(SqlServerDbzConnectorConfig config, TableSchema tableSchema)
             throws SQLException {
         this.tableSchema = tableSchema;
-
-        var dbHost = userProps.get(DbzConnectorConfig.HOST);
-        var dbPort = userProps.get(DbzConnectorConfig.PORT);
-        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var user = userProps.get(DbzConnectorConfig.USER);
-        var password = userProps.get(DbzConnectorConfig.PASSWORD);
-        var encrypt =
-                Boolean.parseBoolean(
-                        userProps.getOrDefault(DbzConnectorConfig.SQL_SERVER_ENCRYPT, "false"));
-
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.SQL_SERVER, dbHost, dbPort, dbName);
-        jdbcUrl = jdbcUrl + ";encrypt=" + encrypt + ";trustServerCertificate=true";
-        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
-
-        this.dbName = dbName;
-        this.user = user;
-        this.schemaName = userProps.get(DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
-        this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
-        this.isCdcSourceJob = isCdcSourceJob;
+        this.user = config.getUser();
+        this.jdbcConnection =
+                DriverManager.getConnection(config.getJdbcUrl(), user, config.getPassword());
+        this.dbName = config.getDbName();
+        this.schemaName = config.getSchemaName();
+        this.tableName = config.getTableName();
+        this.isCdcSourceJob = config.isCdcSourceJob();
     }
 
     @Override

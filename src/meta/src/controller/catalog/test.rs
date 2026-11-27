@@ -2334,6 +2334,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_drop_object_rejects_source_without_its_table() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let mut job = crate::manager::StreamingJob::Table(
+            Some(PbSource {
+                name: "t".to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                info: Some(StreamSourceInfo::default()),
+                ..Default::default()
+            }),
+            PbTable {
+                name: "t".to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                table_type: PbTableType::Table as _,
+                handle_pk_conflict_behavior:
+                    risingwave_pb::catalog::PbHandleConflictBehavior::NoCheck as _,
+                fragment_id: FragmentId::placeholder(),
+                ..Default::default()
+            },
+            risingwave_pb::ddl_service::TableJobType::General,
+        );
+        mgr.create_job_catalog(
+            &mut job,
+            &crate::model::StreamContext::default(),
+            &None,
+            1,
+            HashSet::new(),
+            risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(true),
+            &None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let crate::manager::StreamingJob::Table(Some(source), _, _) = job else {
+            unreachable!()
+        };
+
+        let err = mgr
+            .drop_object(ObjectType::Source, source.id, DropMode::Restrict)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("use DROP TABLE"), "{err}");
+
+        // The source may be in another schema than its table.
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "other_schema".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let other_schema: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("other_schema"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        Object::update_many()
+            .col_expr(object::Column::SchemaId, other_schema.into())
+            .col_expr(
+                object::Column::BelongToOid,
+                other_schema.as_object_id().into(),
+            )
+            .filter(object::Column::Oid.eq(source.id.as_object_id()))
+            .exec(&mgr.inner.read().await.db)
+            .await?;
+        let err = mgr
+            .drop_object(ObjectType::Schema, other_schema, DropMode::Cascade)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("use DROP TABLE"), "{err}");
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_cancel_creating_table_deletes_associated_source() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let (tx, mut notification_rx) = mpsc::unbounded_channel();

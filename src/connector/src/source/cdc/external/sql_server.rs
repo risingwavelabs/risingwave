@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -24,9 +25,10 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
 use tiberius::{Config, Query, QueryItem};
 
-use crate::connector_common::sql_server::mssql_type_to_rw_type;
+use crate::connector_common::sql_server::{MssqlTimeouts, mssql_type_to_rw_type};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::{ScalarImplTiberiusWrapper, SqlServerRowDecoder};
 use crate::sink::sqlserver::SqlServerClient;
@@ -38,6 +40,35 @@ use crate::source::cdc::external::{
 
 // The maximum commit_lsn value in Sql Server
 const MAX_COMMIT_LSN: &str = "ffffffff:ffffffff:ffff";
+
+/// Timeouts of the connections that RisingWave opens to SQL Server itself: schema discovery, LSN
+/// queries and backfill. The change stream uses the Debezium connector's own settings.
+#[serde_as]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub struct SqlServerCdcTimeouts {
+    /// Milliseconds allowed to establish a connection: TCP connect, TLS and login. Unset or 0
+    /// means no limit.
+    #[serde(rename = "database.connect.timeout.ms", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub connect_timeout_ms: Option<u64>,
+    /// Milliseconds to wait for each response of SQL Server while a statement runs, including the
+    /// first one. This does not limit the total time of a statement. Unset or 0 means no limit.
+    #[serde(rename = "database.command.timeout.ms", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub command_timeout_ms: Option<u64>,
+}
+
+impl SqlServerCdcTimeouts {
+    pub fn from_properties(properties: &BTreeMap<String, String>) -> ConnectorResult<Self> {
+        let options = serde_json::from_value(serde_json::to_value(properties)?)
+            .context("invalid `database.connect.timeout.ms` or `database.command.timeout.ms`")?;
+        Ok(options)
+    }
+
+    pub fn timeouts(&self) -> MssqlTimeouts {
+        MssqlTimeouts::from_millis(self.connect_timeout_ms, self.command_timeout_ms)
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SqlServerOffset {
@@ -98,7 +129,9 @@ impl SqlServerExternalTable {
         }
         client_config.trust_cert();
 
-        let mut client = SqlServerClient::new_with_config(client_config).await?;
+        let mut client =
+            SqlServerClient::new_with_config(client_config, config.sql_server_timeouts.timeouts())
+                .await?;
 
         let mut column_descs = vec![];
         let mut pk_names = vec![];
@@ -303,7 +336,9 @@ impl SqlServerExternalTableReader {
         }
         client_config.trust_cert();
 
-        let client = SqlServerClient::new_with_config(client_config).await?;
+        let client =
+            SqlServerClient::new_with_config(client_config, config.sql_server_timeouts.timeouts())
+                .await?;
 
         let field_names = rw_schema
             .fields

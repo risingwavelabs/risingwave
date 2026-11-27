@@ -58,7 +58,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
 );
 
 statement ok
-create table iceberg_batch_table ( primary key (id) ) with (
+create table iceberg_batch_table ( id int, primary key (id) ) with (
   connector = 'iceberg',
   warehouse.path = 's3://hummock001/iceberg_connection',
   s3.access.key = secret my_secret,
@@ -167,7 +167,7 @@ statement ok
 create table t_refresh_composite_pk (
   id2 varchar,
   id1 int,
-  name varchar,
+  "LocId_Order/Customer_Departure_point" varchar,
   primary key (id1, id2)
 ) with (commit_checkpoint_interval = 2) engine = iceberg;
 
@@ -208,6 +208,54 @@ select id1, id2 from iceberg_batch_table_composite_pk order by id1, id2;
 2 10
 2 20
 
+# Infer the type of a quoted column name containing a slash. Deletes must still
+# work when the other PK column, id2, is not declared in the refresh table.
+statement ok
+create table iceberg_projected_table (
+  "LocId_Order/Customer_Departure_point",
+  id1 int,
+  primary key ("LocId_Order/Customer_Departure_point")
+) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh_composite_pk',
+  database.name = 'public',
+  refresh_mode = 'FULL_RELOAD'
+);
+
+statement error Data type mismatch
+create table iceberg_projected_bad (id1 bigint, primary key (id1)) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh_composite_pk',
+  database.name = 'public',
+  refresh_mode = 'FULL_RELOAD'
+);
+
+statement error
+select id2 from iceberg_projected_table;
+
+statement ok
+refresh table iceberg_projected_table;
+
+query TI retry 11 backoff 1s
+select * from iceberg_projected_table order by "LocId_Order/Customer_Departure_point";
+----
+aaa 1
+bbb 1
+ccc 2
+ddd 2
+
 statement ok
 delete from t_refresh_composite_pk where id1 = 1 and id2 = '20';
 
@@ -230,7 +278,23 @@ select id1, id2 from iceberg_batch_table_composite_pk order by id1, id2;
 2 20
 3 30
 
+statement ok
+refresh table iceberg_projected_table;
+
+query TI retry 11 backoff 1s
+select "LocId_Order/Customer_Departure_point", id1
+from iceberg_projected_table
+order by "LocId_Order/Customer_Departure_point";
+----
+aaa 1
+ccc 2
+ddd 2
+eee 3
+
 # Cleanup
+
+statement ok
+drop table iceberg_projected_table;
 
 statement ok
 drop table iceberg_batch_table_composite_pk;

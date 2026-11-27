@@ -39,7 +39,10 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
-use risingwave_connector::source::cdc::{CdcSourceExternalTableIdentifier, build_cdc_table_id};
+use risingwave_connector::source::cdc::{
+    CDC_COLUMN_EXCLUDE_LIST, CdcSourceExternalTableIdentifier, build_cdc_table_id,
+    parse_cdc_column_exclude_list,
+};
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type,
 };
@@ -485,7 +488,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let (with_properties, refresh_mode) =
+    let (with_properties, ingest_mode) =
         bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
@@ -523,7 +526,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         table_name,
         format_encode,
         with_properties,
-        &column_defs,
+        column_defs,
         constraints,
         wildcard_idx,
         source_watermarks,
@@ -534,7 +537,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         CreateSourceType::Table,
         rate_limit,
         sql_column_strategy,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
@@ -1114,8 +1117,31 @@ pub(super) async fn handle_create_table_plan(
                 cdc_table.external_table_name.clone(),
             )?;
 
+            let excluded_columns = match handler_args.with_options.get(CDC_COLUMN_EXCLUDE_LIST) {
+                Some(list) => {
+                    let columns = parse_cdc_column_exclude_list(list);
+                    if columns.is_empty() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_COLUMN_EXCLUDE_LIST}` must list at least one column"
+                        ))
+                        .into());
+                    }
+                    if wildcard_idx.is_none() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_COLUMN_EXCLUDE_LIST}` requires the `(*)` wildcard in the column list"
+                        ))
+                        .into());
+                    }
+                    columns
+                }
+                None => HashSet::new(),
+            };
+
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
-                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                Some(_) => {
+                    bind_cdc_table_schema_externally(cdc_with_options.clone(), &excluded_columns)
+                        .await?
+                }
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
@@ -1706,7 +1732,7 @@ pub async fn create_iceberg_engine_table(
 
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args)?;
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
+    let (with_properties, ingest_mode) =
         bind_connector_props(&source_handler_args, &format_encode, true)?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
@@ -1736,7 +1762,7 @@ pub async fn create_iceberg_engine_table(
         create_source_stmt.source_name,
         format_encode,
         with_properties,
-        &create_source_stmt.columns,
+        create_source_stmt.columns,
         create_source_stmt.constraints,
         create_source_stmt.wildcard_idx,
         create_source_stmt.source_watermarks,
@@ -1747,7 +1773,7 @@ pub async fn create_iceberg_engine_table(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
