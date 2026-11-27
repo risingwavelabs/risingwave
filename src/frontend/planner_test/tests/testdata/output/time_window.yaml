@@ -4,12 +4,12 @@
     select * from tumble(t1, created_at, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at, $expr1, $expr2] }
-    └─LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
+    └─LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp, TumbleStart(t1.created_at, '72:00:00':Interval) as $expr1, (TumbleStart(t1.created_at, '72:00:00':Interval) + '72:00:00':Interval) as $expr2] }
       └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t1.id, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2] }
-      └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1] }
+    └─BatchProject { exprs: [t1.id, t1.created_at, $expr1, ($expr1 + '72:00:00':Interval) as $expr2] }
+      └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '72:00:00':Interval) as $expr1] }
         └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
 - sql: |
     create materialized view t as select * from s;
@@ -63,12 +63,12 @@
     select * from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at, window_start, window_end] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_start, window_end, t1._row_id] }
+    └─StreamHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at, window_start, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -76,12 +76,12 @@
     select id, created_at, window_start from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at, window_start] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_start, t1._row_id(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_start, t1._row_id] }
+    └─StreamHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -89,12 +89,12 @@
     select id, created_at, window_end from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at, window_end] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_end], pk_columns: [t1._row_id, window_end], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_end, t1._row_id] }
+    └─StreamHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -102,17 +102,17 @@
     select id, created_at from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at] }
+    BatchHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.created_at) }
         └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_start, t1._row_id] }
+    └─StreamHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: hop window does not preserve input order across window lanes
@@ -124,7 +124,7 @@
   batch_plan: |-
     BatchExchange { order: [t1.id ASC], dist: Single }
     └─BatchSort { order: [t1.id ASC] }
-      └─BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at] }
+      └─BatchHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at] }
         └─BatchFilter { predicate: IsNotNull(t1.created_at) }
           └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: UpstreamHashShard(t1.id) }
 - name: single-lane hop window preserves input order
@@ -134,7 +134,7 @@
     from hop(t1, created_at, interval '1' day, interval '1' day)
     order by id;
   batch_plan: |-
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 1 day, output: [t1.id, t1.created_at] }
+    BatchHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 24:00:00, output: [t1.id, t1.created_at] }
     └─BatchExchange { order: [t1.id ASC], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.created_at) }
         └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: UpstreamHashShard(t1.id) }
@@ -143,17 +143,17 @@
     select t_hop.id, t_hop.created_at from hop(t1, created_at, interval '1' day, interval '3' day) as t_hop;
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at] }
+    BatchHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.created_at) }
         └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_start, t1._row_id] }
+    └─StreamHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -188,21 +188,21 @@
     select * from tumble(t2, created_at, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, $expr2] }
-    └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
+    └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '72:00:00':Interval) as $expr1, (TumbleStart(t1.created_at, '72:00:00':Interval) + '72:00:00':Interval) as $expr2] }
       └─LogicalShare { id: 3 }
         └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
           └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
             └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2] }
-      └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1] }
+    └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '72:00:00':Interval) as $expr2] }
+      └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '72:00:00':Interval) as $expr1] }
         └─BatchFilter { predicate: (t1.v1 >= 10:Int32) }
           └─BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2, t1._row_id] }
-      └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, t1._row_id] }
+    └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '72:00:00':Interval) as $expr2, t1._row_id] }
+      └─StreamProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '72:00:00':Interval) as $expr1, t1._row_id] }
         └─StreamFilter { predicate: (t1.v1 >= 10:Int32) }
           └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -211,20 +211,20 @@
     select * from hop(t2, created_at, interval '1' day, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, window_start, window_end] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalShare { id: 3 }
           └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
             └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
               └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
+    BatchHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: all }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.created_at) AND (t1.v1 >= 10:Int32) }
         └─BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.v1, t1.created_at, window_start, window_end, t1._row_id] }
+    └─StreamHopWindow { time_col: t1.created_at, slide: 24:00:00, size: 72:00:00, output: [t1.id, t1.v1, t1.created_at, window_start, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) AND (t1.v1 >= 10:Int32) }
         └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -322,3 +322,28 @@
             │ ├─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
             │ └─LogicalScan { table: auction, columns: [auction.item_name, auction.description, auction.expires, auction.seller, auction.category] }
             └─LogicalScan { table: alltypes2, columns: [alltypes2.c1, alltypes2.c2, alltypes2.c6, alltypes2.c7, alltypes2.c9, alltypes2.c11, alltypes2.c15], predicate: IsNotNull(alltypes2.c11) }
+- sql: |
+    create table t1 (id int, created_at timestamp);
+    select * from tumble(t1, created_at, interval '1' month);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t1.id, t1.created_at, $expr1, ($expr1 + '720:00:00':Interval) as $expr2] }
+      └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '720:00:00':Interval) as $expr1] }
+        └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
+- sql: |
+    create table t1 (id int, created_at timestamp);
+    select * from hop(t1, created_at, interval '10' day, interval '1' month);
+  batch_plan: |-
+    BatchHopWindow { time_col: t1.created_at, slide: 240:00:00, size: 720:00:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(t1.created_at) }
+        └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
+- name: window_end must not be merged with a calendar-month addition
+  sql: |
+    create table t1 (id int, created_at timestamp);
+    select window_start + interval '1' month as cal, window_end from tumble(t1, created_at, interval '1' month);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [($expr1 + '1 mon':Interval) as $expr2, ($expr1 + '720:00:00':Interval) as $expr3] }
+      └─BatchProject { exprs: [t1.created_at, TumbleStart(t1.created_at, '720:00:00':Interval) as $expr1] }
+        └─BatchScan { table: t1, columns: [t1.created_at], distribution: SomeShard }
