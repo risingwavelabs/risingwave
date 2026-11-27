@@ -307,6 +307,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = task.compression_algorithm.into();
         options.capacity = task.target_file_size as usize;
+        options.footer_size_limit = task.sst_footer_size_limit();
         let estimated_output_key_count =
             estimate_output_key_count_for_task(&task, options.capacity);
         options.estimated_output_key_count = Some(estimated_output_key_count);

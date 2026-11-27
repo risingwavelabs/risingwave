@@ -275,6 +275,9 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                     compaction_config::max_vnode_key_range_bytes(),
                 )?)
             }
+            "sst_footer_size_limit_bytes" => MutableConfig::SstFooterSizeLimitBytes(
+                parse_optional_positive_u64_value(value, &name, None)?,
+            ),
             "split_weight_by_vnode" => {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "split_weight_by_vnode is managed by the system and cannot be altered via SQL"
