@@ -89,6 +89,10 @@ pub struct LookupExecutorParams<S: StateStore, SD: ValueRowSerde> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
+    /// Whether each pair of join keys matches nulls. A stream row with a null in a join key that
+    /// does not match nulls joins with nothing. If empty, nulls always match.
+    pub null_safe: Vec<bool>,
+
     pub state_table: ReplicatedStateTable<S, SD>,
 
     pub watermark_epoch: AtomicU64Ref,
@@ -108,6 +112,7 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             use_current_epoch,
             stream_join_key_indices,
             arrange_join_key_indices,
+            null_safe,
             column_mapping,
             state_table: storage_table,
             watermark_epoch,
@@ -161,6 +166,19 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             stream_join_key_indices.len(),
             arrange_join_key_indices.len()
         );
+        assert!(null_safe.is_empty() || null_safe.len() == stream_join_key_indices.len());
+
+        // The stream join keys that never match a null.
+        let null_unsafe_stream_key_indices = if null_safe.is_empty() {
+            vec![]
+        } else {
+            stream_join_key_indices
+                .iter()
+                .zip_eq_debug(&null_safe)
+                .filter(|(_, null_safe)| !**null_safe)
+                .map(|(idx, _)| *idx)
+                .collect_vec()
+        };
 
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
@@ -212,6 +230,7 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             },
             column_mapping,
             key_indices_mapping,
+            null_unsafe_stream_key_indices,
             lookup_cache: LookupCache::new(watermark_epoch, metrics_info),
             chunk_size,
         }
@@ -323,6 +342,14 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                         // `U-` to be directly followed by its `U+`, so emit plain `-`/`+`
                         // instead, as the hash join does.
                         let op = op.normalize_update();
+                        if self
+                            .null_unsafe_stream_key_indices
+                            .iter()
+                            .any(|&idx| row.datum_at(idx).is_none())
+                        {
+                            // A null never equals anything.
+                            continue;
+                        }
                         for matched_row in self.lookup_one_row(&row, &metrics).await? {
                             tracing::debug!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 

@@ -1,0 +1,91 @@
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+# An update of a row joins with itself in a self join. Both inputs change the same join result in
+# one epoch, so the delta join must emit the changes in a consistent order.
+
+statement ok
+create table t (k int, v int, id int primary key);
+
+statement ok
+create index i_t_k on t(k) include (v);
+
+statement ok
+insert into t values (1, 10, 1), (1, 20, 2), (2, 30, 3);
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create materialized view v_self as
+select x.id as x_id, x.v as x_v, y.id as y_id, y.v as y_v from t x join t y on x.k = y.k;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+statement ok
+update t set v = v + 1;
+
+statement ok
+update t set k = 2 where id = 1;
+
+query IIII rowsort
+select * from v_self;
+----
+1 11 1 11
+1 11 3 31
+2 21 2 21
+3 31 1 11
+3 31 3 31
+
+statement ok
+drop materialized view v_self;
+
+statement ok
+drop table t;
+
+# Null join keys never match.
+
+statement ok
+create table n1 (k int, v int);
+
+statement ok
+create index i_n1 on n1(k);
+
+statement ok
+create table n2 (k int, v int);
+
+statement ok
+create index i_n2 on n2(k);
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+create materialized view v_null as select n1.v as v1, n2.v as v2 from n1 join n2 on n1.k = n2.k;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
+
+statement ok
+insert into n1 values (null, 1), (1, 2);
+
+statement ok
+insert into n2 values (null, 3), (1, 4);
+
+query II rowsort
+select * from v_null;
+----
+2 4
+
+statement ok
+drop materialized view v_null;
+
+statement ok
+drop table n1;
+
+statement ok
+drop table n2;

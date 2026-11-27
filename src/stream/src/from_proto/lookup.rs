@@ -104,6 +104,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
                         .iter()
                         .map(|x| *x as usize)
                         .collect(),
+                    null_safe: lookup.null_safe.clone(),
                     column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
                     state_table,
                     watermark_epoch: params.watermark_epoch,
