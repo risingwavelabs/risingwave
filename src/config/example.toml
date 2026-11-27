@@ -160,6 +160,7 @@ idle_timeout_sec = 30
 acquire_timeout_sec = 30
 
 [batch]
+point_get_concurrency = 1
 worker_threads_num = ""
 distributed_query_limit = ""
 max_batch_queries_per_frontend_node = ""

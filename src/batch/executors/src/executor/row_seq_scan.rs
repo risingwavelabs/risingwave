@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::stream::FuturesOrdered;
 use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use prometheus::Histogram;
@@ -54,6 +55,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     ordered: bool,
     query_epoch: BatchQueryEpoch,
     limit: Option<u64>,
+    point_get_concurrency: usize,
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
@@ -66,6 +68,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         identity: String,
         limit: Option<u64>,
         metrics: Option<BatchMetrics>,
+        point_get_concurrency: std::num::NonZeroUsize,
     ) -> Self {
         Self {
             chunk_size,
@@ -76,6 +79,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             query_epoch,
             limit,
+            point_get_concurrency: point_get_concurrency.get(),
         }
     }
 }
@@ -136,6 +140,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 source.plan_node().get_identity().clone(),
                 limit,
                 metrics,
+                source.context().get_config().point_get_concurrency,
             )))
         })
     }
@@ -166,6 +171,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             query_epoch,
             limit,
+            point_get_concurrency,
             ..
         } = *self;
         let table = Arc::new(table);
@@ -186,7 +192,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .into_iter()
             .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
 
-        // the number of rows have been returned as execute result
+        // Count accepted point rows even while they are buffered in a chunk.
         let mut returned = 0;
         if let Some(limit) = &limit
             && returned >= *limit
@@ -194,30 +200,40 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             return Ok(());
         }
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
-        // Point Get
-        for point_get in point_gets {
-            let table = table.clone();
-            if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
-                && let Some(chunk) = data_chunk_builder.append_one_row(row)
-            {
-                returned += chunk.cardinality() as u64;
-                yield chunk;
-                if let Some(limit) = &limit
-                    && returned >= *limit
-                {
-                    return Ok(());
+        let max_point_gets = point_get_concurrency as u64;
+        let mut point_gets = point_gets.into_iter();
+        let mut pending = FuturesOrdered::new();
+        while limit != Some(returned) {
+            // Each unresolved point get can produce one row. Refill after consuming its result.
+            let max_pending = limit.map_or(max_point_gets, |limit| {
+                (limit - returned).min(max_point_gets)
+            }) as usize;
+            while pending.len() < max_pending {
+                let Some(point_get) = point_gets.next() else {
+                    break;
+                };
+                pending.push_back(Self::execute_point_get(
+                    table.clone(),
+                    point_get,
+                    query_epoch,
+                    histogram,
+                ));
+            }
+            let Some(row) = pending.next().await else {
+                break;
+            };
+            if let Some(row) = row? {
+                returned += 1;
+                if let Some(chunk) = data_chunk_builder.append_one_row(row) {
+                    yield chunk;
                 }
             }
         }
         if let Some(chunk) = data_chunk_builder.consume_all() {
-            returned += chunk.cardinality() as u64;
             yield chunk;
-            if let Some(limit) = &limit
-                && returned >= *limit
-            {
-                return Ok(());
-            }
+        }
+        if limit == Some(returned) {
+            return Ok(());
         }
 
         // Range Scan
