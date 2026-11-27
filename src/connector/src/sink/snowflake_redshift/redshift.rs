@@ -153,14 +153,22 @@ impl RedShiftConfig {
     }
 
     pub fn build_client(&self) -> Result<JdbcJniClient> {
-        let mut jdbc_url = self.jdbc_url.clone();
+        let (jdbc_url, connection_properties) = self.build_jdbc_connection_properties();
+        JdbcJniClient::new_with_props(jdbc_url, connection_properties)
+    }
+
+    fn build_jdbc_connection_properties(&self) -> (String, Vec<(String, String)>) {
+        // Keep credentials out of the URL so the JDBC driver does not URL-decode them.
+        let mut connection_properties = Vec::new();
         if let Some(username) = &self.username {
-            jdbc_url = format!("{}?user={}", jdbc_url, username);
+            connection_properties.push(("user".to_owned(), username.clone()));
         }
         if let Some(password) = &self.password {
-            jdbc_url = format!("{}&password={}", jdbc_url, password);
+            connection_properties.push(("password".to_owned(), password.clone()));
         }
-        JdbcJniClient::new(jdbc_url)
+        // Let the driver parse the URL unchanged, including IAM URLs and encoded values.
+        // Credentials in the URL take precedence over these separate properties.
+        (self.jdbc_url.clone(), connection_properties)
     }
 }
 
@@ -1030,6 +1038,105 @@ fn build_copy_into_sql(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_build_jdbc_connection_properties() {
+        for jdbc_url in [
+            "jdbc:redshift://example.invalid:5439/dev",
+            "jdbc:redshift://example.invalid:5439/dev?ssl=true&ApplicationName=risingwave",
+            "jdbc:redshift://example.invalid:5439/dev?user=url%2Buser&password=Url%2BPass9%21",
+            "jdbc:redshift://example.invalid:5439/dev;USER=url_user;PASSWORD=old;ssl=true",
+            "jdbc:redshift://example.invalid:5439/dev?USER=url_user;user=other&PASSWORD=old;ssl=true",
+            "jdbc:redshift://example.invalid:5439/dev?user=url_user&password",
+            "jdbc:redshift://example.invalid:5439/dev?password=old&&ApplicationName=a%26b%3Bc%3Fd%23e;",
+            "jdbc:redshift://example.invalid:5439/dev;ApplicationName=app?password=old",
+            "jdbc:redshift:iam://cluster:us-east-1/dev;password=old?ssl=true",
+            "jdbc:redshift:iam://cluster:us-east-1/dev;password=old?password=other",
+        ] {
+            for username in [None, Some(""), Some("user+&%2B=?# 用户")] {
+                for password in [
+                    None,
+                    Some(""),
+                    Some("Example+Pass9!"),
+                    Some("Example&Pass9!"),
+                    Some("Example%2BPass9!"),
+                    Some("Example=?# 密码9!"),
+                ] {
+                    let mut properties = BTreeMap::from([
+                        ("jdbc.url".to_owned(), jdbc_url.to_owned()),
+                        ("table.name".to_owned(), "test_table".to_owned()),
+                    ]);
+                    if let Some(username) = username {
+                        properties.insert("user".to_owned(), username.to_owned());
+                    }
+                    if let Some(password) = password {
+                        properties.insert("password".to_owned(), password.to_owned());
+                    }
+                    let config = RedShiftConfig::from_btreemap(properties).unwrap();
+                    let (url, connection_properties) = config.build_jdbc_connection_properties();
+                    assert_eq!(url, jdbc_url);
+                    let props: BTreeMap<_, _> = connection_properties.into_iter().collect();
+                    assert_eq!(props.get("user").map(String::as_str), username);
+                    assert_eq!(props.get("password").map(String::as_str), password);
+                    assert_eq!(
+                        props.len(),
+                        usize::from(username.is_some()) + usize::from(password.is_some())
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(not(madsim))]
+    #[test]
+    fn test_build_jdbc_connection_properties_from_secrets() {
+        use prost::Message;
+        use risingwave_common::secret::LocalSecretManager;
+        use risingwave_pb::secret::secret::SecretBackend;
+        use risingwave_pb::secret::secret_ref::RefAsType;
+        use risingwave_pb::secret::{PbSecretRef, Secret, SecretMetaBackend};
+
+        let manager = LocalSecretManager::global();
+        let jdbc_url = "jdbc:redshift://example.invalid:5439/dev?user=old&password=old&ssl=true";
+        let username = "user+&%2B=?# 用户";
+        let password = "Example+&%2B=?# 密码9!";
+        let mut secret_refs = BTreeMap::new();
+        for (id, key, value) in [
+            (280560, "jdbc.url", jdbc_url),
+            (280561, "user", username),
+            (280562, "password", password),
+        ] {
+            manager.add_secret(
+                id.into(),
+                Secret {
+                    secret_backend: Some(SecretBackend::Meta(SecretMetaBackend {
+                        value: value.as_bytes().to_vec(),
+                    })),
+                }
+                .encode_to_vec(),
+            );
+            secret_refs.insert(
+                key.to_owned(),
+                PbSecretRef {
+                    secret_id: id.into(),
+                    ref_as: RefAsType::Text.into(),
+                },
+            );
+        }
+        let properties = manager.fill_secrets(
+            BTreeMap::from([("table.name".to_owned(), "test_table".to_owned())]),
+            secret_refs,
+        );
+        for id in [280560, 280561, 280562] {
+            manager.remove_secret(id.into());
+        }
+        let config = RedShiftConfig::from_btreemap(properties.unwrap()).unwrap();
+        let (url, connection_properties) = config.build_jdbc_connection_properties();
+        assert_eq!(url, jdbc_url);
+        let props: BTreeMap<_, _> = connection_properties.into_iter().collect();
+        assert_eq!(props.get("user").unwrap(), username);
+        assert_eq!(props.get("password").unwrap(), password);
+    }
 
     #[test]
     fn test_convert_redshift_decimal_data_type() {
