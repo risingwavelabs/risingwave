@@ -369,11 +369,18 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
     )
 });
 
+static SIMPLIFY_AGG_GROUP_BY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Simplify Aggregation Group Keys",
+        vec![AggGroupBySimplifyRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simplify Aggregation",
         vec![
-            AggGroupBySimplifyRule::create(),
             AggCallMergeRule::create(),
             UnifyFirstLastValueRule::create(),
         ],
@@ -935,6 +942,7 @@ impl LogicalOptimizer {
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)?;
 
+        plan = plan.optimize_by_rules(&SIMPLIFY_AGG_GROUP_BY)?;
         plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;

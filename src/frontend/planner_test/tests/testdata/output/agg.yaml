@@ -1478,14 +1478,14 @@
             └─BatchSortAgg { group_key: [lineitem.l_orderkey], aggs: [internal_last_seen_value(lineitem.l_commitdate)] }
               └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], distribution: UpstreamHashShard(lineitem.l_orderkey) }
   stream_plan: |-
-    StreamMaterialize { columns: [col_0, internal_last_seen_value(lineitem.l_commitdate)(hidden)], stream_key: [internal_last_seen_value(lineitem.l_commitdate)], pk_columns: [internal_last_seen_value(lineitem.l_commitdate)], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [max(max(internal_last_seen_value(lineitem.l_commitdate))), internal_last_seen_value(lineitem.l_commitdate)] }
-      └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate)], aggs: [max(max(internal_last_seen_value(lineitem.l_commitdate))), count] }
-        └─StreamExchange { dist: HashShard(internal_last_seen_value(lineitem.l_commitdate)) }
-          └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate), _vnode], aggs: [max(internal_last_seen_value(lineitem.l_commitdate)), count] }
-            └─StreamProject { exprs: [lineitem.l_orderkey, internal_last_seen_value(lineitem.l_commitdate), Vnode(lineitem.l_orderkey) as _vnode] }
-              └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [internal_last_seen_value(lineitem.l_commitdate), count] }
-                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey], pk: [l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+    StreamMaterialize { columns: [col_0, lineitem.l_commitdate(hidden)], stream_key: [lineitem.l_commitdate], pk_columns: [lineitem.l_commitdate], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(max(lineitem.l_commitdate)), lineitem.l_commitdate] }
+      └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(max(lineitem.l_commitdate)), count] }
+        └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
+          └─StreamHashAgg { group_key: [lineitem.l_commitdate, _vnode], aggs: [max(lineitem.l_commitdate), count] }
+            └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct, Vnode(lineitem.l_orderkey) as _vnode], noop_update_hint: true }
+              └─StreamHashAgg { group_key: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], aggs: [count] }
+                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], stream_scan_type: SnapshotBackfill, stream_key: [lineitem.l_orderkey], pk: [l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
 - name: two phase agg on hop window input should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1836,10 +1836,10 @@
       └─BatchSortAgg { group_key: [t.id], aggs: [count] }
         └─BatchScan { table: t, columns: [t.id], distribution: UpstreamHashShard(t.id) }
   stream_plan: |-
-    StreamMaterialize { columns: [count, t.id(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [count, t.id] }
-      └─StreamHashAgg { group_key: [t.id], aggs: [count] }
-        └─StreamTableScan { table: t, columns: [t.id], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+    StreamMaterialize { columns: [count, t.id(hidden), t.a(hidden), t.b(hidden)], stream_key: [t.id, t.a, t.b], pk_columns: [t.id, t.a, t.b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [count, t.id, t.a, t.b] }
+      └─StreamHashAgg { group_key: [t.id, t.a, t.b], aggs: [count] }
+        └─StreamTableScan { table: t, columns: [t.id, t.a, t.b], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
 - sql: |
     CREATE TABLE t (a int, b int);
     SELECT a, sum((sum(b))) OVER (PARTITION BY a ORDER BY a) FROM t GROUP BY a;
@@ -2367,7 +2367,7 @@
     LogicalAgg { group_key: [m7.a], aggs: [internal_last_seen_value(m7.b), count] }
     └─LogicalScan { table: m7, columns: [m7.a, m7.b], predicate: (m7.a > 0:Int32), cardinality: 1..=1 }
   optimized_logical_plan_for_stream: |-
-    LogicalAgg { group_key: [m7.a], aggs: [internal_last_seen_value(m7.b), count] }
+    LogicalAgg { group_key: [m7.a, m7.b], aggs: [count] }
     └─LogicalScan { table: m7, columns: [m7.a, m7.b], predicate: (m7.a > 0:Int32), cardinality: 1..=1 }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
@@ -2376,8 +2376,8 @@
         └─BatchFilter { predicate: (m7.a > 0:Int32) }
           └─BatchScan { table: m7, columns: [m7.a, m7.b], distribution: Single }
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, count], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
-    └─StreamHashAgg { group_key: [m7.a], aggs: [internal_last_seen_value(m7.b), count] }
-      └─StreamExchange { dist: HashShard(m7.a) }
+    StreamMaterialize { columns: [a, b, count], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [m7.a, m7.b], aggs: [count] }
+      └─StreamExchange { dist: HashShard(m7.a, m7.b) }
         └─StreamFilter { predicate: (m7.a > 0:Int32) }
           └─StreamTableScan { table: m7, columns: [m7.a, m7.b], stream_scan_type: SnapshotBackfill, stream_key: [], pk: [], dist: Single }

@@ -47,3 +47,41 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+statement ok
+create table inventory (sku int primary key, stock int);
+
+statement ok
+insert into inventory values (42, 314), (99, 2718);
+
+statement ok
+create materialized view regional_stock as
+select sku, stock from inventory
+except
+select sku, stock from inventory where sku = 99;
+
+query II
+select * from regional_stock;
+----
+42 314
+
+statement ok
+insert into inventory values (42, null);
+
+query II
+select * from regional_stock;
+----
+42 NULL
+
+query II
+select sku, stock from inventory
+except
+select sku, stock from inventory where sku = 99;
+----
+42 NULL
+
+statement ok
+drop materialized view regional_stock;
+
+statement ok
+drop table inventory;
